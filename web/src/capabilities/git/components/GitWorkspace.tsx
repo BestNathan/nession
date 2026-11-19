@@ -1,11 +1,15 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { GitBranch, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
+import { WorkspaceSurface } from '@/components/ui/workspace-content';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
+import type {
+  WorkspaceContext,
+  WorkspaceDepthControl,
+} from '@/app/workspace/workspaceContext';
 import { useGitStatus } from '../hooks/useGitStatus';
 import { useGitMutations, type GitMutationController, type GitMutationNotice } from '../hooks/useGitMutations';
 import {
@@ -62,7 +66,14 @@ function focusedPath(ctx: WorkspaceContext): string | null {
  * Freshness is pull-on-open plus an explicit refresh — the shared
  * `useGitStatus` model — and the diff is fetched per file on selection.
  */
-export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
+export function GitWorkspace({
+  ctx,
+  depth,
+}: {
+  ctx: WorkspaceContext;
+  /** The App host's depth control; Web never passes one. */
+  depth?: WorkspaceDepthControl;
+}) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
   const status = useGitStatus({ agentId, sessionId });
@@ -78,7 +89,11 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
     applyStatus: status.apply,
     reload: status.refresh,
   });
-  const { state: selection, selectRow } = useGitSelection({
+  const {
+    state: selection,
+    selectRow,
+    clearSelection,
+  } = useGitSelection({
     agentId,
     sessionId,
     handedOver: focusedPath(ctx),
@@ -86,6 +101,34 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
   });
   const [section, setSection] = useState<GitSection>('changes');
   const [surface, setSurface] = useState<GitSurface>('repository');
+
+  // App pushes a selected change as its own depth (#3971): the Changes
+  // collection stays the capability root and the Diff becomes the one page
+  // whose header names it. The capability supplies the guarded leave; the
+  // shell's Back and inner Pop both run it.
+  const setPush = depth?.setPush;
+  const selectedPath = selection.selectedPath;
+  useEffect(() => {
+    if (setPush === undefined) {
+      return;
+    }
+    if (selectedPath === null || section !== 'changes') {
+      setPush(null);
+      return;
+    }
+    setPush({
+      title: selectedPath.split('/').pop() ?? selectedPath,
+      subtitle: 'Git',
+      backLabel: 'Back to Git changes',
+      onLeave: clearSelection,
+      ancestors: [{ id: 'git-changes', title: 'Git' }],
+      onJumpToAncestor: () => clearSelection(),
+    });
+  }, [clearSelection, section, selectedPath, setPush]);
+  useEffect(
+    () => () => setPush?.(null),
+    [setPush],
+  );
 
   if (!sessionId) {
     return (
@@ -134,6 +177,7 @@ export function GitWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           mutations={mutations}
           onSelect={selectRow}
           formKey={`${agentId ?? ''}:${sessionId}`}
+          experience={ctx.experience}
         />
       )}
     </div>
@@ -266,12 +310,14 @@ function GitBody({
   mutations,
   onSelect,
   formKey,
+  experience,
 }: {
   status: ReturnType<typeof useGitStatus>;
   rows: readonly GitRow[] | null;
   selection: GitSelectionState;
   mutations: GitMutationController;
   onSelect: (row: GitRow) => void;
+  experience: WorkspaceContext['experience'];
   /** Session identity: a switch starts a fresh commit draft (#3327). */
   formKey: string;
 }) {
@@ -315,6 +361,25 @@ function GitBody({
 
   const staged = stagedCount(status.status.status);
 
+  // App: one page at a time (#3971). The Changes collection is the capability
+  // root with one scroll owner; a selected change is a pushed Depth that
+  // `GitWorkspace`'s effect declares to the shell. Web keeps the two-pane
+  // master/detail below.
+  if (experience === 'app') {
+    return selection.selectedPath !== null ? (
+      <GitAppDetail selection={selection} />
+    ) : (
+      <GitAppCollection
+        rows={rows}
+        selection={selection}
+        mutations={mutations}
+        staged={staged}
+        formKey={formKey}
+        onSelect={onSelect}
+      />
+    );
+  }
+
   // Side by side when there is room, stacked when there is not. The breakpoint
   // is about available width, not about the experience: a phone in a desktop
   // browser has the same problem as an App, and a tablet has neither's room.
@@ -350,6 +415,7 @@ function GitBody({
             busyKey={mutations.busyKey}
             onStage={mutations.stage}
             onUnstage={mutations.unstage}
+            experience={experience}
           />
         </div>
       </aside>
@@ -367,6 +433,78 @@ function GitBody({
           <GitDiffView response={selection.diff} loading={selection.loading} error={selection.error} />
         )}
       </main>
+    </div>
+  );
+}
+
+/** The App's pushed change: one Diff/Preview Reader surface (#3971). */
+function GitAppDetail({ selection }: { selection: GitSelectionState }) {
+  return (
+    <WorkspaceSurface
+      level="primary"
+      className="min-h-0 flex-1"
+      testId="git-diff-surface"
+    >
+      {selection.mode === 'preview' ? (
+        <GitFilePreviewView
+          path={selection.selectedPath}
+          expected={selection.previewKind ?? 'untracked'}
+          response={selection.preview}
+          media={selection.media}
+          loading={selection.loading}
+          error={selection.error}
+        />
+      ) : (
+        <GitDiffView
+          response={selection.diff}
+          loading={selection.loading}
+          error={selection.error}
+        />
+      )}
+    </WorkspaceSurface>
+  );
+}
+
+/** The App's Changes collection root: one scroll owner, grouped rows (#3971). */
+function GitAppCollection({
+  rows,
+  selection,
+  mutations,
+  staged,
+  formKey,
+  onSelect,
+}: {
+  rows: readonly GitRow[];
+  selection: GitSelectionState;
+  mutations: GitMutationController;
+  staged: number;
+  formKey: string;
+  onSelect: (row: GitRow) => void;
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {mutations.notice ? (
+        <MutationNotice notice={mutations.notice} onDismiss={mutations.dismissNotice} />
+      ) : null}
+      {staged > 0 ? (
+        <GitCommitForm
+          key={formKey}
+          stagedCount={staged}
+          busy={mutations.commitBusy}
+          onCommit={mutations.commit}
+        />
+      ) : null}
+      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}>
+        <GitChangeList
+          rows={rows}
+          selectedKey={selection.selectedKey}
+          onSelect={onSelect}
+          busyKey={mutations.busyKey}
+          onStage={mutations.stage}
+          onUnstage={mutations.unstage}
+          experience="app"
+        />
+      </div>
     </div>
   );
 }
@@ -400,7 +538,7 @@ function MutationNotice({
       <Button
         type="button"
         variant="ghost"
-        size="icon-xs"
+        size="icon"
         aria-label="Dismiss"
         onClick={() => onDismiss()}
       >

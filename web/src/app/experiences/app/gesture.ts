@@ -60,6 +60,17 @@ export const SWIPE_FLICK_VELOCITY_PX_PER_MS = 0.45;
 export const SWIPE_MAX_REVEAL_FRACTION = 0.8;
 
 /**
+ * The most an inner Workspace stack page moves under the finger (#3971).
+ *
+ * Outer navigation previews up to 80% of the shell because another layer is
+ * genuinely arriving. An inner Pop/Forward is the same opaque Workspace
+ * surface sliding, revealing the canvas and a destination label — not the
+ * Terminal — so a short committed range is enough to make the gesture legible
+ * without pretending the whole page has left.
+ */
+export const SWIPE_INNER_MAX_REVEAL_PX = 125;
+
+/**
  * Damped travel when there is no destination at all (the edge of the pager,
  * or no Workspace before a Session exists). It is feedback that the gesture is
  * recognised and cannot go anywhere, not a page preview.

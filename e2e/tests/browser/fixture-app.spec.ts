@@ -338,7 +338,7 @@ test('the Workspace owns one navigation bar per depth (#1051)', async ({ page })
   await expect.poll(() => paintedCount(page, WORKSPACE_HEADERS)).toBe(1);
   await expect.poll(() => paintedCount(page, WORKSPACE_LEAVES)).toBe(1);
   await expect.poll(() => paintedCount(page, WORKSPACE_DOCK)).toBe(1);
-  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to src');
 
   await page.screenshot({ path: 'test-results/canonical-app-workspace-pushed.png', fullPage: true });
 
@@ -364,7 +364,7 @@ test('switching from a pushed Files detail to an Agent root restores the shell r
   await expect(page.getByTestId('files-app-layout')).toBeVisible();
   await openFixtureFile(page);
   await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
-  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to src');
 
   // The Capsule stays available at every depth (#1347). Switching to a root
   // capability must move the shell's pager with it, not leave the Files depth

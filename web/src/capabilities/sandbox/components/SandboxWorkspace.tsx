@@ -53,7 +53,16 @@ function useConfirmDepth(
       return;
     }
     if (confirming) {
-      depth.setPush({ title: 'Enter Sandbox', onLeave });
+      depth.setPush({
+        title: 'Enter Sandbox',
+        subtitle: 'Sandbox',
+        backLabel: 'Back to Sandbox',
+        onLeave,
+        ancestors: [{ id: 'sandbox-root', title: 'Sandbox' }],
+        // The confirmation is the only pushed depth, and cancelling it is the
+        // same guarded action as Back (#3971).
+        onJumpToAncestor: () => onLeave(),
+      });
     } else {
       depth.setPush(null);
     }
@@ -282,9 +291,13 @@ export function SandboxWorkspace({
   return (
     <div
       data-testid="sandbox-workspace"
+      /* The App's Configuration content sits on one primary surface (#3971);
+         its fields/groups are the secondary regions the recipe already owns.
+         Web keeps its existing pane treatment. */
+      data-workspace-surface={ctx.experience === 'app' ? 'primary' : undefined}
       className={cn(
         'flex min-w-0 flex-col gap-3',
-        ctx.experience === 'app' ? 'p-3' : 'h-full min-h-0 p-4',
+        ctx.experience === 'app' ? 'bg-card p-3' : 'h-full min-h-0 p-4',
       )}
     >
       <div
@@ -326,6 +339,7 @@ export function SandboxWorkspace({
         </p>
       ) : null}
       <div
+        data-workspace-section={ctx.experience === 'app' ? '' : undefined}
         className={cn(
           'flex min-w-0 flex-col',
           ctx.experience === 'web' && 'min-h-0 flex-1',

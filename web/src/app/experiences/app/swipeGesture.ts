@@ -2,6 +2,7 @@ import { edgeBandSide, edgeOwnsDrag, platformGuardSide, type EdgeSide, type Shel
 import {
   SWIPE_FLICK_MIN_PX,
   SWIPE_FLICK_VELOCITY_PX_PER_MS,
+  SWIPE_INNER_MAX_REVEAL_PX,
   SWIPE_MAX_REVEAL_FRACTION,
   SWIPE_RESIST_FACTOR,
   SWIPE_RESIST_MAX_PX,
@@ -42,6 +43,24 @@ export type SwipePhase =
 
 export type SwipeDirection = -1 | 0 | 1;
 
+/** Which way an inner Workspace stack gesture would move (#3971). */
+export type InnerSwipeAction = 'pop' | 'forward';
+
+/**
+ * What an inner Workspace stack can do at the current depth.
+ *
+ * The capability reports the *destination titles*, not just booleans: the
+ * transient preview names where the gesture lands, and a title is only present
+ * when a real destination exists. A leftward contact with no forward title
+ * must yield or resist rather than enter something unknown.
+ */
+export interface InnerStackState {
+  /** Title of the depth a right swipe would pop to, or null at the root. */
+  pop: string | null;
+  /** Title of the recorded forward destination, or null when none exists. */
+  forward: string | null;
+}
+
 /** The part of a native touch this machine needs. */
 export interface SwipeTouch {
   identifier: number;
@@ -54,6 +73,10 @@ export interface SwipeSnapshot {
   phase: SwipePhase;
   offset: number;
   destinationIndex: number | null;
+  /** The inner stack operation this contact would commit, if any. */
+  innerAction: InnerSwipeAction | null;
+  /** The destination's own title, for the transient preview. */
+  destinationLabel: string | null;
   direction: SwipeDirection;
   /** Why the machine last changed ownership or ended. Null before any outcome. */
   reason: string | null;
@@ -72,6 +95,8 @@ export interface SwipeMoveResult {
 export interface SwipeEndResult {
   outcome: 'none' | 'commit' | 'snapback';
   destinationIndex: number | null;
+  /** The inner Workspace stack operation a commit should run, if any. */
+  innerAction: InnerSwipeAction | null;
   reason: string;
   /** Travel toward the frozen destination at release, in pixels. */
   travel: number;
@@ -91,8 +116,21 @@ export interface SwipeGestureOptions {
   getPageCount: () => number;
   /** False while the current layer's depth owns its own leave (#1051). */
   shellMayPage: () => boolean;
+  /**
+   * What the active Workspace depth's inner stack can do, or `null` when it has
+   * none (#3971). Inner destinations outrank the outer spatial pager for a
+   * claimed contact: at a pushed depth, a right swipe pops the capability's own
+   * stack, and a left swipe forwards only to a recorded destination. This is
+   * the same coordinator — there is never a second touch owner.
+   */
+  getInnerStack?: () => InnerStackState | null;
   now?: () => number;
 }
+
+/** One resolved destination for a claimed contact. */
+type SwipeDestination =
+  | { kind: 'page'; index: number }
+  | { kind: 'inner'; action: InnerSwipeAction; title: string };
 
 function directionOf(dx: number): SwipeDirection {
   if (dx > 0) {
@@ -113,6 +151,8 @@ export class SwipeGesture {
   private phase: SwipePhase = 'idle';
   private offset = 0;
   private destinationIndex: number | null = null;
+  private innerAction: InnerSwipeAction | null = null;
+  private destinationLabel: string | null = null;
   private direction: SwipeDirection = 0;
   private reason: string | null = null;
 
@@ -134,6 +174,8 @@ export class SwipeGesture {
       phase: this.phase,
       offset: this.offset,
       destinationIndex: this.destinationIndex,
+      innerAction: this.innerAction,
+      destinationLabel: this.destinationLabel,
       direction: this.direction,
       reason: this.reason,
     };
@@ -159,7 +201,10 @@ export class SwipeGesture {
       return false;
     }
 
-    if (!this.options.shellMayPage()) {
+    // The contact may become either an outer page or an inner Workspace stack
+    // move (#3971). Both are one coordinator; only when neither has anywhere to
+    // go does the shell refuse the candidate.
+    if (!this.options.shellMayPage() && !this.innerStackHasDestination()) {
       this.reason = 'shell-standdown';
       return false;
     }
@@ -214,10 +259,18 @@ export class SwipeGesture {
     this.startTime = this.clock();
     this.offset = 0;
     this.destinationIndex = null;
+    this.innerAction = null;
+    this.destinationLabel = null;
     this.direction = 0;
     this.reason = null;
     this.shellWidth = bounds === null ? 0 : Math.max(0, bounds.right - bounds.left);
     return true;
+  }
+
+  /** True when the active depth can move within its own stack in either way. */
+  private innerStackHasDestination(): boolean {
+    const inner = this.options.getInnerStack?.() ?? null;
+    return inner !== null && (inner.pop !== null || inner.forward !== null);
   }
 
   move(touch: SwipeTouch): SwipeMoveResult {
@@ -297,9 +350,10 @@ export class SwipeGesture {
 
     const phase = this.phase;
     const destination = this.destinationIndex;
+    const innerAction = this.innerAction;
     const direction = this.direction;
 
-    if (phase === 'navigation' && destination !== null) {
+    if (phase === 'navigation' && (destination !== null || innerAction !== null)) {
       const travel = Math.max(0, (this.lastX - this.startX) * direction);
       const duration = Math.max(1, this.clock() - this.startTime);
       const velocity = travel / duration;
@@ -313,6 +367,7 @@ export class SwipeGesture {
       return {
         outcome: commit ? 'commit' : 'snapback',
         destinationIndex: destination,
+        innerAction: commit ? innerAction : null,
         reason,
         travel,
         velocity,
@@ -327,6 +382,7 @@ export class SwipeGesture {
       return {
         outcome: 'snapback',
         destinationIndex: null,
+        innerAction: null,
         reason: 'no-destination',
         travel,
         velocity: travel / duration,
@@ -369,28 +425,51 @@ export class SwipeGesture {
     return { snapshot: this.snapshot(), preventDefault: false };
   }
 
-  private claim(destination: number, dx: number): void {
+  private claim(destination: SwipeDestination, dx: number): void {
     this.phase = 'navigation';
-    this.destinationIndex = destination;
+    this.destinationIndex = destination.kind === 'page' ? destination.index : null;
+    this.innerAction = destination.kind === 'inner' ? destination.action : null;
+    this.destinationLabel = destination.kind === 'inner' ? destination.title : null;
     this.direction = directionOf(dx);
     this.reason = null;
     this.offset = this.direction * Math.min(Math.abs(dx), this.maxReveal());
   }
 
   /**
-   * The pager index this horizontal direction would reach, or `null` when it
-   * runs off the end. Rightward travel lowers the index; leftward raises it.
+   * The destination this horizontal direction would reach, or `null` when it
+   * runs off the end.
+   *
+   * Inner Workspace stack moves outrank the outer pager (#3971): at a pushed
+   * depth a rightward contact pops exactly one level, and a leftward one moves
+   * forward only to a destination the capability recorded. When the inner stack
+   * has nothing in that direction, the outer spatial pager is asked next — so
+   * the Workspace root still pages back to the Terminal, and a leftward contact
+   * with no forward destination simply has nowhere to go.
    */
-  private destinationFor(dx: number): number | null {
+  private destinationFor(dx: number): SwipeDestination | null {
     const direction = directionOf(dx);
     if (direction === 0) {
       return null;
     }
+    const inner = this.options.getInnerStack?.() ?? null;
+    if (inner !== null) {
+      if (direction > 0 && inner.pop !== null) {
+        return { kind: 'inner', action: 'pop', title: inner.pop };
+      }
+      if (direction < 0 && inner.forward !== null) {
+        return { kind: 'inner', action: 'forward', title: inner.forward };
+      }
+    }
     const next = this.options.getIndex() - direction;
-    return next >= 0 && next < this.options.getPageCount() ? next : null;
+    return next >= 0 && next < this.options.getPageCount()
+      ? { kind: 'page', index: next }
+      : null;
   }
 
   private maxReveal(): number {
+    if (this.innerAction !== null) {
+      return SWIPE_INNER_MAX_REVEAL_PX;
+    }
     if (this.shellWidth <= 0) {
       // No measurable shell: let the geometry clamp rather than inventing a
       // width. The commit threshold still has its 64px floor.
@@ -408,6 +487,7 @@ export class SwipeGesture {
     return {
       outcome,
       destinationIndex: null,
+      innerAction: null,
       reason,
       travel,
       velocity,
@@ -419,6 +499,8 @@ export class SwipeGesture {
     this.phase = 'idle';
     this.offset = 0;
     this.destinationIndex = null;
+    this.innerAction = null;
+    this.destinationLabel = null;
     this.direction = 0;
     this.identifier = null;
     this.edge = null;

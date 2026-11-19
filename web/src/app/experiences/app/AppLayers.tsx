@@ -4,6 +4,11 @@ import { AppPopupPortal } from './AppPopupPortal';
 import { destinationName } from './appDestinationName';
 import { SwipeDestinationPreview } from './SwipeDestinationPreview';
 import {
+  AppInnerStackMotionContext,
+  type AppInnerStackMotion,
+} from '@/app/workspace/appInnerStackMotion';
+import type { WorkspaceStackReport } from '@/app/workspace/workspaceContext';
+import {
   CapsuleExchangeContext,
   type CapsuleExchange,
 } from '@/platform/motion/capsuleExchange';
@@ -13,10 +18,10 @@ import {
   layerGeometry,
   type AppLayer,
 } from './appLayerPositions';
-import type { ShellBounds } from './edgeBand';
 import { EDGE_PLATFORM_GUARD_PX } from './gesture';
 import { useAppShellWidth } from './useAppShellWidth';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
+import { useShellBounds } from './useShellBounds';
 import { useSwipePager } from './useSwipePager';
 import type { SwipePhase } from './swipeGesture';
 
@@ -47,6 +52,13 @@ export interface AppLayersProps {
    * work the capability was guarding.
    */
   workspaceDetailPushed: boolean;
+  /**
+   * The active Workspace inner stack (#3971), reported by the capability
+   * through `WorkspacePanel`. The pager is the single coordinator: a claimed
+   * contact pops one valid depth on a right swipe and moves forward only to a
+   * recorded destination on a left swipe, before the outer spatial pager.
+   */
+  workspaceStack?: WorkspaceStackReport | null;
 }
 
 /**
@@ -91,6 +103,37 @@ function shouldRenderLayer({
   return current === slot.layer || destinationIndex === slot.index;
 }
 
+function innerStackMotion(
+  action: AppInnerStackMotion['action'],
+  offset: number,
+  settling: boolean,
+): AppInnerStackMotion {
+  return { action, offset, settling };
+}
+
+function capsuleExchangeFor(
+  workspace: ReactNode | null,
+  workspaceX: number,
+  width: number,
+): CapsuleExchange | null {
+  if (workspace === null) {
+    return null;
+  }
+  return { progress: Math.min(1, Math.max(0, 1 - workspaceX / width)) };
+}
+
+function previewName(
+  phase: SwipePhase,
+  destinationLabel: string | null,
+  destinationIndex: number | null,
+  hasWorkspace: boolean,
+): string | null {
+  if (phase !== 'navigation') {
+    return null;
+  }
+  return destinationLabel ?? destinationName(destinationIndex, hasWorkspace);
+}
+
 /**
  * The App's navigation composition (#1049, #2724).
  *
@@ -113,35 +156,30 @@ export function AppLayers({
   terminal,
   workspace,
   workspaceDetailPushed,
+  workspaceStack = null,
 }: AppLayersProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const width = useAppShellWidth(rootRef);
   const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
 
   const handleIndexChange = useCallback(
-    (next: number) => {
-      onLayerChange(layerFromIndex(next));
-    },
+    (next: number) => onLayerChange(layerFromIndex(next)),
     [onLayerChange],
   );
 
-  // The edge band is measured from this element, not from the window (#1081):
-  // the App is routinely narrower than the viewport — 390px inside a desktop
-  // browser, and inside the fixture the browser contract suite drives — and a
-  // band taken from `window.innerWidth` would sit off-screen there, leaving the
-  // gesture unreachable in exactly the case a test can see. Read per touch
-  // rather than cached, so it stays right through a resize or a scroll.
-  const getShellBounds = useCallback((): ShellBounds | null => {
-    const el = rootRef.current;
-    if (!el) {
-      return null;
-    }
-    const rect = el.getBoundingClientRect();
-    return { left: rect.left, right: rect.right };
-  }, []);
+  const getShellBounds = useShellBounds(rootRef);
 
-  const { dragOffset, phase, destinationIndex, direction, lastReason } =
-    useSwipePager({
+  const {
+    dragOffset,
+    phase,
+    destinationIndex,
+    innerAction,
+    innerOffset,
+    innerSettling,
+    destinationLabel,
+    direction,
+    lastReason,
+  } = useSwipePager({
       // Two positions before a Session exists, three after (#1082). The pager
       // already refuses to commit past `pageCount`, so this is what makes the
       // leftward drag a no-op rather than a page onto nothing.
@@ -150,10 +188,12 @@ export function AppLayers({
       onIndexChange: handleIndexChange,
       getShellBounds,
       // A pushed Workspace detail is a depth with its own leave, and the shell
-      // stands down rather than offering a second one (#1081). The layer stays
-      // pageable from its root, where Back and the shell's leave are the same
-      // destination — the Terminal — so there is nothing to compete over.
+      // stands down rather than offering a second one (#1081). #3971 routes
+      // that same contact to the capability's inner stack instead of inventing
+      // a second gesture owner: right swipes pop, left swipes only forward to a
+      // recorded destination, and the capability's guard decides the leave.
       shellMayPage: !(layer === 'workspace' && workspaceDetailPushed),
+      innerStack: layer === 'workspace' ? workspaceStack : null,
       rootRef,
     });
 
@@ -186,12 +226,16 @@ export function AppLayers({
   // disagree about where the finger is; `null` without a Workspace layer, and
   // the consumers treat the endpoints as "no exchange" so a resting surface
   // carries no inline style at all.
-  const capsuleExchange = useMemo<CapsuleExchange | null>(() => {
-    if (workspace === null) {
-      return null;
-    }
-    return { progress: Math.min(1, Math.max(0, 1 - workspaceX / width)) };
-  }, [workspace, workspaceX, width]);
+  const capsuleExchange = useMemo(
+    () => capsuleExchangeFor(workspace, workspaceX, width),
+    [workspace, workspaceX, width],
+  );
+
+  // The Workspace host translates only its header + content frame for an inner
+  // stack move; the Capsule keeps its own geometry. The outer layer offset is
+  // deliberately not reused here — that would slide the opaque Workspace layer
+  // and expose the Terminal underneath.
+  const innerMotion = innerStackMotion(innerAction, innerOffset, innerSettling);
 
   return (
     <div
@@ -201,8 +245,12 @@ export function AppLayers({
       data-layer={layer}
       data-swipe-phase={phase}
       data-swipe-destination={destinationIndex === null ? undefined : destinationIndex}
+      data-swipe-inner={innerAction ?? undefined}
+      data-swipe-destination-label={destinationLabel ?? undefined}
       data-swipe-reason={lastReason ?? undefined}
       data-swipe-guard-px={EDGE_PLATFORM_GUARD_PX}
+      data-workspace-stack-pop={workspaceStack?.pop?.title ?? undefined}
+      data-workspace-stack-forward={workspaceStack?.forward?.title ?? undefined}
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       {/* Every layer is inside the App's popup container, so a menu opened from
@@ -230,20 +278,20 @@ export function AppLayers({
         )}
 
         {renderWorkspace && (
-          <AppLayerSlab
-            testId="app-layer-workspace"
-            x={workspaceX}
-            moving={moving}
-            transition={transition}
-          >
-            {workspace}
-          </AppLayerSlab>
+          <AppInnerStackMotionContext.Provider value={innerMotion}>
+            <AppLayerSlab
+              testId="app-layer-workspace"
+              x={workspaceX}
+              moving={moving}
+              transition={transition}
+            >
+              {workspace}
+            </AppLayerSlab>
+          </AppInnerStackMotionContext.Provider>
         )}
 
         <SwipeDestinationPreview
-          name={phase === 'navigation'
-            ? destinationName(destinationIndex, workspace !== null)
-            : null}
+          name={previewName(phase, destinationLabel, destinationIndex, workspace !== null)}
           direction={direction}
         />
         </CapsuleExchangeContext.Provider>

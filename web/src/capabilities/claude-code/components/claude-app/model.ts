@@ -1,8 +1,10 @@
+import { CLAUDE_CODE_TITLE } from '../../identity';
 import type {
   ClaudeCodeConfigScope,
   ClaudeCodeResourceView,
   ClaudeCodeWorkspaceState,
 } from '../../hooks/useClaudeCodeWorkspace';
+import type { WorkspaceStackAncestor } from '@/app/workspace/workspaceContext';
 import type {
   ClaudeCodeMcpEntry,
   ClaudeCodeMcpTool,
@@ -37,6 +39,18 @@ export interface McpEditorIntent {
   mode: 'add' | 'edit';
   entry?: ClaudeCodeMcpEntry;
 }
+
+/**
+ * The capability root in the App's stack display (#3971).
+ *
+ * The pushed stack holds routes; the conversation root is not a route. Naming
+ * the implicit root once lets the header's ancestry and the Stack Sheet show a
+ * truthful path without inventing a fake route.
+ */
+export const CLAUDE_ROOT_ANCESTOR: WorkspaceStackAncestor = {
+  id: 'claude-root',
+  title: CLAUDE_CODE_TITLE,
+};
 
 /** The navigation actions every pushed screen may use. */
 export interface ClaudeAppActions {

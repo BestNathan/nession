@@ -79,14 +79,22 @@ export interface WorkspaceContext {
  * leave action and the shell decides what the bar does with it.
  */
 export interface WorkspacePush {
-  /** The pushed page's own name. */
+  /** The pushed page's own name — the header's primary title. */
   title: string;
+  /**
+   * The real ancestry under the title: the immediate ancestor or bounded
+   * parent path. Never a fabricated breadcrumb (#3971).
+   *
+   * A capability owns its own stack, so it — not the shell — knows whether the
+   * depth below is its root, a collection, or another detail. Omitted means the
+   * shell may derive only the immediate ancestor's title.
+   */
+  subtitle?: string;
   /**
    * What Back returns to, named for assistive technology.
    *
-   * A capability owns its own stack, so it — not the shell — knows whether the
-   * depth below is its root, a collection, or another detail. Omitted means
-   * "the capability root", which is the only answer the shell can derive.
+   * Omitted means "the capability root", which is the only answer the shell
+   * can derive without the capability's ancestry.
    */
   backLabel?: string;
   /**
@@ -95,24 +103,107 @@ export interface WorkspacePush {
    * protects rather than being re-implemented by the shell.
    */
   onLeave: () => void;
+  /**
+   * The stack above this depth, nearest ancestor first, ending at the
+   * capability root. The App renders it as the optional Stack Sheet and uses
+   * its first entry to name an inner Pop. Omitted when the capability has no
+   * deeper hierarchy than the one it is showing.
+   */
+  ancestors?: readonly WorkspaceStackAncestor[];
+  /**
+   * Jump to an ancestor by id. The capability supplies this so the same leave
+   * guard runs whether the user taps Back, an ancestor, or swipes.
+   */
+  onJumpToAncestor?: (id: string) => void;
 }
+
+/** One ancestor in a capability's pushed stack, nearest first. */
+export interface WorkspaceStackAncestor {
+  /** Stable identity the capability can navigate to. */
+  id: string;
+  title: string;
+}
+
+/**
+ * The semantic action vocabulary the App host renders as icons (#3971).
+ *
+ * A capability names *meaning*; the App host owns the glyph, geometry, touch
+ * target and overflow policy. This keeps two capabilities from drawing two
+ * different "refresh" controls, and it is why the capability never passes a
+ * ReactNode here.
+ */
+export type WorkspaceActionIcon =
+  | 'browse'
+  | 'search'
+  | 'create'
+  | 'edit'
+  | 'refresh'
+  | 'filter'
+  | 'copy'
+  | 'open'
+  | 'confirm'
+  | 'delete'
+  | 'save'
+  | 'stack';
 
 /**
  * A capability-local action the App page header may carry beside its title.
  *
  * The header itself stays the shell's — one Back/title band per depth (#1051).
- * A capability contributes the *semantic action* (its name and what it does),
- * not a second bar: "Browse" belongs to the Claude resource browser, while the
- * geometry, touch target and placement belong to the App chrome. This is the
- * narrow counterpart of the Workspace capsule: switching what a capability
- * shows is not leaving the depth.
+ * A capability contributes the *semantic action* (its name, meaning and what
+ * it does), not a second bar: "Browse" belongs to the Claude resource browser,
+ * while the geometry, touch target and placement belong to the App chrome.
+ * This is the narrow counterpart of the Workspace capsule: switching what a
+ * capability shows is not leaving the depth.
  */
 export interface WorkspaceHeaderAction {
-  /** Visible label. */
+  /** Stable identity for tests and overflow ownership. */
+  id: string;
+  /** Visible label; also the default accessible name. */
   label: string;
   /** Accessible name when it should say more than the visible label. */
   ariaLabel?: string;
+  /** The semantic icon the App host renders. */
+  icon: WorkspaceActionIcon;
+  /**
+   * Show as a compact icon control. The host renders at most two priority
+   * actions; any remaining actions move to More. Destructive actions are never
+   * icon-only, regardless of this flag.
+   */
+  priority?: boolean;
+  /**
+   * Destructive actions keep readable text in overflow and a confirmation
+   * owned by the capability. They are never promoted to an icon-only control.
+   */
+  destructive?: boolean;
   onActivate: () => void;
+}
+
+/**
+ * A capability-recorded forward destination (#3971).
+ *
+ * A leftward inner swipe may only move forward when the capability actually
+ * recorded a destination by leaving it. An unknown resource is never entered
+ * by gesture. The capability owns the history and invalidation; the shell owns
+ * the gesture.
+ */
+export interface WorkspaceForward {
+  title: string;
+  onActivate: () => void;
+}
+
+/**
+ * What an inner Workspace swipe could do at the current depth.
+ *
+ * Reported upward to the App pager so the single gesture coordinator can route
+ * an owned contact to the Workspace stack before the outer spatial navigator.
+ * `null` means the depth has no inner stack to operate.
+ */
+export interface WorkspaceStackReport {
+  /** Right swipe: pop one level, named by destination. */
+  pop: WorkspaceForward | null;
+  /** Left swipe: restore a recorded forward destination. */
+  forward: WorkspaceForward | null;
 }
 
 /**
@@ -127,11 +218,16 @@ export interface WorkspaceDepthControl {
   /** Register a pushed depth, or `null` to return to the capability root. */
   setPush: (push: WorkspacePush | null) => void;
   /**
-   * Register a contextual action for the App page header, or `null` to remove
-   * it. Optional because a Web view — and a capability with no header action —
-   * never has one to declare.
+   * Register the contextual actions for the App page header, or `null` to
+   * remove them. Optional because a Web view — and a capability with no header
+   * action — never has one to declare.
    */
-  setAction?: (action: WorkspaceHeaderAction | null) => void;
+  setActions?: (actions: readonly WorkspaceHeaderAction[] | null) => void;
+  /**
+   * Register the recorded forward destination, or `null` when there is none.
+   * Optional for the same reason as `setActions`.
+   */
+  setForward?: (forward: WorkspaceForward | null) => void;
 }
 
 /** What a Workspace view is handed in both experiences. */

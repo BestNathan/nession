@@ -4,7 +4,11 @@ import { EditorView } from '@uiw/react-codemirror';
 import { describe, expect, it, vi } from 'vitest';
 import { FilesAppLayout } from '@/app/experiences/app/FilesAppLayout';
 import type { FileEntry, FileOps } from '@/capabilities/files';
-import type { WorkspaceContext, WorkspacePush } from '@/app/workspace/workspaceContext';
+import type {
+  WorkspaceContext,
+  WorkspaceForward,
+  WorkspacePush,
+} from '@/app/workspace/workspaceContext';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn() },
@@ -83,13 +87,23 @@ const baseCtx: WorkspaceContext = {
  */
 function renderLayout(ctx: WorkspaceContext = baseCtx) {
   const setPush = vi.fn<(push: WorkspacePush | null) => void>();
-  render(<FilesAppLayout ctx={ctx} depth={{ setPush }} />);
-  return { setPush };
+  const setForward = vi.fn<(forward: WorkspaceForward | null) => void>();
+  render(<FilesAppLayout ctx={ctx} depth={{ setPush, setForward }} />);
+  return { setPush, setForward };
 }
 
 /** The depth the layout last declared — `null` means it is at its root. */
 function lastPush(setPush: ReturnType<typeof renderLayout>['setPush']): WorkspacePush | null {
   const calls = setPush.mock.calls;
+  expect(calls.length).toBeGreaterThan(0);
+  return calls[calls.length - 1][0];
+}
+
+/** The forward destination the layout last recorded (#3971). */
+function lastForward(
+  setForward: ReturnType<typeof renderLayout>['setForward'],
+): WorkspaceForward | null {
+  const calls = setForward.mock.calls;
   expect(calls.length).toBeGreaterThan(0);
   return calls[calls.length - 1][0];
 }
@@ -181,6 +195,28 @@ describe('FilesAppLayout', () => {
 
     expect(screen.getByTestId('files-app-layout')).toBeInTheDocument();
     expect(lastPush(setPush)?.title).toBe('docs');
+  });
+
+  it('records the file it left as the one forward destination (#3971)', async () => {
+    const user = userEvent.setup();
+    const { setPush, setForward } = renderLayout();
+    expect(lastForward(setForward)).toBeNull();
+
+    await user.click(await screen.findByText('docs'));
+    await user.click(await screen.findByText('visual-language.md'));
+    act(() => {
+      lastPush(setPush)?.onLeave();
+    });
+
+    // The leftward inner swipe may re-open exactly the file the user left.
+    await waitFor(() =>
+      expect(lastForward(setForward)?.title).toBe('visual-language.md'),
+    );
+    act(() => {
+      lastForward(setForward)?.onActivate();
+    });
+    expect(screen.queryByTestId('files-app-layout')).not.toBeInTheDocument();
+    expect(lastPush(setPush)?.title).toBe('visual-language.md');
   });
 
   it('declares a pushed depth when entering a subdirectory', async () => {

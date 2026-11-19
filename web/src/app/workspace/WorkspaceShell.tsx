@@ -5,6 +5,8 @@ import {
 } from '@/platform/motion/capsuleExchange';
 import { resolveCapabilityPresences, type CapabilityId } from '@/product/capability';
 import { cn } from '@/shared/lib/utils';
+import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
+import { useAppInnerStackMotion } from '@/app/workspace/appInnerStackMotion';
 import { useWorkspaceCapsuleClearance } from '@/app/workspace/hooks/useWorkspaceCapsuleClearance';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
@@ -122,6 +124,22 @@ export function WorkspaceShell({
   const shellRef = useRef<HTMLDivElement>(null);
   useWorkspaceCapsuleClearance(shellRef);
 
+  // Inner stack motion (#3971): the content region follows the Workspace page
+  // frame while the dock stays put. At rest this is `undefined`, so the settled
+  // layout carries no inline style and the capsule's measured clearance is
+  // exactly the resting geometry.
+  const innerMotion = useAppInnerStackMotion();
+  const reducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
+  const contentMotionStyle = innerMotion.action === null
+    ? undefined
+    : {
+      transform: `translateX(${innerMotion.offset}px)`,
+      transition:
+        innerMotion.settling && !reducedMotion
+          ? 'transform var(--nession-motion-shell-duration) var(--nession-motion-shell-ease)'
+          : undefined,
+    };
+
   // The App's capsule handoff, incoming half: while the swipe carries this
   // layer in, the Capability Form arrives slightly behind the finger's pace
   // and settles into the slot the Conversation form is leaving. X-only and
@@ -220,7 +238,11 @@ export function WorkspaceShell({
           container a tall view overflowed the region — clipped by
           `overflow-hidden`, with no scroll to reach its end, which is the
           thing SC-12 assumes can always happen. */}
-      <div data-testid="workspace-tool-content" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <div
+        data-testid="workspace-tool-content"
+        className="flex min-h-0 flex-1 flex-col overflow-hidden will-change-transform"
+        style={contentMotionStyle}
+      >
         {ctx.experience === 'app' ? (
           ActiveAppLayout ? (
             <ActiveAppLayout ctx={ctx} depth={depth} />

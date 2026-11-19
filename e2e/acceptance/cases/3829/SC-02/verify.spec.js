@@ -43,8 +43,13 @@ test('SC-02: Browse reaches every Claude resource through one push/back stack', 
   await expect(header(page)).toContainText('Conversations');
   const conversations = page.getByTestId('claude-app-layer-conversations');
   await expect(conversations).toBeVisible();
+  const candidateTitle = (await conversations
+    .getByTestId('conversation-candidate-title')
+    .nth(1)
+    .innerText()).trim();
   await conversations.getByTestId('conversation-candidate-title').nth(1).click();
-  await expect(header(page)).toContainText('Conversation');
+  // #3971: the one header names the actual resource, not just its route kind.
+  await expect(header(page).locator('h1')).toContainText(candidateTitle);
   const candidate = page.getByTestId('claude-app-layer-conversation');
   await expect(candidate).toContainText('not bound to this Session');
   await back(page);
@@ -57,11 +62,11 @@ test('SC-02: Browse reaches every Claude resource through one push/back stack', 
   await expect(header(page)).toContainText('Transcripts');
   const transcripts = page.getByTestId('claude-app-layer-transcripts');
   await transcripts.getByTestId('transcript-open').first().click();
-  await expect(header(page)).toContainText('Transcript');
+  await expect(header(page).locator('h1')).toContainText('Transcript execution view');
   const transcript = page.getByTestId('claude-app-layer-transcript');
   await transcript.getByTestId('transcript-record-open').first().waitFor({ timeout: 30_000 });
   await transcript.getByTestId('transcript-record-open').first().click();
-  await expect(header(page)).toContainText('Record');
+  await expect(header(page).locator('h1')).toHaveText(/^(You|Claude|Record|Tool result|Context|System)/);
   const record = page.getByTestId('claude-app-layer-record');
   await expect(record.getByTestId('transcript-record-detail')).toBeVisible();
   await record.getByTestId('claude-app-record-raw').click();
@@ -70,9 +75,9 @@ test('SC-02: Browse reaches every Claude resource through one push/back stack', 
     page.getByTestId('claude-app-layer-raw').getByTestId('transcript-raw-inspector'),
   ).toHaveAttribute('data-variant', 'pushed');
   await back(page);
-  await expect(header(page)).toContainText('Record');
+  await expect(header(page).locator('h1')).toHaveText(/^(You|Claude|Record|Tool result|Context|System)/);
   await back(page);
-  await expect(header(page)).toContainText('Transcript');
+  await expect(header(page).locator('h1')).toContainText('Transcript execution view');
   await back(page);
   await expect(header(page)).toContainText('Transcripts');
   await back(page);
@@ -101,8 +106,10 @@ test('SC-02: Browse reaches every Claude resource through one push/back stack', 
   await configuration.getByTestId('claude-app-configuration-global').click();
   await expect(configuration.getByTestId('claude-code-scope-global')).toBeVisible();
   await configuration.getByTestId('claude-app-configuration-project').click();
-  await configuration.getByTestId('claude-code-file-list').locator('button').first().click();
-  await expect(header(page)).toContainText('File');
+  const configFile = configuration.getByTestId('claude-code-file-list').locator('button').first();
+  const configFileName = (await configFile.innerText()).trim();
+  await configFile.click();
+  await expect(header(page).locator('h1')).toContainText(configFileName);
   await expect(
     page.getByTestId('claude-app-layer-config-file').getByTestId('claude-code-content'),
   ).toBeVisible();

@@ -1,10 +1,19 @@
+import { useCallback } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { conversationLabel } from '@/shared/ai-conversation';
 import type { WorkspaceAppViewProps } from '@/app/workspace/workspaceContext';
 import { useClaudeCodeWorkspace } from '../hooks/useClaudeCodeWorkspace';
+import { transcriptLabel } from '../format';
+import { parseTranscriptRecord } from '../model/transcriptRecord';
 import { ConversationRootScreen } from './claude-app/ConversationRoutes';
 import { ClaudeAppRouteLayer } from './claude-app/ClaudeAppRouteLayer';
-import { routeKey, type AppRoute, type ClaudeAppData } from './claude-app/model';
+import {
+  routeKey,
+  routeTitle,
+  type AppRoute,
+  type ClaudeAppData,
+} from './claude-app/model';
 import { BrowseSheet } from './claude-app/primitives';
 import { useClaudeAppNavigation } from './claude-app/useClaudeAppNavigation';
 import { useClaudeAppSync } from './claude-app/useClaudeAppSync';
@@ -32,12 +41,55 @@ import { McpEditorHost, McpRemoveHost } from './McpView';
  */
 export function ClaudeCodeAppWorkspace({ ctx, depth }: WorkspaceAppViewProps) {
   const state = useClaudeCodeWorkspace(ctx);
+
+  // The header's primary title names the resource, not the route kind (#3971):
+  // a transcript is its label, a record is its parsed kind, an MCP tool is the
+  // tool's own name. Data that has not loaded yet falls back to the stable kind
+  // name rather than inventing identity.
+  const titleOf = useCallback((route: AppRoute): string => {
+    switch (route.kind) {
+      case 'conversation': {
+        const summary = state.conversation.snapshot.conversations.find(
+          (candidate) => candidate.id === route.id,
+        );
+        return summary ? conversationLabel(summary) : routeTitle(route);
+      }
+      case 'transcript': {
+        const transcript = state.transcripts.list.transcripts.find(
+          (candidate) => candidate.id === route.id,
+        );
+        return transcript ? transcriptLabel(transcript) : routeTitle(route);
+      }
+      case 'record': {
+        const parsed = typeof route.record.raw === 'string'
+          ? parseTranscriptRecord(route.record.raw)
+          : null;
+        return parsed?.label ?? routeTitle(route);
+      }
+      case 'mcp-server':
+        return state.mcp.selection?.name ?? routeTitle(route);
+      case 'mcp-tool':
+        return route.tool.name;
+      case 'config-file':
+        return route.path.split('/').pop() ?? routeTitle(route);
+      default:
+        return routeTitle(route);
+    }
+  }, [
+    state.conversation.snapshot.conversations,
+    state.mcp.selection,
+    state.transcripts.list.transcripts,
+  ]);
+
   const navigation = useClaudeAppNavigation({
     agentId: state.agentId,
     sessionId: state.sessionId,
     depth,
+    titleOf,
   });
-  useClaudeAppSync(state, navigation.top, navigation.pop);
+  // A selection that disappeared is an invalidation repair, not a leave: it
+  // must not become a forward destination the gesture could re-open.
+  useClaudeAppSync(state, navigation.top, navigation.retireTop);
 
   if (!state.agentId || !state.sessionId) {
     return (

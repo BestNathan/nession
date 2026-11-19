@@ -242,9 +242,10 @@ function lastPush(setPush: ReturnType<typeof vi.fn>): WorkspacePush | null {
   return calls.length === 0 ? null : (calls[calls.length - 1][0] as WorkspacePush | null);
 }
 
-function lastAction(setAction: ReturnType<typeof vi.fn>): WorkspaceHeaderAction | null {
-  const calls = setAction.mock.calls;
-  return calls.length === 0 ? null : (calls[calls.length - 1][0] as WorkspaceHeaderAction | null);
+function lastAction(setActions: ReturnType<typeof vi.fn>): WorkspaceHeaderAction | null {
+  const calls = setActions.mock.calls;
+  const actions = calls.length === 0 ? null : (calls[calls.length - 1][0] as readonly WorkspaceHeaderAction[] | null);
+  return actions?.[0] ?? null;
 }
 
 function deferred<T>() {
@@ -261,17 +262,17 @@ function layer(testId: string): HTMLElement {
 
 function renderApp(ctx: WorkspaceContext = makeContext()) {
   const setPush = vi.fn<(push: WorkspacePush | null) => void>();
-  const setAction = vi.fn<(action: WorkspaceHeaderAction | null) => void>();
+  const setActions = vi.fn<(actions: readonly WorkspaceHeaderAction[] | null) => void>();
   const view = render(
-    <ClaudeCodeAppWorkspace ctx={ctx} depth={{ setPush, setAction }} />,
+    <ClaudeCodeAppWorkspace ctx={ctx} depth={{ setPush, setActions }} />,
   );
-  return { ...view, setPush, setAction };
+  return { ...view, setPush, setActions };
 }
 
-async function openBrowse(setAction: ReturnType<typeof vi.fn>) {
-  await waitFor(() => expect(lastAction(setAction)).not.toBeNull());
+async function openBrowse(setActions: ReturnType<typeof vi.fn>) {
+  await waitFor(() => expect(lastAction(setActions)).not.toBeNull());
   act(() => {
-    lastAction(setAction)?.onActivate();
+    lastAction(setActions)?.onActivate();
   });
 }
 
@@ -341,7 +342,7 @@ describe('Claude App workspace (#3829)', () => {
   });
 
   it('opens on the bound conversation and declares Browse as the one contextual action', async () => {
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
 
     expect(await screen.findByText('Current work')).toBeInTheDocument();
     expect(screen.getByTestId('claude-app-root')).not.toHaveAttribute('data-covered');
@@ -350,18 +351,20 @@ describe('Claude App workspace (#3829)', () => {
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.getByText('Read-only view. Continue this conversation in the Terminal.')).toBeInTheDocument();
 
-    await waitFor(() => expect(lastAction(setAction)).not.toBeNull());
-    expect(lastAction(setAction)).toMatchObject({
+    await waitFor(() => expect(lastAction(setActions)).not.toBeNull());
+    expect(lastAction(setActions)).toMatchObject({
+      id: 'browse',
       label: 'Browse',
       ariaLabel: 'Browse Claude',
+      icon: 'browse',
     });
     expect(lastPush(setPush)).toBeNull();
   });
 
   it('reads a directory conversation without replacing the bound root, and Back restores it', async () => {
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-conversations');
 
     expect(lastPush(setPush)?.title).toBe('Conversations');
@@ -372,7 +375,7 @@ describe('Claude App workspace (#3829)', () => {
     const user = userEvent.setup();
     await user.click(within(conversationsLayer).getByTitle('c2'));
 
-    expect(lastPush(setPush)?.title).toBe('Conversation');
+    expect(lastPush(setPush)?.title).toBe('Older work');
     expect(lastPush(setPush)?.backLabel).toBe('Back to Conversations');
     const detail = layer('claude-app-layer-conversation');
     expect(await within(detail).findByText('hello from c2')).toBeInTheDocument();
@@ -400,19 +403,19 @@ describe('Claude App workspace (#3829)', () => {
       ...conversations,
       binding: undefined,
     });
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
 
     expect(await screen.findByTestId('claude-app-unbound')).toBeInTheDocument();
     expect(screen.getByText('No conversation linked to this Session')).toBeInTheDocument();
     expect(claudeCodeApi.claudeCodeMessages).not.toHaveBeenCalled();
 
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-conversations');
     const listLayer = layer('claude-app-layer-conversations');
     await userEvent.click(within(listLayer).getByTitle('c2'));
     expect(await screen.findByText('hello from c2')).toBeInTheDocument();
     expect(screen.getByText(/not bound to this Session/)).toBeInTheDocument();
-    expect(lastPush(setPush)?.title).toBe('Conversation');
+    expect(lastPush(setPush)?.title).toBe('Older work');
   });
 
   it('shows the directory loading state instead of claiming no binding', async () => {
@@ -429,22 +432,22 @@ describe('Claude App workspace (#3829)', () => {
   });
 
   it('pushes every transcript record, and Raw from a malformed record stays readable', async () => {
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-transcripts');
 
     expect(lastPush(setPush)?.title).toBe('Transcripts');
     const listLayer = layer('claude-app-layer-transcripts');
     await userEvent.click(within(listLayer).getByTestId('transcript-open'));
 
-    expect(lastPush(setPush)?.title).toBe('Transcript');
+    expect(lastPush(setPush)?.title).toBe('Focused transcript');
     const transcriptLayer = layer('claude-app-layer-transcript');
     expect(await within(transcriptLayer).findAllByTestId('transcript-record')).toHaveLength(2);
 
     // The first row's native detail is its own pushed depth.
     await userEvent.click(within(transcriptLayer).getAllByTestId('transcript-record-open')[0]);
-    expect(lastPush(setPush)?.title).toBe('Record');
+    expect(lastPush(setPush)?.title).toBe('Claude');
     const recordLayer = layer('claude-app-layer-record');
     expect(await within(recordLayer).findByTestId('transcript-record-detail')).toBeInTheDocument();
 
@@ -475,9 +478,9 @@ describe('Claude App workspace (#3829)', () => {
   });
 
   it('pushes a memory file and restores the list selection', async () => {
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-memory');
 
     const memoryLayer = layer('claude-app-layer-memory');
@@ -497,9 +500,9 @@ describe('Claude App workspace (#3829)', () => {
   });
 
   it('pushes Configuration files as one column and keeps the scope inside it', async () => {
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-configuration');
 
     const configuration = layer('claude-app-layer-configuration');
@@ -509,7 +512,7 @@ describe('Claude App workspace (#3829)', () => {
     await userEvent.click(within(configuration).getByTestId('claude-app-configuration-project'));
 
     await userEvent.click(await within(configuration).findByLabelText('CLAUDE.md'));
-    expect(lastPush(setPush)?.title).toBe('File');
+    expect(lastPush(setPush)?.title).toBe('CLAUDE.md');
     const fileLayer = layer('claude-app-layer-config-file');
     expect(await within(fileLayer).findByTestId('claude-code-content')).toHaveTextContent(
       '# guidance',
@@ -517,16 +520,16 @@ describe('Claude App workspace (#3829)', () => {
   });
 
   it('pushes an MCP server and its inspected tool schema, with no second Back', async () => {
-    const { setPush, setAction } = renderApp();
+    const { setPush, setActions } = renderApp();
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-mcp');
 
     const mcpLayer = layer('claude-app-layer-mcp');
     await userEvent.click(
       await within(mcpLayer).findByTestId('claude-code-mcp-row-local-local-tool'),
     );
-    expect(lastPush(setPush)?.title).toBe('MCP server');
+    expect(lastPush(setPush)?.title).toBe('local-tool');
 
     const serverLayer = layer('claude-app-layer-mcp-server');
     expect(await within(serverLayer).findByTestId('claude-code-mcp-detail')).toBeInTheDocument();
@@ -536,16 +539,16 @@ describe('Claude App workspace (#3829)', () => {
     // Inspection is explicit: the tool list arrives only after Inspect tools.
     await userEvent.click(within(serverLayer).getByTestId('claude-code-mcp-inspect'));
     await userEvent.click(await within(serverLayer).findByTestId('claude-code-mcp-tool-open'));
-    expect(lastPush(setPush)?.title).toBe('Tool');
+    expect(lastPush(setPush)?.title).toBe('session.list');
     const toolLayer = layer('claude-app-layer-mcp-tool');
     expect(within(toolLayer).getByText('session.list')).toBeInTheDocument();
     expect(within(toolLayer).getByText(/"type": "object"/)).toBeInTheDocument();
   });
 
   it('retires a pushed depth when the Session changes', async () => {
-    const { setPush, setAction, rerender } = renderApp();
+    const { setPush, setActions, rerender } = renderApp();
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-configuration');
     expect(lastPush(setPush)?.title).toBe('Configuration');
 
@@ -555,23 +558,23 @@ describe('Claude App workspace (#3829)', () => {
         ctx={makeContext({
           session: { ...session, session_id: 'agent-1:other', session_name: 'other' },
         })}
-        depth={{ setPush, setAction }}
+        depth={{ setPush, setActions }}
       />,
     );
 
     await waitFor(() => expect(lastPush(setPush)).toBeNull());
     expect(screen.getByTestId('claude-app-root')).not.toHaveAttribute('data-covered');
     await waitFor(() =>
-      expect(lastAction(setAction)).toMatchObject({ label: 'Browse' }),
+      expect(lastAction(setActions)).toMatchObject({ id: 'browse', label: 'Browse' }),
     );
   });
 
   it('never labels a foreground Claude process as working activity', async () => {
-    const { setAction } = renderApp(
+    const { setActions } = renderApp(
       makeContext({ facts: { sessionForegroundCommand: 'claude' } }),
     );
     await screen.findByText('Current work');
-    await openBrowse(setAction);
+    await openBrowse(setActions);
     await chooseBrowse('claude-browse-conversations');
 
     // The provider's own word for the bound conversation is `inactive`, so the

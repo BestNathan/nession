@@ -168,7 +168,16 @@ App-specific rules:
 - respect top/bottom safe areas;
 - prefer touch-target sizes over desktop compactness;
 - use native push/pop or sheets for deeper capability content;
-- nested capability navigation must not fight top-level spatial gestures;
+- the host owns **one** stack header per depth: Back, a two-line primary
+  title/truthful secondary ancestry, at most two capability-contributed priority
+  icons and More. The secondary line may open the optional Stack Sheet; a
+  capability never renders a second bar (#3971);
+- the host owns the Workspace canvas and its semantic content roles
+  (`WorkspaceSurface` / `Section` / `Group` / `Row`). A capability chooses the
+  role; Nession owns the geometry and rhythm (#3971);
+- nested capability navigation must not fight top-level spatial gestures. The
+  same coordinator routes a claimed contact to the capability's guarded inner
+  stack: right Pop, left Forward only to a recorded destination (#3971);
 - capsule placement should support thumb reach without covering critical Terminal rows;
 - Workspace transition should feel spatially continuous with the Session.
 
@@ -265,16 +274,22 @@ role:
 
 | Layer | Owns | Examples |
 |---|---|---|
-| **Experience host** | page/surface geometry, navigation frame, scroll ancestry, safe areas, the one App page header/Back | `WebLayout`, `AppLayout`/`AppLayers`, `ShellMain`, `WorkspacePanel`, `AppPageHeader` |
-| **Semantic layout recipe** | a repeated stable content relationship used by independent consumers | `WorkspaceMasterDetail`, `WorkspaceScrollRegion`; `ResourceDetail`, `ConfigurationForm`, `OperationSurface` |
+| **Experience host** | page/surface geometry, navigation frame, scroll ancestry, safe areas, the one App page header/Back, the single App gesture coordinator | `WebLayout`, `AppLayout`/`AppLayers`, `ShellMain`, `WorkspacePanel`, `AppPageHeader`, `AppHeaderActions`, `AppStackSheet`, `useSwipePager`/`swipeGesture`/`appInnerStackMotion` |
+| **Semantic layout recipe** | a repeated stable content relationship used by independent consumers | `WorkspaceMasterDetail`, `WorkspaceScrollRegion`; `ResourceDetail`, `ConfigurationForm`, `OperationSurface`, `WorkspaceSurface`/`Section`/`Group`/`Row` |
 | **Capability-local composition** | its own content arrangement inside the host | local `flex` / `grid` / `min-w-0` / `min-h-0` / `flex-1`; a capability's internal list or editor |
 
 Rules:
 
 - Capability and product content must not take page geometry (`h-screen`,
-  `min-h-[100dvh]`, `fixed inset-0`, …), render the App page header/Back, or
-  publish Workspace host chrome (`workspace-shell` / `workspace-tool-bar` /
-  `workspace-tool-content` / `workspace-surface-navigation`).
+  `h-dvh`/`h-svh`/`h-lvh`, `min-h-[100dvh]`, `fixed inset-0`, …), render the App
+  page header/Back/actions/Stack Sheet, or publish Workspace host chrome
+  (`workspace-shell` / `workspace-tool-bar` / `workspace-tool-content` /
+  `workspace-surface-navigation`).
+- Capability and product content must not install a second App gesture owner:
+  it contributes inner-stack destinations through `WorkspaceDepthControl`
+  (`setPush`/`setForward`), never imports the pager engine or publishes the
+  shell's swipe/stack markers. `data-swipe-owner` remains the explicit,
+  bounded way for a surface to claim its own gesture.
 - A stable relationship repeated by two independent consumers is promoted to a
   recipe under `web/src/app/workspace/layout/workspaceLayout.tsx`; a consumer
   must not restate the recipe's stable class.
@@ -292,7 +307,9 @@ Rules:
 | Surface | Current owner | Expected role | Action |
 |---|---|---|---|
 | Web shell / App layers | `WebLayout`, `AppLayout`/`AppLayers` | Experience frame | keep; page geometry is allowed only in this layer |
-| App page header / Back | `WorkspacePanel` → `AppPageHeader` | Experience host | keep exactly one per depth |
+| App page header / Back | `WorkspacePanel` → `AppPageHeader` | Experience host | keep exactly one per depth; actions/Stack Sheet are host-rendered |
+| App Workspace content roles | `components/ui/workspace-content.tsx` | Semantic recipe | primary/secondary surface, Section/Group/Row; no card-per-row |
+| App inner-stack gesture | `AppLayers` → `useSwipePager` → capability Pop/Forward | Experience host | one coordinator; no second touch owner |
 | Files master/detail (Web) | `FilesWebLayout` | `WorkspaceMasterDetail` | migrated (#3194) |
 | Environment master/detail (Web) | `EnvWebLayout` | `WorkspaceMasterDetail` | migrated |
 | Agent / Session detail | experience workspace maps | `WorkspaceScrollRegion` | migrated; the view no longer owns scroll ancestry |
@@ -303,16 +320,18 @@ Rules:
 ### Enforcement
 
 `design/scripts/layout-ownership.mjs` is part of `design-system-fast`. It
-rejects capability/product page geometry, capability-local App headers, host
-chrome, duplicated master/detail or scroll-owner markers, and raw numeric
-spacing in the shared recipe owner. It accepts local flex/grid composition,
-including the Issue's control sample. It also owns the keyboard-avoidance
-binding from §15: only the App Experience scrollport may publish the keyboard
-scroll owner, and only the App viewport environment may read
-`window.visualViewport`. `layout-ownership.test.mjs` holds the negative and
-positive fixtures. Browser evidence for the single scroll owner, alignment,
-overflow and the one App header lives in `ui-contract-web` /
-`ui-contract-matrix` and the SC-03 Case.
+rejects capability/product page geometry (including `dvh`/`svh`/`lvh`/`dvw`
+utilities and fixed inset variants), capability-local App headers/Back/actions
+/markers, host chrome, a second App gesture owner (pager imports or published
+swipe/stack markers), duplicated master/detail or scroll-owner markers, and raw
+numeric spacing in the shared recipe owner. It accepts local flex/grid
+composition, `data-swipe-owner` surfaces, and the Issue's control sample. It
+also owns the keyboard-avoidance binding from §15: only the App Experience
+scrollport may publish the keyboard scroll owner, and only the App viewport
+environment may read `window.visualViewport`. `layout-ownership.test.mjs` holds
+the negative and positive fixtures. Browser evidence for the single scroll
+owner, alignment, overflow, the one App header and the inner-stack gesture lives
+in `ui-contract-web` / `ui-contract-matrix` and the staging Cases for `#3971`.
 
 ## 15. App viewport environment and keyboard avoidance (#3523)
 

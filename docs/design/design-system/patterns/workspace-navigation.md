@@ -161,10 +161,12 @@ open App.tsx     -> capsule visible; the detail's Back is still its only leave
 ```
 
 What survives from `#1051` is the **leave** rule, which was always the load-bearing
-half: a pushed depth's own Back is that depth's one route out, and the shell's swipe
-stands down while it is offered (`shellMayPage`). *Leaving* is one owner per depth;
-*switching capabilities* is not leaving, and the capsule is a bottom-zone control, not
-a bar for the depth.
+half: a pushed depth's own Back is that depth's one route out, and the outer spatial
+pager does not offer a second one. #3971 routes the claimed contact to the capability's
+own inner stack instead of leaving it unclaimed: right swipe Pops one valid depth, left
+swipe Forwards only to a destination the capability recorded, and both run the same
+guard as Back. *Leaving* is one owner per depth; *switching capabilities* is not
+leaving, and the capsule is a bottom-zone control, not a bar for the depth.
 
 Two consequences, replacing the old pair:
 
@@ -178,6 +180,33 @@ Two consequences, replacing the old pair:
   itself, and they are built from capability snapshots, so the row cannot become a
   resource-creation affordance. (The Conversation capsule on Terminal keeps its `+`
   as work disclosure — that is `terminal-capsule.md`'s control, a different owner.)
+
+### App stack header and inner stack swipe (#3971)
+
+The App's one header owns the visible depth hierarchy:
+
+```text
+[Back] | primary title + truthful secondary ancestry | priority icon(s) | More
+```
+
+- The primary title is the current capability/resource; the secondary line is the
+  immediate ancestor or bounded parent path the capability actually reports, or the
+  active Session/Agent context at the capability root. It is never a fabricated
+  breadcrumb.
+- When the capability can jump, the secondary line opens the optional Stack Sheet.
+  Ancestor jumps run the same leave guard as Back; the capability supplies the jump.
+- Right-side actions are **semantic contributions** (`WorkspaceHeaderAction`), not
+  capability-rendered controls. The host draws at most two compact icons and moves
+  the rest, and every destructive action, into More with readable text.
+- The header is two lines and compact at 375/390/430 and in landscape. The Capsule
+  remains present at every depth (above).
+
+The gesture is one coordinator (`AppLayers` → `useSwipePager`). A contact is
+resolved through platform guard → interactive/work surface → Workspace inner stack
+→ outer spatial pager. The header and content frame follow the finger; the Capsule
+keeps its station; the Workspace layer stays opaque so the Terminal is never exposed
+by an internal-depth gesture. A capability that has been switched away cannot retake
+the header or the gesture.
 
 ### Web: the capability capsule
 

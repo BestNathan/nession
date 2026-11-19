@@ -56,8 +56,24 @@ export const VISUAL_VIEWPORT_READ_RE = /\bwindow\.visualViewport\b|\bvisualViewp
 
 const CONTENT_ROOTS = ['web/src/capabilities/', 'web/src/product/'];
 const FRAME_UTILITY_RE =
-  /\b(?:h-screen|min-h-screen|w-screen|h-\[100dvh\]|min-h-\[100dvh\]|fixed\s+inset-0|fixed\s+inset-x-0)\b/g;
-const HEADER_MARKER_RE = /\bAppPageHeader\b|data-testid="app-page-header"/g;
+  /\b(?:h-screen|min-h-screen|w-screen|h-dvh|min-h-dvh|h-svh|min-h-svh|h-lvh|min-h-lvh|w-dvw|h-\[100dvh\]|min-h-\[100dvh\]|h-\[100svh\]|min-h-\[100svh\]|h-\[100lvh\]|min-h-\[100lvh\]|w-\[100dvw\]|fixed\s+inset-0|fixed\s+inset-x-0|fixed\s+inset-y-0)(?![\w-])/g;
+const HEADER_MARKER_RE =
+  /\bAppPageHeader\b|\bAppBackButton\b|\bAppHeaderActions\b|\bAppStackSheet\b|data-testid="(?:app-page-header|app-page-back|app-page-titleblock|app-page-subtitle|app-page-actions|app-page-more|app-page-action-[^"]*|app-header-workspace|app-tool-header|app-tool-back|files-app-nav|files-app-back)"/g;
+/**
+ * The App experience's gesture coordinator and its observable contract (#3971).
+ *
+ * `Sessions ← Terminal → Workspace` plus the Workspace inner stack is one
+ * arbitration: platform guard → interactive/work surface → Workspace stack →
+ * outer pager. A capability contributes destinations and leave guards; it must
+ * not install a second mark or import the pager's engine, because that is how
+ * one contact acquires two owners. `data-swipe-owner` is the explicit
+ * capability-side escape hatch and stays legal.
+ */
+export const APP_GESTURE_OWNER_ROOT = 'web/src/app/experiences/app/';
+export const APP_GESTURE_IMPORT_RE =
+  /from\s+['"]@\/app\/experiences\/app\/(?:edgeBand|gesture|swipeGesture|swipeTouchBinding|useSwipePager|useSwipeSettle|workSurface|appLayerPositions)['"]/g;
+export const GESTURE_MARKER_RE =
+  /\bdata-(?:swipe-phase|swipe-destination(?:-label)?|swipe-inner|swipe-reason|swipe-guard-px|workspace-stack-(?:pop|forward))\b/g;
 const HOST_CHROME_MARKERS = [
   'workspace-shell',
   'workspace-tool-bar',
@@ -100,6 +116,14 @@ const RULES = {
     owner: 'web/src/app/workspace/WorkspaceShell.tsx',
     repair:
       'render the capability content only; the Workspace host publishes its shell, tool bar and surface navigation',
+  },
+  'no-capability-gesture-ownership': {
+    expected:
+      'one App gesture coordinator routes each contact through platform guard → work surface → Workspace inner stack → outer pager',
+    owner:
+      'web/src/app/experiences/app/{useSwipePager,swipeGesture,useSwipeSettle,swipeTouchBinding,workSurface,edgeBand}.ts + web/src/app/workspace/appInnerStackMotion.ts',
+    repair:
+      'contribute destinations through WorkspaceDepthControl (setPush/setForward) and declare a surface with data-swipe-owner; never publish the shell swipe markers or import the pager engine from capability/product content',
   },
   'no-duplicated-master-detail': {
     expected: 'the stable master/detail grid is owned by WorkspaceMasterDetail',
@@ -203,6 +227,16 @@ export function scanLayoutSource(source, file = '<fixture>') {
         kind: 'no-capability-host-chrome',
         actual: marker,
         ...RULES['no-capability-host-chrome'],
+      });
+    }
+    if (!file.startsWith(APP_GESTURE_OWNER_ROOT)) {
+      pushOccurrences(violations, masked, APP_GESTURE_IMPORT_RE, {
+        file,
+        rule: 'no-capability-gesture-ownership',
+      });
+      pushOccurrences(violations, masked, GESTURE_MARKER_RE, {
+        file,
+        rule: 'no-capability-gesture-ownership',
       });
     }
   }
