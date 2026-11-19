@@ -576,6 +576,7 @@ mod tests {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            metadata: None,
         }
     }
 

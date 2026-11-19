@@ -1,6 +1,6 @@
 use crate::db::Database;
 use chrono::{DateTime, Utc};
-use nession_protocol::contracts::session::v1::SessionActivityView;
+use nession_protocol::contracts::session::v1::{SessionActivityView, SessionMetadataAvailability};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
@@ -23,6 +23,11 @@ pub struct SessionInfo {
     /// Durable tmux Session instance identity. `None` for a legacy Session or
     /// before the Agent's first report.
     pub instance_id: Option<String>,
+    /// Bounded work-context summary the owning Agent reported with the current
+    /// incarnation (#4007). In memory only, like `foreground_command`: the
+    /// Agent re-reports it on the next inventory, and `unavailable` is a
+    /// distinct state from a confirmed-empty revision 0.
+    pub metadata: Option<SessionMetadataAvailability>,
     /// Capability-reported Session Activity (#3804).
     ///
     /// In memory only, like `foreground_command`: the Agent re-reports it after
@@ -253,6 +258,11 @@ impl SessionRegistry {
                 // replacement must not erase a level a newer Activity report
                 // already committed (#3804).
                 preserve_activity(previous, &mut session);
+                // The same rule for the metadata summary (#4007): an inventory
+                // frame that carries no summary (a legacy Agent, or one that
+                // does not report it) must not erase the last answer for the
+                // same incarnation.
+                preserve_metadata(previous, &mut session);
             }
             sessions.insert(session.session_id.clone(), session.clone());
         }
@@ -644,6 +654,9 @@ fn session_info_from_row(row: crate::db::SessionRow) -> SessionInfo {
         foreground_command: None,
         working_dir: None,
         instance_id: row.instance_id,
+        // Summaries are live Agent answers and are re-reported; a recovered
+        // row is unknown rather than a guessed empty task (#4007).
+        metadata: None,
         // Ephemeral Activity is not persisted either; the Agent re-reports it
         // from its own coordinator after a restart or reconnect.
         activity: None,
@@ -663,6 +676,19 @@ fn preserve_activity(previous: &SessionInfo, next: &mut SessionInfo) {
         next.activity = previous.activity.clone();
         next.activity_epoch = previous.activity_epoch.clone();
         next.activity_generation = previous.activity_generation;
+    }
+}
+
+/// Keep the last metadata summary for the same incarnation.
+///
+/// A summary is only meaningful for the instance it described, so a
+/// same-name replacement never inherits it; the successor reports its own.
+fn preserve_metadata(previous: &SessionInfo, next: &mut SessionInfo) {
+    if next.metadata.is_none()
+        && previous.instance_id.is_some()
+        && previous.instance_id == next.instance_id
+    {
+        next.metadata = previous.metadata.clone();
     }
 }
 
@@ -699,6 +725,7 @@ mod tests {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            metadata: None,
             activity: None,
             activity_epoch: None,
             activity_generation: 0,

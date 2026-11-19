@@ -177,24 +177,50 @@ async fn start_agent(
     mcp_enabled: bool,
 ) -> (SocketAddr, nession_agent::server::ServerHandle) {
     let tmp = Box::leak(Box::new(tempfile::tempdir().expect("tempdir")));
-    let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let tmux = Arc::new(SessionManager::new());
+    let store = Arc::new(SessionMetadataStore::with_root(
+        Arc::clone(&tmux),
+        tmp.path().join("sessions"),
+    ));
+    start_agent_with(
+        agent_token,
+        mcp_enabled,
+        AGENT_ID,
+        Arc::clone(&tmux),
+        store,
+        tmp.path().to_string_lossy().into_owned(),
+    )
+    .await
+}
+
+/// The same real Agent over explicitly shared tmux/metadata owners.
+///
+/// A production Agent serves its P2P endpoint and its central connection from
+/// one process, one tmux server and one metadata store. Tests that compare
+/// those two surfaces must share the same owners, or the metadata files land
+/// under different roots for one incarnation.
+async fn start_agent_with(
+    agent_token: &str,
+    mcp_enabled: bool,
+    agent_id: &str,
+    tmux: Arc<SessionManager>,
+    session_metadata: Arc<SessionMetadataStore>,
+    data_dir: String,
+) -> (SocketAddr, nession_agent::server::ServerHandle) {
+    let (resize, _resize_updates) = nession_agent::server::ResizeReporter::new();
     let mut server = AgentServer::new(
         "127.0.0.1:0",
-        AGENT_ID,
+        agent_id,
         None,
-        tmp.path().to_string_lossy().into_owned(),
-        tmp.path().to_string_lossy().as_ref(),
+        data_dir.clone(),
+        data_dir.as_str(),
         AttachMode::Plain,
         AgentServerContext {
             resize,
             auth: Arc::new(P2pAuth::new(agent_token)),
             mutations: nession_agent::execution::mutation_scheduler(),
-            tmux: Arc::clone(&tmux),
-            session_metadata: Arc::new(SessionMetadataStore::with_root(
-                Arc::clone(&tmux),
-                tmp.path().join("sessions"),
-            )),
+            tmux,
+            session_metadata,
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             handshake_policy: Default::default(),
         },
@@ -228,6 +254,19 @@ async fn start_agent(
 /// proof a Server+Agent+tmux runtime Case rather than a projection test.
 async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Arc<SessionManager>) {
     let tmux = Arc::new(SessionManager::new());
+    let store = Arc::new(SessionMetadataStore::new(Arc::clone(&tmux)));
+    let handle =
+        register_real_agent_with(server_addr, PROJECT_AGENT, Arc::clone(&tmux), store).await;
+    (handle, tmux)
+}
+
+/// Register one Agent id using explicitly shared tmux/metadata owners.
+async fn register_real_agent_with(
+    server_addr: SocketAddr,
+    agent_id: &str,
+    tmux: Arc<SessionManager>,
+    session_metadata: Arc<SessionMetadataStore>,
+) -> ServerClientHandle {
     let metadata = AgentMetadata {
         tmux_version: "3.3".to_string(),
         os_version: "test".to_string(),
@@ -238,7 +277,7 @@ async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Ar
         variant: None,
     };
     let registry = ExtensionRegistry::new(
-        PROJECT_AGENT,
+        agent_id,
         Vec::new(),
         nession_agent::protocol::served_descriptors().expect("served descriptors"),
     )
@@ -246,7 +285,7 @@ async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Ar
     let client = ServerClient::new(
         format!("ws://{server_addr}"),
         SERVER_TOKEN,
-        PROJECT_AGENT,
+        agent_id,
         "test-host",
         "127.0.0.1",
         19998,
@@ -254,14 +293,15 @@ async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Ar
         Vec::new(),
         None,
         metadata,
-        Arc::clone(&tmux),
+        tmux,
         "/tmp".to_string(),
         Some(Arc::new(registry)),
         SecretString::new(AGENT_TOKEN),
         nession_agent::execution::mutation_scheduler(),
-    );
+    )
+    .with_session_metadata(session_metadata);
     let (handle, _interval) = client.connect_and_run().await.expect("register agent");
-    (handle, tmux)
+    handle
 }
 
 /// Send one authenticated Server request on a fresh WebSocket.
@@ -763,7 +803,7 @@ async fn standalone_query_token_authentication_is_opt_in() {
             .as_array()
             .expect("tools")
             .len(),
-        11
+        17
     );
 
     for target in [
@@ -838,7 +878,7 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
 
     let session = initialize_with(mcp_addr, MCP_TOKEN).await;
     let tools = tools_of(mcp_addr, MCP_TOKEN).await;
-    assert_eq!(tools.as_array().expect("tools").len(), 15);
+    assert_eq!(tools.as_array().expect("tools").len(), 17);
 
     let agents = call_tool(
         mcp_addr,
@@ -1932,6 +1972,321 @@ async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
     server_task.abort();
 }
 
+/// #4007 SC-02/03/04: the metadata Tools answer the same Agent-owned truth from
+/// Server-embedded, Agent-embedded, Server-routed standalone and explicit
+/// direct-Agent standalone hosts. The partial update keeps omitted fields, the
+/// revision/incarnation preconditions refuse stale writers, and the list
+/// summary distinguishes a confirmed-empty record from a failed lookup.
+#[tokio::test]
+async fn session_metadata_tools_share_owner_truth_across_hosts() {
+    let (server_addr, server_task, _db) = start_server_with_mcp(true).await;
+    // One production-shaped Agent: the P2P/embedded surface and the central
+    // connection share one tmux server and one metadata store, so a record
+    // written through any host is the same record the others read.
+    let shared = Box::leak(Box::new(tempfile::tempdir().expect("shared dir")));
+    let shared_tmux = Arc::new(SessionManager::new());
+    let shared_store = Arc::new(SessionMetadataStore::with_root(
+        Arc::clone(&shared_tmux),
+        shared.path().join("sessions"),
+    ));
+    let (agent_addr, agent_handle) = start_agent_with(
+        AGENT_TOKEN,
+        true,
+        AGENT_ID,
+        Arc::clone(&shared_tmux),
+        Arc::clone(&shared_store),
+        shared.path().to_string_lossy().into_owned(),
+    )
+    .await;
+    let server_client = register_real_agent_with(
+        server_addr,
+        AGENT_ID,
+        Arc::clone(&shared_tmux),
+        Arc::clone(&shared_store),
+    )
+    .await;
+    let routed_dir = tempfile::tempdir().expect("routed dir");
+    let mut routed = spawn_standalone(&write_routed_config(routed_dir.path(), server_addr));
+    let routed_addr = await_listen_addr(&mut routed.0).await;
+    let direct_dir = tempfile::tempdir().expect("direct dir");
+    let mut direct = spawn_standalone(&write_direct_config(
+        direct_dir.path(),
+        server_addr,
+        agent_addr,
+    ));
+    let direct_addr = await_listen_addr(&mut direct.0).await;
+
+    let server_session = initialize_with(server_addr, SERVER_TOKEN).await;
+    let agent_session = initialize_with(agent_addr, AGENT_TOKEN).await;
+    let routed_session = initialize_with(routed_addr, MCP_TOKEN).await;
+    let direct_session = initialize_with(direct_addr, MCP_TOKEN).await;
+
+    // The Server only routes to an Agent after its registration arrives.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let listed = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_server_list_agents",
+            json!({}),
+        )
+        .await;
+        let text = text_of(&listed);
+        let online = text["agents"].as_array().is_some_and(|agents| {
+            agents
+                .iter()
+                .any(|agent| agent["agent_id"] == AGENT_ID && agent["status"] == "online")
+        });
+        if online {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Agent never registered with the Server: {text}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    let name = unique_name("metadata-hosts");
+    let legacy_name = unique_name("metadata-empty");
+    for created_name in [&name, &legacy_name] {
+        let created = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_agent_create_session",
+            json!({ "agent_id": AGENT_ID, "name": created_name }),
+        )
+        .await;
+        assert_eq!(created["isError"], false, "server: {created}");
+    }
+
+    // Four routes, one revision-0 answer and one authoritative identity.
+    let mut identity: Option<String> = None;
+    for (addr, token, session, label) in [
+        (server_addr, SERVER_TOKEN, &server_session, "server"),
+        (agent_addr, AGENT_TOKEN, &agent_session, "agent"),
+        (routed_addr, MCP_TOKEN, &routed_session, "routed"),
+        (direct_addr, MCP_TOKEN, &direct_session, "direct"),
+    ] {
+        let got = call_tool(
+            addr,
+            token,
+            session,
+            "nession_agent_get_session_metadata",
+            json!({ "agent_id": AGENT_ID, "name": name }),
+        )
+        .await;
+        assert_eq!(got["isError"], false, "{label}: {got}");
+        let text = text_of(&got);
+        assert_eq!(text["session_id"], format!("{AGENT_ID}:{name}"));
+        assert_eq!(text["metadata"]["revision"], 0);
+        let id = text["instance_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{label}: no instance identity in {text}"))
+            .to_string();
+        match &identity {
+            None => identity = Some(id),
+            Some(existing) => assert_eq!(existing, &id, "{label} reported another identity"),
+        }
+    }
+    let identity = identity.expect("one authoritative instance identity");
+
+    // A description-only patch through the Server route leaves title/tags
+    // omitted (preserved) and commits at the owner.
+    let patched = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "nession_agent_update_session_metadata",
+        json!({
+            "agent_id": AGENT_ID,
+            "name": name,
+            "expected_instance_id": identity,
+            "expected_revision": 0,
+            "patch": { "description": "Goal: ChatGPT OAuth support." }
+        }),
+    )
+    .await;
+    assert_eq!(patched["isError"], false, "{patched}");
+    assert_eq!(text_of(&patched)["metadata"]["revision"], 1);
+
+    // Title and tags replace at revision 1 through the direct-Agent host; the
+    // description survives the partial merge.
+    let patched = call_tool(
+        direct_addr,
+        MCP_TOKEN,
+        &direct_session,
+        "nession_agent_update_session_metadata",
+        json!({
+            "agent_id": AGENT_ID,
+            "name": name,
+            "expected_instance_id": identity,
+            "expected_revision": 1,
+            "patch": { "title": "OAuth work", "tags": ["oauth", "mcp"] }
+        }),
+    )
+    .await;
+    assert_eq!(patched["isError"], false, "{patched}");
+    let committed = text_of(&patched);
+    assert_eq!(committed["metadata"]["revision"], 2);
+    assert_eq!(
+        committed["metadata"]["description"],
+        "Goal: ChatGPT OAuth support."
+    );
+    assert_eq!(committed["metadata"]["title"], "OAuth work");
+    assert_eq!(committed["metadata"]["tags"], json!(["oauth", "mcp"]));
+
+    // A stale revision and a stale incarnation both refuse without writing.
+    let stale_revision = call_tool(
+        routed_addr,
+        MCP_TOKEN,
+        &routed_session,
+        "nession_agent_update_session_metadata",
+        json!({
+            "agent_id": AGENT_ID,
+            "name": name,
+            "expected_instance_id": identity,
+            "expected_revision": 1,
+            "patch": { "title": "stale revision" }
+        }),
+    )
+    .await;
+    assert_eq!(stale_revision["isError"], true, "{stale_revision}");
+    assert_eq!(text_of(&stale_revision)["error"]["kind"], "conflict");
+
+    let stale_instance = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "nession_agent_update_session_metadata",
+        json!({
+            "agent_id": AGENT_ID,
+            "name": name,
+            "expected_instance_id": "00000000-0000-4000-8000-000000000000",
+            "expected_revision": 2,
+            "patch": { "title": "stale instance" }
+        }),
+    )
+    .await;
+    assert_eq!(stale_instance["isError"], true, "{stale_instance}");
+    assert_eq!(text_of(&stale_instance)["error"]["kind"], "conflict");
+
+    // Re-reading the full record through every host proves neither refusal
+    // wrote anything and that the committed partial update is one owner record.
+    for (addr, token, session, label) in [
+        (server_addr, SERVER_TOKEN, &server_session, "server"),
+        (agent_addr, AGENT_TOKEN, &agent_session, "agent"),
+        (routed_addr, MCP_TOKEN, &routed_session, "routed"),
+        (direct_addr, MCP_TOKEN, &direct_session, "direct"),
+    ] {
+        let reread = call_tool(
+            addr,
+            token,
+            session,
+            "nession_agent_get_session_metadata",
+            json!({ "agent_id": AGENT_ID, "name": name }),
+        )
+        .await;
+        assert_eq!(reread["isError"], false, "{label}: {reread}");
+        let record = text_of(&reread);
+        assert_eq!(record["metadata"]["revision"], 2, "{label}");
+        assert_eq!(record["metadata"]["title"], "OAuth work", "{label}");
+        assert_eq!(
+            record["metadata"]["description"], "Goal: ChatGPT OAuth support.",
+            "{label}"
+        );
+        assert_eq!(
+            record["metadata"]["tags"],
+            json!(["oauth", "mcp"]),
+            "{label}"
+        );
+        assert_eq!(record["instance_id"], identity, "{label}");
+    }
+
+    // Every host's list carries the same bounded summary; the Session with no
+    // saved metadata is a confirmed revision 0, not a failed lookup. The full
+    // description never rides the list.
+    for (addr, token, session, label) in [
+        (server_addr, SERVER_TOKEN, &server_session, "server"),
+        (agent_addr, AGENT_TOKEN, &agent_session, "agent"),
+        (routed_addr, MCP_TOKEN, &routed_session, "routed"),
+        (direct_addr, MCP_TOKEN, &direct_session, "direct"),
+    ] {
+        let listed = call_tool(
+            addr,
+            token,
+            session,
+            "nession_agent_list_sessions",
+            json!({ "agent_id": AGENT_ID }),
+        )
+        .await;
+        assert_eq!(listed["isError"], false, "{label}: {listed}");
+        let text = text_of(&listed);
+        let sessions = text["sessions"].as_array().expect("sessions");
+        let saved = sessions
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .unwrap_or_else(|| panic!("{label}: saved Session missing from {text}"));
+        assert_eq!(saved["metadata"]["state"], "available", "{label}");
+        assert_eq!(saved["metadata"]["summary"]["revision"], 2, "{label}");
+        assert_eq!(
+            saved["metadata"]["summary"]["title"], "OAuth work",
+            "{label}"
+        );
+        assert_eq!(
+            saved["metadata"]["summary"]["tags"],
+            json!(["oauth", "mcp"]),
+            "{label}"
+        );
+        assert!(
+            saved["metadata"]["summary"].get("description").is_none(),
+            "{label}: description must stay behind Get"
+        );
+
+        let empty = sessions
+            .iter()
+            .find(|entry| entry["name"] == legacy_name)
+            .unwrap_or_else(|| panic!("{label}: empty Session missing from {text}"));
+        assert_eq!(empty["metadata"]["state"], "available", "{label}");
+        assert_eq!(empty["metadata"]["summary"]["revision"], 0, "{label}");
+        assert!(
+            empty["metadata"]["summary"].get("title").is_none(),
+            "{label}: a confirmed empty record has no title"
+        );
+    }
+
+    // A missing Session is not an empty successful read.
+    let missing = call_tool(
+        server_addr,
+        SERVER_TOKEN,
+        &server_session,
+        "nession_agent_get_session_metadata",
+        json!({ "agent_id": AGENT_ID, "name": "no-such-session" }),
+    )
+    .await;
+    assert_eq!(missing["isError"], true, "{missing}");
+    assert_eq!(text_of(&missing)["error"]["kind"], "not_found");
+
+    for kill_name in [&name, &legacy_name] {
+        let killed = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_agent_kill_session",
+            json!({ "agent_id": AGENT_ID, "name": kill_name }),
+        )
+        .await;
+        assert_eq!(killed["isError"], false, "{killed}");
+    }
+    terminate_and_wait(&mut routed.0).await;
+    terminate_and_wait(&mut direct.0).await;
+    let _ = server_client.shutdown().await;
+    let _ = agent_handle.shutdown().await;
+    server_task.abort();
+}
+
 /// SC-03: all three hosts serve one catalog, byte for byte.
 #[tokio::test]
 async fn all_three_hosts_share_one_tool_catalog() {
@@ -1946,7 +2301,7 @@ async fn all_three_hosts_share_one_tool_catalog() {
     let agent_tools = tools_of(agent_addr, AGENT_TOKEN).await;
     let standalone_tools = tools_of(standalone_addr, MCP_TOKEN).await;
 
-    assert_eq!(server_tools.as_array().expect("tools").len(), 15);
+    assert_eq!(server_tools.as_array().expect("tools").len(), 17);
     let names: Vec<_> = server_tools
         .as_array()
         .expect("tools")
@@ -1971,6 +2326,8 @@ async fn all_three_hosts_share_one_tool_catalog() {
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",
+            "nession_agent_get_session_metadata",
+            "nession_agent_update_session_metadata",
         ]
     );
     assert_eq!(
@@ -2474,7 +2831,7 @@ async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_n
 
     let first = legacy.list_tools(None).await.expect("tools/list");
     let first_revision = catalog_revision(&first);
-    assert_eq!(first.tools.len(), 15);
+    assert_eq!(first.tools.len(), 17);
 
     // Reading and calling do not alter the catalog generation.
     let _ = legacy
@@ -2483,7 +2840,7 @@ async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_n
         .expect("tools/call");
     let stable = legacy.list_tools(None).await.expect("tools/list");
     assert_eq!(catalog_revision(&stable), first_revision);
-    assert_eq!(stable.tools.len(), 15);
+    assert_eq!(stable.tools.len(), 17);
 
     // Ordinary Session runtime work is not a catalog event either.
     let _ = legacy
@@ -2499,7 +2856,7 @@ async fn catalog_revision_and_list_changed_are_explicit_and_runtime_state_does_n
         .expect("session create");
     let after_session = legacy.list_tools(None).await.expect("tools/list");
     assert_eq!(catalog_revision(&after_session), first_revision);
-    assert_eq!(after_session.tools.len(), 15);
+    assert_eq!(after_session.tools.len(), 17);
 
     // Installing a manifest is an explicit catalog change: the connected
     // legacy session receives the list-change notification and the next list

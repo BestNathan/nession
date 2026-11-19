@@ -36,7 +36,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionKillResponse, SessionRefusal, WebSessionsListResponse,
+    ServerSessionListReply, SessionKillResponse, SessionMetadataPatchPayload,
+    SessionMetadataResponse, SessionRefusal, WebSessionMetadataGetPayload,
+    WebSessionMetadataPatchPayload, WebSessionsListResponse,
 };
 use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
@@ -508,6 +510,45 @@ impl NodeBackend for ServerNodeBackend {
         Ok(SessionKillResponse {
             name: name.to_string(),
         })
+    }
+
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.require_online(agent_id).await?;
+        // Route through the same `server.session.metadata.get` unit the Web
+        // uses; the Server authorizes and the Agent answers.
+        dispatch_typed::<SessionMetadataResponse>(
+            self.handler.clone(),
+            "server.session.metadata.get",
+            serde_json::to_value(WebSessionMetadataGetPayload {
+                session_id: format!("{agent_id}:{name}"),
+            })
+            .map_err(|error| ToolError::backend(error.to_string()))?,
+        )
+        .await
+    }
+
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.require_online(agent_id).await?;
+        let payload = WebSessionMetadataPatchPayload {
+            session_id: format!("{agent_id}:{}", request.name),
+            expected_instance_id: request.expected_instance_id,
+            expected_revision: request.expected_revision,
+            patch: request.patch,
+        };
+        dispatch_typed::<SessionMetadataResponse>(
+            self.handler.clone(),
+            "server.session.metadata.patch",
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?,
+        )
+        .await
     }
 
     async fn call_extension_tool(

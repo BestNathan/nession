@@ -674,6 +674,246 @@ fn metadata_validation_rejects_invalid_tags() {
 }
 
 #[test]
+fn metadata_patch_distinguishes_omitted_null_and_values() {
+    let current = SessionMetadata {
+        revision: 4,
+        title: Some("Old title".to_string()),
+        description: Some("Old description".to_string()),
+        tags: vec!["alpha".to_string()],
+        created_at: None,
+        updated_at: None,
+    };
+
+    // Omitted fields preserve; explicit null clears; a value replaces.
+    let patch: SessionMetadataPatch =
+        serde_json::from_value(serde_json::json!({ "description": null })).unwrap();
+    assert!(patch.title.is_none(), "omitted title must stay unspecified");
+    assert_eq!(patch.description, Some(None), "null is an explicit clear");
+    assert!(patch.tags.is_none(), "omitted tags preserve the list");
+    assert_eq!(
+        patch.apply(&current),
+        (
+            Some("Old title".to_string()),
+            None,
+            vec!["alpha".to_string()]
+        )
+    );
+
+    let title: SessionMetadataPatch =
+        serde_json::from_value(serde_json::json!({ "title": "New title" })).unwrap();
+    assert_eq!(title.title, Some(Some("New title".to_string())));
+    assert_eq!(
+        title.apply(&current),
+        (
+            Some("New title".to_string()),
+            Some("Old description".to_string()),
+            vec!["alpha".to_string()]
+        )
+    );
+
+    // `[]` clears tags; an omitted tag list is not the same state.
+    let tags: SessionMetadataPatch =
+        serde_json::from_value(serde_json::json!({ "tags": [] })).unwrap();
+    assert_eq!(tags.tags, Some(Vec::new()));
+    assert_eq!(
+        tags.apply(&current),
+        (
+            Some("Old title".to_string()),
+            Some("Old description".to_string()),
+            Vec::new()
+        )
+    );
+
+    let empty: SessionMetadataPatch = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert!(empty.is_empty());
+    assert_eq!(
+        empty.apply(&current),
+        (
+            current.title.clone(),
+            current.description.clone(),
+            current.tags.clone()
+        )
+    );
+
+    let round_trip = serde_json::to_value(&patch).expect("patch json");
+    assert_eq!(round_trip, serde_json::json!({ "description": null }));
+
+    // An unknown patch field is refused rather than silently ignored: a
+    // caller must never believe it changed something the owner never saw.
+    assert!(
+        serde_json::from_value::<SessionMetadataPatch>(serde_json::json!({
+            "title": "New",
+            "unknown_field": true
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn metadata_patch_payload_requires_incarnation_and_revision() {
+    let missing: Result<SessionMetadataPatchPayload, _> = serde_json::from_value(
+        serde_json::json!({ "name": "work", "patch": { "description": "Next" } }),
+    );
+    assert!(
+        missing.is_err(),
+        "a partial update without an incarnation/revision has no safe merge base"
+    );
+
+    let payload: SessionMetadataPatchPayload = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "expected_instance_id": "instance-a",
+        "expected_revision": 4,
+        "patch": { "description": "Next" }
+    }))
+    .expect("guarded patch payload");
+    assert_eq!(payload.expected_instance_id, "instance-a");
+    assert_eq!(payload.expected_revision, 4);
+    assert!(payload.patch.title.is_none());
+
+    let web: WebSessionMetadataPatchPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent-a:work",
+        "expected_instance_id": "instance-a",
+        "expected_revision": 4,
+        "patch": { "title": null }
+    }))
+    .expect("web patch payload");
+    assert_eq!(web.session_id, "agent-a:work");
+    assert_eq!(web.patch.title, Some(None));
+}
+
+#[test]
+fn metadata_update_precondition_is_optional_and_additive() {
+    // A previously written payload still decodes and keeps the legacy
+    // unguarded behavior.
+    let legacy: SessionMetadataUpdatePayload =
+        serde_json::from_str("{\"name\":\"work\",\"expected_revision\":0}").unwrap();
+    assert!(legacy.expected_instance_id.is_none());
+    let web_legacy: WebSessionMetadataUpdatePayload =
+        serde_json::from_str("{\"session_id\":\"a:work\",\"expected_revision\":0}").unwrap();
+    assert!(web_legacy.expected_instance_id.is_none());
+
+    let guarded: SessionMetadataUpdatePayload = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "expected_revision": 4,
+        "expected_instance_id": "instance-a"
+    }))
+    .unwrap();
+    assert_eq!(guarded.expected_instance_id.as_deref(), Some("instance-a"));
+    let guarded_web: WebSessionMetadataUpdatePayload = serde_json::from_value(serde_json::json!({
+        "session_id": "a:work",
+        "expected_revision": 4,
+        "expected_instance_id": "instance-a"
+    }))
+    .unwrap();
+    assert_eq!(
+        guarded_web.expected_instance_id.as_deref(),
+        Some("instance-a")
+    );
+}
+
+#[test]
+fn metadata_response_carries_the_instance_identity() {
+    let metadata = SessionMetadata {
+        revision: 5,
+        title: Some("Work".to_string()),
+        description: None,
+        tags: Vec::new(),
+        created_at: Some(1),
+        updated_at: Some(2),
+    };
+    let response = SessionMetadataResponse::success_for("instance-a".to_string(), metadata);
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(json["instance_id"], "instance-a");
+    assert_eq!(json["metadata"]["revision"], 5);
+    let decoded: SessionMetadataResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, response);
+
+    // Older replies and failures omit the identity without failing to decode.
+    let failed: SessionMetadataResponse =
+        serde_json::from_str("{\"success\":false,\"error\":\"nope\",\"error_kind\":\"not_found\"}")
+            .unwrap();
+    assert!(failed.instance_id.is_none());
+}
+
+#[test]
+fn session_list_metadata_availability_is_explicit() {
+    let available: SessionMetadataAvailability = serde_json::from_value(serde_json::json!({
+        "state": "available",
+        "summary": { "revision": 0, "tags": [] }
+    }))
+    .unwrap();
+    assert_eq!(
+        available,
+        SessionMetadataAvailability::available(SessionMetadataSummary {
+            revision: 0,
+            title: None,
+            tags: Vec::new(),
+        })
+    );
+    let unavailable: SessionMetadataAvailability =
+        serde_json::from_value(serde_json::json!({ "state": "unavailable" })).unwrap();
+    assert_eq!(unavailable, SessionMetadataAvailability::unavailable());
+    assert_eq!(
+        serde_json::to_value(&unavailable).unwrap(),
+        serde_json::json!({ "state": "unavailable" })
+    );
+
+    let session: SessionInfo = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "created_at": 0,
+        "window_count": 1,
+        "attached_clients": 0,
+        "width": 80,
+        "height": 24,
+        "foreground_command": null,
+        "metadata": {
+            "state": "available",
+            "summary": { "revision": 2, "title": "Release triage", "tags": ["release"] }
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        session.metadata,
+        Some(SessionMetadataAvailability::available(
+            SessionMetadataSummary {
+                revision: 2,
+                title: Some("Release triage".to_string()),
+                tags: vec!["release".to_string()],
+            }
+        ))
+    );
+
+    // A legacy entry without the field decodes; the caller treats it as unknown.
+    let legacy: SessionInfo = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "created_at": 0,
+        "window_count": 1,
+        "attached_clients": 0,
+        "width": 80,
+        "height": 24,
+        "foreground_command": null
+    }))
+    .unwrap();
+    assert!(legacy.metadata.is_none());
+
+    let web: WebSessionInfo = serde_json::from_value(serde_json::json!({
+        "session_id": "a:work",
+        "agent_id": "agent-a",
+        "session_name": "work",
+        "status": "detached",
+        "window_count": 1,
+        "attached_clients": 0,
+        "last_activity": "2026-11-19T00:00:00Z",
+        "metadata": { "state": "unavailable" }
+    }))
+    .unwrap();
+    assert_eq!(
+        web.metadata,
+        Some(SessionMetadataAvailability::unavailable())
+    );
+}
+
+#[test]
 fn sandbox_command_payloads_round_trip_with_empty_first_rows() {
     // #3124: the client sends the Web-safe draft; empty Resource/Syscall rows
     // survive the wire as an empty list, not as a fabricated option.

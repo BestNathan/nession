@@ -25,7 +25,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use nession_protocol::contracts::session::v1::{
-    SessionInfo, WebSessionInfo, WebSessionsListResponse,
+    SessionInfo, SessionMetadataAvailability, WebSessionInfo, WebSessionsListResponse,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
@@ -72,6 +72,18 @@ pub struct SessionSummary {
     /// the Server could not report the Session's metadata.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<Option<String>>,
+    /// The Agent's bounded work-context summary for this Session (#4007).
+    ///
+    /// `available` is the Agent's answer at list time (revision 0 = confirmed
+    /// empty); `unavailable` means the metadata read failed and must never be
+    /// rendered as an empty task. Never includes `description`; use
+    /// `nession_agent_get_session_metadata` for the full record.
+    #[serde(default = "metadata_unknown")]
+    pub metadata: SessionMetadataAvailability,
+}
+
+fn metadata_unknown() -> SessionMetadataAvailability {
+    SessionMetadataAvailability::unavailable()
 }
 
 impl SessionSummary {
@@ -89,6 +101,10 @@ impl SessionSummary {
             working_dir: session.working_dir.clone(),
             instance_id: session.instance_id.clone(),
             project_id: None,
+            metadata: session
+                .metadata
+                .clone()
+                .unwrap_or(SessionMetadataAvailability::unavailable()),
         }
     }
 
@@ -108,6 +124,10 @@ impl SessionSummary {
             working_dir: session.working_dir.clone(),
             instance_id: session.instance_id.clone(),
             project_id: Some(session.project_id.clone()),
+            metadata: session
+                .metadata
+                .clone()
+                .unwrap_or(SessionMetadataAvailability::unavailable()),
         }
     }
 }
@@ -189,7 +209,10 @@ impl ToolHandler for NessionAgentListSessions {
          not the Server registry view. `agent_id` is required; the call never falls back to the \
          host running MCP. Each Session's `project_id` is the Server's current authoritative \
          Project association; explicit null means unassociated and an omitted field means the \
-         Server metadata was unavailable."
+         Server metadata was unavailable. `metadata` is the Agent's bounded title/tag summary: \
+         state `available` with revision 0 is a confirmed empty record, state `unavailable` is a \
+         failed lookup and is never an empty task; use `nession_agent_get_session_metadata` for \
+         the full description and authoritative instance identity."
     }
 
     fn input_schema(&self) -> Map<String, Value> {
@@ -233,6 +256,7 @@ impl ToolHandler for NessionAgentListSessions {
 mod tests {
     use super::*;
     use crate::tools::test_support::{arguments, context, Recorded, Recording};
+    use nession_protocol::contracts::session::v1::SessionMetadataSummary;
     use std::sync::Arc;
 
     #[tokio::test]
@@ -334,11 +358,86 @@ mod tests {
         let summary = SessionSummary::from_agent_session("agent-a", &session);
         assert_eq!(summary.session_id, "agent-a:shell");
         assert_eq!(summary.project_id, None);
+        assert_eq!(
+            summary.metadata,
+            SessionMetadataAvailability::unavailable(),
+            "a legacy Agent's omitted summary is unknown, never confirmed empty"
+        );
         let value = serde_json::to_value(&summary).expect("summary json");
         assert!(
             value.get("project_id").is_none(),
             "unresolved metadata must be omitted, not serialized as null"
         );
+    }
+
+    #[test]
+    fn confirmed_empty_and_unavailable_summaries_stay_distinct() {
+        let empty: SessionInfo = serde_json::from_value(serde_json::json!({
+            "name": "shell",
+            "created_at": 0,
+            "window_count": 1,
+            "attached_clients": 0,
+            "width": 80,
+            "height": 24,
+            "foreground_command": null,
+            "metadata": { "state": "available", "summary": { "revision": 0, "tags": [] } }
+        }))
+        .expect("agent session");
+        let summary = SessionSummary::from_agent_session("agent-a", &empty);
+        assert_eq!(
+            summary.metadata,
+            SessionMetadataAvailability::available(SessionMetadataSummary {
+                revision: 0,
+                title: None,
+                tags: Vec::new(),
+            })
+        );
+        let value = serde_json::to_value(&summary).expect("summary json");
+        assert_eq!(value["metadata"]["state"], "available");
+        assert_eq!(value["metadata"]["summary"]["revision"], 0);
+
+        let failed: WebSessionInfo = serde_json::from_value(serde_json::json!({
+            "session_id": "agent-a:shell",
+            "agent_id": "agent-a",
+            "session_name": "shell",
+            "status": "detached",
+            "window_count": 1,
+            "attached_clients": 0,
+            "last_activity": "2026-11-19T00:00:00Z",
+            "metadata": { "state": "unavailable" }
+        }))
+        .expect("server session");
+        let summary = SessionSummary::from_web_session(&failed);
+        assert_eq!(summary.metadata, SessionMetadataAvailability::unavailable());
+        let value = serde_json::to_value(&summary).expect("summary json");
+        assert_eq!(value["metadata"]["state"], "unavailable");
+        assert!(
+            value["metadata"].get("summary").is_none(),
+            "an unavailable lookup must not fabricate an empty summary"
+        );
+    }
+
+    #[test]
+    fn a_summary_never_carries_the_description() {
+        let session: SessionInfo = serde_json::from_value(serde_json::json!({
+            "name": "shell",
+            "created_at": 0,
+            "window_count": 1,
+            "attached_clients": 0,
+            "width": 80,
+            "height": 24,
+            "foreground_command": null,
+            "metadata": {
+                "state": "available",
+                "summary": { "revision": 3, "title": "Work", "tags": ["one"] }
+            }
+        }))
+        .expect("agent session");
+        let value = serde_json::to_value(SessionSummary::from_agent_session("agent-a", &session))
+            .expect("summary json");
+        let rendered = value.to_string();
+        assert!(rendered.contains("\"title\":\"Work\""), "{rendered}");
+        assert!(!rendered.contains("description"), "{rendered}");
     }
 
     #[tokio::test]

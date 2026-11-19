@@ -24,7 +24,8 @@ use std::time::Duration;
 use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_protocol::contracts::session::v1::{
     AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionKillPayload,
-    SessionKillResponse, SessionListResponse,
+    SessionKillResponse, SessionListResponse, SessionMetadataGetPayload,
+    SessionMetadataPatchPayload, SessionMetadataResponse,
 };
 use nession_protocol::Message;
 use serde_json::Value;
@@ -109,6 +110,45 @@ impl AgentConnection {
             .await?;
         serde_json::from_value(payload).map_err(|source| ClientError::Reply {
             wire: wire::AGENT_SESSION_LIST.to_string(),
+            source,
+        })
+    }
+
+    /// `agent.session.metadata.get` — one Session's work context (#4007).
+    pub async fn get_session_metadata(
+        &mut self,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        let payload = self
+            .request(
+                proto_msg(
+                    wire::AGENT_SESSION_METADATA_GET,
+                    SessionMetadataGetPayload {
+                        name: name.to_string(),
+                    },
+                ),
+                DEFAULT_REQUEST_TIMEOUT,
+            )
+            .await?;
+        serde_json::from_value(payload).map_err(|source| ClientError::Reply {
+            wire: wire::AGENT_SESSION_METADATA_GET.to_string(),
+            source,
+        })
+    }
+
+    /// `agent.session.metadata.patch` — partial update at the Agent owner.
+    pub async fn patch_session_metadata(
+        &mut self,
+        payload: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        let reply = self
+            .request(
+                proto_msg(wire::AGENT_SESSION_METADATA_PATCH, payload),
+                DEFAULT_REQUEST_TIMEOUT,
+            )
+            .await?;
+        serde_json::from_value(reply).map_err(|source| ClientError::Reply {
+            wire: wire::AGENT_SESSION_METADATA_PATCH.to_string(),
             source,
         })
     }

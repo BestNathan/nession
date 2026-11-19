@@ -61,6 +61,13 @@ foreground_command?: string | null, working_dir?: string | null,
  */
 instance_id?: string | null, 
 /**
+ * Bounded work-context summary (#4007), projected from the Agent that
+ * owns the Session. `available` is the Agent's answer; `unavailable` is a
+ * failed lookup and is never an empty task. Omitted when the Server has
+ * no report from a current Agent (legacy or stale).
+ */
+metadata?: SessionMetadataAvailability | null, 
+/**
  * The focused Session's Server-owned Project membership (#3082).
  *
  * Absent for a Session with no Project. This is durable membership, not an
@@ -79,6 +86,30 @@ project_id?: string | null,
  * treats it as unknown when that Agent is offline or stale.
  */
 activity?: SessionActivityView | null, last_activity: string, };
+export type SessionMetadataAvailability = { 
+/**
+ * `available` when the Agent read the metadata; `unavailable` when the
+ * lookup failed. Never render `unavailable` as an empty task.
+ */
+state: SessionMetadataState, 
+/**
+ * The bounded summary. Present only when `state` is `available`.
+ */
+summary?: SessionMetadataSummary | null, };
+export type SessionMetadataState = "available" | "unavailable";
+export type SessionMetadataSummary = { 
+/**
+ * 0 means confirmed-empty (a legacy Session), not unavailable.
+ */
+revision: number, 
+/**
+ * The display title; absent falls back to the tmux Session name.
+ */
+title?: string | null, 
+/**
+ * The Session's labels, in their stored order.
+ */
+tags: Array<string>, };
 export type SessionActivityView = { 
 /**
  * `working`, `idle` or `unknown`.

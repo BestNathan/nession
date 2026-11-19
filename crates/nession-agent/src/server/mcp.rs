@@ -21,12 +21,17 @@ use nession_mcp::provider::McpToolProvider;
 use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
 use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
 use nession_mcp::{McpService, ServiceConfig};
-use nession_protocol::contracts::session::v1::{SessionKillResponse, SessionListResponse};
+use nession_protocol::contracts::session::v1::{
+    SessionKillResponse, SessionListResponse, SessionMetadataPatchPayload, SessionMetadataResponse,
+};
 
 use crate::config::AgentConfig;
 use crate::execution::ResourceKey;
 use crate::server::execution::{
     ExecutionLanes, DEFAULT_MUTATIONS_IN_FLIGHT, DEFAULT_QUERY_CONCURRENCY,
+};
+use crate::session::metadata::{
+    attach_session_summaries, error_kind_and_detail, SessionMetadataSnapshot, SessionMetadataStore,
 };
 use crate::session::registry::SessionRegistry;
 use crate::tmux::manager::{SessionBindingInput, SessionManager};
@@ -59,6 +64,7 @@ pub(crate) fn build(
     tmux: Arc<SessionManager>,
     sessions: Arc<SessionRegistry>,
     mutations: Arc<KeyedLane<ResourceKey>>,
+    session_metadata: Arc<SessionMetadataStore>,
     tool_providers: Vec<Arc<dyn McpToolProvider>>,
 ) -> anyhow::Result<Option<Arc<McpService>>> {
     let McpHost {
@@ -93,6 +99,7 @@ pub(crate) fn build(
         default_working_dir: default_working_dir.to_string(),
         terminal_cols,
         mutations,
+        session_metadata,
     });
 
     let allowed_hosts =
@@ -122,6 +129,10 @@ struct AgentNodeBackend {
     /// central connection. An MCP create/kill of a Session is ordered against
     /// a terminal client's mutation of the same Session (#565).
     mutations: Arc<KeyedLane<ResourceKey>>,
+    /// The Agent's one metadata owner (#4007). The embedded MCP endpoint is
+    /// this Session domain's own surface, so it reads and patches the store
+    /// directly rather than routing through a wire it also serves.
+    session_metadata: Arc<SessionMetadataStore>,
 }
 
 impl AgentNodeBackend {
@@ -181,11 +192,12 @@ impl AgentNodeBackend {
 impl NodeBackend for AgentNodeBackend {
     async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         self.ensure_target(agent_id)?;
-        let sessions = self
+        let mut sessions = self
             .tmux
             .list_sessions()
             .await
             .map_err(|error| ToolError::backend(format!("{error:#}")))?;
+        attach_session_summaries(&self.session_metadata, &mut sessions).await;
         let reply = SessionListResponse {
             sessions,
             stale_agents: Vec::new(),
@@ -265,6 +277,57 @@ impl NodeBackend for AgentNodeBackend {
             })
             .await?;
         Ok(response)
+    }
+
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.ensure_target(agent_id)?;
+        Ok(metadata_reply(
+            self.session_metadata.read_current(name).await,
+        ))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.ensure_target(agent_id)?;
+        Ok(metadata_reply(
+            self.session_metadata
+                .patch(
+                    &request.name,
+                    &request.expected_instance_id,
+                    request.expected_revision,
+                    &request.patch,
+                )
+                .await,
+        ))
+    }
+}
+
+/// Turn the owner's result into the shared typed answer.
+///
+/// A store refusal is the owner's answer, not an MCP transport failure: the
+/// Tool maps its stable kind and returns no success shape.
+fn metadata_reply(result: anyhow::Result<SessionMetadataSnapshot>) -> SessionMetadataResponse {
+    match result {
+        Ok(snapshot) => {
+            SessionMetadataResponse::success_for(snapshot.instance_id, snapshot.metadata)
+        }
+        Err(error) => {
+            let (kind, detail) = error_kind_and_detail(&error);
+            SessionMetadataResponse {
+                success: false,
+                error: Some(detail),
+                error_kind: Some(kind.to_string()),
+                metadata: None,
+                instance_id: None,
+            }
+        }
     }
 }
 

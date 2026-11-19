@@ -37,7 +37,7 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
-    WebSessionsListResponse,
+    SessionMetadataPatchPayload, SessionMetadataResponse, WebSessionsListResponse,
 };
 use rmcp::model::{CallToolRequestParams, ContentBlock, ProtocolVersion};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -55,6 +55,7 @@ const LEGACY: &str = "2025-03-26";
 #[derive(Default)]
 struct Recorder {
     calls: Mutex<Vec<String>>,
+    metadata_reply: Mutex<Option<Value>>,
 }
 
 impl Recorder {
@@ -64,6 +65,14 @@ impl Recorder {
 
     fn push(&self, call: impl Into<String>) {
         self.calls.lock().expect("recorder lock").push(call.into());
+    }
+
+    fn set_metadata_reply(&self, reply: Value) {
+        *self.metadata_reply.lock().expect("metadata reply") = Some(reply);
+    }
+
+    fn metadata_reply(&self) -> Option<Value> {
+        self.metadata_reply.lock().expect("metadata reply").clone()
     }
 }
 
@@ -268,6 +277,41 @@ impl NodeBackend for Recorder {
         self.push(format!("node.kill:{agent_id}:{name}"));
         typed(json!({ "name": name }))
     }
+
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.push(format!("node.get_session_metadata:{agent_id}:{name}"));
+        if let Some(reply) = self.metadata_reply() {
+            return typed(reply);
+        }
+        typed(json!({
+            "success": true,
+            "metadata": { "revision": 0, "tags": [] },
+            "instance_id": "instance-a"
+        }))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.push(format!(
+            "node.update_session_metadata:{agent_id}:{}:{}",
+            request.name, request.expected_revision
+        ));
+        if let Some(reply) = self.metadata_reply() {
+            return typed(reply);
+        }
+        typed(json!({
+            "success": true,
+            "metadata": { "revision": request.expected_revision + 1, "tags": [] },
+            "instance_id": request.expected_instance_id
+        }))
+    }
 }
 
 struct SlowNode;
@@ -302,6 +346,30 @@ impl NodeBackend for SlowNode {
         Ok(SessionKillResponse {
             name: name.to_string(),
         })
+    }
+
+    async fn get_session_metadata(
+        &self,
+        _agent_id: &str,
+        _name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        typed(json!({
+            "success": true,
+            "metadata": { "revision": 0, "tags": [] },
+            "instance_id": "instance-a"
+        }))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        _agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        typed(json!({
+            "success": true,
+            "metadata": { "revision": request.expected_revision + 1, "tags": [] },
+            "instance_id": request.expected_instance_id
+        }))
     }
 }
 
@@ -603,6 +671,8 @@ async fn modern_stateless_requests_need_no_initialize_and_advertise_tools() {
             "nession_agent_list_sessions",
             "nession_agent_create_session",
             "nession_agent_kill_session",
+            "nession_agent_get_session_metadata",
+            "nession_agent_update_session_metadata",
         ]
     );
     // Modern cache semantics are part of the advertised result, not optional
@@ -759,7 +829,7 @@ async fn every_successful_tool_call_returns_declared_structured_content() {
         .as_array()
         .expect("tools")
         .clone();
-    assert_eq!(tools.len(), 15);
+    assert_eq!(tools.len(), 17);
     let calls = [
         ("nession_server_list_agents", json!({})),
         ("nession_server_project_list", json!({})),
@@ -814,6 +884,20 @@ async fn every_successful_tool_call_returns_declared_structured_content() {
         (
             "nession_agent_kill_session",
             json!({ "agent_id": "agent-1", "name": "dev" }),
+        ),
+        (
+            "nession_agent_get_session_metadata",
+            json!({ "agent_id": "agent-1", "name": "dev" }),
+        ),
+        (
+            "nession_agent_update_session_metadata",
+            json!({
+                "agent_id": "agent-1",
+                "name": "dev",
+                "expected_instance_id": "instance-a",
+                "expected_revision": 0,
+                "patch": { "description": "Next step" }
+            }),
         ),
     ];
     for (name, arguments) in calls {
@@ -886,6 +970,43 @@ async fn a_refused_argument_result_carries_no_structured_content() {
         result.get("structuredContent").is_none(),
         "an error result must not masquerade as a conforming success output"
     );
+}
+
+#[tokio::test]
+async fn a_metadata_conflict_refusal_carries_no_structured_content() {
+    let recorder = Arc::new(Recorder::default());
+    recorder.set_metadata_reply(json!({
+        "success": false,
+        "error": "expected instance instance-a, current instance instance-b",
+        "error_kind": "conflict",
+        "metadata": null
+    }));
+    let harness = start(Arc::clone(&recorder)).await;
+    let refused = modern(
+        harness.addr,
+        "tools/call",
+        tool_call_params(
+            "nession_agent_update_session_metadata",
+            json!({
+                "agent_id": "agent-1",
+                "name": "dev",
+                "expected_instance_id": "instance-a",
+                "expected_revision": 4,
+                "patch": { "description": "Next step" }
+            }),
+        ),
+        Some("nession_agent_update_session_metadata"),
+    )
+    .await;
+    assert_eq!(refused.status, 200, "{}", refused.body);
+    let result = &refused.json()["result"];
+    assert_eq!(result["isError"], true);
+    assert!(
+        result.get("structuredContent").is_none(),
+        "an owner refusal must not masquerade as a conforming success output"
+    );
+    // The owner's stable kind is what a model can act on.
+    assert_eq!(text_of(result)["error"]["kind"], "conflict");
 }
 
 #[tokio::test]
@@ -1034,7 +1155,7 @@ async fn the_legacy_initialize_lifecycle_still_works() {
             .as_array()
             .expect("tools")
             .len(),
-        15
+        17
     );
 
     let call = request(
@@ -1400,7 +1521,7 @@ async fn the_official_client_negotiates_modern_protocol_without_initialize() {
     assert_eq!(info.protocol_version, ProtocolVersion::V_2026_07_28);
 
     let tools = running.list_tools(None).await.expect("tools/list");
-    assert_eq!(tools.tools.len(), 15);
+    assert_eq!(tools.tools.len(), 17);
 
     let result = running
         .call_tool(CallToolRequestParams::new("nession_server_list_agents"))
@@ -1435,7 +1556,7 @@ async fn the_official_client_keeps_the_legacy_lifecycle() {
     );
 
     let tools = running.list_tools(None).await.expect("tools/list");
-    assert_eq!(tools.tools.len(), 15);
+    assert_eq!(tools.tools.len(), 17);
     let result = running
         .call_tool(
             CallToolRequestParams::new("nession_agent_create_session").with_arguments(

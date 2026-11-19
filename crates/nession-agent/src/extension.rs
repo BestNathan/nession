@@ -1095,9 +1095,10 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // The core and peer-to-peer lists share seven ids (`session.create`,
+        // The core and peer-to-peer lists share eight ids (`session.create`,
         // `session.kill`, `session.capture-preview`, `session.metadata.get` /
-        // `session.metadata.update` since #2789, `session.list` since #565,
+        // `session.metadata.update` since #2789, `session.metadata.patch` since
+        // #4007, `session.list` since #565,
         // where the Server-hosted MCP node tools ask the Agent over the control
         // channel for the same answer a direct client gets over P2P, and
         // `mcp.tool.call` since #3778: a contributed Tool is invoked on both
@@ -1109,8 +1110,8 @@ mod tests {
         // from a unit that was never wired up.
         assert_eq!(
             manifest.protocols.len(),
-            core.len() + p2p.len() - 7,
-            "the union is by id, so the seven shared units are counted once"
+            core.len() + p2p.len() - 8,
+            "the union is by id, so the eight shared units are counted once"
         );
         // The literal count is unchanged by #565: `session.list` was already in
         // the peer-to-peer list, so adding its control-channel arm grows both
@@ -1169,9 +1170,12 @@ mod tests {
         // explicit, user-authorized cache action the Server forwards for one
         // current Session. It prepares one already-cataloged identity and
         // never starts a download from an observation read.
+        // Up by one for #4007: `session.metadata.patch` is the partial-update
+        // sibling of the two metadata units, served on both sockets because
+        // the Agent resolves the patch at the one owner either way.
         assert_eq!(
             manifest.protocols.len(),
-            42,
+            43,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

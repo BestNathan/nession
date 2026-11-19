@@ -8,8 +8,10 @@
 
 mod env_target;
 pub mod nession_agent_create_session;
+pub mod nession_agent_get_session_metadata;
 pub mod nession_agent_kill_session;
 pub mod nession_agent_list_sessions;
+pub mod nession_agent_update_session_metadata;
 pub mod nession_server_env_delete;
 pub mod nession_server_env_get;
 pub mod nession_server_env_list;
@@ -51,6 +53,8 @@ pub fn baseline_handlers() -> Vec<Arc<dyn ToolHandler>> {
         Arc::new(nession_agent_list_sessions::NessionAgentListSessions),
         Arc::new(nession_agent_create_session::NessionAgentCreateSession),
         Arc::new(nession_agent_kill_session::NessionAgentKillSession),
+        Arc::new(nession_agent_get_session_metadata::NessionAgentGetSessionMetadata),
+        Arc::new(nession_agent_update_session_metadata::NessionAgentUpdateSessionMetadata),
     ]
 }
 
@@ -80,6 +84,8 @@ pub const TOOL_NAMES: &[&str] = &[
     "nession_agent_list_sessions",
     "nession_agent_create_session",
     "nession_agent_kill_session",
+    "nession_agent_get_session_metadata",
+    "nession_agent_update_session_metadata",
 ];
 
 #[cfg(test)]
@@ -107,7 +113,8 @@ pub(crate) mod test_support {
         ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
         ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
         ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-        SessionKillResponse, WebSessionsListResponse,
+        SessionKillResponse, SessionMetadataPatchPayload, SessionMetadataResponse,
+        WebSessionsListResponse,
     };
 
     /// What one Tool call asked the backend for.
@@ -128,6 +135,8 @@ pub(crate) mod test_support {
         ListSessions(String),
         CreateSession(String, String, Option<String>),
         KillSession(String, String),
+        GetSessionMetadata(String, String),
+        UpdateSessionMetadata(String, SessionMetadataPatchPayload),
     }
 
     /// A backend pair that records calls and answers a canned reply.
@@ -142,6 +151,8 @@ pub(crate) mod test_support {
         /// Optional explicit create reply; `None` echoes the request's
         /// `project_id` as a confirmed association.
         pub create_project_session_reply: Mutex<Option<Value>>,
+        /// Canned reply for the Agent metadata get/update seams.
+        pub metadata_reply: Mutex<Value>,
     }
 
     impl Default for Recording {
@@ -156,6 +167,11 @@ pub(crate) mod test_support {
                     "project": project_fixture("project-123e4567-e89b-42d3-a456-426614174000")
                 })),
                 create_project_session_reply: Mutex::new(None),
+                metadata_reply: Mutex::new(json!({
+                    "success": true,
+                    "metadata": { "revision": 0, "tags": [] },
+                    "instance_id": "instance-a"
+                })),
             }
         }
     }
@@ -207,6 +223,15 @@ pub(crate) mod test_support {
                 .create_project_session_reply
                 .lock()
                 .expect("create project session") = Some(reply);
+        }
+
+        pub fn set_metadata_reply(&self, reply: Value) {
+            *self.metadata_reply.lock().expect("metadata reply") = reply;
+        }
+
+        fn metadata_reply(&self) -> Result<SessionMetadataResponse, ToolError> {
+            let reply = self.metadata_reply.lock().expect("metadata reply").clone();
+            serde_json::from_value(reply).map_err(|error| ToolError::backend(error.to_string()))
         }
     }
 
@@ -456,6 +481,36 @@ pub(crate) mod test_support {
             serde_json::from_value(json!({ "name": name }))
                 .map_err(|error| ToolError::backend(error.to_string()))
         }
+
+        async fn get_session_metadata(
+            &self,
+            agent_id: &str,
+            name: &str,
+        ) -> Result<SessionMetadataResponse, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::GetSessionMetadata(
+                    agent_id.to_string(),
+                    name.to_string(),
+                ));
+            self.metadata_reply()
+        }
+
+        async fn update_session_metadata(
+            &self,
+            agent_id: &str,
+            request: SessionMetadataPatchPayload,
+        ) -> Result<SessionMetadataResponse, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::UpdateSessionMetadata(
+                    agent_id.to_string(),
+                    request,
+                ));
+            self.metadata_reply()
+        }
     }
 
     /// A context over one shared recorder.
@@ -494,7 +549,7 @@ mod tests {
     fn every_registered_tool_advertises_a_documented_output_contract() {
         let catalog = registry().expect("registry");
         let tools = catalog.list();
-        assert_eq!(tools.len(), 15, "the catalog is exactly 15 Tools");
+        assert_eq!(tools.len(), 17, "the catalog is exactly 17 Tools");
         for tool in tools {
             let schema = tool
                 .output_schema
@@ -644,8 +699,22 @@ mod tests {
                 "nession_agent_kill_session",
                 serde_json::json!({ "agent_id": "agent-a", "name": "dev" }),
             ),
+            (
+                "nession_agent_get_session_metadata",
+                serde_json::json!({ "agent_id": "agent-a", "name": "dev" }),
+            ),
+            (
+                "nession_agent_update_session_metadata",
+                serde_json::json!({
+                    "agent_id": "agent-a",
+                    "name": "dev",
+                    "expected_instance_id": "instance-a",
+                    "expected_revision": 0,
+                    "patch": { "description": "Next step" }
+                }),
+            ),
         ];
-        assert_eq!(calls.len(), 15);
+        assert_eq!(calls.len(), 17);
         for (name, input) in calls {
             let reply = catalog
                 .call(&context(&recorder), name, Some(arguments(input)))

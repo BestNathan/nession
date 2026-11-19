@@ -34,7 +34,7 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
-    WebSessionsListResponse,
+    SessionMetadataPatchPayload, SessionMetadataResponse, WebSessionsListResponse,
 };
 use serde_json::{Map, Value};
 
@@ -159,6 +159,26 @@ pub trait NodeBackend: Send + Sync {
         agent_id: &str,
         name: &str,
     ) -> Result<SessionKillResponse, ToolError>;
+
+    /// `nession_agent_get_session_metadata` (#4007).
+    ///
+    /// The reply is the Agent owner's typed metadata answer, including the
+    /// durable instance identity and its stable refusal kinds.
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError>;
+
+    /// `nession_agent_update_session_metadata` (#4007).
+    ///
+    /// The request carries the required incarnation and revision preconditions;
+    /// the Agent, not this host, resolves the patch and applies the CAS.
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError>;
 
     /// Execute one Extension-contributed Tool on the explicitly named Agent
     /// (`#3778`).
@@ -315,6 +335,22 @@ impl NodeBackend for UnavailableNodeBackend {
         _agent_id: &str,
         _name: &str,
     ) -> Result<SessionKillResponse, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn get_session_metadata(
+        &self,
+        _agent_id: &str,
+        _name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn update_session_metadata(
+        &self,
+        _agent_id: &str,
+        _request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 }

@@ -55,7 +55,7 @@ use nession_protocol::contracts::session::v1::{
     ServerSessionSandboxContextPayload, ServerSessionSandboxEnterPayload,
     ServerSessionSandboxFocusPayload, ServerSessionSandboxImagePreparePayload,
     ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
-    SessionMetadataUpdatePayload,
+    SessionMetadataPatchPayload, SessionMetadataUpdatePayload,
 };
 use nession_protocol::contracts::workspace::v1::{
     AgentWorkspaceDescriptor, AgentWorkspaceKind, AgentWorkspaceStatus,
@@ -84,7 +84,9 @@ use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
 use crate::protocol::core_routes;
-use crate::session::metadata::{error_kind_and_detail, SessionMetadataStore};
+use crate::session::metadata::{
+    attach_session_summaries, error_kind_and_detail, SessionMetadataStore,
+};
 use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{SessionBindingInput, SessionManager};
 use nession_runtime::lane::KeyedLane;
@@ -4048,7 +4050,9 @@ core_routes!(agent, msg, responses;
                     // receives.
                     let request_id = str_field(&msg.payload, "request_id");
                     let response = match agent.tmux.list_sessions().await {
-                        Ok(sessions) => serde_json::json!({
+                        Ok(mut sessions) => {
+                            attach_session_summaries(&agent.session_metadata, &mut sessions).await;
+                            serde_json::json!({
                             "msg_type": "server.agent.command-response",
                             "id": uuid::Uuid::new_v4().to_string(),
                             "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
@@ -4060,7 +4064,8 @@ core_routes!(agent, msg, responses;
                                 "stale_agents": [],
                                 "error": null,
                             }
-                        }),
+                        })
+                        },
                         Err(e) => serde_json::json!({
                             "msg_type": "server.agent.command-response",
                             "id": uuid::Uuid::new_v4().to_string(),
@@ -4436,17 +4441,18 @@ core_routes!(agent, msg, responses;
     "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => Key(session_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
-                    let (success, error, error_kind, metadata) =
-                        match agent.session_metadata.get(&name).await {
-                            Ok(metadata) => (
+                    let (success, error, error_kind, metadata, instance_id) =
+                        match agent.session_metadata.read_current(&name).await {
+                            Ok(snapshot) => (
                                 true,
                                 None,
                                 None,
-                                serde_json::to_value(metadata).ok(),
+                                serde_json::to_value(&snapshot.metadata).ok(),
+                                Some(snapshot.instance_id),
                             ),
                             Err(failure) => {
                                 let (kind, detail) = error_kind_and_detail(&failure);
-                                (false, Some(detail), Some(kind.to_string()), None)
+                                (false, Some(detail), Some(kind.to_string()), None, None)
                             }
                         };
                     let response = serde_json::json!({
@@ -4460,6 +4466,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "error_kind": error_kind,
                             "metadata": metadata,
+                            "instance_id": instance_id,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4474,10 +4481,11 @@ core_routes!(agent, msg, responses;
                                 return Ok(());
                             }
                         };
-                    let (success, error, error_kind, metadata) = match agent
+                    let (success, error, error_kind, metadata, instance_id) = match agent
                         .session_metadata
-                        .update(
+                        .update_guarded(
                             &payload.name,
+                            payload.expected_instance_id.as_deref(),
                             payload.title.as_deref(),
                             payload.description.as_deref(),
                             &payload.tags,
@@ -4485,15 +4493,16 @@ core_routes!(agent, msg, responses;
                         )
                         .await
                     {
-                        Ok(metadata) => (
+                        Ok(snapshot) => (
                             true,
                             None,
                             None,
-                            serde_json::to_value(metadata).ok(),
+                            serde_json::to_value(&snapshot.metadata).ok(),
+                            Some(snapshot.instance_id),
                         ),
                         Err(failure) => {
                             let (kind, detail) = error_kind_and_detail(&failure);
-                            (false, Some(detail), Some(kind.to_string()), None)
+                            (false, Some(detail), Some(kind.to_string()), None, None)
                         }
                     };
                     let response = serde_json::json!({
@@ -4507,6 +4516,55 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "error_kind": error_kind,
                             "metadata": metadata,
+                            "instance_id": instance_id,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.metadata.patch" => "agent.session.metadata.patch" => 1 => Key(session_by_name(&msg.payload)) => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let payload: SessionMetadataPatchPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.metadata.patch payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let (success, error, error_kind, metadata, instance_id) = match agent
+                        .session_metadata
+                        .patch(
+                            &payload.name,
+                            &payload.expected_instance_id,
+                            payload.expected_revision,
+                            &payload.patch,
+                        )
+                        .await
+                    {
+                        Ok(snapshot) => (
+                            true,
+                            None,
+                            None,
+                            serde_json::to_value(&snapshot.metadata).ok(),
+                            Some(snapshot.instance_id),
+                        ),
+                        Err(failure) => {
+                            let (kind, detail) = error_kind_and_detail(&failure);
+                            (false, Some(detail), Some(kind.to_string()), None, None)
+                        }
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.metadata.patch",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "metadata": metadata,
+                            "instance_id": instance_id,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -5194,7 +5252,10 @@ core_routes!(agent, msg, responses;
                     // fields; the server derives status from `attached_clients`
                     // so the rule lives in exactly one place.
                     let (sessions, list_error) = match agent.tmux.list_sessions().await {
-                        Ok(sessions) => (sessions, None),
+                        Ok(mut sessions) => {
+                            attach_session_summaries(&agent.session_metadata, &mut sessions).await;
+                            (sessions, None)
+                        }
                         Err(e) => {
                             warn!("tmux list-sessions failed: {:#}", e);
                             // A listing failure is not "no sessions": reporting
@@ -5220,6 +5281,7 @@ core_routes!(agent, msg, responses;
                                 "foreground_command": s.foreground_command,
                                 "working_dir": s.working_dir,
                                 "instance_id": s.instance_id,
+                                "metadata": s.metadata,
                             })
                         })
                         .collect();

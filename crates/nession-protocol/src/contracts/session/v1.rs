@@ -941,6 +941,13 @@ pub struct SessionInfo {
     /// that has not been asked yet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
+    /// Bounded work-context summary (#4007).
+    ///
+    /// `available` is the Agent's answer at list time (revision 0 = confirmed
+    /// empty); `unavailable` means the Agent could not read the metadata.
+    /// Omitted by a legacy Agent that does not report summaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadataAvailability>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1158,6 +1165,12 @@ pub struct WebSessionInfo {
     /// yet, so an absent value is not an incarnation change.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
+    /// Bounded work-context summary (#4007), projected from the Agent that
+    /// owns the Session. `available` is the Agent's answer; `unavailable` is a
+    /// failed lookup and is never an empty task. Omitted when the Server has
+    /// no report from a current Agent (legacy or stale).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadataAvailability>,
     /// The focused Session's Server-owned Project membership (#3082).
     ///
     /// Absent for a Session with no Project. This is durable membership, not an
@@ -1743,14 +1756,20 @@ pub const SESSION_METADATA_TAG_LIMIT: usize = 12;
 pub struct SessionMetadata {
     /// 0 means no metadata has been recorded (a legacy Session).
     pub revision: u64,
+    /// Display alias shown in navigation; never a tmux rename. Absent is the
+    /// tmux-name fallback.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
+    /// What this work is about, in the user's or AI's own words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    /// User-chosen labels, normalized and case-insensitively unique.
     #[serde(default)]
     pub tags: Vec<String>,
+    /// Unix seconds when the first revision was saved.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<u64>,
+    /// Unix seconds of the last committed revision.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub updated_at: Option<u64>,
 }
@@ -1780,6 +1799,12 @@ pub struct SessionMetadataGetPayload {
 /// A full replacement: absent title/description clear them, absent tags empty
 /// the list. `expected_revision` is the revision the caller last read (0 for a
 /// Session with no metadata yet).
+///
+/// `expected_instance_id` is an optional incarnation precondition (#4007).
+/// Present: the update commits only while the public name still names exactly
+/// that durable tmux instance, so a caller that read incarnation A can never
+/// write a same-name replacement B. Absent: the legacy Web behavior is
+/// unchanged.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1792,6 +1817,106 @@ pub struct SessionMetadataUpdatePayload {
     #[serde(default)]
     pub tags: Vec<String>,
     pub expected_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_instance_id: Option<String>,
+}
+
+/// `agent.session.metadata.patch`'s request (#4007).
+///
+/// A partial update resolved against the current metadata by the Agent, the
+/// metadata's only writer. The incarnation and revision preconditions are
+/// required: a partial update that did not read the current state has no safe
+/// merge base.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SessionMetadataPatchPayload {
+    pub name: String,
+    /// The durable tmux instance the caller last read. A different current
+    /// instance is refused as a `conflict`; the successor's metadata is never
+    /// touched.
+    pub expected_instance_id: String,
+    /// The revision the caller last read. Resolved against the same current
+    /// metadata as the patch.
+    pub expected_revision: u64,
+    pub patch: SessionMetadataPatch,
+}
+
+/// One partial metadata update (#4007).
+///
+/// Per field, three states are distinct:
+///
+/// * omitted — preserve the current value;
+/// * explicit `null` (title/description) — clear it;
+/// * a value — replace it.
+///
+/// `tags` is a whole-list replacement: omitted preserves, `[]` clears.
+/// The Agent resolves the patch against the current metadata under the same
+/// revision/instance guard as a full update, so a concurrent write is a
+/// `conflict` rather than a last-writer-wins merge.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionMetadataPatch {
+    /// Omitted preserves, explicit `null` clears, a string replaces.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
+    pub title: Option<Option<String>>,
+    /// Omitted preserves, explicit `null` clears, a string replaces.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_patch_field"
+    )]
+    pub description: Option<Option<String>>,
+    /// Omitted preserves; `[]` clears; a list replaces.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
+}
+
+/// Distinguish an explicit `null` patch field from an omitted one.
+///
+/// Serde's derived handling of `Option<Option<T>>` collapses both to `None`;
+/// this deserializer is only called when the field is present, so a present
+/// `null` becomes `Some(None)` and a present value `Some(Some(value))`.
+fn deserialize_patch_field<'de, D>(deserializer: D) -> Result<Option<Option<String>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<String>::deserialize(deserializer).map(Some)
+}
+
+impl SessionMetadataPatch {
+    /// No field was named: there is nothing to resolve or commit.
+    pub fn is_empty(&self) -> bool {
+        self.title.is_none() && self.description.is_none() && self.tags.is_none()
+    }
+
+    /// Resolve this patch against the current metadata.
+    ///
+    /// Pure: the caller supplies the metadata it read under the same guard in
+    /// which it will write the result.
+    pub fn apply(
+        &self,
+        current: &SessionMetadata,
+    ) -> (Option<String>, Option<String>, Vec<String>) {
+        let title = match &self.title {
+            None => current.title.clone(),
+            Some(None) => None,
+            Some(Some(title)) => Some(title.clone()),
+        };
+        let description = match &self.description {
+            None => current.description.clone(),
+            Some(None) => None,
+            Some(Some(description)) => Some(description.clone()),
+        };
+        let tags = self.tags.clone().unwrap_or_else(|| current.tags.clone());
+        (title, description, tags)
+    }
 }
 
 /// `server.session.metadata.get`'s request.
@@ -1803,6 +1928,10 @@ pub struct WebSessionMetadataGetPayload {
 }
 
 /// `server.session.metadata.update`'s request.
+///
+/// `expected_instance_id` is the Web-safe counterpart of the Agent
+/// precondition (#4007): when present, the Server forwards it and the Agent
+/// refuses a write aimed at a same-name replacement.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1815,6 +1944,19 @@ pub struct WebSessionMetadataUpdatePayload {
     #[serde(default)]
     pub tags: Vec<String>,
     pub expected_revision: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_instance_id: Option<String>,
+}
+
+/// `server.session.metadata.patch`'s request (#4007).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct WebSessionMetadataPatchPayload {
+    pub session_id: String,
+    pub expected_instance_id: String,
+    pub expected_revision: u64,
+    pub patch: SessionMetadataPatch,
 }
 
 /// `server.session.project.set`'s request (#3082).
@@ -1877,6 +2019,101 @@ pub struct SessionMetadataResponse {
     pub error_kind: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub metadata: Option<SessionMetadata>,
+    /// The durable tmux instance this answer describes (#4007).
+    ///
+    /// Present on success, alongside `metadata`; a caller uses it as the
+    /// `expected_instance_id` of its next guarded write. Absent on failure.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+}
+
+impl SessionMetadataResponse {
+    /// A successful answer for one incarnation.
+    pub fn success_for(instance_id: String, metadata: SessionMetadata) -> Self {
+        Self {
+            success: true,
+            error: None,
+            error_kind: None,
+            metadata: Some(metadata),
+            instance_id: Some(instance_id),
+        }
+    }
+}
+
+/// The bounded work-context summary a Session list may carry (#4007).
+///
+/// Deliberately excludes `description` (returned only by the metadata Get) and
+/// the timestamps: a list needs enough to identify the current work, not the
+/// whole record.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMetadataSummary {
+    /// 0 means confirmed-empty (a legacy Session), not unavailable.
+    pub revision: u64,
+    /// The display title; absent falls back to the tmux Session name.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// The Session's labels, in their stored order.
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+impl SessionMetadata {
+    /// Project the list-safe summary of this record.
+    pub fn summary(&self) -> SessionMetadataSummary {
+        SessionMetadataSummary {
+            revision: self.revision,
+            title: self.title.clone(),
+            tags: self.tags.clone(),
+        }
+    }
+}
+
+/// Whether a Session list's metadata summary is the Agent's answer or unknown.
+///
+/// A failed lookup is never rendered as an empty task: `unavailable` is a
+/// distinct state from a confirmed revision-0 answer (#4007 SC-04).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SessionMetadataAvailability {
+    /// `available` when the Agent read the metadata; `unavailable` when the
+    /// lookup failed. Never render `unavailable` as an empty task.
+    pub state: SessionMetadataState,
+    /// The bounded summary. Present only when `state` is `available`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<SessionMetadataSummary>,
+}
+
+impl SessionMetadataAvailability {
+    /// The Agent's answer, including a confirmed revision-0 record.
+    pub fn available(summary: SessionMetadataSummary) -> Self {
+        Self {
+            state: SessionMetadataState::Available,
+            summary: Some(summary),
+        }
+    }
+
+    /// A failed lookup; never a fabricated empty record.
+    pub fn unavailable() -> Self {
+        Self {
+            state: SessionMetadataState::Unavailable,
+            summary: None,
+        }
+    }
+}
+
+/// The two availability states a Session list may report (#4007 SC-04).
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMetadataState {
+    /// The Agent read the Session's metadata; revision 0 is confirmed empty.
+    Available,
+    /// The Agent could not read this Session's metadata. Never "empty".
+    Unavailable,
 }
 
 /// Bounds/normalization failure for a metadata update.
