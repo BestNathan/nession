@@ -19,7 +19,8 @@ import {
   requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
-import {collectPrCiTriad, requiresPrCiTriad, enforcePrCiTriad, selfTestPrCiTriad}
+import {collectPrCiTriad, requiresPrCiTriad, requiresPrVisualEvidenceCriterion,
+  validPrCiTriadReceipt, enforcePrCiTriad, selfTestPrCiTriad}
   from './acceptance-pr-ci-triad.mjs';
 
 export { normalizeAcceptanceResult };
@@ -637,7 +638,19 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     context.pr_rust_quality = collectPrRustQuality(context.target_ref);
   }
   if (requiresPrCiTriad(context)) {
-    context.pr_ci_triad = collectPrCiTriad(context.target_ref);
+    const visual = context.criteria.some(requiresPrVisualEvidenceCriterion);
+    context.pr_ci_triad = collectPrCiTriad(context.target_ref, undefined, {visual});
+    if (visual && context.pr_ci_triad?.status === 'pass' &&
+        context.pr_ci_triad?.receipt?.variant === 'visual' &&
+        validPrCiTriadReceipt(context.pr_ci_triad.receipt, context.target_ref)) {
+      // Trusted-main verifier, never model/PR code, supplies these five
+      // GitHub-bound Quality + browser evidence receipts to the Agent.
+      context.ci_evidence = {
+        kind: 'verified_pr_visual_ci_v1',
+        target_sha: context.target_ref,
+        receipt: context.pr_ci_triad.receipt,
+      };
+    }
   }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
