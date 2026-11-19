@@ -34,7 +34,9 @@ import {commitQwenPublisherIntent}
 import {commitQwenRepairPublisherIntent,qwenRepairPublisherIntentPath}
   from '../publisher/qwen-repair-intent.mjs';
 import {materializeQwenRepairGitTree,publishQwenRepairToSamePR,
-  readBackQwenRepairPR} from '../publisher/qwen-repair-github.mjs';
+  readBackQwenRepairPR,attestQwenRepairPriorGitHistory}
+  from '../publisher/qwen-repair-github.mjs';
+import {preflightAgentPatch} from '../publisher/patch-preflight.mjs';
 import {materializeQwenTrustedBlobs,publishTrustedQwenGitHubPR,
   readBackQwenPublishedPR} from '../publisher/qwen-github-publish.mjs';
 import {applyQwenPublicationToRemote,
@@ -969,6 +971,8 @@ try {
   assert.equal(secondPublisherOrigin.original_publisher_run_id,publisherRun);
   assert.equal(secondPublisherOrigin.original_checkpoint_version,2);
   assert.equal(secondPublisherOrigin.repair_checkpoint_version,3);
+  assert.deepEqual(secondPublisherOrigin.published_head_shas,
+    [commitSha,shaB]);
   for(const wrong of [
     {originalIntent:{...repairWalIntent.record,
       original_publisher_run_id:publisherRun+1}},
@@ -987,6 +991,155 @@ try {
   assert.throws(()=>qwenRepairPublishedSource({
     storeRoot:post,issue,actionId:secondRepair.id,sha:commitSha}),
     /trusted Qwen Repair origin/);
+  // #4046: true A->B->C publisher transaction. In the second native Repair,
+  // reviewed source B has parent A, NOT original main. Verify all historical
+  // PR commits match the ordered Store-signed Publisher SHA history before
+  // allowing even the first write; ambiguous retries remain GET-only.
+  const secondLivePath=path.join(repairSource,'calc.js');
+  fs.appendFileSync(secondLivePath,'// second native Repair\n');
+  const secondPatch=git(repairSource,'diff','--','calc.js');
+  git(repairSource,'restore','--','calc.js');
+  const secondChecked=preflightAgentPatch({checkout:repairSource,
+    source_sha:shaB,patch:secondPatch,allowed_paths:['calc.js']});
+  const secondPreflight={
+    patch:secondPatch,origin:secondPublisherOrigin,
+    evidence:{...repairPreflight.evidence,
+      action_id:secondRepair.id,developer_run_id:secondWorkerRun,
+      source_sha:shaB,
+      checkpoint_version:3,
+      checkpoint_commit_sha:secondCheckpoint.commit_sha,
+      ciphertext_sha256:secondCheckpoint.ciphertext_sha256,
+      patch_sha256:sha256(Buffer.from(secondPatch)),
+      file_manifest:secondChecked.files},
+  };
+  const secondRecord={...repairWalIntent.record,
+    action_id:secondRepair.id,worker_run_id:secondWorkerRun,
+    source_sha:shaB,checkpoint_version:3,
+    checkpoint_commit_sha:secondCheckpoint.commit_sha,
+    checkpoint_ciphertext_sha256:secondCheckpoint.ciphertext_sha256,
+    patch_sha256:secondPreflight.evidence.patch_sha256,
+    file_manifest_sha256:sha256(JSON.stringify(secondChecked.files)),
+    file_count:secondChecked.files.length,
+    publisher_run_id:repairPublisherRun+42};
+  const secondWriteIntent={status:'committed',may_publish:true,
+    store_commit_sha:'e'.repeat(40),record:secondRecord};
+  const secondReadonlyIntent={...secondWriteIntent,status:'reconcile',
+    may_publish:false};
+  fs.appendFileSync(secondLivePath,'// second native Repair\n');
+  git(repairSource,'add','--','calc.js');
+  git(repairSource,'commit','-m','mock second Qwen Repair PR-C');
+  const shaC=git(repairSource,'rev-parse','HEAD');
+  const treeC=git(repairSource,'rev-parse',shaC+'^{tree}');
+  const blobC=git(repairSource,'rev-parse',shaC+':calc.js');
+  const treeB=git(repairSource,'rev-parse',shaB+'^{tree}');
+  let secondLiveSha=shaB;
+  const secondCalls=[];
+  const secondPrAt=sha=>({number:prNumber,state:'open',
+    user:{login:'nession-publisher[bot]'},
+    head:{ref:branch,sha,repo:repoIdentity},
+    base:{ref:'main',repo:repoIdentity}});
+  const secondApi=async(method,endpoint,body)=>{
+    secondCalls.push(method+':'+endpoint);
+    if(method==='GET'){
+      if(endpoint==='pulls?state=all&head=BestNathan:'+
+           encodeURIComponent(branch)+'&per_page=100')
+        return [secondPrAt(secondLiveSha)];
+      if(endpoint==='pulls/'+prNumber)return secondPrAt(secondLiveSha);
+      if(endpoint==='git/ref/heads/'+branch)
+        return {ref:'refs/heads/'+branch,object:{sha:secondLiveSha}};
+      if(endpoint==='git/commits/'+commitSha)
+        return {parents:[{sha:inputSha}],tree:{sha:baseTree}};
+      if(endpoint==='git/commits/'+shaB)
+        return {parents:[{sha:commitSha}],tree:{sha:treeB}};
+      if(endpoint==='git/commits/'+shaC)
+        return {parents:[{sha:shaB}],tree:{sha:treeC}};
+      if(endpoint==='pulls/'+prNumber+'/files?per_page=100')
+        return [{filename:'calc.js',status:'modified',
+          sha:secondLiveSha===shaC?blobC:repairBlob}];
+      throw Error('unexpected signed second-Repair GET '+endpoint);
+    }
+    if(method==='POST'&&endpoint==='git/blobs'){
+      assert.equal(body.encoding,'base64');
+      return {sha:blobC};
+    }
+    if(method==='POST'&&endpoint==='git/trees'){
+      assert.equal(body.base_tree,treeB);
+      assert.equal(body.tree[0].sha,blobC);
+      return {sha:treeC};
+    }
+    if(method==='POST'&&endpoint==='git/commits'){
+      assert.deepEqual(body.parents,[shaB]);
+      assert.equal(body.tree,treeC);
+      return {sha:shaC,tree:{sha:treeC}};
+    }
+    if(method==='PATCH'&&endpoint==='git/refs/heads/'+branch){
+      assert.equal(secondLiveSha,shaB);
+      assert.deepEqual(body,{sha:shaC,force:false});
+      secondLiveSha=shaC;
+      return {ref:'refs/heads/'+branch,object:{sha:shaC}};
+    }
+    throw Error('unexpected second Repair Publisher API '+method+endpoint);
+  };
+  assert.deepEqual(await attestQwenRepairPriorGitHistory({
+    preflight:secondPreflight,intent:secondReadonlyIntent,api:secondApi}),
+    {latest_tree_sha:treeB,predecessor_sha:shaB,
+      first_sha:commitSha,length:2});
+  secondCalls.length=0;
+  const secondPR=await publishQwenRepairToSamePR({
+    preflight:secondPreflight,intent:secondWriteIntent,
+    sourceCheckout:repairSource,api:secondApi});
+  assert.equal(secondPR.head_sha,shaC);
+  assert.equal(secondPR.previous_sha,shaB);
+  assert.equal(secondPR.pull_request,prNumber);
+  assert.equal(secondPR.expected_tree_sha,treeC);
+  assert.deepEqual(secondCalls.filter(x=>!x.startsWith('GET:')),[
+    'POST:git/blobs','POST:git/trees','POST:git/commits',
+    'PATCH:git/refs/heads/'+branch]);
+  const writes=secondCalls.filter(x=>!x.startsWith('GET:')).length;
+  const readC=await readBackQwenRepairPR({
+    preflight:secondPreflight,intent:secondReadonlyIntent,
+    sourceCheckout:repairSource,api:secondApi});
+  assert.deepEqual(readC,secondPR);
+  assert.equal(secondCalls.filter(x=>!x.startsWith('GET:')).length,writes);
+  await assert.rejects(()=>publishQwenRepairToSamePR({
+    preflight:secondPreflight,intent:secondReadonlyIntent,
+    sourceCheckout:repairSource,api:secondApi}),
+    /Store-fenced|Repair PR update/);
+  const safeCallCount=secondCalls.length;
+  for(const invalid of [
+    {preflight:{...secondPreflight,origin:{...secondPublisherOrigin,
+      published_head_shas:[shaB]}}},
+    {preflight:{...secondPreflight,origin:{...secondPublisherOrigin,
+      published_head_shas:[shaB,commitSha]}}},
+    {preflight:{...secondPreflight,origin:{...secondPublisherOrigin,
+      published_head_shas:[commitSha,'f'.repeat(40)]}}},
+    {intent:{...secondReadonlyIntent,record:{
+      ...secondRecord,source_sha:commitSha}}},
+  ]){
+    await assert.rejects(()=>attestQwenRepairPriorGitHistory({
+      preflight:secondPreflight,intent:secondReadonlyIntent,api:secondApi,
+      ...invalid}),/Qwen Repair PR update/);
+  }
+  assert.equal(secondCalls.length,safeCallCount,
+    'forged Store ancestors must be denied before GitHub API');
+  for(const wrong of [
+    {type:'rewritten-B',sha:shaB,parent:inputSha},
+    {type:'rewritten-A',sha:commitSha,parent:'f'.repeat(40)},
+    {type:'B-merge-commit',sha:shaB,parents:[{sha:commitSha},{sha:inputSha}]},
+  ]){
+    const badApi=async(method,endpoint,body)=>{
+      if(method==='GET'&&endpoint==='git/commits/'+wrong.sha){
+        const original=await secondApi(method,endpoint,body);
+        return {...original,parents:wrong.parents??[{sha:wrong.parent}]};
+      }
+      return secondApi(method,endpoint,body);
+    };
+    await assert.rejects(()=>attestQwenRepairPriorGitHistory({
+      preflight:secondPreflight,intent:secondReadonlyIntent,api:badApi}),
+      /signed Qwen PR chain/);
+  }
+  assert.equal(secondCalls.filter(x=>!x.startsWith('GET:')).length,writes,
+    'rewritten/foreign/merged historical commits cannot create writes');
   assert.equal(posts,5,'Repair update never creates a second GitHub PR');
   assert.equal(repairMutations.length,4,'Store handoff never writes GitHub');
 
