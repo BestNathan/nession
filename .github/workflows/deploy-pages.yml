@@ -119,25 +119,35 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Prepare Rust toolchain and restore trusted Pages Cargo cache
+      - name: Prepare Rust toolchain for canonical Protocol codegen
         if: steps.detect.outputs.active == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          # The historical schema JSON cache below is NOT a Cargo dependency
-          # cache. Without this, even prototype-only publishes re-download
-          # locked dependencies for the current-main Protocol/MCP exporters.
-          # rust-cache keys include OS/arch, rustc version, Cargo.lock,
-          # workspace manifests and Rust flags; reuse survives unrelated
-          # prototype/Knowledge signals without trusting their executable code.
-          cache: true
-          cache-key: pages-main-codegen-v1
-          cache-workspaces: '. -> target'
-          cache-targets: true
-          cache-workspace-crates: false
-          cache-bin: false
-          cache-on-failure: false
-          # Historical tagged codegen uses a separate CARGO_HOME/TARGET_DIR in
-          # an unprivileged step; no historical binary can enter this target.
+          # rust-cache hashes all runner-installed toolchains: 1.99.1 vs
+          # 1.100.0 made two otherwise identical runs miss (Issue #4008).
+          cache: false
+      - name: Restore trusted main Pages Cargo cache
+        if: steps.detect.outputs.active == 'true'
+        id: cargo_cache
+        uses: actions/cache@v4
+        with:
+          # Current-main Cargo dependencies and target only. Historical tagged
+          # codegen uses a separate CARGO_HOME/CARGO_TARGET_DIR and no credentials.
+          # rust-toolchain.toml pins the actual compiler, never runner extras.
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git
+            target
+          key: pages-main-cargo-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock', 'Cargo.toml', '.cargo/config.toml', 'crates/**/Cargo.toml') }}
+          restore-keys: |
+            pages-main-cargo-v2-${{ runner.os }}-${{ runner.arch }}-
+      - name: Report Pages Cargo cache reuse
+        if: steps.detect.outputs.active == 'true'
+        env:
+          CACHE_HIT: ${{ steps.cargo_cache.outputs.cache-hit }}
+        run: |
+          echo "Pages Cargo cache exact hit: ${CACHE_HIT:-false}" >> "$GITHUB_STEP_SUMMARY"
       - name: Restore SHA-keyed historical Protocol schemas
         if: steps.detect.outputs.active == 'true'
         uses: actions/cache@v4
