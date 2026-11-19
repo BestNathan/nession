@@ -106,6 +106,16 @@ const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 /// Initial delay for exponential backoff (1 second).
 const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
 
+/// Total budget for one Server connection attempt (#4072): dial, WS upgrade,
+/// registration acceptance and the post-accept Environment Binding report.
+///
+/// One bound over the whole attempt rather than a deadline per phase: a Server
+/// that upgrades but never answers must not hold the supervisor, and a caller
+/// waiting on the first-start outcome must still get one. A timeout is a
+/// transient failure, so the existing backoff retries it; an explicit refusal
+/// remains permanent.
+const DEFAULT_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
+
 /// How many command responses may be waiting for the socket at once (#961).
 ///
 /// The queue carries one frame per command the Server sent, and a command is
@@ -176,6 +186,8 @@ pub struct RegisterResponsePayload {
 pub struct ServerClient {
     /// Server URL (e.g., "wss://server.example.com:8443").
     server_url: String,
+    /// Total budget for one attempt (see [`DEFAULT_CONNECT_ATTEMPT_TIMEOUT`]).
+    connect_attempt_timeout: Duration,
     /// Authentication token for the server.
     auth_token: String,
     /// Agent identifier.
@@ -581,6 +593,7 @@ impl ServerClient {
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/agent/envs"));
         Self {
             server_url: server_url.into(),
+            connect_attempt_timeout: DEFAULT_CONNECT_ATTEMPT_TIMEOUT,
             auth_token: auth_token.into(),
             agent_id: agent_id.into(),
             hostname: hostname.into(),
@@ -611,6 +624,14 @@ impl ServerClient {
     /// to both.
     pub fn with_session_metadata(mut self, store: Arc<SessionMetadataStore>) -> Self {
         self.session_metadata = store;
+        self
+    }
+
+    /// Override the total connect-attempt budget (#4072). Tests use a short
+    /// bound; production keeps [`DEFAULT_CONNECT_ATTEMPT_TIMEOUT`].
+    #[cfg(test)]
+    pub(crate) fn with_connect_attempt_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_attempt_timeout = timeout;
         self
     }
 
@@ -722,7 +743,37 @@ impl ServerClient {
                 return;
             }
 
-            match this.connect_once().await {
+            // One bounded, cancellable attempt covers dial, WS upgrade,
+            // registration acceptance and the post-accept report (#4072).
+            //
+            // - A shutdown during any pending phase drops the attempt (and its
+            //   socket) immediately instead of waiting for the remote peer.
+            // - A timeout is a transient failure and takes the existing backoff
+            //   path below, so a silent Server never blocks the first-start
+            //   outcome or the supervisor.
+            // - An explicit refusal is an `Err` from `connect_once` and is still
+            //   distinguished from a timeout by its own error type.
+            let attempt = tokio::select! {
+                biased;
+                _ = shutdown_rx.recv() => {
+                    info!("Server client shutting down during connect attempt");
+                    this.set_session_publish_handle(None);
+                    return;
+                }
+                result = tokio::time::timeout(
+                    this.connect_attempt_timeout,
+                    this.connect_once(),
+                ) => result,
+            };
+            let attempt = match attempt {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!(
+                    "server connection attempt timed out after {:?}",
+                    this.connect_attempt_timeout
+                )),
+            };
+
+            match attempt {
                 Ok((sink, stream, interval)) => {
                     info!("Connected to server successfully");
                     reconnect_delay = INITIAL_RECONNECT_DELAY;
@@ -1366,7 +1417,9 @@ impl ServerClient {
 mod tests {
     use super::*;
     use crate::test_support::TestSession;
+    use std::sync::atomic::AtomicUsize;
     use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tokio_tungstenite::accept_async;
 
     /// Start a mock WebSocket server that accepts connections and echoes messages.
@@ -1676,6 +1729,336 @@ mod tests {
 
         handle.shutdown().await.ok();
         server_handle.abort();
+    }
+
+    /// A `ServerClient` pointed at `server_url`, with no connection started.
+    fn test_client(server_url: String, agent_id: &str) -> ServerClient {
+        ServerClient::new(
+            server_url,
+            "test-token",
+            agent_id,
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            Arc::new(SessionManager::new()),
+            "/tmp".to_string(),
+            None,
+            SecretString::new("test-agent-token-000000"),
+            crate::execution::mutation_scheduler(),
+        )
+    }
+
+    /// A Server that completes the WS upgrade but never acknowledges
+    /// registration must not hold the attempt or the first-start outcome
+    /// (#4072 SC-01).
+    #[tokio::test]
+    async fn connect_attempt_registration_stall_settles_within_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let _ws = accept_async(stream).await.expect("ws upgrade");
+            let _ = accepted_tx.send(());
+            // Hold the upgraded socket open without ever answering.
+            let _ = release_rx.await;
+        });
+
+        let client = test_client(format!("ws://{addr}"), "stalled-agent")
+            .with_connect_attempt_timeout(Duration::from_millis(200));
+
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), client.connect_and_run())
+            .await
+            .expect("connect_and_run must settle instead of hanging");
+        let (handle, interval) = outcome.expect("a silent Server is transient, not a refusal");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "settled before the documented deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "settled far past the deadline: {elapsed:?}"
+        );
+        assert_eq!(interval, None);
+        assert!(!handle.is_connected());
+
+        accepted_rx.await.expect("the upgrade must have completed");
+        handle.shutdown().await.ok();
+        release_tx.send(()).ok();
+        let _ = server.await;
+    }
+
+    /// A TCP peer that accepts but never answers the HTTP Upgrade exercises
+    /// the same total deadline before registration even starts (#4072 SC-01).
+    #[tokio::test]
+    async fn connect_attempt_upgrade_stall_settles_within_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let _ = accepted_tx.send(());
+            // Never read or answer the Upgrade request.
+            let _ = release_rx.await;
+            drop(stream);
+        });
+
+        let client = test_client(format!("ws://{addr}"), "no-upgrade-agent")
+            .with_connect_attempt_timeout(Duration::from_millis(200));
+
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), client.connect_and_run())
+            .await
+            .expect("connect_and_run must settle instead of hanging");
+        let (handle, interval) = outcome.expect("a stalled upgrade is transient");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "settled before the documented deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "settled far past the deadline: {elapsed:?}"
+        );
+        assert_eq!(interval, None);
+
+        accepted_rx
+            .await
+            .expect("the TCP connection must have opened");
+        handle.shutdown().await.ok();
+        release_tx.send(()).ok();
+        let _ = server.await;
+    }
+
+    /// Shutdown during a pending reconnect registration must cancel that
+    /// attempt immediately, not wait for the remote peer or the deadline
+    /// (#4072 SC-02).
+    #[tokio::test]
+    async fn connect_attempt_shutdown_cancels_pending_registration() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let (second_open_tx, second_open_rx) = oneshot::channel();
+        let (second_closed_tx, second_closed_rx) = oneshot::channel();
+
+        let count = Arc::clone(&accepted);
+        let server = tokio::spawn(async move {
+            // First connection: register, then drop it to force a reconnect.
+            let (stream, _) = listener.accept().await.expect("accept first");
+            count.fetch_add(1, Ordering::SeqCst);
+            let ws = accept_async(stream).await.expect("first ws");
+            let (mut sink, mut stream) = ws.split();
+            let response = serde_json::json!({
+                "msg_type": "server.agent.register",
+                "id": "test-id",
+                "timestamp": 1,
+                "payload": { "status": "accepted", "message": "ok" }
+            });
+            let _ = sink.send(WsMessage::Text(response.to_string())).await;
+            let _ = stream.next().await; // the agent's register frame
+            drop(sink);
+            drop(stream);
+
+            // Second connection: complete the upgrade, then stay silent.
+            let (stream, _) = listener.accept().await.expect("accept second");
+            count.fetch_add(1, Ordering::SeqCst);
+            let mut ws = accept_async(stream).await.expect("second ws");
+            let _ = second_open_tx.send(());
+            while let Some(Ok(_)) = ws.next().await {}
+            let _ = second_closed_tx.send(());
+        });
+
+        // A long deadline: only the shutdown can explain a prompt end.
+        let client = test_client(format!("ws://{addr}"), "shutdown-agent")
+            .with_connect_attempt_timeout(Duration::from_secs(30));
+        let (handle, _) = client
+            .connect_and_run()
+            .await
+            .expect("first connect must succeed");
+
+        tokio::time::timeout(Duration::from_secs(5), second_open_rx)
+            .await
+            .expect("the supervisor should start its reconnect attempt")
+            .expect("server task dropped without opening the second socket");
+
+        let started = std::time::Instant::now();
+        handle.shutdown().await.expect("shutdown signal");
+        tokio::time::timeout(Duration::from_secs(2), second_closed_rx)
+            .await
+            .expect("shutdown must cancel the pending attempt, not wait for the deadline")
+            .expect("the mock server did not observe the cancelled socket closing");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "shutdown took {:?}",
+            started.elapsed()
+        );
+
+        // A cancelled attempt is not immediately retried.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            2,
+            "a cancelled attempt must not be retried"
+        );
+        server.abort();
+    }
+
+    /// A silent Server is retried; the replacement Server then registers and
+    /// normal heartbeat delivery resumes (#4072 SC-03).
+    #[tokio::test]
+    async fn connect_attempt_silent_server_is_retried_then_registers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let (frame_tx, mut frame_rx) = mpsc::channel::<serde_json::Value>(16);
+        let server = tokio::spawn(async move {
+            // First connection: complete the upgrade, never answer.
+            let (stream, _) = listener.accept().await.expect("accept silent");
+            let mut silent = accept_async(stream).await.expect("silent ws");
+            while let Some(Ok(_)) = silent.next().await {}
+
+            // Second connection: the replacement Server registers normally.
+            let (stream, _) = listener.accept().await.expect("accept responsive");
+            let ws = accept_async(stream).await.expect("responsive ws");
+            let (mut sink, mut stream) = ws.split();
+            while let Some(Ok(message)) = stream.next().await {
+                let WsMessage::Text(text) = message else {
+                    continue;
+                };
+                let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                if parsed["msg_type"] == "server.agent.register" {
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.register",
+                        "id": "test-id",
+                        "timestamp": 1,
+                        "payload": { "status": "accepted", "message": "ok" }
+                    });
+                    let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                }
+                let _ = frame_tx.send(parsed).await;
+            }
+        });
+
+        let client = test_client(format!("ws://{addr}"), "recovering-agent")
+            .with_connect_attempt_timeout(Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        let (handle, interval) =
+            tokio::time::timeout(Duration::from_secs(5), client.connect_and_run())
+                .await
+                .expect("first-start outcome must settle")
+                .expect("a silent Server is transient");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the first outcome took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(interval, None);
+
+        // The replacement Server receives a fresh registration.
+        let registration = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = frame_rx.recv().await.expect("server frame channel closed");
+                if frame["msg_type"] == "server.agent.register" {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("the agent must re-register with the responsive Server");
+        assert_eq!(registration["payload"]["agent_id"], "recovering-agent");
+
+        // Normal heartbeat delivery resumes on the recovered connection. Its
+        // arrival also proves the connection is live: the outbox is drained
+        // only by `run_connection`.
+        handle
+            .send_heartbeat(AgentStatus::Online, 0, 0, 1, [0.0; 3])
+            .expect("heartbeat publish");
+        let heartbeat = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let frame = frame_rx.recv().await.expect("server frame channel closed");
+                if frame["msg_type"] == "control.heartbeat" {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("a heartbeat must reach the recovered Server");
+        assert_eq!(heartbeat["payload"]["agent_id"], "recovering-agent");
+        assert!(handle.is_connected());
+
+        handle.shutdown().await.ok();
+        server.abort();
+    }
+
+    /// An explicit registration refusal is the peer's permanent answer: it
+    /// reaches the caller and is never retried (#4072 SC-03).
+    #[tokio::test]
+    async fn connect_attempt_explicit_refusal_stays_permanent() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&accepted);
+        let server = tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                count.fetch_add(1, Ordering::SeqCst);
+                let ws = accept_async(stream).await.expect("ws");
+                let (mut sink, mut stream) = ws.split();
+                let response = serde_json::json!({
+                    "msg_type": "server.agent.register",
+                    "id": "test-id",
+                    "timestamp": 1,
+                    "payload": {
+                        "status": "rejected",
+                        "message": "agent must be upgraded"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                // Keep both halves alive long enough for the agent to read the
+                // refusal; continue accepting so a wrongful retry is visible.
+                tokio::spawn(async move {
+                    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                        while let Some(Ok(_)) = stream.next().await {}
+                    })
+                    .await;
+                    drop(sink);
+                });
+            }
+        });
+
+        let client = test_client(format!("ws://{addr}"), "refused-agent")
+            .with_connect_attempt_timeout(Duration::from_secs(5));
+        let result = tokio::time::timeout(Duration::from_secs(3), client.connect_and_run())
+            .await
+            .expect("a refusal must settle promptly");
+        let error = match result {
+            Ok(_) => panic!("a refusal must reach the caller, not be swallowed"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("agent must be upgraded"),
+            "unexpected error: {error}"
+        );
+
+        // No retry: the refusal is permanent, so the supervisor must have stopped.
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            1,
+            "an explicit refusal must never be retried"
+        );
+        server.abort();
     }
 
     #[tokio::test]
