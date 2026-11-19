@@ -997,7 +997,9 @@ try {
   // allowing even the first write; ambiguous retries remain GET-only.
   const secondLivePath=path.join(repairSource,'calc.js');
   fs.appendFileSync(secondLivePath,'// second native Repair\n');
-  const secondPatch=git(repairSource,'diff','--','calc.js');
+  // The test Git wrapper trims its stdout; the bounded Publisher patch
+  // contract requires the original trailing newline from git diff.
+  const secondPatch=git(repairSource,'diff','--','calc.js')+'\n';
   git(repairSource,'restore','--','calc.js');
   const secondChecked=preflightAgentPatch({checkout:repairSource,
     source_sha:shaB,patch:secondPatch,allowed_paths:['calc.js']});
