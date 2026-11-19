@@ -137,3 +137,27 @@ test('Pages publisher restores stable Cargo cache while preserving canonical sou
  assert.match(yaml,/node pages\/scripts\/publish-prototypes\.mjs/);
  assert.match(yaml,/Verify public site URL and exact deployed main SHA/);
 });
+
+test('Pages retry selects the exact attempt-specific artifact rather than duplicate github-pages',async()=>{
+ const yaml=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
+ const accepts=yaml.indexOf('        uses: actions/upload-pages-artifact@v3');
+ const deploy=yaml.indexOf('        uses: actions/deploy-pages@v4',accepts);
+ const readback=yaml.indexOf('      # Read only the exact trusted main code',deploy);
+ assert.ok(accepts>0&&deploy>accepts&&readback>deploy);
+ const uploadBlock=yaml.slice(accepts,deploy),deployBlock=yaml.slice(deploy,readback);
+ const expected='github-pages-${{ github.run_attempt }}';
+ const valid=(a,b)=>
+   a.includes('uses: actions/upload-pages-artifact@v3') &&
+   a.includes('with:') && a.includes('name: '+expected) &&
+   a.includes('path: pages/dist') &&
+   b.includes('uses: actions/deploy-pages@v4') &&
+   b.includes('with:') && b.includes('artifact_name: '+expected);
+ assert.ok(valid(uploadBlock,deployBlock),'upload and deployment must select the same run_attempt artifact');
+ assert.equal(valid(uploadBlock.replace('name: '+expected, 'name: github-pages'),deployBlock),false,
+   'unscoped upload must fail the contract');
+ assert.equal(valid(uploadBlock,deployBlock.replace('artifact_name: '+expected, 'artifact_name: github-pages')),false,
+   'unscoped deployment must fail the contract');
+ assert.match(yaml,/Verify public site URL and exact deployed main SHA/);
+ assert.match(yaml,/Build sanitized static Pages artifact/);
+ assert.match(yaml,/pages-main-cargo-v2-/,'Cargo cache remains enabled on retries');
+});
