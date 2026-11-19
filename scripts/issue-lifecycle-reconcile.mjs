@@ -216,7 +216,7 @@ export async function verifyManualAcceptedPrAnchors(repository, issue, prs,
   for (const [id, row] of report.rows) {
     if (planStage(plan.plan.get(id)) !== 'pr' || !criteria.criteria.get(id)?.checked ||
         !['pass','n/a'].includes(String(row.result).toLowerCase())) continue;
-    const ref = /\\bref ([0-9a-f]{40});/i.exec(String(row.evidence ?? ''))?.[1];
+    const ref = /\bref ([0-9a-f]{40});/i.exec(String(row.evidence ?? ''))?.[1];
     if (ref) anchors.add(ref);
   }
   if (anchors.size > 8) throw Error('too many PR Acceptance source anchors');
