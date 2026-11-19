@@ -5,7 +5,6 @@
 // and writes the only authoritative deployment-linked Acceptance record.
 // This optional public-GitHub readback cross-check is never a substitute for it.
 const assert = require('node:assert/strict');
-const { execFileSync } = require('node:child_process');
 const { targetSha } = require('./mcp-cases.cjs');
 
 const REPO = 'BestNathan/nession';
@@ -230,7 +229,16 @@ async function verify(issue) {
   const fix=issue===3953
     ? '3123821ac51df3cea535a4150a1769ffa88e16d9' // four-role Provenance source
     : '737bb0a0abf92fc5e9fc96ae7247148c00fa6aa3'; // Pod containerName binding
-  execFileSync('git',['merge-base','--is-ancestor',fix,sha],{stdio:'ignore'});
+  // Acceptance checks out the exact product SHA with fetch-depth=1.
+  // Do not claim ancestry from absent local parents: authenticate historical
+  // fix ancestry from GitHub's read-only compare endpoint instead.
+  if (fix !== sha) {
+    const comparison=await get('/compare/'+fix+'...'+sha);
+    assert.equal(comparison.status,'ahead','identity source must descend from the fix');
+    assert.equal(comparison.base_commit?.sha,fix);
+    assert.equal(comparison.merge_base_commit?.sha,fix);
+    assert.equal(comparison.behind_by,0);
+  }
   const deployed=await sourceAttestation(sha);
   const acr=await fourRoleACR(sha);
   const ev=[
