@@ -8,8 +8,10 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {preflightAgentPatch,validPublisherFile} from './patch-preflight.mjs';
-import {validateQwenRepairPublisherIntent}
+import {validateQwenRepairPublisherIntent,qwenRepairPrewriteRecoveryPath}
   from './qwen-repair-intent.mjs';
+import {SOURCE as QWEN_PREWRITE_FAILURE}
+  from './qwen-repair-prewrite-failure.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/;
 const hash=data=>createHash('sha256').update(data).digest('hex');
@@ -29,9 +31,21 @@ function git(root,args,{input,home=root}={}){
 function plan(preflight,intent,{write=false}={}){
   const x=validateQwenRepairPublisherIntent(intent?.record);
   const e=preflight?.evidence;
+  const heads=preflight?.origin?.published_head_shas;
+  if(!Array.isArray(heads)||
+      heads.length!==x.checkpoint_version-1||
+      heads.length>32||heads.at(-1)!==x.source_sha||
+      heads.some(sha=>!SHA.test(sha))||
+      new Set(heads).size!==heads.length)
+    fail('missing exact Store-authenticated published PR HEAD sequence');
+  // A previously immutable WAL can be recovered after a PROVEN pre-write
+  // failure only by a separate Store-CAS marker. Replay after a possible
+  // GitHub write is GET-only. Initial Publisher write grants are unchanged.
+  const prewrite=write&&isValidQwenPrewriteRecoveryGrant(intent,x);
   if(!SHA.test(intent?.store_commit_sha??'')||
-      (write?(intent.status!=='committed'||intent.may_publish!==true):
-        !['committed','reconcile'].includes(intent.status))||
+      (write
+        ?!(intent.status==='committed'&&intent.may_publish===true)&&!prewrite
+        :!['committed','reconcile'].includes(intent.status))||
       e?.schema_version!==1||e.kind!=='trusted_qwen_repair_preflight_only'||
       e.status!=='preflight_only'||e.issue!==x.issue||
       e.action_id!==x.action_id||e.developer_run_id!==x.worker_run_id||
@@ -50,6 +64,22 @@ function plan(preflight,intent,{write=false}={}){
       hash(Buffer.from(preflight.patch))!==x.patch_sha256)
     fail('missing exact immutable Store-fenced Repair grant or manifest');
   return x;
+}
+export function isValidQwenPrewriteRecoveryGrant(intent,record){
+  const f=QWEN_PREWRITE_FAILURE,r=intent?.recovery;
+  return intent?.status==='prewrite_recovery'&&
+    intent.may_publish===true&&
+    r?.verified===true&&r.failed_run_id===f.run_id&&
+    Number.isSafeInteger(r.run_id)&&r.run_id>f.run_id&&
+    SHA.test(r.wal_commit_sha??'')&&
+    r.marker_path===qwenRepairPrewriteRecoveryPath()&&
+    r.marker_store_commit_sha===intent.store_commit_sha&&
+    SHA.test(intent.store_commit_sha??'')&&
+    record?.issue===f.issue&&record.action_id===f.action_id&&
+    record.worker_run_id===f.worker_run_id&&
+    record.source_sha===f.source_sha&&
+    record.checkpoint_version===f.checkpoint_version&&
+    record.publisher_run_id===f.run_id;
 }
 export function materializeQwenRepairGitTree({preflight,intent,sourceCheckout}){
   const record=plan(preflight,intent);
@@ -102,6 +132,30 @@ async function get(api,endpoint){
   const v=await api('GET',endpoint);
   if(v==null)fail('incomplete independently retrieved GitHub source');
   return v;
+}
+// #4046: attest every historical PR commit against ordered Store-signed
+// Publisher transitions. The first commit A must descend directly from the
+// original main. After a prior Repair, current B must descend from A, etc.
+// The immutable WAL need not (and MUST NOT) be rewritten after a failed
+// pre-write attempt. These historical SHAs come from the independently
+// authenticated Store-backed preflight; the model cannot choose them.
+export async function attestQwenRepairPriorGitHistory({preflight,intent,api}){
+  if(typeof api!=='function')fail('GET-only history source required');
+  const record=plan(preflight,intent);
+  const heads=preflight.origin.published_head_shas;
+  let latest=null;
+  for(let i=heads.length-1;i>=0;i--){
+    const current=await get(api,'git/commits/'+heads[i]);
+    const expectedParent=i===0?record.original_main_sha:heads[i-1];
+    if(!Array.isArray(current.parents)||current.parents.length!==1||
+       current.parents[0]?.sha!==expectedParent||
+       !SHA.test(current.tree?.sha??''))
+      fail('signed Qwen PR chain has rewritten, missing or foreign parent/tree');
+    if(i===heads.length-1)latest=current;
+  }
+  return Object.freeze({latest_tree_sha:latest.tree.sha,
+    predecessor_sha:record.source_sha,
+    first_sha:heads[0],length:heads.length});
 }
 function matchPR(pr,record,expectedSha){
   if(pr?.state!=='open'||!Number.isSafeInteger(pr.number)||pr.number<1||
@@ -182,6 +236,7 @@ export async function readBackQwenRepairPR({
   const branch=await get(api,'git/ref/heads/'+short);
   if(branch.ref!==record.branch||branch.object?.sha!==pr.head.sha)
     fail('PR/ref SHA mismatch after Qwen Repair');
+  await attestQwenRepairPriorGitHistory({preflight,intent,api});
   const commit=await get(api,'git/commits/'+pr.head.sha);
   if(!Array.isArray(commit.parents)||commit.parents.length!==1||
       commit.parents[0].sha!==record.source_sha||
@@ -204,14 +259,11 @@ export async function publishQwenRepairToSamePR({
   const oldFiles=await prFiles(api,pr.number);
   if(blobs.some(b=>!oldFiles.some(f=>f.filename===b.path)))
     fail('Repair cannot add a new PR file outside original published scope');
-  const current=await get(api,'git/commits/'+record.source_sha);
-  // The current Slice proves its ORIGINAL PR-A parent, not a random
-  // branch or a model-selected base. Additional rounds require independently
-  // authenticated chained PR snapshots, not relaxing this check.
-  if(!Array.isArray(current.parents)||current.parents.length!==1||
-      current.parents[0].sha!==record.original_main_sha||
-      !SHA.test(current.tree?.sha??''))
-    fail('original Qwen PR-A commit parent or tree was rewritten');
+  // A reviewed B is the original A's child, not original main's child.
+  // Verify *every* historical ancestor against Store publisher transitions
+  // before the first GitHub POST; the same check runs in GET-only readback.
+  const history=await attestQwenRepairPriorGitHistory({
+    preflight,intent,api});
   const tree=[];
   for(const blob of blobs){
     const created=await api('POST','git/blobs',{
@@ -221,7 +273,7 @@ export async function publishQwenRepairToSamePR({
     tree.push({path:blob.path,mode:'100644',type:'blob',sha:created.sha});
   }
   const newTree=await api('POST','git/trees',{
-    base_tree:current.tree.sha,tree});
+    base_tree:history.latest_tree_sha,tree});
   if(newTree?.sha!==expected_tree_sha)
     fail('GitHub Repair tree differs from exact local source patch');
   const commit=await api('POST','git/commits',{
