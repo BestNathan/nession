@@ -65,6 +65,15 @@ function imageRegistryClass(imageID) {
   if (/^[a-z0-9.-]*\.aliyuncs\.com\//.test(repository)) return 'acr';
   return 'other';
 }
+function imageSpecRegistryClass(image) {
+  // Only report a fixed category of the Pod's immutable *spec* image.
+  // Compare with status.imageID's registry class to isolate admission rewrites
+  // from node-level mirrors without exposing node or registry identifiers.
+  if (typeof image !== 'string') return 'unobservable';
+  const match = /^([^:@\s]+):[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.exec(image);
+  return match ? imageRegistryClass(match[1] + '@sha256:' + '0'.repeat(64))
+    : 'unobservable';
+}
 function containerState(entry) {
   const state = entry?.state ?? {};
   const previous = entry?.lastState?.terminated;
@@ -110,6 +119,15 @@ export function readback({deployments, pods, events = null, short}) {
   }
   const podsOut = [];
   const podUids = new Map();
+  // Ephemeral group numbers identify co-located Pods only within one snapshot;
+  // raw node names never leave the trusted collector.
+  const nodeGroups = new Map();
+  function nodeGroup(nodeName) {
+    if (typeof nodeName !== 'string' ||
+        !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(nodeName)) return null;
+    if (!nodeGroups.has(nodeName)) nodeGroups.set(nodeName, nodeGroups.size + 1);
+    return nodeGroups.get(nodeName);
+  }
   for (const entry of objects(pods, 500)) {
     const owner = entry?.metadata?.ownerReferences?.find(o => o?.kind === 'ReplicaSet');
     const matched = typeof owner?.name === 'string' ? owner.name.match(POD_OWNER) : null;
@@ -117,8 +135,13 @@ export function readback({deployments, pods, events = null, short}) {
         entry?.metadata?.labels?.env !== 'staging') continue;
     const role = matched[1];
     if (typeof entry?.metadata?.uid === 'string') podUids.set(entry.metadata.uid, role);
+    const specContainers = entry.spec?.containers;
+    const specImage = Array.isArray(specContainers) && specContainers.length === 1
+      ? specContainers[0]?.image : null;
     podsOut.push({
       role, phase: phase(entry.status?.phase),
+      spec_image_registry_class: imageSpecRegistryClass(specImage),
+      node_group: nodeGroup(entry.spec?.nodeName),
       conditions: (entry.status?.conditions ?? []).slice(0, 10).map(c => ({
         type: ['Ready', 'ContainersReady', 'Initialized', 'PodScheduled'].includes(c?.type)
           ? c.type : 'other',
@@ -162,7 +185,8 @@ function selfTest() {
       containerStatuses:[{ready:false,restartCount:4,imageID:'ghcr.example@sha256:'+'a'.repeat(64),
         state:{waiting:{reason:'CrashLoopBackOff',message:token}},
         lastState:{terminated:{reason:'OOMKilled',exitCode:137,message:token}}}]},
-    spec:{containers:[{env:[{name:'TOKEN',value:token}]}]},
+    spec:{nodeName:'private-host-a',containers:[{image:'ghcr.io/bestnathan/nession:server-abcdef0',
+      env:[{name:'TOKEN',value:token}]}]},
   };
   const d = {items:[{metadata:{name:'nession-server-staging',namespace:'nession',generation:3},
     spec:{replicas:1,template:{spec:{containers:[{image:'acr.example/nession:server-abcdef0'}]}}},
@@ -181,6 +205,20 @@ function selfTest() {
   assert.equal(actual.pod_status[0].containers[0].previous_exit_code,137);
   assert.equal(actual.pod_status[0].containers[0].waiting_reason,'CrashLoopBackOff');
   assert.equal(actual.pod_status[0].containers[0].image_registry_class,'other');
+  assert.equal(actual.pod_status[0].spec_image_registry_class,'ghcr');
+  assert.equal(actual.pod_status[0].node_group,1);
+  assert.ok(!JSON.stringify(actual).includes('private-host-a'));
+  const otherNode = structuredClone(pod);
+  otherNode.metadata.uid = 'node2';
+  otherNode.metadata.ownerReferences[0].name = 'nession-ui-staging-abc123';
+  otherNode.spec.nodeName = 'private-host-b';
+  otherNode.spec.containers[0].image =
+    'crpi-foo.cn-beijing.personal.cr.aliyuncs.com/n_public/nession:ui-abcdef0';
+  const groups = readback({deployments:d,pods:{items:[pod,otherNode]},short:'abcdef0'});
+  assert.deepEqual(groups.pod_status.map(item=>item.node_group),[1,2]);
+  assert.deepEqual(groups.pod_status.map(item=>item.spec_image_registry_class),['ghcr','acr']);
+  assert.ok(!JSON.stringify(groups).includes('private-host-b'));
+  assert.ok(!JSON.stringify(groups).includes('crpi-foo'));
   const sha = 'a'.repeat(64);
   assert.equal(imageRegistryClass('ghcr.io/bestnathan/nession@sha256:' + sha), 'ghcr');
   assert.equal(imageRegistryClass('crpi-foo.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:' + sha), 'acr');
