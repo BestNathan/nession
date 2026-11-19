@@ -15,6 +15,8 @@
 # this TOML so it can be stored in a nonsecret ConfigMap. Never embed
 # ${PLACEHOLDER} strings: MCP does not interpolate TOML. Simultaneously
 # configuring a literal token and its environment variable is an error.
+# Credential ENV values are read by nession-mcp at process startup; restarting
+# the process is necessary after Kubernetes Secret rotation.
 # The inbound token and the outbound credentials are separate secrets; never
 # reuse the MCP inbound token as a Server/Agent credential.
 
