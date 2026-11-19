@@ -162,6 +162,9 @@ function isContentSource(file) {
 
 function pushOccurrences(violations, masked, regex, { file, rule, actualOf }) {
   for (const match of masked.matchAll(regex)) {
+    // An explicit zero gap/inset is a valid structural relationship (e.g. a
+    // continuous list). Only non-zero visual decisions need a design token.
+    if (rule === 'no-recipe-raw-spacing' && (/-0$/.test(match[0]) || /:\s*['"]?0$/.test(match[0]))) continue;
     violations.push({
       file,
       line: lineNumber(masked, match.index),
