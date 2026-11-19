@@ -83,7 +83,10 @@ test('SC-03: semantic surfaces and region hierarchy carry each App resource mode
       .toBeLessThanOrEqual(1);
 
     // ── Configuration · Sandbox: named Sections over secondary field groups ──
-    await helper.openWorkspace(page, 'sandbox', '?sandbox=inside');
+    // The editable policy draft is the configuration flow; `?sandbox=inside`
+    // shows the verified effective policy as a read-only ResourceDetail, which
+    // is a different recipe and not the form this criterion names.
+    await helper.openWorkspace(page, 'sandbox');
     const sandbox = page.getByTestId('sandbox-workspace');
     await sandbox.waitFor({ timeout: 30_000 });
     await expect(sandbox).toHaveAttribute('data-workspace-surface', 'primary');

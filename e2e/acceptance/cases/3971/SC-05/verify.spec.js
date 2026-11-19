@@ -30,6 +30,18 @@ async function swipeTo(page, from, dx, cancel = false) {
   });
 }
 
+/**
+ * A committed or resisted inner contact settles the page frame back to rest.
+ * The shell deliberately refuses a new touch while that animation is running,
+ * so a Case that makes two contacts in a row must wait for the coordinator's
+ * own published phase rather than starting into the settle.
+ */
+async function rest(page) {
+  await expect(layer(page)).toHaveAttribute('data-swipe-phase', 'idle', {
+    timeout: 10_000,
+  });
+}
+
 test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinator', async ({ page }) => {
   test.setTimeout(115_000);
   const { sha } = verifiedRuntime('SC-05');
@@ -46,12 +58,16 @@ test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinato
     const transcriptsPoint = await helper.contentPoint(
       page,
       '[data-testid="claude-app-transcripts"]',
-      { fx: 0.4, fy: 0.12 },
+      // The heading band above the list is the stable non-interactive anchor:
+      // lower in the container the point can land on a transcript row button,
+      // whose own touch the shell must keep.
+      { fx: 0.4, fy: 0.03 },
     );
     await swipeTo(page, transcriptsPoint, 120);
     await expect(title(page)).toHaveText('Claude Code', { timeout: 10_000 });
     await expect(layer(page)).toHaveAttribute('data-layer', 'workspace');
     await expect(layer(page)).toHaveAttribute('data-workspace-stack-forward', 'Transcripts');
+    await rest(page);
 
     const rootPoint = await helper.contentPoint(
       page,
@@ -60,6 +76,7 @@ test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinato
     );
     await swipeTo(page, rootPoint, -120);
     await expect(title(page)).toHaveText('Transcripts', { timeout: 10_000 });
+    await rest(page);
     expect(await helper.terminalMarkedCount(page)).toBe(1);
   }
 
@@ -72,7 +89,7 @@ test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinato
   const noForwardPoint = await helper.contentPoint(
     page,
     '[data-testid="claude-app-transcripts"]',
-    { fx: 0.4, fy: 0.12 },
+    { fx: 0.4, fy: 0.03 },
   );
   await swipeTo(page, noForwardPoint, -120);
   await expect(page.getByTestId('app-layer-root')).toHaveAttribute(
@@ -80,6 +97,7 @@ test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinato
     'no-destination',
   );
   await expect(title(page)).toHaveText('Transcripts');
+  await rest(page);
 
   // A genuine touchcancel snaps back and keeps the depth.
   await swipe.startTouch(page, noForwardPoint);
@@ -152,6 +170,7 @@ test('SC-05: the Workspace inner stack is one touch-owned Pop/Forward coordinato
   await page.getByRole('button', { name: 'Cancel' }).click();
   await expect(page.locator('.cm-editor')).toBeVisible();
   await expect(title(page)).toHaveText('App.tsx');
+  await rest(page);
 
   // The editor interior keeps its own horizontal drag (no pop).
   await swipe.swipe(page, {
