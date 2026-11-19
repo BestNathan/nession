@@ -30,7 +30,7 @@ export function FormSurface({ className, ...props }: React.ComponentProps<'div'>
     <div
       data-recipe="configuration-form"
       data-recipe-part="form-surface"
-      className={cn('flex w-full min-w-0 flex-col gap-5', className)}
+      className={cn('flex w-full min-w-0 flex-col gap-[var(--nession-rhythm-section-stack)]', className)}
       {...props}
     />
   );
@@ -130,7 +130,7 @@ export function FormField({
     <div
       data-recipe-part="form-field"
       data-testid={testId}
-      className={cn('flex min-w-0 flex-col gap-1.5', className)}
+      className={cn('flex min-w-0 flex-col gap-[var(--nession-rhythm-field-stack)]', className)}
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
         <Label
@@ -194,7 +194,7 @@ export function FormActions({ className, ...props }: React.ComponentProps<'div'>
   return (
     <div
       data-recipe-part="form-actions"
-      className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}
+      className={cn('flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]', className)}
       {...props}
     />
   );
