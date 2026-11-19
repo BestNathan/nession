@@ -13,19 +13,19 @@ GitHub Environment names must match GitOps environment directory names:
 - preprod -> gitops/environments/preprod
 - production -> gitops/environments/production
 
-The workflow permits the separate **staging/MCP_CONFIG_TOML** and
-**staging/MCP_TLS_PEM_BUNDLE** targets. Additional pairs need a reviewed
-registry entry and workflow choice; inputs may not define
-an arbitrary namespace, output path, or secret name. Multiple independent
-GitHub Secrets can coexist under the same GitHub Environment without being
-merged into a single Kubernetes Secret.
+The **Deploy / Seal GitOps Secret** workflow now exposes only
+**staging/MCP_CONFIG_TOML**. The existing `MCP_TLS_PEM_BUNDLE` registry
+entry is retained solely as a bounded strict SealedSecret target consumed by
+**Deploy / Configure Site → issue-tls** (#3992). The TLS private key is minted
+ephemerally in the protected runner, not uploaded to a GitHub Environment
+Secret. No workflow may accept an arbitrary namespace, output path or host.
 
 ## Registered resource
 
 | GitHub Environment | GitHub Secret | Kubernetes Secret | data key | GitOps encrypted resource |
 |---|---|---|---|---|
 | staging | MCP_CONFIG_TOML | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
-| staging | MCP_TLS_PEM_BUNDLE | nession/nession-mcp-staging-tls (kubernetes.io/tls) | tls.crt + tls.key | environments/staging/mcp/sealed-tls.json |
+| staging | *issued by Configure Site / issue-tls* | nession/nession-mcp-staging-tls (kubernetes.io/tls) | tls.crt + tls.key | environments/staging/mcp/sealed-tls.json |
 
 The target registry in scripts/ci/seal-gitops-secret.mjs is the sole owner of
 the allowed mapping and Kustomize overlay path.
@@ -128,59 +128,54 @@ resource on `gitops` before relying on Argo CD reconciliation. Cluster
 readiness itself requires an independent Kubernetes observation.
 
 
-## Staging MCP HTTPS TLS — one raw PEM Secret (#3936)
+## Staging MCP HTTPS TLS — Cloudflare Origin CA issuance (#3936, #3992)
 
-**Only use this workflow when Nession GitOps owns the staging MCP TLS Secret.**
-If cert-manager, Higress or nitops already manages that same Secret, decide on
-one owner and coordinate migration before sealing it. The Sealed Secrets
-controller's public encryption certificate is different from the HTTPS cert.
+**One TLS Secret owner:** `Deploy / Configure Site → issue-tls` now owns
+the staged site's Origin CA certificate issuance and strict SealedSecret
+publication. The former `Deploy / Seal GitOps Secret → MCP_TLS_PEM_BUNDLE`
+manual upload target is **retired**. Existing encrypted Kubernetes identity,
+`nession/nession-mcp-staging-tls`, and GitOps resource
+`environments/staging/mcp/sealed-tls.json` remain unchanged.
 
-Under GitHub Settings → Environments → staging → Environment Secrets, create
-MCP_TLS_PEM_BUNDLE. Its original raw value is **PEM, not JSON/base64**:
-first the leaf certificate, next any ordered intermediate certificates,
-then the corresponding **unencrypted private key**. Example structure
-(placeholders here are NOT valid credentials; never upload placeholders):
+The Cloudflare DNS Zone, existing `staging/CLOUDFLARE_API_TOKEN` Environment
+Secret, `CLOUDFLARE_ZONE_ID` and `CLOUDFLARE_ORIGIN_IPV4` Environment
+Variables are **reused**. No additional Cloudflare credential is required by
+the workflow. The token must have sufficient provider API permissions to call
+Origin CA `POST /client/v4/certificates`. A successfully authorized DNS
+request by itself does not prove that issuance is authorized.
 
-~~~text
------BEGIN CERTIFICATE-----
-<leaf certificate>
------END CERTIFICATE-----
------BEGIN CERTIFICATE-----
-<intermediate certificate, when present>
------END CERTIFICATE-----
------BEGIN PRIVATE KEY-----
-<matching private key>
------END PRIVATE KEY-----
-~~~
+After running `Deploy / Configure Site → apply` and seeing the provider
+readback for a Nession-owned proxied record, manually run:
 
-PKCS#1 RSA/EC keys are also supported. The original bundle must contain only
-certificate blocks followed by exactly one matching unencrypted private key.
-Do not put private keys in Git, Issues, comments or workflow input text.
+```sh
+gh workflow run deploy-configure-site.yml -R BestNathan/nession --ref main \
+  -f site=staging-mcp -f action=issue-tls
+```
 
-The loader checks hostname SAN staging-mcp-nession.bestnathan.top, cert validity
-(now and more than seven days remaining), key match, and ordered intermediate
-chain signatures. It rejects unexpected PEM blocks, duplicate or encrypted
-keys, wrong hostname, bad chain, expired/soon-expiring certificates and
-mismatched keys **before sealing**. This is not an independent public CA trust
-test; external verification is still required.
+The trusted main source pins the exact first-level SAN
+`staging-mcp-nession.bestnathan.top`, confirms active Cloudflare Zone and
+owned proxied DNS before creating an RSA private key and CSR on the protected
+runner. It requests a one-year Origin CA certificate through the Cloudflare
+API, validates that the resulting leaf covers that exact SAN, matches the
+locally generated private key, is not self-signed and has adequate validity.
 
-Once this implementation is merged to main, manually run:
-https://github.com/BestNathan/nession/actions/workflows/deploy-seal-gitops-secret.yml
-with environment=staging and secret=MCP_TLS_PEM_BUNDLE. The existing protected
-Environment gate and offline strict kubeseal path applies. The single GitHub
-Secret becomes Kubernetes Secret nession/nession-mcp-staging-tls with type
-kubernetes.io/tls and exactly two encrypted keys (tls.crt, tls.key), published
-as environments/staging/mcp/sealed-tls.json. Its Kustomization resource entry
-is added idempotently alongside sealed-secret.json for MCP configuration.
-No plaintext key is committed or uploaded as an artifact.
+The leaf/key bundle is written **only to ephemeral, mode 0600 runner files**.
+The existing `SEALED_SECRETS_CERT_PEM` public certificate and pinned
+`kubeseal --scope strict` produce encrypted `tls.crt` and `tls.key`
+for the same resource identity. The existing bounded GitOps publisher writes
+**only encrypted** `sealed-tls.json` and its Kustomization registration.
+The runner deletes plaintext work files. No new `MCP_TLS_PEM_BUNDLE`
+Environment Secret value is needed; do not attempt to provide a PEM in
+workflow inputs, repository files, comments or artifacts.
 
-The main-push bootstrap remains hard-bound to MCP_CONFIG_TOML. It does NOT
-attempt TLS automatically: TLS generation/renewal requires explicitly
-selecting the new target and provisioning the PEM bundle. For renewal,
-replace the raw Environment Secret and manually run the same TLS selection;
-then verify Argo CD/Sealed Secrets reconciliation and the actual active
-certificate after the Ingress controller reload. Maintain an independent
-expiration monitor. Sealing does not automatically renew certificates.
+This operation is deliberately **explicit**, not run on each DNS `apply`,
+so retries do not unnecessarily mint/revoke certificates. A new
+`issue-tls` run rotates the Origin CA certificate and the SealedSecret;
+prior Cloudflare Origin CA certificates are not automatically revoked.
+Monitor validity and plan renewal separately. Deployment and application
+health still need independent readback; GitHub Actions success is not
+Kubernetes success. The Sealed Secrets controller's public encryption
+certificate is *not* the Cloudflare Origin CA certificate.
 
 **Do not enable MCP ingress.yaml** merely because TLS encryption succeeded.
 Confirm controller-created TLS Secret, Argo CD sync, public DNS, HTTPS trust
@@ -205,6 +200,6 @@ base64-decodable private-key material.
 The staging MCP endpoint is now `https://staging-mcp-nession.bestnathan.top/mcp`.
 The old multi-label `staging.mcp.nession.bestnathan.top` DNS name is no longer allowed. Cloudflare Universal SSL on the `bestnathan.top` zone ordinarily covers first-level hosts such as `staging-mcp-nession.bestnathan.top`, not the old multi-level hostname. A Cloudflare DNS record and its active Edge certificate must still be verified independently.
 
-Migration order: (1) stage the updated GitOps Ingress and temporarily exclude `ingress.yaml`; (2) after the registered hostname check above reaches `main`, replace Environment Secret `staging/MCP_TLS_PEM_BUNDLE` with a new trusted fullchain PEM and matching private key for the **new** SAN, then manually run `Deploy / Seal GitOps Secret` selecting that target; (3) update `staging/MCP_CONFIG_TOML` with `allowed_hosts` including the new public hostname and no old hostname, keeping the private Service host entries and separate inbound/backend tokens, then seal it with the same workflow's `MCP_CONFIG_TOML` selection; (4) verify the **actual Kubernetes TLS certificate SAN and MCP config** (and pod config reload/restart), Cloudflare DNS, Edge TLS and origin trust; (5) enable the staged Ingress via a separate GitOps PR only after preflight. Never include TLS private keys or bearer tokens in an issue/PR/log, and never use insecure TLS verification with auth tokens.
+Migration order: (1) keep the new GitOps Ingress staged but excluded from Kustomization; (2) after Cloudflare DNS apply verification, run `Deploy / Configure Site` with `action=issue-tls` using the existing protected Cloudflare Token to create an Origin CA cert and seal it directly; (3) independently update `staging/MCP_CONFIG_TOML` with the new public `allowed_hosts` and re-seal it using `Deploy / Seal GitOps Secret` with `secret=MCP_CONFIG_TOML`, retaining internal Service Host entries and bearer credentials; (4) verify the **deployed** Kubernetes TLS certificate SAN and effective running MCP config (restart when necessary), Cloudflare Edge TLS and Origin trust; (5) enable the staged Ingress via a separate GitOps PR only after preflight. Never expose the private key or tokens in issues, PRs or logs, and never disable TLS verification for bearer-authenticated clients.
 
 A `kubernetes.io/tls` Secret existing is not proof its SAN changed. The current old self-signed certificate cannot satisfy Cloudflare Full (strict) origin verification. Use a publicly trusted certificate (or an explicitly Cloudflare-trusted Origin CA certificate for proxied-only traffic) and verify the presented Edge certificate and origin TLS separately. Manual Certbot DNS challenge does not auto-renew without automation.
