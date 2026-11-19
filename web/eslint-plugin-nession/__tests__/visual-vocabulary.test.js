@@ -246,6 +246,24 @@ test('visual-vocabulary reports non-canonical production variables', () => {
   });
 });
 
+test('global ESLint rejects newly authored raw metric classes but accepts generated tokens (#4061)', () => {
+  ruleTester.run('visual-vocabulary', nessionPlugin.rules['visual-vocabulary'], {
+    valid: [{
+      filename: '/proj/web/src/product/new/components/NewThing.tsx',
+      code: 'export const cls = "flex gap-[var(--nession-panel-padding)] min-w-0";',
+    }],
+    invalid: [{
+      filename: '/proj/web/src/product/new/components/NewThing.tsx',
+      code: 'export const cls = "gap-3";',
+      errors: [{messageId: 'metricViolation'}],
+    }, {
+      filename: '/proj/web/src/capabilities/new/components/NewThing.tsx',
+      code: 'export const cls = "flex w-[44px] px-4";',
+      errors: [{messageId: 'metricViolation'}, {messageId: 'metricViolation'}],
+    }],
+  });
+});
+
 test('violation output gives the canonical repair path', () => {
   const rule = nessionPlugin.rules['visual-vocabulary'];
   const reported = [];

@@ -8,6 +8,12 @@
  * aliases once the production-source migration reached zero consumers.
  */
 
+import {
+  collectNonTokenSourceMetrics,
+  isShippingStyleFile,
+  rejectNewMetricDebt,
+} from '../../../design/scripts/visual-token-drift.mjs';
+
 const RAW_COLOR_RE = /\[(?:#[0-9a-fA-F]{3,8}|(?:rgb|hsl|oklch|oklab)\([^\]]+)\]/i;
 const PALETTES = new Set([
   'red','green','blue','yellow','amber','orange','emerald','teal','cyan','sky',
@@ -256,6 +262,15 @@ export default function visualVocabularyRule(metadata) {
       },
       schema: [],
       messages: {
+        metricViolation: [
+          'DESIGN_SYSTEM_VIOLATION',
+          'rule: nession/visual-vocabulary',
+          'kind: {{kind}}',
+          'actual: {{token}}',
+          'expected: a canonical Web/App token-backed visual metric',
+          'owner: design/tokens/experience/*.json + design/scripts/visual-token-drift.mjs',
+          'repair: migrate the edited file\'s non-token metric to var(--nession-*) or a shared Recipe; frozen legacy blobs are not editable exceptions',
+        ].join('\n'),
         violation: [
           'DESIGN_SYSTEM_VIOLATION',
           '',
@@ -312,6 +327,20 @@ export default function visualVocabularyRule(metadata) {
       }
 
       return {
+        Program(node) {
+          if (!isShippingStyleFile(filename)) return;
+          const sourceCode = context.sourceCode ?? context.getSourceCode();
+          const source = sourceCode.text;
+          const observations = collectNonTokenSourceMetrics(source, filename);
+          for (const hit of rejectNewMetricDebt(filename, source, observations)) {
+            context.report({
+              node,
+              loc: sourceCode.getLocFromIndex(hit.index),
+              messageId: 'metricViolation',
+              data: { token: hit.token, kind: hit.kind },
+            });
+          }
+        },
         Literal(node) {
           check(node, node.value);
         },

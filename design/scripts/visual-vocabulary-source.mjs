@@ -6,6 +6,12 @@ import {
   findVisualVariableViolations,
   isForeignAdapter,
 } from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
+import {
+  collectNonTokenSourceMetrics,
+  isShippingStyleFile,
+  readLegacyMetricBaseline,
+  rejectNewMetricDebt,
+} from './visual-token-drift.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -350,6 +356,25 @@ export function scanLocalVariableContracts(files, owners = {}, surfaces = {}) {
   return violations;
 }
 
+/** Global additive-only token enforcement (#4061). Unchanged legacy source
+ * blobs are pinned by their Git SHA, and any edited file must migrate *all*
+ * detectable non-token metrics. Existing visual-vocabulary and Recipe gates
+ * remain authoritative for their respective non-spacing rules.
+ */
+export function scanNonTokenStyleSource(
+  source, file = '<fixture>', baseline = readLegacyMetricBaseline(),
+) {
+  if (!isShippingStyleFile(file)) return [];
+  const violations = collectNonTokenSourceMetrics(source, file);
+  return rejectNewMetricDebt(file, source, violations, baseline).map(hit => ({
+    file,
+    line: lineNumber(source, hit.index),
+    kind: `untokenized-${hit.kind}`,
+    actual: hit.token,
+    repair: 'replace the raw visual metric with an Experience/semantic --nession-* token, or consume an owned Recipe; the old file blob is frozen until migrated',
+  }));
+}
+
 export function scanVisualVocabularySuppression(source, file = '<fixture>') {
   const violations = [];
   for (const match of source.matchAll(/eslint-disable(?:-next-line|-line)?[^\n]*nession\/visual-vocabulary/g)) {
@@ -392,6 +417,7 @@ export function scanRepository(root = ROOT) {
     const source = readFileSync(path, 'utf8');
     if (!isTestSource(rel)) sources.push({ file: rel, source });
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
+    violations.push(...scanNonTokenStyleSource(source, rel));
     if (ext !== '.css') {
       violations.push(...scanVisualVocabularySuppression(source, rel));
       if (!isTestSource(rel)) {
