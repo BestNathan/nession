@@ -79,6 +79,20 @@ export interface TransportPlugin {
 }
 
 /**
+ * Bounded classification of a rejected inbound frame (#4070).
+ *
+ * An envelope fact only — never the frame body, a token or a URL. Consumers
+ * decide how much of this to log.
+ */
+export type InvalidEnvelopeReason =
+  | 'malformed-json'
+  | 'not-an-object'
+  | 'invalid-msg-type'
+  | 'invalid-id'
+  | 'invalid-timestamp'
+  | 'missing-payload';
+
+/**
  * A bounded, redacted transport fact for client diagnostics (#3358).
  *
  * Never carries a URL, auth token or credential: `generation` and `attempt`
@@ -91,7 +105,8 @@ export interface TransportDiagnostic {
     | 'socket-error'
     | 'socket-close'
     | 'handshake-failure'
-    | 'reconnect-scheduled';
+    | 'reconnect-scheduled'
+    | 'invalid-envelope';
   generation: number;
   attempt: number;
   /** Browser CloseEvent code and cleanliness, for `socket-close`. */
@@ -103,6 +118,8 @@ export interface TransportDiagnostic {
   failureClass?: 'auth-rejected' | 'transport';
   /** Delay of the scheduled retry, for `reconnect-scheduled`. */
   delayMs?: number;
+  /** Why a text frame was rejected, for `invalid-envelope`. Never the body. */
+  frameClass?: InvalidEnvelopeReason;
 }
 
 export interface WebSocketServiceOptions {
@@ -156,6 +173,15 @@ export interface WebSocketServiceOptions {
    * every existing caller.
    */
   isHandshakeRefusal?: (error: Error) => boolean;
+  /**
+   * Finite budget, in UTF-8 bytes, for the browser socket's native outbound
+   * buffer (default `DEFAULT_MAX_BUFFERED_SEND_BYTES`, 16 MiB).
+   *
+   * A frame is admitted only when `ws.bufferedAmount` plus its serialized size
+   * fits. The transport keeps no JavaScript queue of its own: a refused frame
+   * throws a typed error synchronously and is never silently buffered (#4069).
+   */
+  maxBufferedSendBytes?: number;
   /** Redacted, bounded connection diagnostics (#3358 SC-05). */
   onDiagnostic?: (diagnostic: TransportDiagnostic) => void;
   onError?: (error: Error) => void;
