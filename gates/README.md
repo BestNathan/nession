@@ -55,9 +55,10 @@ The `quality-rust` suite executes the canonical workspace Rust test route:
 `rust-test-unit` selects every lib/bin target and `rust-test-integration`
 selects every integration test target through `scripts/rust-test-route.mjs`;
 `rust-test-route-contract` rejects a suite or selector that omits a
-test-capable crate/target and records the inventory in the CI step log.
-`scripts/check-coverage.sh` thresholds are coverage policy, not execution
-selection (#4064).
+test-capable crate/target, records the inventory in the CI step log, and
+requires every declared exception (package, integration target, coverage
+test-name skip) to carry a reason. `scripts/check-coverage.sh` thresholds are
+coverage policy, not execution selection (#4064).
 
 The Server Handler locality Gate (`server-handler-locality`) is included in the
 `quality-rust` and aggregate `quality` suites. Its isolated self-test and

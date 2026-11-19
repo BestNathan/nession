@@ -64,6 +64,10 @@ rc=$?
 # Drop compilation/checking/downloading noise.
 grep -E '(FAILED|^test |^thread |panicked|^Error |^error\[|^error:)' "$tmp" || true
 
+# A panic's message is on the line after `thread ... panicked at ...:`; without
+# it a red Gate names the location but not the invariant it observed.
+grep -A2 'panicked at' "$tmp" || true
+
 if [ $rc -ne 0 ]; then
     failures=$(grep -c 'FAILED' "$tmp" 2>/dev/null || echo 0)
     echo ""

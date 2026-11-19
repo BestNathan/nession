@@ -45,15 +45,17 @@ export const PACKAGE_EXCLUSIONS = new Map([
   // 'crate-name' => 'why the crate cannot run in this route'
 ]);
 
-// Runtime-gated targets are still selected and executed. The annotation makes
-// the platform condition visible in the inventory instead of looking like an
-// omission on a host where the target contains zero cases.
-export const RUNTIME_GATED = new Map([
+// An excluded integration target is never silently dropped: the inventory
+// names it and the reason. A target can only be excluded by its unique cargo
+// target name, so a shared name that also matches another package is refused.
+export const TARGET_EXCLUSIONS = new Map([
   [
     'nession-sandbox:linux_runtime',
-    'target_os = "linux": macOS hosts execute zero cases; Linux CI executes them'
+    'requires bwrap, mkfs.erofs, erofsfuse, fusermount3, fuse-overlayfs and /dev/fuse; ' +
+      'the native runtime proof runs in the provisioned Acceptance Case lane (e2e/acceptance/cases/2681)'
   ]
 ]);
+
 
 class ContractError extends Error {}
 
@@ -148,18 +150,30 @@ function excludedPackages() {
   return new Set(PACKAGE_EXCLUSIONS.keys());
 }
 
+function excludedTargets() {
+  return new Set(TARGET_EXCLUSIONS.keys());
+}
+
+function targetId(target) {
+  return `${target.package}:${target.target}`;
+}
+
+// The route's expected coverage: every test-capable target that is not an
+// explicitly justified exception.
+export function expectedTargets(workspace, mode) {
+  const packages = excludedPackages();
+  const targets = excludedTargets();
+  return allTestTargets(workspace, mode).filter(target =>
+    !packages.has(target.package) && !targets.has(targetId(target)));
+}
+
 export function routeArgs(workspace, mode) {
   if (mode === 'unit') {
     const args = ['--lib', '--bins'];
     for (const pkg of PACKAGE_EXCLUSIONS.keys()) args.push('--exclude', pkg);
     return args;
   }
-  const excluded = excludedPackages();
-  const names = [...new Set(
-    allTestTargets(workspace, mode)
-      .filter(target => !excluded.has(target.package))
-      .map(target => target.target)
-  )].sort();
+  const names = [...new Set(expectedTargets(workspace, mode).map(target => target.target))].sort();
   if (!names.length) fail('the workspace has no integration test targets; refusing an empty route');
   const args = [];
   for (const name of names) args.push('--test', name);
@@ -185,8 +199,9 @@ export function selectedTargets(workspace, mode, args) {
     else if (arg === '--test') testNames.add(args[++index]);
     else fail(`unsupported route argument ${arg}`);
   }
+  const declared = excludedTargets();
   return allTestTargets(workspace, mode).filter(target => {
-    if (excluded.has(target.package)) return false;
+    if (excluded.has(target.package) || declared.has(targetId(target))) return false;
     if (mode === 'integration') return testNames.has(target.target);
     if (target.kind.includes('lib') || target.kind.includes('proc-macro')) {
       return allLibs || libNames.has(target.target);
@@ -217,14 +232,13 @@ export function buildInventory(workspace, mode, args, skips) {
     target_count: selected.length,
     targets: selected,
     package_exclusions: [...PACKAGE_EXCLUSIONS].map(([pkg, reason]) => ({package: pkg, reason})),
-    runtime_gated: [...RUNTIME_GATED]
-      .filter(([key]) => {
+    target_exclusions: [...TARGET_EXCLUSIONS]
+      .filter(([key]) => allTestTargets(workspace, 'unit')
+        .concat(allTestTargets(workspace, 'integration'))
+        .some(entry => targetId(entry) === key))
+      .map(([key, reason]) => {
         const [pkg, target] = key.split(':');
-        return selected.some(entry => entry.package === pkg && entry.target === target);
-      })
-      .map(([key, condition]) => {
-        const [pkg, target] = key.split(':');
-        return {package: pkg, target, condition};
+        return {package: pkg, target, reason};
       }),
     coverage_test_skips: skips.map(test => ({owner: 'scripts/check-coverage.sh', test}))
   };
@@ -261,22 +275,30 @@ export function validateInventory(expected, inventory, label) {
   }
 }
 
-export function validateExclusions(workspace) {
+export function validateExclusions(workspace, options = {}) {
+  const packageExclusions = options.packageExclusions ?? PACKAGE_EXCLUSIONS;
+  const targetExclusions = options.targetExclusions ?? TARGET_EXCLUSIONS;
   const knownPackages = new Set(workspace.packages.map(pkg => pkg.name));
-  for (const [pkg, reason] of PACKAGE_EXCLUSIONS) {
+  for (const [pkg, reason] of packageExclusions) {
     if (!knownPackages.has(pkg)) fail(`stale package exclusion ${pkg}: no such workspace member`);
     if (!reason || !String(reason).trim()) fail(`package exclusion ${pkg} has no justification`);
   }
-  // A runtime-gated target belongs to exactly one mode; validate against the
-  // route's whole selected surface so each annotation must name a real target.
-  const selected = new Set([
-    ...allTestTargets(workspace, 'unit'),
-    ...allTestTargets(workspace, 'integration')
-  ].map(targetKey));
-  for (const key of RUNTIME_GATED.keys()) {
-    const [pkg, target] = key.split(':');
-    const match = [...selected].some(entry => entry.startsWith(`${pkg}\u0000${target}\u0000`));
-    if (!match) fail(`stale runtime-gated annotation ${key}: the target is not selected by any route mode`);
+  const unit = allTestTargets(workspace, 'unit');
+  const integration = allTestTargets(workspace, 'integration');
+  const known = new Map(unit.concat(integration).map(target => [targetId(target), target]));
+  for (const [key, reason] of targetExclusions) {
+    const target = known.get(key);
+    if (!target) fail(`stale target exclusion ${key}: no such test-capable target`);
+    if (!reason || !String(reason).trim()) fail(`target exclusion ${key} has no justification`);
+    if (!target.kind.includes('test')) {
+      fail(`target exclusion ${key} is not an integration target; unit targets must stay in the route`);
+    }
+    const ambiguous = integration.filter(entry =>
+      entry.target === target.target && targetId(entry) !== key);
+    if (ambiguous.length) {
+      fail(`target exclusion ${key} shares its cargo target name with ${ambiguous.map(targetId).join(', ')}; ` +
+        'a name-level exclusion cannot isolate it');
+    }
   }
 }
 
@@ -305,7 +327,7 @@ function validateContract() {
   for (const mode of ['unit', 'integration']) {
     const args = routeArgs(workspace, mode);
     const inventory = buildInventory(workspace, mode, args, skips);
-    validateInventory(allTestTargets(workspace, mode), inventory, `${mode} route`);
+    validateInventory(expectedTargets(workspace, mode), inventory, `${mode} route`);
   }
   console.log(`✓ rust test route contract: ${workspace.packages.length} packages, ` +
     `${allTestTargets(workspace, 'unit').length} unit target(s), ` +
@@ -364,11 +386,11 @@ function selftest() {
     const fixture = loadWorkspace(manifestPath);
 
     const unitArgs = routeArgs(fixture, 'unit');
-    validateInventory(allTestTargets(fixture, 'unit'),
+    validateInventory(expectedTargets(fixture, 'unit'),
       buildInventory(fixture, 'unit', unitArgs, []), 'fixture unit route');
     expectRejected('a unit route without --bins', () => {
       const narrowed = unitArgs.filter(arg => arg !== '--bins');
-      validateInventory(allTestTargets(fixture, 'unit'),
+      validateInventory(expectedTargets(fixture, 'unit'),
         buildInventory(fixture, 'unit', narrowed, []), 'fixture unit route');
     });
     expectRejected('an integration route narrowed to `--test integration`', () => {
@@ -376,12 +398,17 @@ function selftest() {
         buildInventory(fixture, 'integration', ['--test', 'integration'], []), 'fixture integration route');
     });
     expectRejected('an exclusion without a justification', () => {
-      PACKAGE_EXCLUSIONS.set('omitted-crate', '');
-      try {
-        validateExclusions(fixture);
-      } finally {
-        PACKAGE_EXCLUSIONS.delete('omitted-crate');
-      }
+      validateExclusions(fixture, {packageExclusions: new Map([['omitted-crate', '']])});
+    });
+    expectRejected('a target exclusion without a justification', () => {
+      validateExclusions(fixture, {
+        targetExclusions: new Map([['omitted-crate:custom_target', '']])
+      });
+    });
+    expectRejected('a stale target exclusion', () => {
+      validateExclusions(fixture, {
+        targetExclusions: new Map([['omitted-crate:missing_target', 'stale']])
+      });
     });
 
     const inventory = run(process.execPath,
