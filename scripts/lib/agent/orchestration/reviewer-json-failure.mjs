@@ -1,11 +1,14 @@
 // #3601: independently attest the sole known Reviewer Run whose bounded
 // malformed-JSON verdict caused a post-model failure. No model text, source
 // selected by Issue comments, or uploaded output may attest a Reviewer result.
-import {REVIEWER_JSON_FAILURE as F} from './outbox.mjs';
+import {REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_SOURCES}
+  from './outbox.mjs';
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/,DIGEST=/^sha256:[a-f0-9]{64}$/;
 const positive=x=>Number.isSafeInteger(x)&&x>0;
 function deny(s){throw Error('trusted Reviewer JSON failure: '+s);}
 export function attestReviewerJsonFailure(run,listing,artifacts){
+  const F=REVIEWER_JSON_FAILURE_SOURCES.find(source=>source.run_id===run?.id);
+  if(!F)deny('unknown post-model Reviewer Run');
   if(run?.id!==F.run_id||run.run_attempt!==1||
       run.name!=='Agent / Review'||
       run.path!=='.github/workflows/agent-review.yml'||
@@ -29,9 +32,11 @@ export function attestReviewerJsonFailure(run,listing,artifacts){
     deny('not the known successful admission + failed model Review');
   const exactly=(steps,name,conclusion)=>steps.filter(s=>s.name===name&&
     s.status==='completed'&&s.conclusion===conclusion).length===1;
+  const expectedReviewStep=F.issue===3784
+    ?'Run the read-only Reviewer Slice directly with Node.js'
+    :'Run the read-only Reviewer Slice in an OS-isolated container';
   if(!exactly(prepare[0].steps,'Prepare the reviewer admission','success')||
-      !exactly(review[0].steps,
-        'Run the read-only Reviewer Slice in an OS-isolated container','failure')||
+      !exactly(review[0].steps,expectedReviewStep,'failure')||
       review[0].steps.filter(s=>s.conclusion==='failure').length!==1)
     deny('failed step is not the bounded Review model output stage');
   // The original signed admission and claim must exist, but no verdict,
@@ -62,7 +67,11 @@ async function api(token,path){
   if(!resp.ok)deny('GitHub source read failed '+resp.status);
   return resp.json();
 }
-export async function verifyReviewerJsonFailureLive(token){
+export async function verifyReviewerJsonFailureLive(token,source=REVIEWER_JSON_FAILURE){
+  const F=REVIEWER_JSON_FAILURE_SOURCES.find(f=>
+    f.issue===source?.issue&&f.action_id===source?.action_id&&
+    f.run_id===source?.run_id);
+  if(!F)deny('unrecognized Reviewer post-model recovery source');
   const [run,jobs,artifacts]=await Promise.all([
     api(token,'/actions/runs/'+F.run_id),
     api(token,'/actions/runs/'+F.run_id+'/jobs?per_page=100'),
