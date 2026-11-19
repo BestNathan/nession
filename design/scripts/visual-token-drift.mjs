@@ -146,7 +146,7 @@ export function findNonTokenMetricUtilities(value) {
 const CSS_METRIC_DECLARATION =
   /(?:^|[;{\n])\s*((?:padding|margin)(?:-(?:top|right|bottom|left|inline|block))?|(?:row-|column-)?gap|(?:min-|max-)?(?:width|height)|font-size|border-radius|top|right|bottom|left)\s*:\s*([^;{}\n]+)/gm;
 const JSX_METRIC_PROPERTY =
-  /\b((?:padding|margin)(?:Top|Bottom|Left|Right|Inline|Block)?|(?:row|column)?Gap|(?:min|max)?(?:Width|Height)|fontSize|borderRadius)\s*:\s*['"]?(-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?)/g;
+  /\b((?:padding|margin)(?:Top|Bottom|Left|Right|Inline|Block)?|(?:row|column)?Gap|(?:min|max)?(?:Width|Height)|width|height|top|right|bottom|left|inset|fontSize|borderRadius)\s*:\s*['"]?(-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?)/g;
 
 export function findNonTokenCssMetrics(source) {
   const out = [];
