@@ -10,6 +10,52 @@ const BASELINE_PATH = join(HERE, '..', 'contracts', 'visual-token-debt.json');
 // consciously revised and reviewed, with explicit migration rationale.
 export const PINNED_LEGACY_BASELINE_BLOB = '51de139b34944136eba1998c5ef47b2b0011d698';
 
+/** One lexical collector for both ESLint and the fast source Gate. Legacy
+ * literal baseline decisions are based on the complete Git blob, not the
+ * position or the particular authoring frontend.
+ */
+function maskStyleComments(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, match => match.replace(/[^\n]/g, ' '))
+    .replace(/(^|[^:])\/\/[^\n]*/gm, (match, prefix) =>
+      prefix + ' '.repeat(match.length - prefix.length));
+}
+
+function sourceStringLiterals(source) {
+  const values = [];
+  const patterns = [
+    /'([^'\\]*(?:\\.[^'\\]*)*)'/g,
+    /"([^"\\]*(?:\\.[^"\\]*)*)"/g,
+    /`([^`\\]*(?:\\.[^`\\]*)*)`/g,
+  ];
+  for (const pattern of patterns) {
+    for (const match of source.matchAll(pattern)) {
+      values.push({value: match[1], index: match.index ?? 0});
+    }
+  }
+  return values;
+}
+
+export function collectNonTokenSourceMetrics(source, file) {
+  if (!isShippingStyleFile(file)) return [];
+  const normalized = normalizeStyleFile(file);
+  if (normalized.endsWith('src/platform/editor/model/editorTheme.ts') ||
+      normalized.endsWith('src/shared/markdown/markdownVisualGrammar.ts')) {
+    return []; // Renderer-specific adapter with its own design contract.
+  }
+  const masked = maskStyleComments(source);
+  if (normalized.endsWith('.css')) return findNonTokenCssMetrics(masked);
+
+  const observations = [];
+  for (const literal of sourceStringLiterals(masked)) {
+    for (const metric of findNonTokenMetricUtilities(literal.value)) {
+      observations.push({...metric, literal: literal.value, index: literal.index});
+    }
+  }
+  observations.push(...findNonTokenInlineMetrics(masked));
+  return observations;
+}
+
 export function gitBlobSha(content) {
   const bytes = Buffer.from(content, 'utf8');
   return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
