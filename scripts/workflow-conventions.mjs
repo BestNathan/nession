@@ -75,6 +75,7 @@ export const CATALOG = [
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
   ['release-staging-convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
+  ['release-toolchains', 'release-toolchains.yml', 'Release / Toolchains', 'release-toolchains.yml', 'Release / Toolchains', 'delivery'],
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['deploy-configure-site', 'deploy-configure-site.yml', 'Deploy / Configure Site', 'deploy-configure-site.yml', 'Deploy / Configure Site', 'delivery'],
   ['deploy-seal-gitops-secret', 'deploy-seal-gitops-secret.yml', 'Deploy / Seal GitOps Secret', 'deploy-seal-gitops-secret.yml', 'Deploy / Seal GitOps Secret', 'delivery'],
