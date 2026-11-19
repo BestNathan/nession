@@ -2,6 +2,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatViolation } from './design-gate.mjs';
+import { LAYOUT_RECIPE_OWNER, isTokenOwnedRecipe } from './recipe-style-owners.mjs';
+export { LAYOUT_RECIPE_OWNER };
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -26,7 +28,6 @@ const ROOT = resolve(SCRIPT_DIR, '..', '..');
  * the expected owner and the repair.
  */
 
-export const LAYOUT_RECIPE_OWNER = 'web/src/app/workspace/layout/workspaceLayout.tsx';
 export const MASTER_DETAIL_MARKER =
   'grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)]';
 export const SCROLL_OWNER_MARKER = 'data-workspace-scroll-owner';
@@ -68,14 +69,6 @@ const HOST_CHROME_MARKERS = [
  * This is the same owner as the existing no-recipe-raw-spacing check (#3194).
  * A broader legacy product/capability migration must be explicitly audited.
  */
-export const TOKEN_OWNED_RECIPE_FILES = new Set([
-  LAYOUT_RECIPE_OWNER,
-  'web/src/components/ui/resource-detail.tsx',
-  'web/src/components/ui/configuration-form.tsx',
-  'web/src/components/ui/configuration-formStyles.ts',
-  'web/src/components/ui/operation-surface.tsx',
-]);
-
 const SPACING_PREFIX = '(?:gap(?:-[xy])?|space-[xy]|p[trblxy]?|m[trblxy]?|w|h|size)';
 const RAW_SPACING_RE = new RegExp(
   `(?<![\\w-])-?${SPACING_PREFIX}-(?:(?:-?\\d+(?:\\.\\d+)?|px)(?![\\w.-])|\\[-?\\d+(?:\\.\\d+)?(?:px|rem|em|vh|vw|%|ch|dvh)?\\])`,
@@ -232,7 +225,7 @@ export function scanLayoutSource(source, file = '<fixture>') {
     }
   }
 
-  if (TOKEN_OWNED_RECIPE_FILES.has(file)) {
+  if (isTokenOwnedRecipe(file)) {
     for (const regex of [RAW_SPACING_RE, RAW_CALC_LENGTH_RE, RAW_INLINE_VISUAL_RE]) {
       pushOccurrences(violations, masked, regex, {
         file,
