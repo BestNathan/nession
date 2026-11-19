@@ -43,7 +43,7 @@ export function OperationActions({ className, ...props }: React.ComponentProps<'
   return (
     <div
       data-recipe-part="operation-actions"
-      className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}
+      className={cn('flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]', className)}
       {...props}
     />
   );
