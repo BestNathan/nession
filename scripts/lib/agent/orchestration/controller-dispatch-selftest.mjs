@@ -1,15 +1,17 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
+import {REVIEWER_PREMODEL_FAILURE_3784_C} from './outbox.mjs';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
-  REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
   QWEN_TOOL_RECOVERY_COMMENT,
-  assertOwnerReviewDispatchRole}
+  assertReviewerRecoveryPrLease,assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
 import {SOURCE as QWEN_KEY_FAILURE,
@@ -337,6 +339,49 @@ for(const bad of [
   {event:{...premodelRecovery.event,issue:{number:3434,state:'open'}}},
 ])assert.throws(()=>assertDispatchAuthority({...premodelRecovery,...bad}),
   /authenticated owner\/main/);
+
+// #4097: only the exact newer pre-model #3784 source can request CAS.
+const cRecoveryAction='ad5899ead831233a22dcac8856c7029bfebb47d23bb3eb47f0c9e68afaf2c504';
+const cRecovery={...premodelRecovery,issue:3784,actionId:cRecoveryAction,
+  event:{...premodelRecovery.event,issue:{number:3784,state:'open'},
+    comment:{...premodelRecovery.event.comment,
+      body:REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(cRecovery).action_id,cRecoveryAction);
+for(const wrong of [
+  {actionId:'f'.repeat(64)},{issue:3433},
+  {event:{...cRecovery.event,action:'edited'}},
+  {event:{...cRecovery.event,issue:{number:3784,state:'closed'}}},
+  {event:{...cRecovery.event,issue:{number:3784,state:'open',pull_request:{}}}},
+  {event:{...cRecovery.event,comment:{...cRecovery.event.comment,
+    body:REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT+' '}}},
+  {event:{...cRecovery.event,comment:{...cRecovery.event.comment,
+    body:'/nession recover-review-preflight issue=3784 run=44500591866'}}},
+  {event:{...cRecovery.event,comment:{...cRecovery.event.comment,
+    user:{login:'external'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'external'}},
+])assert.throws(()=>assertDispatchAuthority({...cRecovery,...wrong}),
+  /authenticated owner\/main/);
+
+const cProductHead='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
+const cProductBranch='agent/3784/qwen-39c01222a8d00fa3';
+const cLeasePr={number:3919,state:'open',draft:false,merged_at:null,
+  head:{sha:cProductHead,ref:cProductBranch,repo:{full_name:'BestNathan/nession'}},
+  base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
+const cLeaseRef={ref:'refs/heads/'+cProductBranch,object:{sha:cProductHead}};
+assert.equal(assertReviewerRecoveryPrLease(REVIEWER_PREMODEL_FAILURE_3784_C,
+  cLeasePr,cLeaseRef),true);
+for(const [pr,ref] of [
+  [{...cLeasePr,head:{...cLeasePr.head,
+    sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}},cLeaseRef],
+  [cLeasePr,{...cLeaseRef,object:{sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}}],
+  [{...cLeasePr,number:3918},cLeaseRef],
+  [{...cLeasePr,state:'closed'},cLeaseRef],
+  [{...cLeasePr,base:{...cLeasePr.base,ref:'staging'}},cLeaseRef],
+  [{...cLeasePr,head:{...cLeasePr.head,ref:'agent/3784/forged'}},cLeaseRef],
+])assert.throws(()=>assertReviewerRecoveryPrLease(
+  REVIEWER_PREMODEL_FAILURE_3784_C,pr,ref),/immutable #3784 Store v35 C/);
+assert.throws(()=>assertReviewerRecoveryPrLease(
+  null,cLeasePr,cLeaseRef),/unexpected Reviewer C PR lease source/);
 
 const jsonAction='8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7';
 const jsonRecovery={...ownerReview,actionId:jsonAction,
