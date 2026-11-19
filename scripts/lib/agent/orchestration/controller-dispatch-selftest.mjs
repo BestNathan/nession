@@ -7,7 +7,8 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
-  QWEN_CLI_RECOVERY_COMMENT,QWEN_TOOL_RECOVERY_COMMENT,
+  QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
+  QWEN_TOOL_RECOVERY_COMMENT,
   assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
@@ -183,6 +184,34 @@ for(const mutation of [
   assert.throws(()=>assertDispatchAuthority({...cliRecovery,...mutation}),
     /authenticated owner\/main/);
 }
+
+// #3885: only the original Owner/main, exact Run and exact dispatched
+// Repair Outbox Action may request an independently authenticated successor.
+const turnsFailure=(await import('./qwen-repair-turns-failure.mjs')).SOURCE;
+const turnsEvent={...cliCommentEvent,comment:{
+  ...cliCommentEvent.comment,id:7001510011,
+  body:QWEN_REPAIR_TURNS_RECOVERY_COMMENT}};
+const turnsRecovery={...cliRecovery,event:turnsEvent,
+  actionId:turnsFailure.action_id};
+assert.equal(assertDispatchAuthority(turnsRecovery).action_id,turnsFailure.action_id);
+for(const wrong of [
+  {issue:3885},
+  {actionId:cliFailure.action_id},
+  {event:{...turnsEvent,action:'edited'}},
+  {event:{...turnsEvent,issue:{number:3784,state:'closed'}}},
+  {event:{...turnsEvent,issue:{number:3784,state:'open',pull_request:{}}}},
+  {event:{...turnsEvent,comment:{...turnsEvent.comment,
+    body:QWEN_REPAIR_TURNS_RECOVERY_COMMENT+' '}}},
+  {event:{...turnsEvent,comment:{...turnsEvent.comment,
+    body:'/nession recover-qwen-turns issue=3784 run=44470557906'}}},
+  {event:{...turnsEvent,comment:{...turnsEvent.comment,
+    user:{login:'unknown'}}}},
+  {event:{...turnsEvent,comment:{...turnsEvent.comment,id:0}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'github-actions[bot]'}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+  {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
+])assert.throws(()=>assertDispatchAuthority({...turnsRecovery,...wrong}),
+  /authenticated owner\\/main/);
 
 // #3885 second post-model failure: a one-shot Owner Issue comment is
 // independently bound to the actual Run's signed Store Action (never arbitrary).
