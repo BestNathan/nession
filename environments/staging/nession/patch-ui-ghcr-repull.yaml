@@ -1,0 +1,16 @@
+# #4032 SC-04: source-bound, staging-only UI Pod replacement.
+# After GHCR GitOps cutover the old Ready UI imageID did not match
+# the immutable GHCR release provenance, despite the desired GHCR tag.
+# Changing the Pod template forces a single controlled replacement; the
+# canonical image/tag still comes solely from scripts/gitops-commit.sh.
+# This is not deployment attestation; Deploy / Identity must independently
+# prove the replacement's actual registry and immutable digest.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-ui
+spec:
+  template:
+    metadata:
+      annotations:
+        nession.bestnathan.top/ghcr-rollout-source: "bd4ba6ba772f371b29da3ce2aa0cd10a5925232a"
