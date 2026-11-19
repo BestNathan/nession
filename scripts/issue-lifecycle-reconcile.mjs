@@ -110,7 +110,8 @@ export async function verifiedManualSourcePulls(repository, issueNumber, prs, to
 }
 
 export function selectManualAgentRuns(issue, prs, {
-  verifiedStagingSha = null, verifiedMainSha = null, verifiedPrSha = null, diagnostics = [],
+  verifiedStagingSha = null, verifiedMainSha = null, verifiedPrSha = null,
+  verifiedPrAnchors = [], diagnostics = [],
 } = {}) {
   const success = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
@@ -146,13 +147,18 @@ export function selectManualAgentRuns(issue, prs, {
         .filter(Boolean));
       const heads = [...new Set(candidates.map(p => p.head?.sha)
         .filter(sha => SHA.test(String(sha || ''))))];
-      // An authenticated human-selected PR head disambiguates multiple
-      // implementations, but never overwrites an already accepted SC source.
-      // The caller must first prove the SHA belongs to a merged, linked PR.
+      // Previously accepted SCs are immutable. A human-selected current
+      // merged PR head can prove that every old accepted SHA belongs to its
+      // *same* implementing PR ancestry (trusted GitHub compare + commit→PR).
+      // This authorizes evaluating only the Pending SCs at the newer head,
+      // not silently replacing earlier accepted evidence (#4076).
+      const anchorProof = new Set(verifiedPrAnchors);
       const selected = acceptedRefs.size
-        ? (acceptedRefs.size === 1 && heads.includes([...acceptedRefs][0]) &&
-            (!verifiedPrSha || verifiedPrSha === [...acceptedRefs][0])
-          ? [...acceptedRefs][0] : null)
+        ? (verifiedPrSha && heads.includes(verifiedPrSha)
+          ? ([...acceptedRefs].every(ref =>
+              ref === verifiedPrSha || anchorProof.has(ref)) ? verifiedPrSha : null)
+          : (acceptedRefs.size === 1 && heads.includes([...acceptedRefs][0])
+            ? [...acceptedRefs][0] : null))
         : verifiedPrSha
           ? (heads.includes(verifiedPrSha) ? verifiedPrSha : null)
           : (heads.length === 1 ? heads[0] : null);
@@ -185,6 +191,58 @@ export function selectManualAgentRuns(issue, prs, {
     planned.set(stage, sha);
   }
   return [...planned].map(([stage, sha]) => ({ stage, target_ref: sha }));
+}
+
+/** Trust-gated re-evaluation of a merged implementation's newer PR head.
+ * Every already-Pass PR-stage source must be an actual ancestor of the
+ * selected head in the same merged Issue-linked PR, never merely a prose ref.
+ * No accepted criterion is mutated by this function (#4076).
+ */
+export async function verifyManualAcceptedPrAnchors(repository, issue, prs,
+  selectedSha, token, request = githubRequest) {
+  if (!SHA.test(String(selectedSha ?? '')) || !token || !Array.isArray(prs))
+    throw Error('invalid manual PR anchor proof request');
+  const selected = prs.filter(pr => pr.merged_at &&
+    pr.head?.sha === selectedSha && ['main','staging'].includes(pr.base?.ref));
+  if (selected.length !== 1)
+    throw Error('ambiguous or missing merged implementing PR for selected SHA');
+  const pr = selected[0];
+  const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
+  const criteria = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
+  const plan = validateAcceptancePlan(issue.body, criteria.criteria.keys(), report.rows);
+  if (report.errors.length || criteria.errors.length || plan.errors.length || !plan.plan)
+    throw Error('invalid authoritative Issue Acceptance contract');
+  const anchors = new Set();
+  for (const [id, row] of report.rows) {
+    if (planStage(plan.plan.get(id)) !== 'pr' || !criteria.criteria.get(id)?.checked ||
+        !['pass','n/a'].includes(String(row.result).toLowerCase())) continue;
+    const ref = /\bref ([0-9a-f]{40});/i.exec(String(row.evidence ?? ''))?.[1];
+    if (ref) anchors.add(ref);
+  }
+  if (anchors.size > 8) throw Error('too many PR Acceptance source anchors');
+  const { prefix } = repoParts(repository);
+  const verified = [];
+  for (const oldSha of anchors) {
+    if (oldSha === selectedSha) { verified.push(oldSha); continue; }
+    const [comparison, related] = await Promise.all([
+      request(prefix + '/compare/' + oldSha + '...' + selectedSha, { token }),
+      request(prefix + '/commits/' + oldSha + '/pulls?per_page=100', { token }),
+    ]);
+    const ancestral = comparison?.base_commit?.sha === oldSha &&
+      comparison?.merge_base_commit?.sha === oldSha &&
+      comparison?.behind_by === 0 && comparison?.ahead_by > 0 &&
+      comparison?.status === 'ahead';
+    const samePr = Array.isArray(related) && related.length < 100 &&
+      related.some(p => p.number === pr.number && p.merged_at &&
+        p.head?.sha === selectedSha &&
+        p.head?.repo?.full_name === repository &&
+        p.base?.repo?.full_name === repository &&
+        p.base?.ref === pr.base.ref);
+    if (!ancestral || !samePr)
+      throw Error('accepted PR source lacks authenticated same-PR ancestry: ' + oldSha);
+    verified.push(oldSha);
+  }
+  return verified;
 }
 
 async function githubRequest(path, { token, method = 'GET', body } = {}) {
@@ -400,18 +458,22 @@ async function handleManual(event, repository, actor, token, request = githubReq
   if (command.targetPrSha && !verifiedPrSha) {
     throw Error('unverified or unmerged Issue-linked exact PR head');
   }
+  const verifiedPrAnchors = verifiedPrSha
+    ? await verifyManualAcceptedPrAnchors(repository, issue, sourcePrs,
+      verifiedPrSha, token, request) : [];
   const diagnostics = [];
   if (!sourcePrs.length && prs.length)
     diagnostics.push('reference-only or unverified PR: no source-aligned implementation');
   const directlySelected = selectManualAgentRuns(issue, sourcePrs,
-    { verifiedMainSha, verifiedPrSha, diagnostics });
+    { verifiedMainSha, verifiedPrSha, verifiedPrAnchors, diagnostics });
   // Never invent a staging association. When the source PR was correctly
   // merged to main (e.g. scripts-only), authenticate its actual ancestry in
   // staging before scheduling the pending merged/staging Agent criterion.
   const verifiedStagingSha = directlySelected.some(run => run.stage === 'staging')
     ? null : await verifiedStagingTargetForMainPR(repository, sourcePrs, token, request);
   const runs = verifiedStagingSha
-    ? selectManualAgentRuns(issue, sourcePrs, { verifiedStagingSha, verifiedMainSha, verifiedPrSha, diagnostics })
+    ? selectManualAgentRuns(issue, sourcePrs,
+      { verifiedStagingSha, verifiedMainSha, verifiedPrSha, verifiedPrAnchors, diagnostics })
     : directlySelected;
   for (const run of runs) {
     await request(prefix + '/actions/workflows/agent-sc-acceptance.yml/dispatches', {
@@ -577,6 +639,78 @@ async function selfTest() {
   assert.deepEqual(selectManualAgentRuns(unknownSource,[actual,ambiguous],
     {diagnostics:ambiguousReasons}),[]);
   assert.match(ambiguousReasons.join(' '),/conflicting/);
+  // #4076: prior Pass source is an authenticated ancestor of this very
+  // merged implementing PR; select the newest head for Pending criteria only.
+  const updatedHead = 'd'.repeat(40);
+  const mergedSamePr = {...nativeActual, merged_at:'2026-11-19T10:00:00Z',
+    state:'closed', head:{...nativeActual.head,sha:updatedHead}};
+  const sourceAnchor = nativeActual.head.sha;
+  const verifiedCompare = {base_commit:{sha:sourceAnchor},
+    merge_base_commit:{sha:sourceAnchor},behind_by:0,ahead_by:5,status:'ahead'};
+  const samePrWitness = [{number:mergedSamePr.number, merged_at:mergedSamePr.merged_at,
+    head:mergedSamePr.head,base:mergedSamePr.base}];
+  const ancestryRead = async path => {
+    if (path.includes('/compare/')) return verifiedCompare;
+    if (path.endsWith('/pulls?per_page=100')) return samePrWitness;
+    throw Error('unexpected PR ancestry fetch: '+path);
+  };
+  assert.deepEqual(await verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',ancestryRead),
+    [sourceAnchor]);
+  assert.deepEqual(selectManualAgentRuns(anchored,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor]}),
+    [{stage:'pr',target_ref:updatedHead}]);
+  assert.deepEqual(selectManualAgentRuns(anchored,[mergedSamePr],
+    {verifiedPrSha:updatedHead}),[],
+    'a newer head without authenticated original ancestry must fail closed');
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/')
+      ? {...verifiedCompare,behind_by:1,status:'diverged'} : samePrWitness),
+  /lacks authenticated same-PR ancestry/);
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/') ? verifiedCompare
+      : [{...samePrWitness[0],number:9999}]),
+  /lacks authenticated same-PR ancestry/);
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/') ? verifiedCompare
+      : [{...samePrWitness[0],head:{...samePrWitness[0].head,
+          repo:{full_name:'attacker/fork'}}}]),
+  /lacks authenticated same-PR ancestry/,
+  'forked or spoofed PR association may not attest an accepted old head');
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[{...mergedSamePr,merged_at:null}],updatedHead,
+    'fixture-token',ancestryRead),
+  /ambiguous or missing merged implementing PR/,
+  'an unmerged implementing PR never authorizes historic source recovery');
+  const secondAnchor = 'c'.repeat(40);
+  const multiAnchorBody = twoScBody
+    .replace('- [ ] SC-02 exact-head Quality receipt',
+      '- [x] SC-02 earlier accepted + third Pending\n- [ ] SC-03 exact-head Quality receipt')
+    .replace('  SC-02:\n    when: pr\n    method: agent\n',
+      '  SC-02:\n    when: pr\n    method: agent\n'+
+      '  SC-03:\n    when: pr\n    method: agent\n')
+    .replace('| SC-02 | Pending | awaiting independently authenticated Web Quality |',
+      '| SC-02 | Pass | run 101; ref '+secondAnchor+
+      '; source agent-qwen; test: second source |\n'+
+      '| SC-03 | Pending | awaiting independently authenticated Web Quality |');
+  const multiAnchorIssue = {...anchored,body:multiAnchorBody};
+  const multiAnchorRead = async path => path.includes('/compare/')
+    ? {base_commit:{sha:path.split('/compare/')[1].split('...')[0]},
+      merge_base_commit:{sha:path.split('/compare/')[1].split('...')[0]},
+      behind_by:0,ahead_by:5,status:'ahead'}
+    : samePrWitness;
+  assert.deepEqual(await verifyManualAcceptedPrAnchors('BestNathan/nession',
+    multiAnchorIssue,[mergedSamePr],updatedHead,'fixture-token',multiAnchorRead),
+    [sourceAnchor,secondAnchor]);
+  assert.deepEqual(selectManualAgentRuns(multiAnchorIssue,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor,secondAnchor]}),
+    [{stage:'pr',target_ref:updatedHead}]);
+  assert.deepEqual(selectManualAgentRuns(multiAnchorIssue,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor]}),[],
+    'partial ancestor proof must not authorize a mixed-source acceptance');
   const stagedBody = body.replace('when: pr\n',
     'when: merged\n    branch: staging\n').replace('| Pass |', '| Pending |');
   const mainPr = { ...pr, base: { ref: 'main' } };
