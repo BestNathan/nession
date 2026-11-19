@@ -47,9 +47,17 @@ export function collectNonTokenSourceMetrics(source, file) {
   if (normalized.endsWith('.css')) return findNonTokenCssMetrics(masked);
 
   const observations = [];
+  for (const localVar of masked.matchAll(UNOWNED_LOCAL_VISUAL_VAR)) {
+    observations.push({token: localVar[0], kind: 'unowned-local-variable',
+      literal: localVar[0], index: localVar.index ?? 0});
+  }
   for (const literal of sourceStringLiterals(masked)) {
     for (const metric of findNonTokenMetricUtilities(literal.value)) {
       observations.push({...metric, literal: literal.value, index: literal.index});
+    }
+    for (const dynamic of literal.value.matchAll(DYNAMIC_VISUAL_CLASS_RE)) {
+      observations.push({token: dynamic[1], kind: 'dynamic-visual-class',
+        literal: literal.value, index: literal.index});
     }
   }
   observations.push(...findNonTokenInlineMetrics(masked));
@@ -96,6 +104,11 @@ export function isShippingStyleFile(filename) {
     !/\.(?:test|spec)\.[^.]+$/.test(name);
 }
 
+// A local CSS variable or interpolated Tailwind metric is not a generated
+// design token. Both would silently bypass value-level checks otherwise.
+const UNOWNED_LOCAL_VISUAL_VAR = /--nession-local-[a-zA-Z0-9_-]+/g;
+const DYNAMIC_VISUAL_CLASS_RE =
+  /(?:^|\s)(-?(?:gap(?:-[xy])?|space-[xy]|p[trblxy]?|m[trblxy]?|w|h|size|min-[wh]|max-[wh]|top|right|bottom|left|inset(?:-[xy])?)-\$\{)/g;
 const METRIC_CLASS_RE =
   /^-?(?:gap(?:-[xy])?|space-[xy]|p[trblxy]?|m[trblxy]?|w|h|size|min-[wh]|max-[wh]|top|right|bottom|left|inset(?:-[xy])?)-(.+)$/;
 const NON_METRIC_SUFFIX = /^(?:0|auto|full|screen|svh|dvh|lvh|svw|dvw|lvw|min|max|fit|none|px-0|\d+\/\d+)$/;
