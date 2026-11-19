@@ -2,39 +2,39 @@
   "schema_version": 2,
   "repository_name": "BestNathan/nession",
   "branch": "main",
-  "commit_sha": "db6295494dcc316464d1f280ebf7685c38b4525c",
-  "generated_at": "2026-11-18T17:34:06.371Z",
+  "commit_sha": "ec95388860a697bba0072396b6716b797cd62b02",
+  "generated_at": "2026-11-19T02:10:37.795Z",
   "repository": {
     "source": {
-      "loc": 660534,
-      "files": 3298
+      "loc": 662321,
+      "files": 3306
     },
     "tests": {
       "unit": {
-        "total": 4640,
+        "total": 4641,
         "rust": 2794,
-        "web": 1846
+        "web": 1847
       },
       "integration": {
-        "total": 2317,
+        "total": 2320,
         "rust": 357,
-        "web": 1960
+        "web": 1963
       },
       "e2e": {
         "total": 511,
         "playwright": 511
       },
-      "total": 7468
+      "total": 7472
     },
     "execution": {
       "unit": {
-        "passed": 4636,
+        "passed": 4637,
         "failed": 1,
         "skipped": 3,
-        "pass_rate": 0.9997843433254259
+        "pass_rate": 0.9997843898231996
       },
       "integration": {
-        "passed": 2316,
+        "passed": 2319,
         "failed": 0,
         "skipped": 1,
         "pass_rate": 1
@@ -49,9 +49,9 @@
     "coverage": {
       "rust": {
         "lines": {
-          "covered": 66706,
+          "covered": 66689,
           "total": 77640,
-          "rate": 0.8591705306543019
+          "rate": 0.8589515713549717
         },
         "crates": {
           "nession-common": {
@@ -64,17 +64,17 @@
           },
           "nession-agent": {
             "lines": {
-              "covered": 22460,
+              "covered": 22449,
               "total": 26402,
-              "rate": 0.8506931293083857
+              "rate": 0.8502764942049845
             },
             "threshold": 0.79
           },
           "nession-server": {
             "lines": {
-              "covered": 15588,
+              "covered": 15582,
               "total": 18449,
-              "rate": 0.8449238441107919
+              "rate": 0.8445986232316115
             },
             "threshold": 0.8
           },
@@ -130,9 +130,9 @@
       },
       "web": {
         "lines": {
-          "covered": 18030,
-          "total": 21431,
-          "rate": 0.8413046521394242
+          "covered": 18076,
+          "total": 21474,
+          "rate": 0.8417621309490547
         }
       }
     },
@@ -159,43 +159,43 @@
   },
   "efficiency": {
     "window": "7d",
-    "window_start": "2026-11-11T17:34:06.371Z",
-    "window_30d_start": "2026-10-19T17:34:06.371Z",
+    "window_start": "2026-11-12T02:10:37.795Z",
+    "window_30d_start": "2026-10-20T02:10:37.795Z",
     "source_churn": {
-      "additions": 132587,
-      "deletions": 13198,
-      "baseline": "2d5d8fec5d4cedebb2c8e4de2f193664b65c6233"
+      "additions": 127463,
+      "deletions": 12878,
+      "baseline": "dfa6120499275b396ecefc684558f6bf5061316c"
     },
     "source_churn_30d": {
-      "additions": 411674,
-      "deletions": 30724,
-      "baseline": "031eab2e92dc75d9be356a469ce449e1a575407d"
+      "additions": 413098,
+      "deletions": 30763,
+      "baseline": "27900a28e0f3904d3cfa79131dcae1ac593d7e26"
     },
     "commits": {
-      "total": 11116,
-      "last_7d": 1361,
-      "last_30d": 5051
+      "total": 11155,
+      "last_7d": 1388,
+      "last_30d": 5077
     },
     "issues": {
-      "total": 969,
-      "open": 42,
-      "created_7d": 196,
-      "closed_7d": 172,
-      "created_30d": 532,
-      "closed_30d": 520
+      "total": 974,
+      "open": 43,
+      "created_7d": 197,
+      "closed_7d": 173,
+      "created_30d": 534,
+      "closed_30d": 521
     },
     "pull_requests": {
-      "total": 3005,
-      "open": 7,
-      "created_7d": 461,
-      "merged_7d": 397,
-      "created_30d": 1417,
-      "merged_30d": 1276
+      "total": 3017,
+      "open": 6,
+      "created_7d": 471,
+      "merged_7d": 405,
+      "created_30d": 1426,
+      "merged_30d": 1285
     },
     "workflow_runs": {
-      "total": 137092,
-      "last_7d": 36553,
-      "last_30d": 110490
+      "total": 138014,
+      "last_7d": 37093,
+      "last_30d": 111143
     }
   }
 }
