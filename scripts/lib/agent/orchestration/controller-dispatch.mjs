@@ -62,6 +62,25 @@ export const REVIEWER_PREMODEL_3784_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3784 run=44431618028';
 export const REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3784 run=44500591865';
+
+const QWEN_RECOVERY_C_SHA='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
+const QWEN_RECOVERY_BRANCH='agent/3784/qwen-39c01222a8d00fa3';
+// Before any Store CAS, reject the current direct/extra PR-head mutation.
+// An independently green CI run for D cannot authorize Review of Store C.
+export function assertReviewerRecoveryPrLease(source,pr,ref){
+  if(source!==REVIEWER_PREMODEL_FAILURE_3784_C)
+    fail('unexpected Reviewer C PR lease source');
+  if(pr?.number!==3919||pr.state!=='open'||pr.draft!==false||
+     pr.merged_at!=null||pr.head?.sha!==QWEN_RECOVERY_C_SHA||
+     pr.head?.ref!==QWEN_RECOVERY_BRANCH||
+     pr.head?.repo?.full_name!==REPO||
+     pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
+     ref?.ref!=='refs/heads/'+QWEN_RECOVERY_BRANCH||
+     ref.object?.sha!==QWEN_RECOVERY_C_SHA)
+    fail('Publisher PR HEAD no longer matches immutable #3784 Store v35 C; do not advance recovery CAS');
+  return true;
+}
+
 const REVIEWER_PREMODEL_RECOVERIES=Object.freeze([
   [REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_RECOVERY_COMMENT],
   [REVIEWER_PREMODEL_FAILURE_3784,REVIEWER_PREMODEL_3784_RECOVERY_COMMENT],
@@ -530,6 +549,14 @@ async function main(){
       // CAS-fail the original action, create one successor, and only dispatch
       // the authenticated successor. Replays are reconciled, never re-POSTed.
       const proof=await verifyReviewerPremodelFailureLive(token,reviewerPremodelSource);
+      if(reviewerPremodelSource===REVIEWER_PREMODEL_FAILURE_3784_C){
+        // This is a source-bound pre-CAS read, not permission to trust PR D.
+        const [pr,ref]=await Promise.all([
+          api(token,'/pulls/3919'),
+          api(token,'/git/ref/heads/'+QWEN_RECOVERY_BRANCH),
+        ]);
+        assertReviewerRecoveryPrLease(reviewerPremodelSource,pr,ref);
+      }
       const recovered=recoverAttestedReviewerPremodelFailure({
         remote:storeRemote,source:proof});
       const signer={key,key_id:'main-controller',
