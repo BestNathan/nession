@@ -48,7 +48,7 @@ use crate::session::terminal::state::InputSequence;
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
 use crate::tmux::env::profiles_from_snapshots;
-use crate::tmux::manager::{SessionBindingInput, SessionManager};
+use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use axum::extract::{FromRequestParts, State, WebSocketUpgrade};
@@ -2038,6 +2038,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
+                // Initial metadata is validated before any Session side effect
+                // (#4081): the same shared normalization and bounds as the
+                // update surfaces, never a second validator.
+                let initial_metadata = match payload.initial_metadata.as_ref() {
+                    Some(metadata) => match metadata.normalized() {
+                        Ok(metadata) => Some(metadata),
+                        Err(error) => return ctx.err("invalid_metadata", &error.to_string()),
+                    },
+                    None => None,
+                };
+                let initial = initial_metadata.as_ref().map(|metadata| InitialSessionMetadata {
+                    store: ctx.session_metadata.as_ref(),
+                    metadata,
+                });
                 let working_dir = match payload.working_dir.as_deref() {
                     Some(wd) => match SessionManager::validate_initial_working_dir(wd) {
                         Ok(path) => path,
@@ -2124,6 +2138,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             crate::managed_session::MANAGED_WORKING_DIR,
                             binding,
                             &prepared.policy,
+                            initial.as_ref(),
                         )
                         .await
                 } else {
@@ -2135,6 +2150,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &working_dir,
                             binding,
                             payload.sandbox.as_ref(),
+                            initial.as_ref(),
                         )
                         .await
                 };
@@ -2147,6 +2163,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             workspace: managed
                                 .as_ref()
                                 .map(|prepared| prepared.workspace.display().to_string()),
+                            instance_id: outcome.instance_id,
+                            metadata: outcome.metadata,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -3110,11 +3128,37 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_id: None,
                             error: Some(e.to_string()),
                             sandbox: None,
+                            instance_id: None,
+                            metadata: None,
                         };
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default();
                     }
                 };
+                // Validate initial metadata before any Session side effect
+                // (#4081), through the one shared contract validator.
+                let initial_metadata = match payload.initial_metadata.as_ref() {
+                    Some(metadata) => match metadata.normalized() {
+                        Ok(metadata) => Some(metadata),
+                        Err(error) => {
+                            let resp = WebSessionCreateResponse {
+                                success: false,
+                                session_id: None,
+                                error: Some(error.to_string()),
+                                sandbox: None,
+                                instance_id: None,
+                                metadata: None,
+                            };
+                            return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                                .unwrap_or_default();
+                        }
+                    },
+                    None => None,
+                };
+                let initial = initial_metadata.as_ref().map(|metadata| InitialSessionMetadata {
+                    store: ctx.session_metadata.as_ref(),
+                    metadata,
+                });
                 let working_dir = match payload.working_dir.as_deref() {
                     Some(wd) => match SessionManager::validate_initial_working_dir(wd) {
                         Ok(path) => path,
@@ -3124,6 +3168,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 session_id: None,
                                 error: Some(e.to_string()),
                                 sandbox: None,
+                                instance_id: None,
+                                metadata: None,
                             };
                             return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default();
@@ -3145,6 +3191,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         &working_dir,
                         None,
                         payload.sandbox.as_ref(),
+                        initial.as_ref(),
                     )
                     .await
                 {
@@ -3155,6 +3202,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_id: Some(session_id),
                             error: None,
                             sandbox: outcome.sandbox,
+                            instance_id: outcome.instance_id,
+                            metadata: outcome.metadata,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -3165,6 +3214,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_id: None,
                             error: Some(e.to_string()),
                             sandbox: None,
+                            instance_id: None,
+                            metadata: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -6221,6 +6272,7 @@ mod tests {
             terminal_cols: None,
             sandbox: None,
             managed: None,
+            initial_metadata: None,
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
         let create_resp: Message<SessionCreateResponse> =
@@ -7301,6 +7353,7 @@ mod tests {
             working_dir: None,
             terminal_cols: None,
             sandbox: None,
+            initial_metadata: None,
         };
         let create_req = new_message(msg_types::CLIENT_SESSION_CREATE, create_payload);
         let create_resp: Message<WebSessionCreateResponse> =

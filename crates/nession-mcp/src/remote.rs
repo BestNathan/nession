@@ -38,9 +38,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionKillResponse, SessionMetadataPatchPayload,
-    SessionMetadataResponse, SessionRefusal, WebSessionMetadataPatchPayload,
-    WebSessionsListResponse,
+    ServerSessionListReply, SessionInitialMetadata, SessionKillResponse,
+    SessionMetadataPatchPayload, SessionMetadataResponse, SessionRefusal,
+    WebSessionMetadataPatchPayload, WebSessionsListResponse,
 };
 use serde_json::Map;
 use std::time::Duration;
@@ -379,12 +379,14 @@ impl NodeBackend for ServerRoutedNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         let mut connection = self.connect_to_agent(agent_id).await?;
         // The MCP Tool has no Sandbox parameter; omitting the policy lets the
-        // Server's create path apply its default (#2681).
+        // Server's create path apply its default (#2681). Initial metadata
+        // rides the same canonical create payload (#4081).
         let reply = connection
-            .create_session_in(agent_id, name, working_dir, None)
+            .create_session_in(agent_id, name, working_dir, None, initial_metadata.cloned())
             .await
             .map_err(map_client_error)?;
         close_server(connection).await;
@@ -400,6 +402,8 @@ impl NodeBackend for ServerRoutedNodeBackend {
         Ok(SessionCreatedOutput {
             name: name.to_string(),
             warnings: reply.warnings,
+            instance_id: reply.instance_id,
+            metadata: reply.metadata,
         })
     }
 
@@ -551,17 +555,20 @@ impl NodeBackend for RemoteNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         self.ensure_target(agent_id)?;
         let mut connection = self.connect().await?;
         let reply = connection
-            .create_session(name, working_dir)
+            .create_session(name, working_dir, initial_metadata.cloned())
             .await
             .map_err(map_client_error)?;
         Self::close(connection).await;
         Ok(SessionCreatedOutput {
             name: reply.name,
             warnings: reply.warnings,
+            instance_id: reply.instance_id,
+            metadata: reply.metadata,
         })
     }
 

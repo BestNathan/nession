@@ -35,8 +35,8 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreateResponsePayload, ClientSessionEnvBindingGetPayload,
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
     ClientSessionEnvBindingSetPayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
-    ServerSessionListPayload, ServerSessionListReply, SessionMetadataResponse,
-    WebSessionMetadataGetPayload, WebSessionMetadataPatchPayload,
+    ServerSessionListPayload, ServerSessionListReply, SessionInitialMetadata,
+    SessionMetadataResponse, WebSessionMetadataGetPayload, WebSessionMetadataPatchPayload,
 };
 use nession_protocol::Message;
 
@@ -565,22 +565,27 @@ impl ClientConnection {
         name: &str,
         sandbox: Option<SandboxPolicy>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
-        self.create_session_in(agent_id, name, None, sandbox).await
+        self.create_session_in(agent_id, name, None, sandbox, None)
+            .await
     }
 
-    /// `server.session.create` with an explicit initial working directory.
+    /// `server.session.create` with an explicit initial working directory and
+    /// optional initial Session Metadata (#4081).
     ///
     /// The Server passes `working_dir` to the target Agent on the same
     /// canonical create route; an MCP caller that names a directory must not
     /// silently lose it (`#3264`). The Sandbox policy is an explicit parameter
     /// of the same call (`#2681`): Nession MCP Tools do not expose it, so they
-    /// pass `None` and the Server's create path applies its default.
+    /// pass `None` and the Server's create path applies its default. The
+    /// initial metadata is the creation-time work context the Agent commits
+    /// with the create; absent preserves the pre-#4081 request.
     pub async fn create_session_in(
         &mut self,
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
         sandbox: Option<SandboxPolicy>,
+        initial_metadata: Option<SessionInitialMetadata>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
         self.create_session_payload(ClientSessionCreatePayload {
             agent_id: agent_id.to_string(),
@@ -591,6 +596,7 @@ impl ClientConnection {
             sandbox,
             project_id: None,
             managed: None,
+            initial_metadata,
         })
         .await
     }

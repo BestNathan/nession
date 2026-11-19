@@ -2287,6 +2287,223 @@ async fn session_metadata_tools_share_owner_truth_across_hosts() {
     server_task.abort();
 }
 
+/// #4081 SC-02/SC-04: one valid Create input carrying initial work context
+/// through Server-embedded, Agent-embedded, Server-routed standalone and
+/// explicit direct-Agent standalone hosts results in the same normalized
+/// record on the one targeted Agent; Get and the list summary see it
+/// immediately, without a separate update call. An unavailable/unauthorized
+/// target is refused and never falls back to the MCP host's Agent.
+#[tokio::test]
+async fn session_metadata_creation_is_equivalent_across_hosts() {
+    let (server_addr, server_task, _db) = start_server_with_mcp(true).await;
+    let shared = Box::leak(Box::new(tempfile::tempdir().expect("shared dir")));
+    let shared_tmux = Arc::new(SessionManager::new());
+    let shared_store = Arc::new(SessionMetadataStore::with_root(
+        Arc::clone(&shared_tmux),
+        shared.path().join("sessions"),
+    ));
+    let (agent_addr, agent_handle) = start_agent_with(
+        AGENT_TOKEN,
+        true,
+        AGENT_ID,
+        Arc::clone(&shared_tmux),
+        Arc::clone(&shared_store),
+        shared.path().to_string_lossy().into_owned(),
+    )
+    .await;
+    let server_client = register_real_agent_with(
+        server_addr,
+        AGENT_ID,
+        Arc::clone(&shared_tmux),
+        Arc::clone(&shared_store),
+    )
+    .await;
+    let routed_dir = tempfile::tempdir().expect("routed dir");
+    let mut routed = spawn_standalone(&write_routed_config(routed_dir.path(), server_addr));
+    let routed_addr = await_listen_addr(&mut routed.0).await;
+    let direct_dir = tempfile::tempdir().expect("direct dir");
+    let mut direct = spawn_standalone(&write_direct_config(
+        direct_dir.path(),
+        server_addr,
+        agent_addr,
+    ));
+    let direct_addr = await_listen_addr(&mut direct.0).await;
+
+    let server_session = initialize_with(server_addr, SERVER_TOKEN).await;
+    let agent_session = initialize_with(agent_addr, AGENT_TOKEN).await;
+    let routed_session = initialize_with(routed_addr, MCP_TOKEN).await;
+    let direct_session = initialize_with(direct_addr, MCP_TOKEN).await;
+
+    // The Server only routes to an Agent after its registration arrives.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let listed = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_server_list_agents",
+            json!({}),
+        )
+        .await;
+        let text = text_of(&listed);
+        let online = text["agents"].as_array().is_some_and(|agents| {
+            agents
+                .iter()
+                .any(|agent| agent["agent_id"] == AGENT_ID && agent["status"] == "online")
+        });
+        if online {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "Agent never registered with the Server: {text}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+
+    let initial = json!({
+        "title": "OAuth implementation",
+        "description": "Goal: implement and validate the OAuth flow.",
+        "tags": ["backend", "oauth"]
+    });
+    // One create through each hosting mode, with the same valid input.
+    let mut created_names = Vec::new();
+    for (addr, token, session, label) in [
+        (server_addr, SERVER_TOKEN, &server_session, "server"),
+        (agent_addr, AGENT_TOKEN, &agent_session, "agent"),
+        (routed_addr, MCP_TOKEN, &routed_session, "routed"),
+        (direct_addr, MCP_TOKEN, &direct_session, "direct"),
+    ] {
+        let name = unique_name(&format!("metadata-create-{label}"));
+        let created = call_tool(
+            addr,
+            token,
+            session,
+            "nession_agent_create_session",
+            json!({ "agent_id": AGENT_ID, "name": name, "metadata": initial }),
+        )
+        .await;
+        assert_eq!(created["isError"], false, "{label}: {created}");
+        let created = text_of(&created);
+        assert_eq!(created["name"], name, "{label}");
+        assert_eq!(created["metadata"]["revision"], 1, "{label}: {created}");
+        assert_eq!(
+            created["metadata"]["title"], "OAuth implementation",
+            "{label}: {created}"
+        );
+        let instance = created["instance_id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("{label}: no instance identity: {created}"))
+            .to_string();
+        created_names.push((name, instance));
+    }
+
+    // Every host sees the committed record and its identity immediately.
+    for (addr, token, session, label) in [
+        (server_addr, SERVER_TOKEN, &server_session, "server"),
+        (agent_addr, AGENT_TOKEN, &agent_session, "agent"),
+        (routed_addr, MCP_TOKEN, &routed_session, "routed"),
+        (direct_addr, MCP_TOKEN, &direct_session, "direct"),
+    ] {
+        let listed = call_tool(
+            addr,
+            token,
+            session,
+            "nession_agent_list_sessions",
+            json!({ "agent_id": AGENT_ID }),
+        )
+        .await;
+        assert_eq!(listed["isError"], false, "{label}: {listed}");
+        let text = text_of(&listed);
+        let sessions = text["sessions"].as_array().expect("sessions");
+        for (name, instance) in &created_names {
+            let got = call_tool(
+                addr,
+                token,
+                session,
+                "nession_agent_get_session_metadata",
+                json!({ "agent_id": AGENT_ID, "name": name }),
+            )
+            .await;
+            assert_eq!(got["isError"], false, "{label}: {got}");
+            let record = text_of(&got);
+            assert_eq!(record["metadata"]["revision"], 1, "{label}: {record}");
+            assert_eq!(
+                record["metadata"]["title"], "OAuth implementation",
+                "{label}: {record}"
+            );
+            assert_eq!(
+                record["metadata"]["description"], "Goal: implement and validate the OAuth flow.",
+                "{label}: {record}"
+            );
+            assert_eq!(
+                record["metadata"]["tags"],
+                json!(["backend", "oauth"]),
+                "{label}: {record}"
+            );
+            assert_eq!(record["instance_id"], *instance, "{label}");
+
+            let summary = sessions
+                .iter()
+                .find(|entry| entry["name"] == *name)
+                .unwrap_or_else(|| panic!("{label}: created Session missing from {text}"));
+            assert_eq!(summary["metadata"]["state"], "available", "{label}");
+            assert_eq!(
+                summary["metadata"]["summary"]["revision"], 1,
+                "{label}: {summary}"
+            );
+            assert_eq!(
+                summary["metadata"]["summary"]["title"], "OAuth implementation",
+                "{label}: {summary}"
+            );
+            assert!(
+                summary["metadata"]["summary"].get("description").is_none(),
+                "{label}: the list summary never carries the description"
+            );
+        }
+    }
+
+    // An explicit target this direct host does not own is refused; nothing is
+    // created on the host Agent instead.
+    let refused = call_tool(
+        direct_addr,
+        MCP_TOKEN,
+        &direct_session,
+        "nession_agent_create_session",
+        json!({
+            "agent_id": "some-other-agent",
+            "name": unique_name("metadata-foreign"),
+            "metadata": initial
+        }),
+    )
+    .await;
+    assert_eq!(refused["isError"], true, "{refused}");
+    let real = shared_tmux.list_sessions().await.expect("real Agent list");
+    assert!(
+        !real.iter().any(|session| session
+            .name
+            .starts_with("nession-test-mcp-metadata-foreign")),
+        "a refused target must not create a Session on the host Agent"
+    );
+
+    for (name, _) in &created_names {
+        let killed = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_agent_kill_session",
+            json!({ "agent_id": AGENT_ID, "name": name }),
+        )
+        .await;
+        assert_eq!(killed["isError"], false, "{killed}");
+    }
+    terminate_and_wait(&mut routed.0).await;
+    terminate_and_wait(&mut direct.0).await;
+    let _ = server_client.shutdown().await;
+    let _ = agent_handle.shutdown().await;
+    server_task.abort();
+}
+
 /// SC-03: all three hosts serve one catalog, byte for byte.
 #[tokio::test]
 async fn all_three_hosts_share_one_tool_catalog() {

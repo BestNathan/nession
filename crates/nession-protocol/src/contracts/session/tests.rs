@@ -228,6 +228,7 @@ fn test_server_session_create_payload() {
         terminal_cols: None,
         sandbox: None,
         managed: None,
+        initial_metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -266,6 +267,8 @@ fn test_agent_command_response_payload() {
         error: None,
         session_name: Some("new-session".to_string()),
         sandbox: None,
+        instance_id: Some("instance-a".to_string()),
+        metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -282,6 +285,8 @@ fn test_agent_command_response_payload_failure() {
         error: Some("session already exists".to_string()),
         session_name: None,
         sandbox: None,
+        instance_id: None,
+        metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -301,6 +306,7 @@ fn test_client_session_create_payload() {
         sandbox: None,
         project_id: None,
         managed: None,
+        initial_metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -539,6 +545,8 @@ fn test_client_session_create_response_payload() {
         warnings: Vec::new(),
         project_id: None,
         sandbox: None,
+        instance_id: None,
+        metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreateResponsePayload = serde_json::from_str(&json).unwrap();
@@ -581,6 +589,98 @@ fn absent_metadata_is_revision_zero_and_old_payloads_stay_readable() {
     assert!(update.description.is_none());
     assert!(update.tags.is_empty());
     assert_eq!(update.expected_revision, 0);
+}
+
+#[test]
+fn initial_metadata_is_input_only_and_rejects_owner_written_fields() {
+    let parsed: SessionInitialMetadata = serde_json::from_value(serde_json::json!({
+        "title": " OAuth implementation ",
+        "description": null,
+        "tags": ["backend", "oauth"]
+    }))
+    .expect("a valid initial metadata object");
+    assert_eq!(parsed.title.as_deref(), Some(" OAuth implementation "));
+    assert!(parsed.description.is_none());
+    assert_eq!(parsed.tags, vec!["backend", "oauth"]);
+
+    for owner_written in [
+        serde_json::json!({ "revision": 3 }),
+        serde_json::json!({ "instance_id": "instance-a" }),
+        serde_json::json!({ "created_at": 1 }),
+        serde_json::json!({ "updated_at": 1 }),
+        serde_json::json!({ "name": "other" }),
+    ] {
+        assert!(
+            serde_json::from_value::<SessionInitialMetadata>(owner_written.clone()).is_err(),
+            "owner-written/unknown field must be refused: {owner_written}"
+        );
+    }
+}
+
+#[test]
+fn initial_metadata_uses_the_shared_normalization_and_bounds() {
+    let normalized = SessionInitialMetadata {
+        title: Some("  Release triage  ".to_string()),
+        description: Some("  Fix staging  ".to_string()),
+        tags: vec![" release ".to_string(), "Staging".to_string()],
+    }
+    .normalized()
+    .expect("valid values");
+    assert_eq!(normalized.title.as_deref(), Some("Release triage"));
+    assert_eq!(normalized.description.as_deref(), Some("Fix staging"));
+    assert_eq!(normalized.tags, vec!["release", "Staging"]);
+
+    let too_long = SessionInitialMetadata {
+        title: Some("x".repeat(SESSION_METADATA_TITLE_MAX_CHARS + 1)),
+        ..SessionInitialMetadata::default()
+    };
+    assert_eq!(
+        too_long.normalized().unwrap_err(),
+        SessionMetadataValidationError::TitleTooLong {
+            max: SESSION_METADATA_TITLE_MAX_CHARS
+        }
+    );
+    let duplicate = SessionInitialMetadata {
+        tags: vec!["same".to_string(), "SAME".to_string()],
+        ..SessionInitialMetadata::default()
+    };
+    assert_eq!(
+        duplicate.normalized().unwrap_err(),
+        SessionMetadataValidationError::DuplicateTag { index: 1 }
+    );
+    let empty_tag = SessionInitialMetadata {
+        tags: vec!["  ".to_string()],
+        ..SessionInitialMetadata::default()
+    };
+    assert_eq!(
+        empty_tag.normalized().unwrap_err(),
+        SessionMetadataValidationError::EmptyTag { index: 0 }
+    );
+}
+
+#[test]
+fn create_payloads_accept_initial_metadata_additively() {
+    // The field is absent for every pre-#4081 caller and round-trips when set.
+    let minimal = serde_json::json!({"name": "work"});
+    let direct: SessionCreatePayload = serde_json::from_value(minimal).unwrap();
+    assert!(direct.initial_metadata.is_none());
+    let web: WebSessionCreatePayload =
+        serde_json::from_value(serde_json::json!({"agent_id": "a", "name": "work"})).unwrap();
+    assert!(web.initial_metadata.is_none());
+
+    let metadata = serde_json::json!({
+        "title": "OAuth implementation",
+        "description": "Goal: implement and validate the OAuth flow.",
+        "tags": ["backend", "oauth"]
+    });
+    let direct: SessionCreatePayload = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "initial_metadata": metadata
+    }))
+    .unwrap();
+    let initial = direct.initial_metadata.expect("initial metadata");
+    assert_eq!(initial.title.as_deref(), Some("OAuth implementation"));
+    assert_eq!(initial.normalized().unwrap().tags.len(), 2);
 }
 
 #[test]

@@ -21,7 +21,9 @@ use nession_agent::session::metadata::SessionMetadataStore;
 use nession_agent::tmux::manager::SessionManager;
 use nession_agent::tmux::ops::TmuxDep;
 use nession_protocol::contracts::env::v1::{EnvFileRef, EnvSnapshot, EnvSource, SessionEnvProfile};
-use nession_protocol::contracts::session::v1::{SessionMetadataPatch, SessionMetadataPatchPayload};
+use nession_protocol::contracts::session::v1::{
+    SessionInitialMetadata, SessionMetadataPatch, SessionMetadataPatchPayload,
+};
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -161,6 +163,7 @@ async fn integration_session_create_and_kill() {
         terminal_cols: None,
         sandbox: None,
         managed: None,
+        initial_metadata: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let resp: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -245,6 +248,100 @@ async fn integration_session_create_env_snapshot_lands_in_tmux() {
         "the value was not passed to tmux as one argv value"
     );
 
+    handle.shutdown().await.ok();
+}
+
+/// #4081: invalid initial work context is refused before any Session side
+/// effect. The refused attempt created nothing, which the same name being
+/// creatable immediately afterwards proves through the real P2P route.
+#[tokio::test]
+async fn integration_session_create_rejects_invalid_initial_metadata_before_side_effects() {
+    use std::time::Duration;
+
+    let (addr, handle, auth) = start_server(0).await.unwrap();
+    let (mut sink, mut stream) = connect(&auth, addr).await.unwrap();
+
+    let session = TestSession::new("initial-metadata-invalid");
+    let name = session.name().to_string();
+    let refused = new_message(
+        msg_types::SESSION_CREATE,
+        SessionCreatePayload {
+            name: name.clone(),
+            width: 80,
+            height: 24,
+            working_dir: None,
+            env_snapshots: Vec::new(),
+            binding_profiles: Vec::new(),
+            binding_revision: None,
+            terminal_cols: None,
+            sandbox: None,
+            managed: None,
+            initial_metadata: Some(SessionInitialMetadata {
+                title: Some("x".repeat(121)),
+                ..SessionInitialMetadata::default()
+            }),
+        },
+    );
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&refused).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the create with invalid initial metadata");
+    let answered = answer_for(&mut stream, &refused.id, Duration::from_secs(30))
+        .await
+        .expect("the refusal was never answered");
+    assert_eq!(
+        answered["msg_type"],
+        serde_json::json!(msg_types::ERROR),
+        "invalid initial metadata must be refused before the create: {answered}"
+    );
+    assert_eq!(
+        answered["payload"]["code"],
+        serde_json::json!("invalid_metadata"),
+        "{answered}"
+    );
+    assert!(
+        answered["payload"]["message"]
+            .as_str()
+            .unwrap_or("")
+            .contains("title must be at most 120 characters"),
+        "the refusal names the shared bound: {answered}"
+    );
+
+    // No Session was created by the refused attempt: the same name succeeds
+    // immediately, with the no-metadata default record.
+    let retry = new_message(
+        msg_types::SESSION_CREATE,
+        SessionCreatePayload {
+            name: name.clone(),
+            width: 80,
+            height: 24,
+            working_dir: None,
+            env_snapshots: Vec::new(),
+            binding_profiles: Vec::new(),
+            binding_revision: None,
+            terminal_cols: None,
+            sandbox: None,
+            managed: None,
+            initial_metadata: None,
+        },
+    );
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&retry).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the retry");
+    let answered = answer_for(&mut stream, &retry.id, Duration::from_secs(30))
+        .await
+        .expect("the retry was never answered");
+    assert_eq!(
+        answered["msg_type"],
+        serde_json::json!(msg_types::OK),
+        "the refused attempt left no Session behind: {answered}"
+    );
+
+    // Leave no fixture Session on the shared test socket.
+    SessionManager::new().kill_session(&name).await.ok();
     handle.shutdown().await.ok();
 }
 
@@ -716,6 +813,7 @@ async fn integration_attach_detach_churn_keeps_the_binding() {
             terminal_cols: None,
             sandbox: None,
             managed: None,
+            initial_metadata: None,
         },
     );
     let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -851,6 +949,7 @@ async fn integration_new_session_uses_configured_columns_and_clamps_resize() {
         terminal_cols: None,
         sandbox: None,
         managed: None,
+        initial_metadata: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -1104,6 +1203,7 @@ async fn integration_standalone_agent_uses_its_configured_columns() {
         terminal_cols: None,
         sandbox: None,
         managed: None,
+        initial_metadata: None,
     };
     let req = new_message(msg_types::SESSION_CREATE, create);
     let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -1211,6 +1311,7 @@ async fn shared_agent_keeps_independent_session_widths() {
             terminal_cols,
             sandbox: None,
             managed: None,
+            initial_metadata: None,
         };
         let req = new_message(msg_types::SESSION_CREATE, create);
         let created: nession_agent::server::websocket::Message<SessionCreateResponse> =
@@ -1410,6 +1511,7 @@ async fn configured_width_survives_shared_server_flood_and_attach() {
             terminal_cols: None,
             sandbox: None,
             managed: None,
+            initial_metadata: None,
         };
         let req = new_message(msg_types::SESSION_CREATE, create);
         let created: nession_agent::server::websocket::Message<serde_json::Value> =
@@ -2942,6 +3044,7 @@ async fn integration_web_ui_session_create() {
         working_dir: None,
         terminal_cols: None,
         sandbox: None,
+        initial_metadata: None,
     };
     let req = new_message(msg_types::CLIENT_SESSION_CREATE, payload);
     let resp: nession_agent::server::websocket::Message<WebSessionCreateResponse> =

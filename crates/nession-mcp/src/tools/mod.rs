@@ -113,8 +113,8 @@ pub(crate) mod test_support {
         ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
         ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
         ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-        SessionKillResponse, SessionMetadataPatchPayload, SessionMetadataResponse,
-        WebSessionsListResponse,
+        SessionInitialMetadata, SessionKillResponse, SessionMetadataPatchPayload,
+        SessionMetadataResponse, WebSessionsListResponse,
     };
 
     /// What one Tool call asked the backend for.
@@ -133,7 +133,12 @@ pub(crate) mod test_support {
         BindingSet(String, u64, Vec<EnvFileRef>),
         BindingReapply(String, u64),
         ListSessions(String),
-        CreateSession(String, String, Option<String>),
+        CreateSession(
+            String,
+            String,
+            Option<String>,
+            Option<SessionInitialMetadata>,
+        ),
         KillSession(String, String),
         GetSessionMetadata(String, String),
         UpdateSessionMetadata(String, SessionMetadataPatchPayload),
@@ -453,6 +458,7 @@ pub(crate) mod test_support {
             agent_id: &str,
             name: &str,
             working_dir: Option<&str>,
+            initial_metadata: Option<&SessionInitialMetadata>,
         ) -> Result<SessionCreatedOutput, ToolError> {
             self.calls
                 .lock()
@@ -461,9 +467,25 @@ pub(crate) mod test_support {
                     agent_id.to_string(),
                     name.to_string(),
                     working_dir.map(str::to_owned),
+                    initial_metadata.cloned(),
                 ));
-            serde_json::from_value(json!({ "name": name, "warnings": [] }))
-                .map_err(|error| ToolError::backend(error.to_string()))
+            let metadata = initial_metadata.map(|metadata| {
+                json!({
+                    "revision": 1,
+                    "title": metadata.title,
+                    "description": metadata.description,
+                    "tags": metadata.tags,
+                    "created_at": 1,
+                    "updated_at": 1,
+                })
+            });
+            serde_json::from_value(json!({
+                "name": name,
+                "warnings": [],
+                "instance_id": initial_metadata.map(|_| "instance-fixture"),
+                "metadata": metadata,
+            }))
+            .map_err(|error| ToolError::backend(error.to_string()))
         }
 
         async fn kill_session(
