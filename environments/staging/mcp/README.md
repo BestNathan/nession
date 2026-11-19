@@ -1,175 +1,130 @@
-# Staging-only standalone Nession MCP (#3902)
+# Staging standalone MCP GitOps desired state (#3902, #3914)
 
-This is a **separate Argo CD Application** (`nession-mcp-staging`) and a
-single stateless Deployment/ClusterIP Service (`nession-mcp-staging`) in the
-shared `nession` namespace. The Higress HTTPS Ingress manifest for
-`https://staging-mcp-nession.bestnathan.top/mcp` is included in the
-staging MCP Kustomization (#3945). It is an Exact `/mcp` HTTPS route to
-`nession-mcp-staging:9090`, not a catch-all. Its presence in desired state
-does **not** prove the live Ingress, TLS Secret, Host allowlist, source
-Nginx-to-Higress forwarding, or external MCP authentication is working.
-HTTP must redirect to HTTPS before credentialed traffic is used.
-The previously deployed Kubernetes certificate was self-signed and issued for
-`staging.mcp.nession.bestnathan.top`, which does NOT cover the new hostname. Both the public
-Host allowlist and certificate must be replaced via protected Secrets before
-reactivating this Ingress. Ordinary clients must receive a trusted TLS chain.
-Never disable certificate verification to make a bearer-authenticated MCP
-client connect. A staged manifest is not evidence that DNS, externally trusted
-TLS, HTTP redirect, or authenticated MCP requests have passed live tests.
-Production, preprod, and staging-01 are unchanged.
-This service is not the embedded `/mcp` route inside Server/Agent containers.
+This overlay owns the independent MCP Deployment, Service and staging HTTPS
+Ingress, not the embedded Server/Agent MCP endpoint. The public route is
+`https://staging-mcp-nession.bestnathan.top/mcp` with an Exact `/mcp`
+path through Higress to the MCP Service (9090). Its existence in GitOps does
+not prove that Cloudflare → origin Nginx → Kubernetes/Higress forwarding,
+Cloudflare Full (strict) origin TLS, HTTP redirect, and actual authenticated
+Streamable HTTP requests have passed. A 404 from the operator's origin Nginx
+is not a positive MCP endpoint test (#3945).
 
-## Image and version contract
+## Config ownership: GitOps only (user decision 2026-11-19)
 
-`scripts/gitops-commit.sh staging <short-sha>` (main source) verifies all
-four ACR OCI indices (`server`, `agent`, `ui`, `mcp`) support linux/amd64
-and linux/arm64, then changes this overlay's `mcp-<short-sha>` and
-`environments/staging/nession`'s three image tags in **one GitOps commit**.
-The independent Argo apps reconcile separately, so the same desired source
-revision does not guarantee simultaneous *runtime* readiness. Inspect both.
+`mcp.toml` is a checked-in, **nonsecret** file under this directory. Its
+settings include bind address, `/mcp`, Host/Origin policies, Query Token
+switch, and the internal staging Server WebSocket endpoint
+`ws://nession-server-staging:18080`. There is **no GitHub Environment Variable
+for MCP TOML** and no `${VARIABLE}` substitution.
 
-## Encrypted MCP configuration via GitHub Environments (#3912 / PR #3913)
+`kustomization.yaml` uses `configMapGenerator` to produce the read-only
+ConfigMap `nession-mcp-settings-<content-hash>` from `mcp.toml`, and
+automatically rewrites the Deployment's ConfigMap volume reference. A checked-in
+config change changes the generated name / pod template and rolls MCP to
+consume it. The fixed file mount is `/etc/nession/mcp.toml`.
 
-The GitHub Environment is **`staging`**, matching
-`gitops/environments/staging` exactly. It holds independent GitHub Secrets
-for this environment. The operator provides **`MCP_CONFIG_TOML`** as one
-Environment Secret whose value is the complete **raw `mcp.toml` text**,
-not JSON/base64 or a bundle. The repository variable
-`SEALED_SECRETS_CERT_PEM` contains the controller's **public X.509 RSA
-certificate PEM** (not the SSH public key used by Argo CD, and never the
-controller private key). See `docs/engineering/sealed-secret-generation.md`
-on `main`.
+### Secrets are the only separate inputs
 
-The main-owned `Deploy / Seal GitOps Secret` workflow already exists and
-has successfully published both encrypted resources to this overlay. For the
-new hostname, after the source registry update is merged to `main`, edit
-the existing private `staging/MCP_CONFIG_TOML` and
-`staging/MCP_TLS_PEM_BUNDLE` GitHub Environment Secrets independently, and
-run the workflow manually once per selected target to reseal their content.
-The existing Sealed Secrets Controller generates the ordinary Kubernetes
-Secrets `nession-mcp-config-staging` (key `mcp.toml`) and
-`nession-mcp-staging-tls` (keys `tls.crt`/`tls.key`). No workflow
-Kubernetes credentials or controller private key are required. The main-push
-bootstrap of the producer **only** seals `MCP_CONFIG_TOML` and cannot replace
-the required manual PEM/TLS rotation.
+| Process env | Kubernetes Secret / key | Operator source |
+|---|---|---|
+| `NESSION_MCP_INBOUND_TOKEN` | `nession-mcp-inbound-staging/token` | GitHub Environment **Secret** `staging/NESSION_MCP_INBOUND_TOKEN`, sealed into `sealed-inbound.json` |
+| `NESSION_MCP_BACKEND_SERVER_TOKEN` | `nession-mcp-backend-server-staging/token` | GitHub Environment **Secret** `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`, sealed into `sealed-backend-server.json` |
 
-Start from the checked-in `mcp.example.toml`; set separate nonempty inbound
-and staging Server backend tokens. The Server credential must be **rotated**
-if it is the existing credential previously committed in plain text. The
-config must bind `0.0.0.0:9090`, explicitly allow the public Host, and use
-`ws://nession-server-staging:18080` as the backend URL. Browser Origins
-remain refused by default. Missing/invalid config fails closed; never commit
-either token or place it in a ConfigMap.
+Both `secretKeyRef` fields are required (`optional: false`); missing
+credentials block Pod startup rather than enabling anonymous access.
+The two MCP credentials are separate. The backend Server credential must
+equal the value of the staging Server/Agent canonical auth token; this
+standalone MCP Secret is an independent Kubernetes object, **not** a second
+Server identity. Provision/rotate consistently, otherwise MCP tool calls fail.
+Historical `MCP_CONFIG_TOML` Environment Secret and the encrypted legacy
+`sealed-secret.json` remain only for rollback until new runtime validation
+succeeds; the former is NOT a config source for the new Deployment.
 
-## Public HTTPS MCP entry point (operator prerequisites)
+The existing staging Server token was previously committed in plaintext under
+`base/nession/secret.yaml`, so it is security debt; rotate it in a coordinated
+Server + Agent + MCP migration. This GitOps change does not replace it or
+silently switch Server/Agent credentials. Injected environment Secrets require
+MCP Pod restart after rotation.
 
-The staging-only Ingress (declared in the Kustomization, subject to Argo reconciliation) is
-`nession-mcp-staging`, with
-`ingressClassName: higress` and the single **Exact** path `/mcp` mapped to
-the MCP Service port 9090. The supported external endpoint is:
+## Safe cutover prerequisites and order
 
-```text
-https://staging-mcp-nession.bestnathan.top/mcp
-```
+1. Merge the independently reviewed **main** Secret publisher PR, which
+   registers exactly `staging/NESSION_MCP_INBOUND_TOKEN` and
+   `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`. Confirm a staging MCP image
+   built from a SHA containing the env-credential loader (#3950) and standalone
+   Query Token implementation (#3995) is source-pinned and available in GHCR for amd64 and arm64. The
+   historical running ACR tag `mcp-4774f3e` includes both implementations in
+   its corresponding source, but rollout must follow the canonical GHCR writer.
+2. Set two GitHub **Environment Secrets**:
+   `staging/NESSION_MCP_INBOUND_TOKEN` to a strong, independently generated raw
+   token; `staging/NESSION_MCP_BACKEND_SERVER_TOKEN` to the **exact current**
+   staging Server/Agent auth token value. Do not provide either as a repository
+   Variable, JSON envelope, issue comment or GitOps file. The main-owned
+   `Deploy / Seal GitOps Secret` workflow is manual-only, accepts only these
+   environment-only input and encrypts the entire required Secret set in
+   one invocation. The registered staging set contains these two names;
+   any missing/invalid required value fails the entire run without publishing
+   a partial GitOps change.
+   `SEALED_SECRETS_CERT_PEM` is the controller's existing public X.509
+   certificate and NOT a credential.
+3. Dispatch **Deploy / Seal GitOps Secret once**, choosing only the
+   `staging` environment. It validates **both** required Secrets before
+   sealing. It produces `sealed-inbound.json` and
+   `sealed-backend-server.json`, and commits both along with their
+   Kustomization registration in **one atomic GitOps commit**. Missing or
+   invalid input or either malformed sealed output fails the whole run.
+   Verify Argo CD reconciles both exact Kubernetes Secrets
+   `nession-mcp-inbound-staging/token` and
+   `nession-mcp-backend-server-staging/token`. If a concurrent change
+   updates Kustomization, reconcile this draft PR against the latest GitOps
+   HEAD before merging.
+4. **Do not enable URL credentials during this cutover.** The checked-in
+   `mcp.toml` explicitly sets `allow_query_token = false`. Public Bearer
+   authentication stays mandatory; this phase is not a usable ChatGPT
+   `No authentication` URL. A future separately reviewed change may set the
+   flag to `true` only after Cloudflare/Higress/origin Nginx request logs and
+   security event logs are proven to omit/redact query strings, and external
+   HTTPS redirect and TLS trust are verified. Do not place real tokens into
+   GitOps, command arguments, curl URLs, Issues or artifacts.
+5. Only then merge this desired-state PR to `gitops`. Argo CD mounts the
+   generated ConfigMap and injects **both** independently sealed Secrets into
+   the MCP Pod. Confirm the
+   published GHCR MCP tag is source-verified, the Deployment becomes Ready,
+   and authenticated `POST /mcp` initializes using `Authorization: Bearer`.
+   Missing/invalid credentials must be rejected, including `?token=...` while
+   URL authentication is disabled. Call `tools/list` and a safe read-only
+   Server Tool. A TCP probe or public unauthenticated GET/401 alone is
+   insufficient. Do not assume live acceptance from a GitOps merge.
+6. After live acceptance, explicitly retire the unused legacy config Secret
+   and old GitHub `MCP_CONFIG_TOML` entry; do not remove rollback resources
+   before proving the new credential path. Query-token mode is an
+   accommodation for headerless clients, not OAuth.
 
-**Before reactivating the public MCP endpoint (GitOps config alone is NOT sufficient):**
+## Version, rotation and rollback
 
-1. In Cloudflare's `bestnathan.top` zone create/verify the **first-level**
-   proxied record (one DNS label `staging-mcp-nession`) and its matching
-   active Cloudflare **Edge certificate**; confirm Cloudflare → Higress
-   **Origin TLS** certificate trust under Full (strict) before forwarding
-   authenticated MCP traffic. Create/verify the public DNS A/AAAA/CNAME record
-   `staging-mcp-nession.bestnathan.top` pointing to the externally reachable
-   **Higress gateway**. A GitOps Ingress manifest does not create public DNS.
-2. Provision a **new** valid TLS certificate with SAN
-   `staging-mcp-nession.bestnathan.top` and its matching private key.
-   **Use the reviewed SealedSecret workflow**, not plaintext `kubectl create
-   secret`, when GitOps owns this Secret. First reconcile any existing
-   cert-manager/Higress/nitops owner of that exact name to avoid two writers.
-   Once the #3945 registered-hostname change is merged to main, put the
-   renewed PEM bundle (leaf, ordered intermediates, then matching unencrypted private key) into GitHub
-   Environment `staging` Secret `MCP_TLS_PEM_BUNDLE`, and manually run
-   `Deploy / Seal GitOps Secret` selecting `staging/MCP_TLS_PEM_BUNDLE`.
-   Use a publicly trusted certificate, or a Cloudflare Origin CA certificate
-   if the origin is reached only through Cloudflare and Full (strict).
-   That produces encrypted `sealed-tls.json` in this overlay and instructs
-   the Sealed Secrets controller to create a `kubernetes.io/tls` Secret
-   `nession/nession-mcp-staging-tls` with `tls.crt` + `tls.key`.
-   See `docs/engineering/sealed-secret-generation.md` on main for validation,
-   rotation and expiration requirements. The key never enters plaintext Git.
-3. Update the existing **private GitHub Environment** `MCP_CONFIG_TOML`
-   so `[mcp].allowed_hosts` contains the new hostname but NOT the old name,
-   retaining internal Kubernetes Service hosts and distinct inbound/outbound
-   bearer tokens; re-run `Deploy / Seal GitOps Secret` selecting
-   `staging/MCP_CONFIG_TOML`. The repo's `mcp.example.toml` documents the
-   allowed hosts. Verify **both** Kubernetes Secrets exist after Argo CD/
-   Sealed Secrets reconcile: `nession-mcp-config-staging` and
-   `nession-mcp-staging-tls`. Verify actual TLS SAN and that the running
-   pod sees the new config; reload/restart the Deployment if necessary.
-   Verify DNS, external Edge HTTPS trust, and origin TLS independently.
-   Host allowlist must include the public
-   hostname, and inbound/outbound bearer tokens must differ.
-4. **Activation / live verification:** `ingress.yaml` is now declared by
-   `kustomization.yaml` in a separately reviewed GitOps activation (#3945).
-   Verify that Argo reconciles the real Higress Ingress, that its TLS
-   Secret serves the exact new SAN, and that DNS resolves publicly.
-   The external origin Nginx-to-K8s/Higress forwarding is independently
-   configured by the operator; until then an Nginx 404 is expected and
-   must not be mistaken for an MCP 404. Verify Cloudflare Full (strict)
-   origin trust, HTTPS redirect, and Host policy before credentialed use.
-   Roll back the GitOps activation if a prerequisite fails.
-   MCP itself speaks plain HTTP **inside the cluster** behind TLS termination.
-   For query-token clients, first deploy the merged standalone query-token
-   implementation to the actual staging MCP image, and set
-   `[mcp].allow_query_token = true` in the **protected** `MCP_CONFIG_TOML`
-   before re-sealing it; the checked-in example is not live configuration.
-   Higress's default access log `path` can include query parameters.
-   Redact query parameters in **both** Higress gateway access logs and
-   the external origin Nginx/proxy logs before enabling URL tokens.
-   Do not include a real token in curl examples, Issues, PRs or logs.
+`scripts/gitops-commit.sh staging <short-sha>` is the source-owned release
+writer for image tag advancement. It verifies all four GHCR image indices
+(server/agent/ui/mcp) for amd64 and arm64 and updates their tags in one
+GitOps commit. Do not patch image tags or build images manually to bypass it.
 
-5. Do not enable permissive CORS or anonymous MCP calls to make clients work.
-   `allowed_origins = []` rejects browser Origins by default; native MCP
-   clients can call it with `Authorization: Bearer <inbound-token>`.
+Re-running the trusted Secret publisher reseals **both** registered
+credentials in one commit even if only one Secret value changed.
+A SealedSecret update does **not** automatically restart pods consuming
+a Secret via environment variables. Trigger a
+controlled MCP rollout after rotating the inbound token. Coordinate Server
+token changes across all three workloads. To roll back configuration,
+revert the reviewed GitOps desired-state merge or use a previously verified
+image/Secret configuration; never publish a real token in history.
 
-After Argo CD sync, verify from a **machine outside** the cluster:
+Read-only verification commands:
 
 ```sh
-# HTTP redirects to HTTPS, never serves MCP content directly.
-curl -sS -I http://staging-mcp-nession.bestnathan.top/mcp
-
-# Check real TLS trust chain and endpoint auth refusal (no -k).
-curl -si https://staging-mcp-nession.bestnathan.top/mcp
-# Expect HTTP 401 without Authorization (not 200 or HTML).
-
-# With the private inbound token, use an MCP client to send
-# initialize and tools/list over the same HTTPS endpoint, and call
-# a safe read-only Tool against the staging Server.
-```
-
-A green TCP probe only proves local listener health, **not** public DNS,
-gateway TLS, authentication, external client reachability, or backend health.
-Live external handshake/readback is a separate deployment acceptance check,
-not an assumption from a PR merge or Argo CD Synced status.
-
-## Verification and rollback
-
-Read-only resource checks (do not print full TLS Secret YAML, which exposes
-base64-decodable private key material):
-
-```sh
-kubectl -n nession get sealedsecret nession-mcp-staging-tls
-kubectl -n nession get secret nession-mcp-staging-tls -o jsonpath='{.type}{"\\n"}'
-kubectl -n nession rollout status deployment/nession-mcp-staging
+kubectl -n nession get sealedsecret nession-mcp-inbound-staging
+kubectl -n nession get secret nession-mcp-inbound-staging -o jsonpath='{.type}{"\\n"}'
+kubectl -n nession get sealedsecret nession-mcp-backend-server-staging
+kubectl -n nession get secret nession-mcp-backend-server-staging -o jsonpath='{.type}{"\\n"}'
 kubectl -n nession get deploy/nession-mcp-staging svc/nession-mcp-staging
-kubectl -n nession port-forward service/nession-mcp-staging 9090:9090
+kubectl -n nession rollout status deployment/nession-mcp-staging
 ```
 
-Authenticate an MCP client at `http://localhost:9090/mcp` using the inbound
-token; verify `tools/list` and a safe read through the staging Server.
-Do not treat a TCP readiness pass as proof that remote Server tools work.
-
-For rollback, revert the relevant GitOps desired-state commit or pin a
-previous published staging SHA through the trusted deployment writer; never
-retag/rebuild images by hand. The MCP app can also be rolled back independently,
-but doing so temporarily breaks its same-SHA desired-state alignment.
+Do not print the Secret data, token-bearing request URL or full TLS Secret.

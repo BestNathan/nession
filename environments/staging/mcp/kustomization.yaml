@@ -21,6 +21,13 @@ resources:
   - service.yaml
   - ingress.yaml
 
+# Non-secret standalone MCP config lives only in this GitOps source file.
+# Keep the default Kustomize content hash so config edits roll the MCP Pod.
+configMapGenerator:
+- name: nession-mcp-settings
+  files:
+  - mcp.toml
+
 images:
 - name: ghcr.io/bestnathan/nession-mcp
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
