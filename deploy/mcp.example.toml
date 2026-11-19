@@ -19,6 +19,14 @@ listen_address = "0.0.0.0:9090"
 # the inbound endpoint verifies and it is never forwarded to a backend.
 auth_token = ""
 
+# Optional (default false): permit ?token=<URL-encoded MCP inbound token> for
+# MCP clients that cannot supply Authorization headers. This is still an
+# authenticated endpoint, using exactly the same [mcp].auth_token verifier.
+# URL query credentials can leak through ingress access logs, browser history,
+# copied links and client connection configuration. Use HTTPS and configure
+# EVERY reverse proxy/edge to omit or redact query strings in logs.
+# allow_query_token = true
+
 # The authorities (Host header values) this endpoint accepts. Keep this
 # explicit for any public ingress; add the ingress DNS name here.
 allowed_hosts = ["mcp.example.com"]
