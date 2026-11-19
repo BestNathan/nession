@@ -75,7 +75,7 @@ const RAW_SPACING_RE = new RegExp(
   'g',
 );
 const RAW_CALC_LENGTH_RE = new RegExp(
-  `(?<![\\w-])${SPACING_PREFIX}-\\[[^\\]\\n]*?(?:\\d+(?:\\.\\d+)?)(?:px|rem|em|vh|vw|dvh|%)\\b[^\\]\\n]*?\\]`,
+  `(?<![\\w-])${SPACING_PREFIX}-\\[(?:calc|clamp|min|max)\\([^\\]\\n]*?\\d+(?:\\.\\d+)?(?:px|rem|em|vh|vw|dvh|%)[^\\]\\n]*?\\]`,
   'g',
 );
 const RAW_INLINE_VISUAL_RE =
