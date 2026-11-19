@@ -57,8 +57,13 @@ export function assessChangedPaths(paths) {
     // even though it could not affect E2E (#2478). The root `AGENTS.md` is the
     // same kind of instruction metadata and was the remaining omission. Root
     // ignore rules are the same kind of repository metadata and cannot affect
-    // a browser runtime.
-    if (/^(docs\/|\.claude\/|\.gitignore$|AGENTS\.md$|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$)/.test(p)) continue;
+    // a browser runtime. The actionlint configuration is repository CI lint
+    // tooling of that same kind: it cannot affect a browser runtime, and
+    // leaving it unknown refused a clean main→staging merge at the trusted
+    // E2E selection step (#3983). The exception is the exact file, not a
+    // `.github/*.yaml` glob: other GitHub configuration can be deploy or
+    // governance input and must stay fail-closed.
+    if (/^(docs\/|\.claude\/|\.gitignore$|AGENTS\.md$|README\.md$|CHANGELOG\.md$|\.github\/[^/]+\.md$|\.github\/actionlint\.yaml$)/.test(p)) continue;
     if (/^crates\/nession-(agent|server|protocol|common)\//.test(p)) {
       components.add('agent-server-protocol');
     } else if (/^web\//.test(p)) {
@@ -204,6 +209,26 @@ function selfTest() {
   assert.equal(assessChangedPaths(['.gitignore']).needsAudit, false);
   assert.deepEqual(assessChangedPaths(['.gitignore']).components, []);
   assert.equal(assessChangedPaths(['.gitignore']).floor, VERIFICATION_TIERS[0]);
+  // Repository CI lint configuration is tooling, not a runtime/build input.
+  assert.equal(assessChangedPaths(['.github/actionlint.yaml']).needsAudit, false);
+  assert.deepEqual(assessChangedPaths(['.github/actionlint.yaml']).components, []);
+  assert.equal(assessChangedPaths(['.github/actionlint.yaml']).floor, VERIFICATION_TIERS[0]);
+  assert.deepEqual(
+    assessChangedPaths([
+      '.github/actionlint.yaml',
+      'web/src/App.tsx',
+      'e2e/tests/browser/login.spec.ts',
+    ]),
+    {
+      floor: VERIFICATION_TIERS[1],
+      reasons: ['cross-component-diff'],
+      components: ['e2e', 'web'],
+      needsAudit: false,
+    },
+  );
+  // The exception is the exact actionlint file; other .github YAML stays
+  // fail-closed because it can be deployment or governance input.
+  assert.equal(assessChangedPaths(['.github/unknown.yaml']).needsAudit, true);
   // Non-documentation governance files still fail closed.
   assert.equal(assessChangedPaths(['.github/CODEOWNERS']).needsAudit, true);
   assert.equal(assessChangedPaths(['.github/ISSUE_TEMPLATE/bug.md']).needsAudit, true);
