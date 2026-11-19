@@ -19,6 +19,13 @@ import {renderReviewPrompt,reviewModelResult} from '../tasks/review.mjs';
 const REPO='BestNathan/nession',ISSUE=3001,MAIN='a'.repeat(40);
 const HEAD='b'.repeat(40),TREE='c'.repeat(40),BLOB='d'.repeat(40);
 const CP='e'.repeat(40),HASH='f'.repeat(64);
+// #4040: Qwen Reviewer demands independently fetched, bounded Issue criteria.
+const CRITERIA=[{id:'SC-01',text:'Reject Composite in every role before Workspace allocation'},
+  {id:'SC-02',text:'Retain single-image preparation and require negative test fixtures'}];
+const ISSUE_RECORD={number:ISSUE,state:'open',
+  repository_url:'https://api.github.com/repos/'+REPO,
+  body:['## Success Criteria','- [ ] SC-01 '+CRITERIA[0].text,
+    '- [ ] SC-02 '+CRITERIA[1].text,'','## Acceptance Report'].join('\n')};
 const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
 const initial=startDevelopment(registry,{
   issue:ISSUE,sha:MAIN,developer:'dev-qwen-01',
@@ -68,7 +75,8 @@ const tree={sha:TREE,truncated:false,tree:files.map(f=>({
 const baseFiles=[{path:'src/a.ts',content:'base a\n'},
   {path:'docs/b.md',content:'base b\n'}];
 const good={state:published,intent,publisherRun,pullRequests:[pr],pr,
-  ref,commit,files,tree,actionId:reviewerAction,base_files:baseFiles};
+  ref,commit,files,tree,actionId:reviewerAction,base_files:baseFiles,
+  issue_criteria:CRITERIA};
 const make=delta=>admitQwenPublishedReview({...good,...delta});
 const accepted=make({});
 const botPublisherRun={...publisherRun,event:'workflow_dispatch',
@@ -81,6 +89,11 @@ const botAccepted=make({publisherRun:botPublisherRun});
 assert.equal(botAccepted.target_sha,HEAD);
 assert.deepEqual(botAccepted,accepted);
 assert.equal(accepted.issue,ISSUE);
+assert.deepEqual(accepted.issue_criteria,CRITERIA);
+assert.match(accepted.issue_criteria_sha256,/^[a-f0-9]{64}$/);
+assert.throws(()=>assertReviewerAdmission({...accepted,issue_criteria:[]}),/Qwen Reviewer admission/);
+assert.throws(()=>assertReviewerAdmission({...accepted,
+  issue_criteria:[...CRITERIA,{id:'SC-01',text:'duplicate'}]}),/Qwen Reviewer admission/);
 assert.equal(accepted.review_action_id,reviewerAction);
 assert.deepEqual(accepted.expected_files.map(x=>x.path),
   ['docs/b.md','src/a.ts']);
@@ -165,7 +178,7 @@ const commitB={sha:SHA_B,parents:[{sha:HEAD}],tree:{sha:TREE}};
 const repairAdmission=admitQwenRepairPublishedReview({
   state:repairPublished,intent:repairIntent,publisherRun:repairPublisherRun,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
-  actionId:REPAIR_ACTION});
+  actionId:REPAIR_ACTION,issue_criteria:CRITERIA});
 assert.equal(repairAdmission.target_sha,SHA_B);
 assert.equal(repairAdmission.base_sha_at_publication,MAIN);
 assert.equal(repairAdmission.publisher_run_id,REPAIR_RUN);
@@ -175,7 +188,7 @@ const botRepairPublisher={...repairPublisherRun,event:'workflow_dispatch',
 assert.equal(admitQwenRepairPublishedReview({
   state:repairPublished,intent:repairIntent,publisherRun:botRepairPublisher,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
-  actionId:REPAIR_ACTION,
+  actionId:REPAIR_ACTION,issue_criteria:CRITERIA,
 }).target_sha,SHA_B);
 for(const bad of [
   {publisherRun:{...botRepairPublisher,actor:{login:'BestNathan'}}},
@@ -189,7 +202,7 @@ for(const bad of [
 ])assert.throws(()=>admitQwenRepairPublishedReview({
   state:repairPublished,intent:repairIntent,publisherRun:repairPublisherRun,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
-  actionId:REPAIR_ACTION,...bad}),/Qwen Reviewer admission|Repair/);
+  actionId:REPAIR_ACTION,issue_criteria:CRITERIA,...bad}),/Qwen Reviewer admission|Repair/);
 // A failed original PR-B writer can be reconciled by a distinct successful
 // main-owned Publisher Run; the signed Store transition binds both IDs.
 const recoveredRunId=REPAIR_RUN+1;
@@ -206,7 +219,7 @@ const recoveredAdmission=admitQwenRepairPublishedReview({
   state:recoveredPublished,intent:repairIntent,
   publisherRun:recoveredPublisherRun,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
-  actionId:REPAIR_ACTION});
+  actionId:REPAIR_ACTION,issue_criteria:CRITERIA});
 assert.equal(recoveredAdmission.publisher_run_id,recoveredRunId);
 assert.equal(recoveredAdmission.publisher_intent_sha256,
   repairAdmission.publisher_intent_sha256);
@@ -228,7 +241,7 @@ for(const bad of [
   state:recoveredPublished,intent:repairIntent,
   publisherRun:recoveredPublisherRun,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
-  actionId:REPAIR_ACTION,...bad}),/Qwen Reviewer admission|Repair|agent outbox/);
+  actionId:REPAIR_ACTION,issue_criteria:CRITERIA,...bad}),/Qwen Reviewer admission|Repair|agent outbox/);
 
 console.log('Qwen Reviewer repair: SHA A parent, repair Publisher/outbox, SHA B admission and negatives pass');
 
@@ -251,6 +264,7 @@ try{
     ['git/commits/'+HEAD]:commit,
     ['pulls/541/files?per_page=100']:files,
     ['git/trees/'+TREE+'?recursive=1']:tree,
+    ['issues/'+ISSUE]:ISSUE_RECORD,
     ['contents/src/a.ts?ref='+MAIN]:{encoding:'base64',
       content:Buffer.from('base a\n').toString('base64')},
     ['contents/docs/b.md?ref='+MAIN]:{encoding:'base64',
