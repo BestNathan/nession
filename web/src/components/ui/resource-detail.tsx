@@ -34,7 +34,7 @@ export function DetailSurface({ className, ...props }: React.ComponentProps<'div
     <div
       data-recipe="resource-detail"
       data-recipe-part="detail-surface"
-      className={cn('flex w-full min-w-0 flex-col gap-5', className)}
+      className={cn('flex w-full min-w-0 flex-col gap-[var(--nession-rhythm-section-stack)]', className)}
       {...props}
     />
   );
@@ -79,7 +79,7 @@ export function DetailHeader({
     <header
       data-recipe-part="detail-header"
       data-testid={testId}
-      className={cn('flex min-w-0 flex-col gap-2', className)}
+      className={cn('flex min-w-0 flex-col gap-[var(--nession-rhythm-section-content)]', className)}
     >
       {eyebrow ? (
         <p
@@ -90,9 +90,9 @@ export function DetailHeader({
         </p>
       ) : null}
       <div className="flex min-w-0 items-start justify-between gap-3">
-        <div className="flex min-w-0 flex-1 flex-col gap-1">
+        <div className="flex min-w-0 flex-1 flex-col gap-[var(--nession-rhythm-text-stack)]">
           {title !== undefined ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <div className="flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]">
               <Heading
                 id={titleId}
                 data-recipe-part="detail-title"
@@ -104,7 +104,7 @@ export function DetailHeader({
               {badges}
             </div>
           ) : badges ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">{badges}</div>
+            <div className="flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]">{badges}</div>
           ) : null}
           {meta ? (
             <p
@@ -132,7 +132,7 @@ export function DetailHeader({
       {children ? (
         <div
           data-recipe-part="detail-header-actions"
-          className="flex min-w-0 flex-wrap items-center gap-2"
+          className="flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]"
         >
           {children}
         </div>
@@ -163,7 +163,7 @@ export function DetailSection({
     <section
       data-recipe-part="detail-section"
       data-testid={testId}
-      className={cn('flex min-w-0 flex-col gap-2', className)}
+      className={cn('flex min-w-0 flex-col gap-[var(--nession-rhythm-section-content)]', className)}
     >
       <div className="flex min-w-0 items-center justify-between gap-2">
         <Heading
@@ -185,7 +185,7 @@ export function DetailGroup({ className, ...props }: React.ComponentProps<'div'>
   return (
     <div
       data-recipe-part="detail-group"
-      className={cn('flex min-w-0 flex-col gap-1', className)}
+      className={cn('flex min-w-0 flex-col gap-[var(--nession-rhythm-text-stack)]', className)}
       {...props}
     />
   );
@@ -232,7 +232,7 @@ export function DetailFact({
       data-testid={testId}
       className={cn(
         'min-w-0',
-        inline ? 'flex items-baseline gap-2' : 'flex flex-col gap-0.5',
+        inline ? 'flex items-baseline gap-[var(--nession-rhythm-inline)]' : 'flex flex-col gap-0.5',
         className,
       )}
     >
