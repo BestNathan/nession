@@ -270,7 +270,15 @@ export function addResource(yaml, resource) {
   if (!/^resources:\s*$/m.test(yaml)) throw new Error('Kustomization resources list absent');
   const resources = yaml.split(/\r?\n/);
   if (resources.some(line => line.trim() === '- ' + filename)) return yaml;
-  return yaml.replace(/^resources:\s*\r?\n/m, 'resources:\n  - ' + filename + '\n');
+  // Preserve the existing YAML sequence indentation. Kustomize accepts
+  // either indentless YAML sequences ("- entry") or indented ones
+  // ("  - entry"), but mixing them turns the mapping into invalid YAML.
+  const anchor = /^resources:[ \t]*\r?\n([ \t]*)(?=-\s+\S)/m;
+  if (!anchor.test(yaml)) {
+    throw new Error('Kustomization resources sequence is empty or malformed');
+  }
+  return yaml.replace(anchor, (_match, indent) =>
+    'resources:\n' + indent + '- ' + filename + '\n' + indent);
 }
 
 
