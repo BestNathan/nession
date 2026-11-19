@@ -16,7 +16,7 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
-  REVIEWER_JSON_FAILURE} from './outbox.mjs';
+  REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
   recoverAttestedReviewerPremodelFailure,recoverAttestedReviewerJsonFailure}
   from './dispatch-store.mjs';
@@ -62,6 +62,12 @@ const REVIEWER_PREMODEL_RECOVERIES=Object.freeze([
 ]);
 export const REVIEWER_JSON_RECOVERY_COMMENT=
   '/nession recover-review-json issue=3433 run=43681851455';
+export const REVIEWER_JSON_3784_RECOVERY_COMMENT=
+  '/nession recover-review-json issue=3784 run=44458253065';
+const REVIEWER_JSON_RECOVERIES=Object.freeze([
+  [REVIEWER_JSON_FAILURE,REVIEWER_JSON_RECOVERY_COMMENT],
+  [REVIEWER_JSON_FAILURE_3784,REVIEWER_JSON_3784_RECOVERY_COMMENT],
+]);
 export const QWEN_CLI_RECOVERY_COMMENT=
   '/nession recover-qwen-cli issue=3784 run=44250586057';
 export const QWEN_TOOL_RECOVERY_COMMENT=
@@ -119,13 +125,12 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
   const repairCommand=commanded?
     REPAIR_DISPATCH_RE.exec(event?.comment?.body??''):null;
   const jsonRecovery=commanded&&event?.action==='created'&&
-    event?.issue?.number===REVIEWER_JSON_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
     event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&
-    event.comment.body===REVIEWER_JSON_RECOVERY_COMMENT&&
-    issue===REVIEWER_JSON_FAILURE.issue&&
-    actionId===REVIEWER_JSON_FAILURE.action_id;
+    REVIEWER_JSON_RECOVERIES.some(([source,command])=>
+      event.issue.number===source.issue&&event.comment.body===command&&
+      issue===source.issue&&actionId===source.action_id);
   const toolRecoveryComment=commanded&&event?.action==='created'&&
     event?.issue?.number===QWEN_TOOL_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue.pull_request&&
@@ -355,8 +360,10 @@ async function main(){
     ?(REVIEWER_PREMODEL_RECOVERIES.find(([,command])=>
        event?.comment?.body===command)?.[0]??null):null;
   const reviewerPremodelRecovery=reviewerPremodelSource!==null;
-  const reviewerJsonRecovery=commanded&&
-    event?.comment?.body===REVIEWER_JSON_RECOVERY_COMMENT;
+  const reviewerJsonSource=commanded
+    ?(REVIEWER_JSON_RECOVERIES.find(([,command])=>
+       event?.comment?.body===command)?.[0]??null):null;
+  const reviewerJsonRecovery=reviewerJsonSource!==null;
   const recoveringQwenCli=commanded&&
     event?.comment?.body===QWEN_CLI_RECOVERY_COMMENT;
   const recoveringQwenTools=commanded&&
@@ -367,7 +374,7 @@ async function main(){
     ownerReviewCommand?Number(ownerReviewCommand[1]):
     ownerRepairCommand?Number(ownerRepairCommand[1]):
     reviewerPremodelRecovery?reviewerPremodelSource.issue:
-    reviewerJsonRecovery?REVIEWER_JSON_FAILURE.issue:1997):
+    reviewerJsonRecovery?reviewerJsonSource.issue:1997):
     Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
     String(event?.inputs?.recovery_run_id??'0')===String(QWEN_KEY_FAILURE.run_id);
@@ -390,7 +397,7 @@ async function main(){
     recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
     qwenV2CommentAction??newReviewAction??newRepairAction??
     reviewerPremodelSource?.action_id??
-    (reviewerJsonRecovery?REVIEWER_JSON_FAILURE.action_id:null)??
+    reviewerJsonSource?.action_id??
     (recoveringRepair||retryingRepair?
     REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
     recoveringReview?REVIEW_ACTION:
@@ -460,7 +467,7 @@ async function main(){
       // absence of any accepted verdict Artifact BEFORE the Store CAS.
       // Dispatch only the single deterministic successor, never the old
       // consumed ticket or an untrusted Issue-comment-selected Run.
-      const proof=await verifyReviewerJsonFailureLive(token);
+      const proof=await verifyReviewerJsonFailureLive(token,reviewerJsonSource);
       const recovered=recoverAttestedReviewerJsonFailure({
         remote:storeRemote,source:proof});
       const signer={key,key_id:'main-controller',
