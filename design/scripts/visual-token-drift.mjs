@@ -66,13 +66,16 @@ export function gitBlobSha(content) {
  * this baseline from PR-head code: that would make every new violation legal.
  * A scoped reviewer can explicitly shrink the inventory after migration.
  */
+let frozenBaseline = null;
 export function readLegacyMetricBaseline() {
+  if (frozenBaseline) return frozenBaseline;
   const raw = readFileSync(BASELINE_PATH, 'utf8');
   if (gitBlobSha(raw) !== PINNED_LEGACY_BASELINE_BLOB) {
     throw new Error('non-token visual baseline changed without Design Gate owner approval');
   }
   const manifest = JSON.parse(raw);
   if (manifest.schema_version !== 1 || !manifest.files) throw new Error('invalid visual baseline');
+  frozenBaseline = manifest;
   return manifest;
 }
 
