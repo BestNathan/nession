@@ -97,14 +97,21 @@ function registryEvidence(sha) {
     const refs = [];
     for (const manifest of platforms) {
       assert.match(manifest.digest ?? '', DIGEST, role + ' invalid platform Digest');
-      const config = JSON.parse(dockerInspect(['--format', '{{json .Image}}',
-        GHCR + '@' + manifest.digest]));
-      assert.equal(config?.config?.Labels?.['org.opencontainers.image.revision'], sha,
-        role + ' ' + manifest.platform.architecture + ' source revision mismatch');
+      // Only the dedicated standalone MCP Dockerfile emits an OCI revision
+      // label. Server/Agent/UI prebuilt Dockerfiles do NOT; their provenance
+      // is instead authenticated by the exact release Run, source SHA and
+      // GHCR publication receipt. Never require or fabricate a missing label.
+      if (role === 'mcp') {
+        const config = JSON.parse(dockerInspect(['--format', '{{json .Image}}',
+          GHCR + '@' + manifest.digest]));
+        assert.equal(config?.config?.Labels?.['org.opencontainers.image.revision'], sha,
+          role + ' ' + manifest.platform.architecture + ' source revision mismatch');
+      }
       refs.push(manifest.platform.architecture + '=' + manifest.digest);
     }
     evidence.push({ type: 'registry', value: image + ' ' + refs.join(' ') +
-      ' config revision=' + sha });
+      (role === 'mcp' ? ' config revision=' + sha :
+        ' source-bound by trusted Release Run and GHCR provenance') });
   }
   return evidence;
 }
