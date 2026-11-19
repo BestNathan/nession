@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "55a0e8bc6f3b3b3d8764a748e79bf3b9f0239c5949d3b55b20f71097a704c247",
+  "run_id": 44435308515,
+  "run_attempt": 1,
+  "issue": 3968,
+  "criterion": "SC-04",
+  "criterion_text": ": A subsequent authenticated Staging ACR Run demonstrates real exact-SHA GHCR→ACR four-role source/digest proof, or explicitly retains Pending with the observed operational blocker; a source-only fixture is not runtime proof.",
+  "stage": "staging",
+  "target_sha": "c4d92ab89b48375032dc875f24ccd62617b35fb0",
+  "contract_sha256": "a48a2f832f9d768780447df7d221619835f580c9d54afa1b895d3b8a4da123eb",
+  "case_revision": "c4d92ab89b48375032dc875f24ccd62617b35fb0",
+  "case_tree_sha": "dce679853a390c29a1bef3f44ea45acef2a0ff0b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T01:17:07.019Z",
+  "finished_at": "2026-11-19T01:17:22.917Z",
+  "duration_ms": 15898,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "agent amd64 source revision mismatch\n+ actual - expected\n\n+ undefined\n- 'af5dbe1b7acf37110394985cf98a3787ec8f595c'",
+      "evidence": [
+        {
+          "type": "ci",
+          "value": "source/GHCR/ACR role, revision, digest or GitOps check was not established"
+        }
+      ],
+      "duration_ms": 9795,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44435308515,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "ec95388860a697bba0072396b6716b797cd62b02",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "comment_case": {
+        "issue": 3968,
+        "criterion": "SC-04",
+        "comment_id": 6996596111
+      },
+      "dispatch_binding": {
+        "target_sha": "c4d92ab89b48375032dc875f24ccd62617b35fb0",
+        "stage": "staging",
+        "issue": 3968,
+        "criterion": "SC-04",
+        "job_id": 135262572890,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44435308515",
+    "record_path": "runs/2026-11-19/44435308515-1/3968/SC-04.json",
+    "source_result_sha256": "b01dd02bb8dc9a0a9103f8a3a49c5e1ad33cbcaeda4c28a40cc5e337668087a9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44435308515-1",
+    "sha256": "b01dd02bb8dc9a0a9103f8a3a49c5e1ad33cbcaeda4c28a40cc5e337668087a9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44435308515",
+    "durability": "time-limited; object archival not configured"
+  }
+}
