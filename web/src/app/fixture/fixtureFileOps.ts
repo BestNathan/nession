@@ -31,6 +31,10 @@ let state: FixtureState | null = null;
 /** Test-only write controls for the guarded Web Files transition Case (#3171). */
 let nextWriteDelayMs = 0;
 let nextWriteError: string | null = null;
+/** Test-only read controls for the conflict-reload transaction Case (#3743). */
+let nextReadError: string | null = null;
+let nextReadHold = false;
+let heldRead: { release: () => void; fail: (message: string) => void } | null = null;
 
 function parentOf(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -145,7 +149,7 @@ function mimeTypeFor(path: string): string {
   return path.endsWith('.md') ? 'text/markdown' : 'text/plain';
 }
 
-function readFile(
+function readNow(
   path: string,
   options?: { offset?: number; limit?: number },
 ): Promise<FileData> {
@@ -169,6 +173,42 @@ function readFile(
     total_size: bytes.length,
     has_more: offset + slice.length < bytes.length,
     revision: knownRevision(target, path),
+  });
+}
+
+/**
+ * Whole-file reads pass through the Case controls; chunked requests always
+ * carry offset/limit, so a held or failed read is exactly the viewer's
+ * replacement read rather than one chunk of a large-file stream.
+ */
+function readFile(
+  path: string,
+  options?: { offset?: number; limit?: number },
+): Promise<FileData> {
+  if (options !== undefined) {
+    return readNow(path, options);
+  }
+  const failure = nextReadError;
+  const hold = nextReadHold;
+  nextReadError = null;
+  nextReadHold = false;
+  if (failure !== null) {
+    return reject(failure);
+  }
+  if (!hold) {
+    return readNow(path);
+  }
+  return new Promise<FileData>((resolveRead, rejectRead) => {
+    heldRead = {
+      release: () => {
+        heldRead = null;
+        resolveRead(readNow(path));
+      },
+      fail: (message) => {
+        heldRead = null;
+        rejectRead(new Error(message));
+      },
+    };
   });
 }
 
@@ -339,6 +379,14 @@ export interface FixtureFilesControl {
   delayNextWrite: (milliseconds: number) => void;
   /** Reject exactly the next write with a non-conflict failure. */
   failNextWrite: (message?: string) => void;
+  /** Reject exactly the next whole-file read (a viewer's replacement read). */
+  failNextRead: (message?: string) => void;
+  /** Hold exactly the next whole-file read until released or failed. */
+  holdNextRead: () => void;
+  /** Release a held read with the file's current stored content. */
+  releaseHeldRead: () => void;
+  /** Reject a held read. */
+  failHeldRead: (message?: string) => void;
 }
 
 export function fixtureFilesControl(): FixtureFilesControl {
@@ -347,6 +395,9 @@ export function fixtureFilesControl(): FixtureFilesControl {
       state = null;
       nextWriteDelayMs = 0;
       nextWriteError = null;
+      nextReadError = null;
+      nextReadHold = false;
+      heldRead = null;
     },
     revisionOf: (path: string) => knownRevision(current(), path),
     contentsOf: (path: string) => current().contents.get(path) ?? null,
@@ -355,6 +406,24 @@ export function fixtureFilesControl(): FixtureFilesControl {
     },
     failNextWrite: (message = 'fixture: the next write failed') => {
       nextWriteError = message;
+    },
+    failNextRead: (message = 'fixture: the next read failed') => {
+      nextReadError = message;
+    },
+    holdNextRead: () => {
+      nextReadHold = true;
+    },
+    releaseHeldRead: () => {
+      if (heldRead === null) {
+        throw new Error('fixture: no read is held');
+      }
+      heldRead.release();
+    },
+    failHeldRead: (message = 'fixture: the held read failed') => {
+      if (heldRead === null) {
+        throw new Error('fixture: no read is held');
+      }
+      heldRead.fail(message);
     },
     writeExternal: (path: string, content: string) => {
       const target = current();

@@ -13,6 +13,21 @@ const JOBS = [
 ];
 function deny(message) { throw Error('staging GHCR source: ' + message); }
 
+// The automatic Staging ACR source waiter must not consume a long GHCR build
+// window for a SHA that has already left the protected staging HEAD.
+// Check at startup, every 4 x 15-second poll intervals and again immediately
+// before returning authenticated release outputs. Historical manual mirrors
+// deliberately do not require a current staging HEAD.
+function shouldCheckStagingHead(staged, attempt) {
+  return staged && Number.isInteger(attempt) && attempt >= 1 && (attempt - 1) % 4 === 0;
+}
+
+function assertCurrentStagingHead(branch, sourceSha) {
+  if (branch?.commit?.sha !== sourceSha) {
+    deny('Staging moved to another SHA; refuse a stale rollout');
+  }
+}
+
 // Production Staging release validation stays strict across all four roles.
 export function verifyRelease(run, inventory, expectedSha) {
   return verifyReleaseJobs(run, inventory, expectedSha, JOBS);
@@ -87,6 +102,17 @@ export function selfTest() {
       status: 'completed', conclusion: 'success'},
     ]}));
   const inventory = {jobs, total_count: jobs.length};
+  // #3956: only trusted automatic release waits perform bounded HEAD probes.
+  assert.equal(shouldCheckStagingHead(true, 1), true);
+  assert.equal(shouldCheckStagingHead(true, 2), false);
+  assert.equal(shouldCheckStagingHead(true, 4), false);
+  assert.equal(shouldCheckStagingHead(true, 5), true);
+  assert.equal(shouldCheckStagingHead(false, 1), false);
+  assert.equal(shouldCheckStagingHead(false, 5), false);
+  assertCurrentStagingHead({commit: {sha}}, sha);
+  assert.throws(() => assertCurrentStagingHead({commit: {sha: 'b'.repeat(40)}}, sha),
+    /Staging moved to another SHA/);
+  assert.throws(() => assertCurrentStagingHead({}, sha), /Staging moved to another SHA/);
   assert.equal(verifyRelease(run, inventory, sha).short_sha, 'aaaaaaa');
   // The original 3-role Staging release predates standalone MCP. The
   // diagnostic must accept a requested real role but never infer an absent one.
@@ -185,6 +211,9 @@ async function main() {
   // This independent job can wait while the GHCR-only build proceeds. A failed
   // or absent source cannot be laundered into a successful ACR/GitOps receipt.
   for (let attempt = 1; attempt <= (diagnostic ? 1 : 240); attempt++) {
+    if (shouldCheckStagingHead(staged, attempt)) {
+      assertCurrentStagingHead(await api('/branches/staging'), sourceSha);
+    }
     const body = await api('/actions/workflows/release-staging.yml/runs?head_sha=' +
       sourceSha + '&per_page=100');
     if (!Array.isArray(body.workflow_runs) || body.total_count > 100) {
@@ -214,10 +243,8 @@ async function main() {
         ? verifyMirrorRelease(run, jobs, sourceSha, selectedImage)
         : verifyRelease(run, jobs, sourceSha);
       if (staged) {
-        const branch = await api('/branches/staging');
-        if (branch.commit?.sha !== sourceSha) {
-          deny('Staging moved to another SHA; refuse a stale rollout');
-        }
+        // Recheck just before publication even when the periodic poll passed.
+        assertCurrentStagingHead(await api('/branches/staging'), sourceSha);
       }
       fs.appendFileSync(process.env.GITHUB_OUTPUT,
         'source_sha=' + verified.source_sha + '\n' +

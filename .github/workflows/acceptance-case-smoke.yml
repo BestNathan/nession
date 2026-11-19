@@ -86,7 +86,7 @@ jobs:
                 > "${RUNNER_TEMP}/acceptance-smoke-contracts/${issue}.json"
             done
             ISSUE_NUMBERS="${issue_numbers}" ACCEPTANCE_STAGE="pr" \
-              TARGET_SHA="${target_sha}" \
+              TARGET_SHA="${target_sha}" ACCEPTANCE_RUNNER="standard" \
               node trusted/scripts/select-acceptance-cases.mjs select \
               e2e/acceptance/cases "${RUNNER_TEMP}/acceptance-smoke-contracts" \
               "${RUNNER_TEMP}/selected-pr-cases.json" "${RUNNER_TEMP}/pr-case-coverage.json"

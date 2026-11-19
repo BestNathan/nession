@@ -147,6 +147,18 @@ On replacement:
 The baseline is captured before the first mutation of a revision, so a read
 failure aborts the apply rather than recording a value nobody observed.
 
+The durable record is part of that proof. A `binding.json` that exists but
+cannot be read or parsed is never treated as a new Session: the apply fails
+before the first tmux read or mutation, the record and the generated overlay
+are left exactly as found, and the error is bounded — it names the failing
+durable record, never a key or a value. The observed status is `error` with no
+claimed revision or managed keys, not an absent binding. A missing
+`binding.json` beside surviving materialization files (`env-runtime.sh`,
+`revision`, `shell-revision`) is the same damaged state. Only a state
+directory with neither the record nor those artifacts is verified first use,
+and only there may a new baseline be captured. Repairing the record restores
+the original baseline path without a second state owner.
+
 ## Reserved keys
 
 Environment profiles cannot control runtime-critical keys. The policy lives in

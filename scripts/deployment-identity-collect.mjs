@@ -50,6 +50,9 @@ const SAFE_REJECTION_PREFIXES = [
   /^environment [a-z][a-z0-9-]{0,62} /,
   /^GitOps revision /,
   /^duplicate (agent|server|ui) /,
+  /^missing running pod for (agent|server|ui) deployment$/,
+  /^no ready pod reports the (agent|server|ui) deployment image$/,
+  /^missing (agent|server|ui) deployment nession-(agent|server|ui)-(staging|staging-01)$/,
   /^missing --[a-z-]+$/,
   /^usage: attest /,
   /^(provenance|deployments|pods) is (not valid JSON|unreadable)$/,
@@ -153,8 +156,12 @@ export function deploymentIdentityFailureObservation({
         if (digest) liveDigests.add(digest);
       }
     }
+    // The Kubernetes container name need not equal the Nession image role.
+    // Diagnose only a role-scoped image from the expected Deployment, not a
+    // pod's runtime-rewritten status.image display reference.
+    const roleImagePrefix = overlay.images[role].repository + ':' + role + '-';
     const actualImage = d?.spec?.template?.spec?.containers?.find(
-      c => c?.name === role)?.image;
+      c => typeof c?.image === 'string' && c.image.startsWith(roleImagePrefix))?.image;
     const observedTag = typeof actualImage === 'string'
       ? actualImage.match(/:([a-z]+-[a-f0-9]{7,40})$/)?.[1] ?? null : null;
     return {
@@ -337,20 +344,20 @@ function deploymentFor(overlay, roleName, deployments) {
   return {
     deployment,
     image,
+    containerName: nonEmptyLine(roleContainers[0].name, roleName + ' deployment container name'),
     generation,
     observedGeneration,
     uid: nonEmptyLine(deployment.metadata?.uid, roleName + ' deployment UID'),
   };
 }
 
-function imageIdFor(overlay, roleName, deploymentName, image, pods) {
-  // A cluster registry mirror may resolve the deployment image to another
-  // repository, so the pod status image string can differ from the GitOps
-  // image while keeping the same immutable role tag. Match the role tag and
-  // let the attestation bind the digest to trusted per-registry provenance.
-  const tagSuffix = ':' + image.slice(image.lastIndexOf(':') + 1);
-  const matchesTag = (entry) =>
-    typeof entry?.image === 'string' && entry.image.endsWith(tagSuffix);
+function imageIdFor(overlay, roleName, deploymentName, containerName, pods) {
+  // The trusted Deployment spec names the precise role container and pins
+  // its image repository/tag. Match this container by Kubernetes status.name,
+  // NOT by status.image: containerd/registry mirrors may render that display
+  // string as an alias or digest. The immutable imageID digest is independently
+  // bound to the verified release provenance by attestDeployment().
+
   // A deployment's ReplicaSet is `<deployment-name>-<pod-template-hash>`, and
   // the hash never contains a dash. Matching by plain prefix adopted a sibling
   // lane whose name extends this one (nession-agent-staging vs
@@ -374,10 +381,12 @@ function imageIdFor(overlay, roleName, deploymentName, image, pods) {
     }
     if (pod.status?.phase !== 'Running') fail(roleName + ' pod is not Running');
     const statuses = list(pod.status?.containerStatuses, roleName + ' pod container statuses');
-    const status = statuses.find((entry) => matchesTag(entry) && entry?.ready === true);
-    if (!status && statuses.some(matchesTag)) {
-      fail(roleName + ' pod container is not ready');
+    const matchingStatuses = statuses.filter((entry) => entry?.name === containerName);
+    if (matchingStatuses.length > 1) {
+      fail(roleName + ' pod has duplicate role container statuses');
     }
+    const status = matchingStatuses[0];
+    if (status && status.ready !== true) fail(roleName + ' pod container is not ready');
     if (!status) continue;
     const imageId = nonEmptyLine(status.imageID, roleName + ' pod imageID');
     imageIds.add(imageId);
@@ -403,7 +412,7 @@ export function observationFromKubernetes({
   const workloads = ROLES.map((roleName) => {
     const selected = deploymentFor(overlay, roleName, deploymentItems);
     const imageId = imageIdFor(
-      overlay, roleName, selected.deployment.metadata.name, selected.image, podItems);
+      overlay, roleName, selected.deployment.metadata.name, selected.containerName, podItems);
     return {
       role: roleName,
       name: selected.deployment.metadata.name,
@@ -576,6 +585,30 @@ function selfTest() {
   assert.equal(positive.workloads[0].image_id,
     'ghcr.io/bestnathan/nession@sha256:' + '1'.repeat(64));
 
+  // #3964: Kubernetes/containerd may normalize the *display* status.image
+  // to a digest reference. The trusted Deployment spec + exact container
+  // name and immutable imageID still prove the real workload identity.
+  const aliasFixtures = kubernetesFixtures({ mutatePods: pods => {
+    for (const pod of pods.items) {
+      const status = pod.status.containerStatuses[0];
+      status.image = 'mirror.example.com/nession@sha256:' +
+        DIGESTS[status.name].repeat(64);
+    }
+  } });
+  const aliased = attestFromObservations({ ...base, ...aliasFixtures });
+  assert.deepEqual(aliased, positive);
+
+  // #3953: production release provenance may include standalone MCP, even
+  // when only server/agent/ui are deployed in this environment.
+  const fourRoleProvenance = provenanceFixture();
+  fourRoleProvenance.images.mcp = {
+    tag: 'mcp-abcdef1', digest: 'sha256:' + '4'.repeat(64),
+  };
+  const published = attestFromObservations({
+    ...base, provenance: fourRoleProvenance, ...kubernetesFixtures(),
+  });
+  assert.deepEqual(published, positive);
+
   // A registry mirror may rewrite the pod status image reference while the
   // immutable role tag stays the same. The observer matches the tag suffix;
   // attestation still binds the digest to trusted provenance.
@@ -677,6 +710,13 @@ function selfTest() {
   reject({ mutatePods: (p) => { p.items[1].status.phase = 'Pending'; } }, /not Running/);
   reject({ mutatePods: (p) => { p.items[1].status.containerStatuses[0].ready = false; } },
     /container is not ready/);
+  reject({ mutatePods: (p) => {
+    p.items[1].status.containerStatuses[0].name = 'unknown-container';
+  } }, /no ready pod reports the server deployment image/);
+  reject({ mutatePods: (p) => {
+    p.items[1].status.containerStatuses.push(
+      structuredClone(p.items[1].status.containerStatuses[0]));
+  } }, /duplicate role container statuses/);
   reject({ mutatePods: (p) => { p.items[1].metadata.labels.env = 'staging-01'; } },
     /env label does not match/);
   reject({ mutatePods: (p) => {
@@ -807,6 +847,18 @@ function selfTest() {
   const readinessRejection = deploymentIdentityRejection(Error('server pod is not Running'));
   assert.equal(readinessRejection.class, 'readiness');
   assert.equal(readinessRejection.retryable, true);
+  for (const known of [
+    'no ready pod reports the server deployment image',
+    'missing running pod for agent deployment',
+    'missing ui deployment nession-ui-staging',
+  ]) {
+    const rejection = deploymentIdentityRejection(Error(known));
+    assert.equal(rejection.class, 'readiness', known);
+    assert.equal(rejection.message, known);
+  }
+  assert.equal(deploymentIdentityRejection(Error(
+    'no ready pod reports the secret=ghs_sensitive deployment image')).message,
+    WITHHELD_REJECTION_MESSAGE);
   const sourceRejection = deploymentIdentityRejection(
     Error('build provenance source_sha must be a 40-character hex SHA'));
   assert.equal(sourceRejection.class, 'source');

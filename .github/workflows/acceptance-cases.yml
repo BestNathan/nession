@@ -44,6 +44,12 @@ on:
         default: linux
         type: choice
         options: [linux, macos]
+      runner:
+        description: Execution lane for a manual Case dispatch
+        required: true
+        default: standard
+        type: choice
+        options: [standard, live-cli]
 
 permissions:
   contents: read
@@ -61,6 +67,11 @@ jobs:
     if: github.event_name != 'workflow_dispatch' || inputs.platform != 'macos'
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    # The live CLI lane's test gateway lives in this GitHub Environment. The
+    # binding lets the live step below resolve `vars`/`secrets`; an environment
+    # secret reaches a process only where a step maps it, so the standard Case
+    # batch (which maps none) still executes without any provider credential.
+    environment: dev-claude-qwen
     outputs:
       macos_count: ${{ steps.macos-select.outputs.count }}
     env:
@@ -243,6 +254,7 @@ jobs:
 
       - name: Select source-aligned Cases
         id: select
+        if: github.event_name != 'workflow_dispatch' || inputs.runner != 'live-cli'
         env:
           ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
           ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
@@ -250,6 +262,7 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.target_sha }}
           RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
           ACCEPTANCE_PLATFORM: linux
+          ACCEPTANCE_RUNNER: standard
           DEPLOYMENT_BINDING_FILE: ${{ steps.deployment.outputs.binding }}
         run: |
           set -euo pipefail
@@ -276,6 +289,41 @@ jobs:
             echo "- Selection: ${selection_status} (not-applicable is not a Case Pass)"
           } >> "${GITHUB_STEP_SUMMARY}"
 
+      # Live external-CLI Cases run in their own step whose environment carries
+      # the test gateway credential. Selection is trusted-main code; the
+      # standard batch never receives the credential and never selects these
+      # Cases. A live Case that cannot be provisioned fails closed.
+      - name: Select live CLI Cases
+        id: select-live
+        if: github.event_name != 'workflow_dispatch' || inputs.runner == 'live-cli'
+        env:
+          ISSUE_NUMBERS: ${{ steps.target.outputs.issues }}
+          ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
+          MANUAL_CRITERION: ${{ steps.target.outputs.manual_criterion }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
+          ACCEPTANCE_PLATFORM: linux
+          ACCEPTANCE_RUNNER: live-cli
+          DEPLOYMENT_BINDING_FILE: ${{ steps.deployment.outputs.binding }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/acceptance-case-results"
+          node trusted/scripts/select-acceptance-cases.mjs select \
+            "workspace/e2e/acceptance/cases" \
+            "${RUNNER_TEMP}/acceptance-contracts" \
+            "${RUNNER_TEMP}/live-selected-cases.json" \
+            "${RUNNER_TEMP}/live-case-coverage.json"
+          count="$(jq 'length' "${RUNNER_TEMP}/live-selected-cases.json")"
+          cp "${RUNNER_TEMP}/live-selected-cases.json" "${RUNNER_TEMP}/acceptance-case-results/selection-live.json"
+          echo "count=${count}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "## Live CLI Case selection"
+            echo
+            echo "- Target: \`${{ steps.target.outputs.target_sha }}\`"
+            echo "- Cases: ${count}"
+            echo "- Lane: \`live-cli\` (test gateway credential scoped to the live step)"
+          } >> "${GITHUB_STEP_SUMMARY}"
+
       # Gate the macOS runner on an actual macOS Case. Without this, every
       # push queues a macOS job that selects nothing and holds the workflow
       # concurrency group while the runner is slow or unavailable.
@@ -288,6 +336,7 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.target_sha }}
           RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
           ACCEPTANCE_PLATFORM: macos
+          ACCEPTANCE_RUNNER: standard
           DEPLOYMENT_BINDING_FILE: ${{ steps.deployment.outputs.binding }}
         run: |
           set -euo pipefail
@@ -341,11 +390,11 @@ jobs:
           echo "NESSION_QWEN_ARTIFACT_DIR=$NESSION_QWEN_ARTIFACT_DIR" >> "$GITHUB_ENV"
 
       - uses: actions-rust-lang/setup-rust-toolchain@v1
-        if: steps.select.outputs.count != '0'
+        if: steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0'
         with: { cache-workspaces: "workspace", cache-all-crates: "true" }
 
       - name: Install runtime dependencies
-        if: steps.select.outputs.count != '0'
+        if: steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0'
         shell: bash
         run: |
           set -euo pipefail
@@ -402,7 +451,7 @@ jobs:
           echo "sandbox prerequisites: $(bwrap --version)"
 
       - name: Install Web preview dependencies
-        if: steps.select.outputs.count != '0'
+        if: steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0'
         run: cd workspace/web && npm ci
 
       # Only an exact main push may read a completed successful main Quality
@@ -410,21 +459,22 @@ jobs:
       # GH_TOKEN passed to target-controlled code. This never suppresses Cases.
       - name: Restore verified main Web dist
         id: web-dist
-        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && steps.target.outputs.stage == 'post-merge' && steps.target.outputs.target_sha == github.sha)) && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0'
+        if: (github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && steps.target.outputs.stage == 'post-merge' && steps.target.outputs.target_sha == github.sha)) && github.ref == 'refs/heads/main' && (steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0')
         env:
           GH_TOKEN: ${{ github.token }}
         run: bash workspace/scripts/ci/try-web-build-reuse.sh workspace "${{ steps.target.outputs.target_sha }}"
 
       - name: Build Web on cold/mismatched artifact
-        if: steps.select.outputs.count != '0' && steps.web-dist.outputs.hit != 'true'
+        if: (steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0') && steps.web-dist.outputs.hit != 'true'
         run: cd workspace/web && npm run build
 
       - name: Verify runnable Web preview and proxy parity
-        if: steps.select.outputs.count != '0'
+        if: steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0'
         run: node workspace/scripts/ci/web-preview-parity.mjs workspace
 
       - name: Build Rust runtime
-        if: steps.select.outputs.count != '0'
+        id: runtime-build
+        if: steps.select.outputs.count != '0' || steps.select-live.outputs.count != '0'
         run: cd workspace && cargo build -p nession-server -p nession-agent -p nession-cli
 
       - name: Verify dual-native evidence combiner
@@ -514,6 +564,57 @@ jobs:
             echo '```'
           } >> "${GITHUB_STEP_SUMMARY}"
           exit "${status}"
+      # The only step that maps the provider gateway credential into a process
+      # environment; the job's environment binding supplies the context. The
+      # standard batch maps nothing and never sees it. These Cases run against
+      # a real, authenticated external agent CLI and fail closed without the
+      # gateway.
+      - name: Execute live CLI Cases with the qwen gateway
+        # Independent evidence: an unrelated standard-batch failure must not
+        # suppress the live Cases (which are still what proves their criteria).
+        # A cancelled job or a failed runtime build still stops the batch.
+        if: ${{ !cancelled() && steps.select-live.outcome == 'success' && steps.select-live.outputs.count != '0' && steps.runtime-build.outcome == 'success' }}
+        env:
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
+          ANTHROPIC_DEFAULT_SONNET_MODEL: ${{ vars.ANTHROPIC_DEFAULT_SONNET_MODEL }}
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+          TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
+          DEPLOYMENT_BINDING: ${{ steps.deployment.outputs.binding }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${ANTHROPIC_BASE_URL:-}" ]] || \
+             { [[ -z "${ANTHROPIC_AUTH_TOKEN:-}" ]] && [[ -z "${ANTHROPIC_API_KEY:-}" ]]; }; then
+            echo '::error::live CLI Cases require the qwen gateway environment (ANTHROPIC_BASE_URL plus ANTHROPIC_AUTH_TOKEN or ANTHROPIC_API_KEY)' >&2
+            exit 1
+          fi
+          results="${RUNNER_TEMP}/acceptance-case-results"
+          binding_args=()
+          if [[ -n "${DEPLOYMENT_BINDING:-}" ]]; then
+            binding_args=(--deployment-binding "${DEPLOYMENT_BINDING}")
+          fi
+          node workspace/e2e/run acceptance-batch \
+            --sha "${TARGET_SHA}" \
+            --stage "${ACCEPTANCE_STAGE}" \
+            --selection "${RUNNER_TEMP}/live-selected-cases.json" \
+            --contracts-dir "${RUNNER_TEMP}/acceptance-contracts" \
+            --results-dir "${results}" \
+            "${binding_args[@]}" \
+            >> "${results}/records.jsonl" 2>> "${results}/batch-live.log" || status=$?
+          status="${status:-0}"
+          cat "${results}/batch-live.log" >&2
+          {
+            echo "## Live CLI Case batch"
+            echo
+            echo '```'
+            grep -E '^\[acceptance-batch\]' "${results}/batch-live.log" || true
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          exit "${status}"
+
       - name: Withhold unpaired native Linux records
         if: always() && steps.select.outputs.both_count != '0'
         run: node trusted/scripts/acceptance-native-case-combine.mjs detach-linux "$RUNNER_TEMP/selected-cases.json" "$RUNNER_TEMP/acceptance-case-results"
@@ -754,6 +855,7 @@ jobs:
           TARGET_SHA: ${{ steps.target.outputs.target_sha }}
           RUNTIME_PROFILE: ${{ steps.target.outputs.runtime_profile }}
           ACCEPTANCE_PLATFORM: macos
+          ACCEPTANCE_RUNNER: standard
           DEPLOYMENT_BINDING_FILE: ${{ steps.deployment.outputs.binding }}
         run: |
           set -euo pipefail
