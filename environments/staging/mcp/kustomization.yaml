@@ -12,8 +12,6 @@ commonLabels:
 
 resources:
   - sealed-backend-server.json
-  - secret-preflight-job.yaml
-  - secret-preflight-networkpolicy.yaml
   - sealed-inbound.json
   - sealed-tls.json
   - sealed-secret.json
