@@ -249,7 +249,7 @@ function checkAgentImageVersionAndCacheContracts(files) {
       if (!clauses.every(line=>source.includes(line))) {
         errors.push(file + ': must pin and verify Node/Claude/tmux and secure NodeSource bootstrap');
       }
-      if (/setup_22\\.x\\s*\\|\\s*bash|curl[^\\n]*\\|\\s*bash/.test(source)) {
+      if (/setup_22\.x\s*\|\s*bash|curl[^\n]*\|\s*bash/.test(source)) {
         errors.push(file + ': downloaded NodeSource shell must never execute');
       }
     }
@@ -420,7 +420,7 @@ export function checkFiles(files) {
     for (const [fragment, message] of required) {
       if (!nodeSource.includes(fragment)) errors.push(NODESOURCE_SETUP + ': ' + message);
     }
-    if (/\\|\\s*(?:ba)?sh\\b|trusted\\.gpg|AllowInsecureRepositories|--allow-unauthenticated/.test(nodeSource)) {
+    if (/\|\s*(?:ba)?sh\b|trusted\.gpg|AllowInsecureRepositories|--allow-unauthenticated/.test(nodeSource)) {
       errors.push(NODESOURCE_SETUP + ': must not bypass signed APT or execute remote shell');
     }
   }
