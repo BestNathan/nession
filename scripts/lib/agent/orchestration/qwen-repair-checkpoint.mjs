@@ -5,7 +5,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {validateDevelopmentState} from './outbox.mjs';
-import {qwenCommittedPublisherIntent} from './qwen-reviewer-source.mjs';
+import {qwenCommittedPublisherIntent,qwenCommittedReviewIntent}
+  from './qwen-reviewer-source.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
 
 const SHA=/^[0-9a-f]{40}$/,HEX=/^[0-9a-f]{64}$/;
@@ -28,6 +29,57 @@ function git(root,...args){
   }).trim();}
   catch{fail('unable to attest committed Git checkpoint');}
 }
+// #4030: each Repair resumes the *latest* committed native Developer checkpoint.
+// A second Review of PR-B follows a Repair Publisher, not the initial Publisher.
+// Only the Store's exact published SHA + immutable write-ahead record may
+// select that checkpoint. The original Publisher remains the unique PR owner.
+function publishedRepairLineage({storeRoot,state}){
+  const publishers=state.transitions.filter(x=>x.kind==='publisher'&&
+    x.outcome==='published'&&x.target_sha===state.target_sha);
+  if(publishers.length!==1||publishers[0].attempt!==1)
+    fail('no unique published PR HEAD for Reviewer');
+  const current=qwenCommittedReviewIntent({storeRoot,issue:state.issue,
+    publisherRunId:publishers[0].run_id});
+  const intent=current.record;
+  const original=current.repair?qwenCommittedPublisherIntent({
+    storeRoot,issue:state.issue,
+    publisherRunId:intent.original_publisher_run_id}):intent;
+  if(original.issue!==state.issue||
+     original.branch!=='agent/'+state.issue+'/qwen-'+
+       original.action_id.slice(0,16)||
+     original.target_main_sha!==original.source_sha||
+     original.source_sha===state.target_sha||
+     current.branch!==original.branch||
+     intent.issue!==state.issue||
+     !positive(intent.worker_run_id)||
+     !positive(intent.checkpoint_version)||
+     !SHA.test(intent.checkpoint_commit_sha??'')||
+     !HEX.test(intent.checkpoint_ciphertext_sha256??''))
+    fail('current Qwen Publisher is not the original immutable PR lineage');
+  if(current.repair){
+    const previous=state.transitions.filter(x=>x.kind==='publisher'&&
+      x.outcome==='published'&&x.target_sha===intent.source_sha);
+    const reviewed=state.transitions.filter(x=>x.kind==='reviewer'&&
+      x.outcome==='changes_requested'&&x.target_sha===intent.source_sha);
+    const publisherIndex=state.transitions.indexOf(publishers[0]);
+    if(intent.branch!=='refs/heads/'+original.branch||
+       intent.original_main_sha!==original.target_main_sha||
+       intent.original_publisher_run_id<=0||
+       intent.checkpoint_version<=original.checkpoint_version||
+       intent.source_sha===state.target_sha||
+       previous.length!==1||previous[0].attempt!==1||
+       reviewed.length!==1||reviewed[0].attempt!==1||
+       state.transitions.indexOf(previous[0])>=
+         state.transitions.indexOf(reviewed[0])||
+       state.transitions.indexOf(reviewed[0])>=publisherIndex)
+      fail('Repair Publisher lacks immutable previous Review and original branch');
+  }else if(intent.target_main_sha!==intent.source_sha)
+    fail('initial Qwen Publisher source is not trusted main');
+  return {intent,original,workerSourceSha:current.repair
+    ?intent.source_sha:intent.worker_source_sha,
+    currentPublisherRunId:publishers[0].run_id};
+}
+
 export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
   validateDevelopmentState(state);
   if(!Number.isSafeInteger(state.issue)||!HEX.test(actionId??'')||
@@ -48,18 +100,7 @@ export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
      last.target_sha!==state.target_sha||!positive(last.run_id)||
      last.attempt!==1)
     fail('no latest authenticated changes_requested Reviewer transition');
-  const publishers=state.transitions.filter(x=>x.kind==='publisher'&&
-    x.outcome==='published'&&x.target_sha===state.target_sha);
-  if(publishers.length!==1||publishers[0].attempt!==1)
-    fail('no unique published PR HEAD for Reviewer');
-  const intent=qwenCommittedPublisherIntent({storeRoot,issue:state.issue,
-    publisherRunId:publishers[0].run_id});
-  if(intent.target_main_sha!==intent.source_sha||
-     intent.source_sha===state.target_sha||
-     !positive(intent.worker_run_id)||!positive(intent.checkpoint_version)||
-     !SHA.test(intent.checkpoint_commit_sha??'')||
-     !HEX.test(intent.checkpoint_ciphertext_sha256??''))
-    fail('Qwen original Developer is not a separately committed published source');
+  const {intent,workerSourceSha}=publishedRepairLineage({storeRoot,state});
   const prefix='roles/developer/dev-qwen-01/issues/'+state.issue;
   const checkpointPath=prefix+'/checkpoints/'+
     String(intent.checkpoint_version).padStart(8,'0')+'.json';
@@ -78,14 +119,14 @@ export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
      checkpoint.identity.role!=='developer'||
      checkpoint.identity.agent_id!=='dev-qwen-01'||
      checkpoint.metadata?.provider!=='claude-code'||
-     checkpoint.metadata.source_sha!==intent.worker_source_sha||
+     checkpoint.metadata.source_sha!==workerSourceSha||
      !HEX.test(checkpoint.metadata.harness_digest??'')||
      checkpoint.ciphertext_sha256!==intent.checkpoint_ciphertext_sha256||
      run.schema_version!==1||run.kind!=='agent_checkpoint_run'||
      run.role!=='developer'||run.agent_id!=='dev-qwen-01'||
      run.issue!==state.issue||run.run_id!==intent.worker_run_id||
      run.attempt!==1||run.version!==head.version||
-     run.source_sha!==intent.worker_source_sha||
+     run.source_sha!==workerSourceSha||
      run.workflow!=='.github/workflows/agent-develop.yml'||
      !SHA.test(run.workflow_sha??'')||
      run.workflow_sha!==intent.worker_sha||
@@ -102,7 +143,7 @@ export function attestQwenPublishedRepairCheckpoint({storeRoot,state,actionId}){
     checkpoint_version:intent.checkpoint_version,
     checkpoint_commit_sha:intent.checkpoint_commit_sha,
     ciphertext_sha256:intent.checkpoint_ciphertext_sha256,
-    source_sha:intent.worker_source_sha,source_run_id:intent.worker_run_id});
+    source_sha:workerSourceSha,source_run_id:intent.worker_run_id});
 }
 
 // A Qwen Repair source is the immutable ORIGINAL published PR branch, not a
@@ -124,20 +165,14 @@ export function qwenRepairPublishedSource({storeRoot,issue,actionId,sha}){
     source_sha:proof.source_sha,source_run_id:proof.source_run_id};
   if(JSON.stringify(item.task.repair_checkpoint)!==JSON.stringify(expected))
     fail('Qwen Repair origin not yet CAS-bound in Store');
-  const published=state.transitions.filter(t=>t.kind==='publisher'&&
-    t.outcome==='published'&&t.target_sha===sha);
-  if(published.length!==1)
-    fail('ambiguous Qwen Repair Publisher origin');
-  const intent=qwenCommittedPublisherIntent({storeRoot,issue,
-    publisherRunId:published[0].run_id});
+  const {intent,original,workerSourceSha,currentPublisherRunId}=
+    publishedRepairLineage({storeRoot,state});
   if(intent.checkpoint_commit_sha!==proof.checkpoint_commit_sha||
      intent.checkpoint_ciphertext_sha256!==proof.ciphertext_sha256||
      intent.worker_run_id!==proof.source_run_id||
-     intent.worker_source_sha!==proof.source_sha||
-     intent.target_main_sha!==intent.source_sha||
-     intent.branch!=='agent/'+issue+'/qwen-'+intent.action_id.slice(0,16))
-    fail('Qwen Repair branch not the authenticated original publication');
-  return Object.freeze({branch:'refs/heads/'+intent.branch,
-    base_sha:intent.target_main_sha,review_sha:sha,issue,
-    repair_action_id:actionId,publisher_run_id:intent.publisher_run_id});
+     workerSourceSha!==proof.source_sha)
+    fail('Qwen Repair branch not the authenticated latest publication');
+  return Object.freeze({branch:'refs/heads/'+original.branch,
+    base_sha:original.target_main_sha,review_sha:sha,issue,
+    repair_action_id:actionId,publisher_run_id:currentPublisherRunId});
 }
