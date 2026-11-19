@@ -145,6 +145,9 @@ export function findNonTokenMetricUtilities(value) {
 
 const CSS_METRIC_DECLARATION =
   /(?:^|[;{\n])\s*((?:padding|margin)(?:-(?:top|right|bottom|left|inline|block))?|(?:row-|column-)?gap|(?:min-|max-)?(?:width|height)|font-size|border-radius|top|right|bottom|left)\s*:\s*([^;{}\n]+)/gm;
+const CSS_RAW_VISUAL_DECLARATION =
+  /(?:^|[;{\n])\s*(color|background(?:-color)?|border(?:-color|-width)?|outline(?:-color|-width)?|box-shadow|text-shadow|fill|stroke|font-weight|opacity)\s*:\s*([^;{}\n]+)/gm;
+const CSS_LITERAL_COLOR = /(?:#[0-9a-fA-F]{3,8}\b|\b(?:rgb|rgba|hsl|hsla|oklch|oklab)\s*\()/;
 const JSX_METRIC_PROPERTY =
   /\b((?:padding|margin)(?:Top|Bottom|Left|Right|Inline|Block)?|(?:row|column)?Gap|(?:min|max)?(?:Width|Height)|width|height|top|right|bottom|left|inset|fontSize|borderRadius)\s*:\s*['"]?(-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?)/g;
 
@@ -157,6 +160,16 @@ export function findNonTokenCssMetrics(source) {
     const withoutTokens = value.replace(/var\([^)]*\)/g, '');
     if (!RAW_LENGTH.test(withoutTokens)) continue;
     out.push({token: hit[1] + ': ' + value, kind:'raw-css-metric', literal:hit[0], index:hit.index ?? 0});
+  }
+  for (const hit of source.matchAll(CSS_RAW_VISUAL_DECLARATION)) {
+    const value = hit[2].trim();
+    const withoutTokens = value.replace(/var\([^)]*\)/g, '');
+    const isColorOrShadow = CSS_LITERAL_COLOR.test(withoutTokens) ||
+      (/(?:shadow|border|outline)/.test(hit[1]) && RAW_LENGTH.test(withoutTokens));
+    const numericVisual = /^(?:opacity|font-weight)$/.test(hit[1]) &&
+      /^-?\d+(?:\.\d+)?$/.test(value) && Number(value) !== 0 && Number(value) !== 1;
+    if (!isColorOrShadow && !numericVisual) continue;
+    out.push({token: hit[1] + ': ' + value, kind:'raw-css-visual', literal:hit[0], index:hit.index ?? 0});
   }
   return out;
 }
