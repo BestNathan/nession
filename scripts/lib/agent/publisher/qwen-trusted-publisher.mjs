@@ -82,6 +82,7 @@ export function isQwenPrewriteOwnerRecovery(env,event){
   return env?.GITHUB_EVENT_NAME==='issue_comment'&&
     env.GITHUB_ACTOR==='BestNathan'&&
     event?.repository?.full_name===REPO&&
+    event?.sender?.login==='BestNathan'&&
     event?.action==='created'&&
     event?.issue?.number===QWEN_PREWRITE_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
