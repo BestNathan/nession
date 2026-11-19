@@ -267,6 +267,46 @@ function confirmQwenSourceInStore(root,record){
     reject('Qwen Publisher does not own the immutable committed native Run');
   return current;
 }
+// #3885: strictly GET/read-only recovery of an ALREADY committed original
+// Publisher Intent. An absent record is an error, never a new publication grant.
+// The exact original commit is needed for durable PR readback after other
+// Issue writers have advanced the Store branch.
+export function readCommittedQwenPublisherIntent({
+  remote,issue,action_id,worker_run_id,publisher_run_id,
+}){
+  if(!positive(issue)||!HEX.test(action_id??'')||
+      !positive(worker_run_id)||!positive(publisher_run_id)||
+      typeof remote!=='string'||!remote||/\s/.test(remote)||remote.length>2000)
+    reject('invalid read-only Qwen Publisher recovery identity');
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-publisher-recovery-'));
+  const root=path.join(tmp,'agent-store');
+  try{
+    try{execFileSync('git',['clone','--quiet','--no-tags','--single-branch',
+      '--branch','agent-store','--',remote,root],{
+      stdio:['ignore','pipe','pipe'],timeout:45000,
+      env:{...process.env,GIT_TERMINAL_PROMPT:'0',GIT_NO_REPLACE_OBJECTS:'1'},
+    });}catch{reject('cannot read original Qwen Store Intent');}
+    if(git(root,'symbolic-ref','--short','HEAD')!=='agent-store')
+      reject('recovery Store branch mismatch');
+    const location='workflows/issues/'+issue+'/results/'+worker_run_id+
+      '-1-'+action_id+'.json';
+    const saved=json(root,location);
+    if(saved===null)reject('no original Qwen Publisher Intent; never create one');
+    const record=validateQwenPublisherIntent(saved);
+    if(qwenPublisherIntentPath(record)!==location||
+       record.issue!==issue||record.action_id!==action_id||
+       record.worker_run_id!==worker_run_id||
+       record.publisher_run_id!==publisher_run_id)
+      reject('recovered Publisher Intent differs from original signed Run');
+    confirmQwenSourceInStore(root,record);
+    const committed=git(root,'log','-1','--format=%H','HEAD','--',location);
+    if(!SHA.test(committed))
+      reject('original Qwen Publisher Intent commit unavailable');
+    return {status:'reconcile',may_publish:false,record,
+      store_commit_sha:committed};
+  }finally{fs.rmSync(tmp,{recursive:true,force:true});}
+}
+
 export function commitQwenPublisherIntent({remote,preflight,target_main_sha,
   publisher_run_id}){
   const record=planQwenPublisherIntent({preflight,target_main_sha,publisher_run_id});
