@@ -1,10 +1,22 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {qwenWorkerAuthority,qwenDeveloperPrompt,classifyQwenCliFailure}
-  from './qwen-development-worker.mjs';
+import {qwenWorkerAuthority,qwenDeveloperPrompt,classifyQwenCliFailure,
+  qwenDeveloperTurnBudget} from './qwen-development-worker.mjs';
 import {attestQwenRepairIssueReview} from './qwen-review-context.mjs';
 import {formatReviewerIssueReceipt}
   from './reviewer-result-ingest.mjs';
+
+// A real native second-cycle Repair hit error_max_turns at the old
+// 10-turn limit. Only an authenticated Repair Resume receives a bounded
+// 24-turn budget; plain/initial Developer remains 10 with unchanged policy.
+assert.equal(qwenDeveloperTurnBudget('implement',false),10);
+assert.equal(qwenDeveloperTurnBudget('implement',true),10);
+assert.equal(qwenDeveloperTurnBudget('repair',true),24);
+for(const [task,resuming] of [
+  ['repair',false],['review',true],['evil',false],
+  ['repair','true'],['implement',null],
+])assert.throws(()=>qwenDeveloperTurnBudget(task,resuming),
+  /Qwen Developer/);
 
 // A real Provider failure must be classifiable without exposing raw model
 // output, prompts, stderr or Gateway credentials to public Actions logs.
