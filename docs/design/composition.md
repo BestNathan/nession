@@ -204,6 +204,11 @@ Containment is a content decision, not a default desire to put everything in car
 A detail or configuration region does not gain a second shell, header or scroll
 owner when it adopts a recipe; the host composition in §7/§8 still owns those.
 
+The relationship of container inset, adjacent peers and mixed content is specified
+once by [Spatial Relationships / Content Rhythm](design-system/spatial-relationships.md).
+The Host owns page-level outer insets; a semantic recipe owns its internal
+Padding/Gap; capabilities must not add compensating margins to recreate either.
+
 ## 11. Large-screen whitespace
 
 Whitespace is not unused product surface that must be filled with features.
