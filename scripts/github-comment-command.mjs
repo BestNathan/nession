@@ -126,6 +126,7 @@ export function dispatchInputs(plan) {
       return {
         issue_number: String(plan.issue_number), criterion: plan.criterion,
         target_sha: plan.target_sha, stage: plan.stage,
+        environment: plan.environment ?? '',
         runtime_profile: plan.runtime_profile, platform: plan.platform,
         source_comment_id: String(plan.comment_id),
       };
