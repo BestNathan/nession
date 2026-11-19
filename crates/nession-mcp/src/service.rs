@@ -456,6 +456,13 @@ where
             warn!("MCP request refused: no valid credential");
             return Box::pin(async { Ok(Self::unauthorized()) });
         }
+        // The MCP protocol uses the path, not URL query parameters. Strip the
+        // credential-bearing query before forwarding to rmcp's transport.
+        let mut request = request;
+        let Ok(path_only) = request.uri().path().parse::<http::Uri>() else {
+            return Box::pin(async { Ok(Self::unauthorized()) });
+        };
+        *request.uri_mut() = path_only;
         let mut inner = self.inner.clone();
         Box::pin(async move {
             match inner.call(request).await {
@@ -530,7 +537,8 @@ fn hex_digit(value: u8) -> Option<u8> {
 
 fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier, allow_query: bool) -> bool {
     // Authorization must not be ambiguous even when multiple headers appear.
-    let mut headers = request.headers().get_all(http::header::AUTHORIZATION).iter();
+    let all_headers = request.headers().get_all(http::header::AUTHORIZATION);
+    let mut headers = all_headers.iter();
     let header = headers.next();
     if headers.next().is_some() {
         return false;
