@@ -103,7 +103,7 @@ owner — while accepting local `flex`/`grid` composition. Browser checks then
 assert the computed result: one intended scroll owner, no page-level horizontal
 overflow, the approved control band, one App page header/Back, and visible
 actions. The canonical model is
-[composition.md §14](../../composition.md#14-layout-ownership-and-shared-recipes-3194).
+[composition.md §14](../composition.md#14-layout-ownership-and-shared-recipes-3194).
 
 ## Spatial relationship and content-rhythm evidence (#4045)
 
