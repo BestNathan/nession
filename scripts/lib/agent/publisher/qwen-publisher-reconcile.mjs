@@ -36,6 +36,8 @@ export const ORIGINAL=Object.freeze({
   pr_sha:'5d7e9118b7e954e760cc680fff7d43b4f9e17612',
   checkpoint_sha:'0eb0963d7365679d0f0448fbcd54ad270bc90ce2',
   patch_sha256:'216249d2ecad6657921a00fb2ce475dd4540defc624984a6c65f1bb5d04d2121',
+  worker_sha:'d112a26c69a3e7e694b32152d61883c957c3f17b',
+  ciphertext_sha256:'2c7faf10c4648ad21698cb4e4d34caa9acda11c7e62e504a51768891abc1b052',
 });
 export const COMMAND='/nession reconcile-qwen-pr issue=3784 publisher_run=44281178406 pr=3919';
 const SHA=/^[0-9a-f]{40}$/;
@@ -88,10 +90,14 @@ export function assertOwnerQwenPublisherRecovery({env,event,run,jobs,receipt,ing
       ingester.actor?.login!=='BestNathan'||
       ingester.repository?.full_name!==REPO)
     fail('original successful main Ingest Run changed identity');
-  if(receipt?.ingester_run_id!==s.ingester_run_id||
+  if(receipt?.status!=='committed'||
+      receipt?.ingester_run_id!==s.ingester_run_id||
       receipt?.run_id!==s.worker_run_id||
       receipt?.action_id!==s.action_id||
-      receipt?.issue!==s.issue||receipt?.checkpoint_commit_sha!==s.checkpoint_sha)
+      receipt?.issue!==s.issue||
+      receipt?.worker_sha!==s.worker_sha||
+      receipt?.ciphertext_sha256!==s.ciphertext_sha256||
+      receipt?.checkpoint_commit_sha!==s.checkpoint_sha)
     fail('Ingest receipt diverged from original signed Worker/Store');
   // Reuse the canonical Qwen Publisher authorization checks against the
   // independently fetched original Run and original completed Ingest.
