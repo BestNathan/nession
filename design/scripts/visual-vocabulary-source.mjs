@@ -6,6 +6,14 @@ import {
   findVisualVariableViolations,
   isForeignAdapter,
 } from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
+import {
+  findNonTokenMetricUtilities,
+  findNonTokenCssMetrics,
+  findNonTokenInlineMetrics,
+  isShippingStyleFile,
+  readLegacyMetricBaseline,
+  rejectNewMetricDebt,
+} from './visual-token-drift.mjs';
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -350,6 +358,42 @@ export function scanLocalVariableContracts(files, owners = {}, surfaces = {}) {
   return violations;
 }
 
+/** Global additive-only token enforcement (#4061). Unchanged legacy source
+ * blobs are pinned by their Git SHA, and any edited file must migrate *all*
+ * detectable non-token metrics. Existing visual-vocabulary and Recipe gates
+ * remain authoritative for their respective non-spacing rules.
+ */
+export function scanNonTokenStyleSource(
+  source, file = '<fixture>', baseline = readLegacyMetricBaseline(),
+) {
+  if (!isShippingStyleFile(file)) return [];
+  const masked = maskComments(source);
+  const observations = [];
+  const adapter = (
+    file.endsWith('/src/platform/editor/model/editorTheme.ts') ||
+    file.endsWith('/src/shared/markdown/markdownVisualGrammar.ts')
+  );
+  if (adapter) return []; // The renderer adapter owns its own styling contract.
+
+  if (file.endsWith('.css')) {
+    observations.push(...findNonTokenCssMetrics(masked));
+  } else {
+    for (const literal of stringLiterals(masked)) {
+      for (const metric of findNonTokenMetricUtilities(literal.value)) {
+        observations.push({...metric, literal: literal.value, index: literal.index});
+      }
+    }
+    observations.push(...findNonTokenInlineMetrics(masked));
+  }
+  return rejectNewMetricDebt(file, source, observations, baseline).map(hit => ({
+    file,
+    line: lineNumber(source, hit.index),
+    kind: `untokenized-${hit.kind}`,
+    actual: hit.token,
+    repair: 'use a generated --nession-* semantic/Experience token or an owned Recipe; unchanged legacy files are frozen until their next edit',
+  }));
+}
+
 export function scanVisualVocabularySuppression(source, file = '<fixture>') {
   const violations = [];
   for (const match of source.matchAll(/eslint-disable(?:-next-line|-line)?[^\n]*nession\/visual-vocabulary/g)) {
@@ -392,6 +436,7 @@ export function scanRepository(root = ROOT) {
     const source = readFileSync(path, 'utf8');
     if (!isTestSource(rel)) sources.push({ file: rel, source });
     if (ext === '.css') violations.push(...scanCssSource(source, rel));
+    violations.push(...scanNonTokenStyleSource(source, rel));
     if (ext !== '.css') {
       violations.push(...scanVisualVocabularySuppression(source, rel));
       if (!isTestSource(rel)) {
