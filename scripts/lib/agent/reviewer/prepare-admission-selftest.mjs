@@ -10,7 +10,7 @@ import { CONTROLLED_1997_POLICY as POLICY } from '../publisher/controlled-propos
 import { planControlledPublisherIntent,
   CONTROLLED_PUBLISHER_INTENT_PATH } from '../publisher/store-intent.mjs';
 import { renderReviewPrompt } from '../tasks/review.mjs';
-import { prepareReviewAdmission } from './prepare-admission.mjs';
+import {prepareReviewAdmission,boundedQwenReviewBaseFiles} from './prepare-admission.mjs';
 
 const REPO='BestNathan/nession';
 const HEAD='3d8e3807cc01f6082734b8d0ba458217c28f60a4';
@@ -91,6 +91,45 @@ try{
 }finally{
   fs.rmSync(temp,{recursive:true,force:true});
 }
+
+// Real #3784 original Rust base is >32KiB; the signed Reviewer admission
+// cannot contain full source bytes (16KiB cap). The GitHub base must still be
+// fetched and checked, without silently claiming an incomplete base file.
+const baseSha='c'.repeat(40),changed=[{filename:'src/large.rs'}];
+let reads=0;
+const fetchBase=content=>async endpoint=>{
+  assert.equal(endpoint,'contents/src/large.rs?ref='+baseSha);
+  reads++;
+  return {encoding:'base64',content:Buffer.from(content).toString('base64'),
+    size:Buffer.byteLength(content)};
+};
+const large='x'.repeat(34891);
+assert.deepEqual(await boundedQwenReviewBaseFiles({
+  files:changed,baseSha,fetcher:fetchBase(large)}),[]);
+assert.equal(reads,1,'large original base still independently fetched');
+const small='pub fn small() {}\\n';
+assert.deepEqual(await boundedQwenReviewBaseFiles({
+  files:changed,baseSha,fetcher:fetchBase(small)}),
+  [{path:'src/large.rs',content:small}]);
+const two=[{filename:'src/large.rs'},{filename:'src/second.rs'}];
+assert.deepEqual(await boundedQwenReviewBaseFiles({
+  files:two,baseSha,fetcher:async p=>({
+    encoding:'base64',content:Buffer.from(p.includes('second.rs')?
+      'y'.repeat(5000):small).toString('base64')})}),[],
+  'no partial originals may masquerade as complete base context');
+for(const fake of [
+  {encoding:'utf8',content:'hello'},
+  {encoding:'base64',content:'***'},
+  {encoding:'base64',content:Buffer.from('x').toString('base64'),size:2},
+  {encoding:'base64',content:Buffer.from('y'.repeat(129*1024)).toString('base64')},
+]){
+  await assert.rejects(()=>boundedQwenReviewBaseFiles({
+    files:changed,baseSha,fetcher:async()=>fake}),
+    /authenticated PR base file|unsafe PR base file/);
+}
+await assert.rejects(()=>boundedQwenReviewBaseFiles({
+  files:changed,baseSha:'untrusted',fetcher:fetchBase('x')}),
+  /invalid Qwen Review base-file/);
 
 // Keep the canonical reviewer Gate authoritative for the Qwen source tests.
 await import('./qwen-pr-admission-selftest.mjs');

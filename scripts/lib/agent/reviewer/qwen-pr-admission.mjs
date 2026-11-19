@@ -35,6 +35,38 @@ export function authenticatedQwenPublisherTrigger(run){
     (run?.event==='workflow_dispatch'&&
       run.actor?.login==='github-actions[bot]');
 }
+// #3885: original Qwen Publisher wrote PR #3919 and failed *after* its
+// GitHub POST. A distinct Owner-authenticated GET-only Publisher recovery
+// verified the same PR/Store Intent and advanced the signed Issue Store.
+// Do not pretend the original Run succeeded. This narrow dual-Run proof
+// preserves both historical outcomes; never authorize an arbitrary failure.
+export function attestedQwenInitialPublisherRecovery({
+  issue,intent,publisherRun,recoveryRun,
+}){
+  return issue===3784&&intent?.issue===3784&&
+    intent.publisher_run_id===44281178406&&
+    intent.target_main_sha==='ec2984381bda57491d764a9ba3e1123a63b89861'&&
+    intent.branch==='agent/3784/qwen-39c01222a8d00fa3'&&
+    publisherRun?.id===44281178406&&publisherRun.run_attempt===1&&
+    publisherRun.name==='Store / Qwen Publisher'&&
+    publisherRun.path==='.github/workflows/store-qwen-publisher.yml'&&
+    publisherRun.event==='workflow_run'&&
+    publisherRun.head_branch==='main'&&
+    publisherRun.head_sha===intent.target_main_sha&&
+    publisherRun.status==='completed'&&publisherRun.conclusion==='failure'&&
+    publisherRun.repository?.full_name===REPO&&
+    publisherRun.head_repository?.full_name===REPO&&
+    recoveryRun?.id===44431297473&&recoveryRun.run_attempt===1&&
+    recoveryRun.name==='Store / Qwen Publisher'&&
+    recoveryRun.path==='.github/workflows/store-qwen-publisher.yml'&&
+    recoveryRun.event==='issue_comment'&&
+    recoveryRun.actor?.login==='BestNathan'&&
+    recoveryRun.head_branch==='main'&&
+    recoveryRun.head_sha==='08f841bf796977a91ff745eb0763559ea67dec51'&&
+    recoveryRun.status==='completed'&&recoveryRun.conclusion==='success'&&
+    recoveryRun.repository?.full_name===REPO&&
+    recoveryRun.head_repository?.full_name===REPO;
+}
 
 export function assertQwenReviewerAdmission(a,identity={agent_id:'review-qwen-01'}){
   if(!exact(a,ADMISSION_FIELDS)||a.schema_version!==1||
@@ -98,6 +130,7 @@ function expectedReviewFiles(files,tree){
 export function admitQwenPublishedReview({
   state,intent,publisherRun,pullRequests,pr,ref,commit,files,tree,
   actionId,reviewerAgentId='review-qwen-01',base_files=[],
+  recoveryRun=null,
 }){
   validateDevelopmentState(state);
   const record=validateQwenPublisherIntent(intent);
@@ -124,9 +157,13 @@ export function admitQwenPublishedReview({
       publisherRun.run_attempt!==1||
       publisherRun.name!=='Store / Qwen Publisher'||
       publisherRun.path!=='.github/workflows/store-qwen-publisher.yml'||
-      !authenticatedQwenPublisherTrigger(publisherRun)||publisherRun.head_branch!=='main'||
+      !(authenticatedQwenPublisherTrigger(publisherRun)&&
+          publisherRun.conclusion==='success'||
+        attestedQwenInitialPublisherRecovery({
+          issue:state.issue,intent:record,publisherRun,recoveryRun}))||
+      publisherRun.head_branch!=='main'||
       publisherRun.head_sha!==record.target_main_sha||
-      publisherRun.status!=='completed'||publisherRun.conclusion!=='success'||
+      publisherRun.status!=='completed'||
       publisherRun.repository?.full_name!==REPO||
       publisherRun.head_repository?.full_name!==REPO)
     deny('Publisher Run/Attempt is not independently authenticated');
