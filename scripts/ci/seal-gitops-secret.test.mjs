@@ -42,6 +42,14 @@ test('SealedSecret enrollment preserves existing indentless and indented YAML li
   const batch = addRequiredResources(originalIndentless, 'staging');
   assert.match(batch, /^resources:\n- sealed-backend-server\.json\n- sealed-inbound\.json\n- sealed-tls\.json\n/m);
   assert.equal(addRequiredResources(batch, 'staging'), batch);
+  const batchNested = addRequiredResources(twoSpace, 'staging');
+  assert.match(batchNested,
+    /^resources:\n  - sealed-backend-server\.json\n  - sealed-inbound\.json\n  - sealed-tls\.json\n/m);
+  assert.equal(addRequiredResources(batchNested, 'staging'), batchNested);
+  // Every resource item must keep the existing sequence indentation.
+  const rows = value => value.split(/\nimages:/)[0].split('\n').filter(line => /^\s*-\s+/.test(line));
+  assert.ok(rows(batch).every(line => line.startsWith('- ')));
+  assert.ok(rows(batchNested).every(line => line.startsWith('  - ')));
 });
 
 test('GitHub Environment must match GitOps environment directory exactly', () => {
