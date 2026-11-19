@@ -8,6 +8,13 @@ Executable tokens, codegen, and lint live in [#467](https://github.com/BestNatha
 
 Tokens encode reusable visual/state values. They do **not** define information architecture or decide capability presence.
 
+Spacing **numbers** live in this token architecture; the meaning of a spacing
+**relationship** (which parent owns the gap or inset, and when zero gap is
+intentional) lives in [Spatial Relationships / Content Rhythm](spatial-relationships.md).
+Do not introduce a second token family just to encode every neighboring pair.
+
+The **small executable content-rhythm family** (implementation [#4050](https://github.com/BestNathan/nession/issues/4050)) is stored in both `design/tokens/experience/web.json` and `app.json`: `rhythm.{sectionStack,sectionContent,textStack,inline,fieldStack}`. The generator emits `--nession-rhythm-*` into the existing CSS API and the App TS projection. These metrics centralize *repeated stable gaps already present in shared recipes*; `spatial-relationships.md` still owns which semantic parent applies them. This family is not a second spacing scale, and icon paint/slot/touch geometry remains distinct.
+
 `Sessions ← Terminal → Workspace`, contextual capability emergence, or whether a control is visible are product/interaction rules. They belong in product model, IA, interaction, pattern, and contract layers — not in color/spacing token names.
 
 ## Layer stack
