@@ -59,8 +59,20 @@ export const REVIEWER_PREMODEL_FAILURE_3784=Object.freeze({
   failure_code:'qwen_reviewer_base_file_premodel_failure',
   state_version:12,
 });
+// #4097: the exact third-cycle Reviewer failed before its model stage.
+export const REVIEWER_PREMODEL_FAILURE_3784_C=Object.freeze({
+  issue:3784,
+  action_id:'ad5899ead831233a22dcac8856c7029bfebb47d23bb3eb47f0c9e68afaf2c504',
+  run_id:44500591865,
+  source_sha:'d80e0827ad2d9f2dd548d20fc92b9462681c3094',
+  main_sha:'b0a07c1f5a012b8d4814558c15d9df77cec0f887',
+  publisher_run_id:44497822207,
+  failure_code:'qwen_reviewer_owner_reconciler_premodel_failure',
+  state_version:35,
+});
 export const REVIEWER_PREMODEL_FAILURE_SOURCES=Object.freeze([
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
+  REVIEWER_PREMODEL_FAILURE_3784_C,
 ]);
 export const REVIEWER_JSON_FAILURE=Object.freeze({
   issue:3433,
@@ -282,6 +294,7 @@ export function validateDevelopmentState(state) {
             QWEN_TOOL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
+            REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
             REVIEWER_JSON_FAILURE.failure_code,
             REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
@@ -320,6 +333,14 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_PREMODEL_FAILURE_3784_C.failure_code&&(
+            state.issue!==REVIEWER_PREMODEL_FAILURE_3784_C.issue||
+            item.id!==REVIEWER_PREMODEL_FAILURE_3784_C.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||
+            item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784_C.source_sha||
+            r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784_C.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_TOOL_FAILURE.failure_code&&(
             state.issue!==QWEN_TOOL_FAILURE.issue||
@@ -372,6 +393,7 @@ export function validateDevelopmentState(state) {
             !(item.task.role==='reviewer'&&
               [REVIEWER_PREMODEL_FAILURE.failure_code,
                 REVIEWER_PREMODEL_FAILURE_3784.failure_code,
+                REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
                 REVIEWER_JSON_FAILURE.failure_code,
                 REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code))))
         reject('invalid authenticated failure receipt');
@@ -942,6 +964,58 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
   onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
     'source_sha','failure_code'],'Reviewer admission failure proof');
   const old=state.outbox.find(x=>x.id===f.action_id);
+  if(f===REVIEWER_PREMODEL_FAILURE_3784_C){
+    // Historical v35 C remains the only eligible replacement. Verify every
+    // signed A→B→C transition and pre-existing reviewer/developer history
+    // before committing one successor. A drifted PR is rejected separately
+    // by the trusted Controller's exact-ref source verifier.
+    const t=state.transitions, last=t.at(-1);
+    const p=t.filter(x=>x.kind==='publisher'&&x.outcome==='published');
+    const expectedPublished=[
+      [44281178406,'5d7e9118b7e954e760cc680fff7d43b4f9e17612'],
+      [44457994853,'51f82d64ec159397ea501e6cbb99e7039ee141bd'],
+      [44497822207,f.source_sha],
+    ];
+    const history=state.outbox.filter(x=>x.id!==f.action_id);
+    if(state.issue!==3784||state.version!==35||version!==35||
+       state.phase!=='review'||state.target_sha!==f.source_sha||
+       state.repair_attempts!==2||t.length!==5||p.length!==3||
+       p.some((x,i)=>x.run_id!==expectedPublished[i][0]||
+         x.target_sha!==expectedPublished[i][1]||x.attempt!==1)||
+       t[1]?.kind!=='reviewer'||t[1].outcome!=='changes_requested'||
+       t[1].run_id!==44457049411||
+       t[3]?.kind!=='reviewer'||t[3].outcome!=='changes_requested'||
+       t[3].run_id!==44466992692||
+       last!==p[2]||last.write_ahead_publisher_run_id!==44476308903||
+       state.assignments.developer!=='dev-qwen-01'||
+       state.assignments.reviewer!=='review-qwen-01'||
+       state.outbox.length!==6||history.length!==5||
+       history.filter(x=>x.status==='failed').length!==5||
+       proof.verified!==true||proof.issue!==f.issue||
+       proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+       proof.attempt!==1||proof.source_sha!==f.source_sha||
+       proof.failure_code!==f.failure_code||
+       old?.status!=='dispatched'||old.attempts!==1||
+       old.task.type!=='dispatch'||old.task.role!=='reviewer'||
+       old.task.task!=='review'||old.task.agent_id!=='review-qwen-01'||
+       old.task.sha!==f.source_sha||
+       old.receipt?.status!=='verified'||
+       old.receipt?.dispatch_id!==f.action_id||
+       old.receipt?.source_run_id!==f.run_id||
+       state.outbox.some(x=>x.id===reviewerPremodelSuccessorId(
+         f.issue,f.action_id,f.run_id)))
+      reject('unverified or already consumed #3784 C pre-model Reviewer source');
+    const successorId=reviewerPremodelSuccessorId(f.issue,f.action_id,f.run_id);
+    if(state.outbox.length>=MAX_OUTBOX)
+      reject('bounded Reviewer successor Outbox exhausted');
+    const failed={...old,status:'failed',receipt:{
+      status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
+      source_attempt:1,failure_code:f.failure_code}};
+    return validateDevelopmentState({...state,version:version+1,
+      outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),
+        {id:successorId,task:{...old.task},status:'pending',
+          attempts:0,receipt:null}]});
+  }
   if(state.issue!==f.issue||version!==(f.state_version??6)||
      state.version!==version||
      state.phase!=='review'||state.target_sha!==f.source_sha||

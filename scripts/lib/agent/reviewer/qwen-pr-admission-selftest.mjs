@@ -13,7 +13,8 @@ import {startDevelopment,validateDevelopmentState,
 import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
 import {assertReviewerAdmission} from './pr-admission.mjs';
 import {admitQwenPublishedReview,admitQwenRepairPublishedReview,
-  authenticatedQwenPublisherTrigger,attestedQwenInitialPublisherRecovery}
+  authenticatedQwenPublisherTrigger,attestedQwenInitialPublisherRecovery,
+  attestedQwenRepairPublisherRecovery}
   from './qwen-pr-admission.mjs';
 import {renderReviewPrompt,reviewModelResult} from '../tasks/review.mjs';
 
@@ -307,6 +308,87 @@ for(const bad of [
   publisherRun:recoveredPublisherRun,
   pullRequests:[prB],pr:prB,ref:refB,commit:commitB,files,tree,
   actionId:REPAIR_ACTION,issue_criteria:CRITERIA,...bad}),/Qwen Reviewer admission|Repair|agent outbox/);
+
+
+// #4097: the real third-cycle Owner reconciler is neither a general
+// workflow_dispatch nor a generic issue_comment Publisher. Store A→B→C,
+// the immutable WAL and its exact successful Owner Run are jointly required.
+const C='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
+const A='5d7e9118b7e954e760cc680fff7d43b4f9e17612';
+const B='51f82d64ec159397ea501e6cbb99e7039ee141bd';
+const saved=[
+  {kind:'publisher',outcome:'published',attempt:1,run_id:44281178406,
+    key:'0'.repeat(64),target_sha:A},
+  {kind:'reviewer',outcome:'changes_requested',attempt:1,run_id:44457049411,
+    key:'1'.repeat(64),target_sha:A},
+  {kind:'publisher',outcome:'published',attempt:1,run_id:44457994853,
+    key:'2'.repeat(64),target_sha:B},
+  {kind:'reviewer',outcome:'changes_requested',attempt:1,run_id:44466992692,
+    key:'3'.repeat(64),target_sha:B},
+  {kind:'publisher',outcome:'published',attempt:1,run_id:44497822207,
+    key:'4'.repeat(64),target_sha:C,
+    write_ahead_publisher_run_id:44476308903},
+];
+const cState=validateDevelopmentState({...repairPublished,issue:3784,
+  version:35,repair_attempts:2,target_sha:C,transitions:saved,
+  outbox:[{...repairReviewer,id:'a'.repeat(64),
+    task:{...repairReviewer.task,sha:C}}]});
+const cIntent={...repairIntent,issue:3784,source_sha:B,
+  original_main_sha:'ec2984381bda57491d764a9ba3e1123a63b89861',
+  original_publisher_run_id:44281178406,
+  branch:'refs/heads/agent/3784/qwen-39c01222a8d00fa3',
+  checkpoint_version:3,publisher_run_id:44476308903};
+const cRun={...repairPublisherRun,id:44497822207,event:'issue_comment',
+  actor:{login:'BestNathan'},
+  head_sha:'01bbda0509faa05ec0b3e8e025e2600cd48cc447'};
+const proofC={state:cState,intent:cIntent,
+  transition:cState.transitions.at(-1),publisherRun:cRun};
+assert.equal(authenticatedQwenPublisherTrigger(cRun),false);
+assert.equal(attestedQwenRepairPublisherRecovery(proofC),true);
+for(const delta of [
+  {publisherRun:{...cRun,id:44497822208}},
+  {publisherRun:{...cRun,run_attempt:2}},
+  {publisherRun:{...cRun,event:'workflow_dispatch'}},
+  {publisherRun:{...cRun,actor:{login:'external'}}},
+  {publisherRun:{...cRun,head_sha:'f'.repeat(40)}},
+  {publisherRun:{...cRun,conclusion:'failure'}},
+  {state:{...cState,issue:3785}},
+  {state:{...cState,target_sha:B}},
+  {state:{...cState,repair_attempts:1}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===1
+    ?{...t,outcome:'approved'}:t)}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===3
+    ?{...t,run_id:44466992693}:t)}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===0
+    ?{...t,run_id:44281178407}:t)}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===2
+    ?{...t,target_sha:C}:t)}},
+  {intent:{...cIntent,publisher_run_id:44495243036}},
+  {intent:{...cIntent,source_sha:A}},
+  {intent:{...cIntent,branch:'refs/heads/agent/3784/qwen-forged00000000'}},
+  {transition:{...proofC.transition,write_ahead_publisher_run_id:44495243036}},
+]){
+  assert.equal(attestedQwenRepairPublisherRecovery({...proofC,...delta}),
+    false,'foreign/corrupted Owner reconciler must fail closed');
+}
+const cPr={...prB,number:3919,head:{...prB.head,sha:C,
+  ref:'agent/3784/qwen-39c01222a8d00fa3'}};
+const cCommit={sha:C,parents:[{sha:B}],tree:{sha:TREE}};
+const cAction=cState.outbox[0].id;
+const cAdmission={state:cState,intent:cIntent,publisherRun:cRun,
+  pullRequests:[cPr],pr:cPr,
+  ref:{ref:cIntent.branch,object:{sha:C}},
+  commit:cCommit,files,tree,actionId:cAction,issue_criteria:CRITERIA};
+assert.equal(admitQwenRepairPublishedReview(cAdmission).target_sha,C);
+for(const bad of [
+  {pr:{...cPr,head:{...cPr.head,sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}}},
+  {ref:{ref:cIntent.branch,object:{sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}}},
+  {commit:{...cCommit,parents:[{sha:A}]}},
+  {publisherRun:{...cRun,actor:{login:'external'}}},
+  {state:{...cState,target_sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'}},
+])assert.throws(()=>admitQwenRepairPublishedReview({...cAdmission,...bad}),
+  /Qwen Reviewer admission|Repair/);
+console.log('✓ #4097 Owner C reconciler: exact signed lineage, denied arbitrary Owner commands and drifted PR D');
 
 console.log('Qwen Reviewer repair: SHA A parent, repair Publisher/outbox, SHA B admission and negatives pass');
 
