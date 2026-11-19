@@ -10,6 +10,8 @@ import {execFileSync} from 'node:child_process';
 import {preflightAgentPatch,validPublisherFile} from './patch-preflight.mjs';
 import {validateQwenRepairPublisherIntent}
   from './qwen-repair-intent.mjs';
+import {SOURCE as QWEN_PREWRITE_FAILURE}
+  from './qwen-repair-prewrite-failure.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/;
 const hash=data=>createHash('sha256').update(data).digest('hex');
@@ -36,9 +38,29 @@ function plan(preflight,intent,{write=false}={}){
       heads.some(sha=>!SHA.test(sha))||
       new Set(heads).size!==heads.length)
     fail('missing exact Store-authenticated published PR HEAD sequence');
+  // A previously immutable WAL can be recovered after a PROVEN pre-write
+  // failure only by a separate Store-CAS marker. Replay after a possible
+  // GitHub write is GET-only. Initial Publisher write grants are unchanged.
+  const recovery=intent?.recovery;
+  const prewrite=write&&intent.status==='prewrite_recovery'&&
+    intent.may_publish===true&&
+    recovery?.verified===true&&
+    recovery.failed_run_id===QWEN_PREWRITE_FAILURE.run_id&&
+    recovery.run_id>recovery.failed_run_id&&
+    recovery.wal_commit_sha&&SHA.test(recovery.wal_commit_sha)&&
+    recovery.marker_path&&
+    /^workflows\/issues\/3784\/results\/44476308903-1-[a-f0-9]{64}\.json$/.test(recovery.marker_path)&&
+    recovery.marker_store_commit_sha===intent.store_commit_sha&&
+    x.issue===QWEN_PREWRITE_FAILURE.issue&&
+    x.action_id===QWEN_PREWRITE_FAILURE.action_id&&
+    x.worker_run_id===QWEN_PREWRITE_FAILURE.worker_run_id&&
+    x.source_sha===QWEN_PREWRITE_FAILURE.source_sha&&
+    x.checkpoint_version===QWEN_PREWRITE_FAILURE.checkpoint_version&&
+    x.publisher_run_id===QWEN_PREWRITE_FAILURE.run_id;
   if(!SHA.test(intent?.store_commit_sha??'')||
-      (write?(intent.status!=='committed'||intent.may_publish!==true):
-        !['committed','reconcile'].includes(intent.status))||
+      (write
+        ?!(intent.status==='committed'&&intent.may_publish===true)&&!prewrite
+        :!['committed','reconcile'].includes(intent.status))||
       e?.schema_version!==1||e.kind!=='trusted_qwen_repair_preflight_only'||
       e.status!=='preflight_only'||e.issue!==x.issue||
       e.action_id!==x.action_id||e.developer_run_id!==x.worker_run_id||
