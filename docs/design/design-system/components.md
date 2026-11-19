@@ -91,6 +91,12 @@ re-imports a second design system. The line:
 | the control's **corner radius**, from the radius token | icon sizes *inside* a control (`size-3.5` next to a 28px button) |
 | | steps with no band (`h-6` — 24px sits below `--control-sm`) |
 
+Accepted upstream primitive spacing is not a second global visual scale. See
+[Spatial Relationships / Content Rhythm](spatial-relationships.md) for the
+meaning of icon-to-label vs icon-**slot**-to-resource-text spacing, who owns
+Padding and Gap, and how Web/App variants should be reviewed before a primitive
+value is changed.
+
 Driving height from the band is not cosmetic. The band is remapped per
 experience (`--control-md` is 32px on Web and 44px on App), so a primitive whose
 height comes from it inherits the App touch floor for free — which is what
