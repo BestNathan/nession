@@ -12,7 +12,7 @@ import {startDevelopment,validateDevelopmentState,
 import {validateQwenPublisherIntent} from '../publisher/store-intent.mjs';
 import {assertReviewerAdmission} from './pr-admission.mjs';
 import {admitQwenPublishedReview,admitQwenRepairPublishedReview,
-  authenticatedQwenPublisherTrigger}
+  authenticatedQwenPublisherTrigger,attestedQwenInitialPublisherRecovery}
   from './qwen-pr-admission.mjs';
 import {renderReviewPrompt,reviewModelResult} from '../tasks/review.mjs';
 
@@ -75,6 +75,48 @@ const botPublisherRun={...publisherRun,event:'workflow_dispatch',
   actor:{login:'github-actions[bot]'}};
 assert.equal(authenticatedQwenPublisherTrigger(botPublisherRun),true);
 assert.equal(authenticatedQwenPublisherTrigger(publisherRun),true);
+// #3784: original Qwen Publisher failed after PR creation; a distinct owner
+// Run verified the *same* PR/Store and committed a Reviewer Action. Never
+// accept a general failed Publisher based on the event shape alone.
+const originalPublisher={id:44281178406,run_attempt:1,
+  name:'Store / Qwen Publisher',
+  path:'.github/workflows/store-qwen-publisher.yml',
+  event:'workflow_run',head_branch:'main',
+  head_sha:'ec2984381bda57491d764a9ba3e1123a63b89861',
+  status:'completed',conclusion:'failure',
+  repository:{full_name:REPO},head_repository:{full_name:REPO}};
+const ownerRecovery={id:44431297473,run_attempt:1,
+  name:'Store / Qwen Publisher',
+  path:'.github/workflows/store-qwen-publisher.yml',
+  event:'issue_comment',actor:{login:'BestNathan'},
+  head_branch:'main',
+  head_sha:'08f841bf796977a91ff745eb0763559ea67dec51',
+  status:'completed',conclusion:'success',
+  repository:{full_name:REPO},head_repository:{full_name:REPO}};
+const originalIntent={issue:3784,publisher_run_id:44281178406,
+  target_main_sha:'ec2984381bda57491d764a9ba3e1123a63b89861',
+  branch:'agent/3784/qwen-39c01222a8d00fa3'};
+const recovered={issue:3784,intent:originalIntent,
+  publisherRun:originalPublisher,recoveryRun:ownerRecovery};
+assert.equal(attestedQwenInitialPublisherRecovery(recovered),true);
+for(const changed of [
+  {issue:3001},
+  {intent:{...originalIntent,issue:3001}},
+  {intent:{...originalIntent,target_main_sha:'0'.repeat(40)}},
+  {publisherRun:{...originalPublisher,conclusion:'success'}},
+  {publisherRun:{...originalPublisher,run_attempt:2}},
+  {publisherRun:{...originalPublisher,head_sha:'0'.repeat(40)}},
+  {publisherRun:{...originalPublisher,head_branch:'staging'}},
+  {recoveryRun:null},
+  {recoveryRun:{...ownerRecovery,conclusion:'failure'}},
+  {recoveryRun:{...ownerRecovery,run_attempt:2}},
+  {recoveryRun:{...ownerRecovery,actor:{login:'attacker'}}},
+  {recoveryRun:{...ownerRecovery,head_sha:'0'.repeat(40)}},
+  {recoveryRun:{...ownerRecovery,event:'workflow_dispatch'}},
+]){
+  assert.equal(attestedQwenInitialPublisherRecovery({
+    ...recovered,...changed}),false);
+}
 assert.equal(authenticatedQwenPublisherTrigger({...botPublisherRun,
   actor:{login:'BestNathan'}}),false);
 const botAccepted=make({publisherRun:botPublisherRun});
