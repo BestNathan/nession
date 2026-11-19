@@ -29,7 +29,8 @@ manually dispatch **Deploy / Seal GitOps Secret** (environment `staging`).
 This workflow accepts only a fixed choice of the two Secret names, not
 arbitrary resource names or YAML paths. Each invocation reads the selected
 raw Secret and publishes only the corresponding `sealed-inbound.json` or
-`sealed-backend-server.json` plus its checked Kustomization enrollment. Verify the SealedSecrets controller materializes
+`sealed-backend-server.json` plus its checked Kustomization enrollment.
+Verify the SealedSecrets controller materializes
 the exact namespace/name/key *before* cutting over the MCP Deployment.
 The operator must approve the protected GitHub Environment for each of
 the two manual SealedSecret publications. The second token's value must match
@@ -38,9 +39,9 @@ the staging Server's existing auth token, or MCP backend calls will fail.
 **Migration safety:** Existing `MCP_CONFIG_TOML` Environment Secret,
 `sealed-secret.json` and its Kubernetes Secret remain legacy rollback
 material until the read-only ConfigMap and credential injection are verified
-live. Do not enable the new Deployment before both the new image and inbound
-Secret are present. Environment-variable credentials are loaded at process
-startup; restart MCP after rotating the inbound Secret. No credential content
+live. Do not enable the new Deployment before the new image and **both**
+MCP Secrets are present. Environment-variable credentials are loaded at process
+startup; restart MCP after either Secret is rotated and coordinate backend credential rotation with Server/Agent. No credential content
 belongs in GitOps TOML, PRs or request/edge logs. Redact query parameters at
 Higress and Nginx before setting `allow_query_token = true`.
 
@@ -72,7 +73,9 @@ Secret. No workflow may accept an arbitrary namespace, output path or host.
 
 | GitHub Environment | GitHub Secret | Kubernetes Secret | data key | GitOps encrypted resource |
 |---|---|---|---|---|
-| staging | NESSION_MCP_INBOUND_TOKEN | nession/nession-mcp-inbound-staging (Opaque) | token | environments/staging/mcp/sealed-inbound.json |\n| staging | NESSION_MCP_BACKEND_SERVER_TOKEN | nession/nession-mcp-backend-server-staging (Opaque) | token | environments/staging/mcp/sealed-backend-server.json |\n| staging | MCP_CONFIG_TOML (legacy/rollback only) | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
+| staging | NESSION_MCP_INBOUND_TOKEN | nession/nession-mcp-inbound-staging (Opaque) | token | environments/staging/mcp/sealed-inbound.json |
+| staging | NESSION_MCP_BACKEND_SERVER_TOKEN | nession/nession-mcp-backend-server-staging (Opaque) | token | environments/staging/mcp/sealed-backend-server.json |
+| staging | MCP_CONFIG_TOML (legacy/rollback only) | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
 | staging | *issued by Configure Site / issue-tls* | nession/nession-mcp-staging-tls (kubernetes.io/tls) | tls.crt + tls.key | environments/staging/mcp/sealed-tls.json |
 
 The target registry in scripts/ci/seal-gitops-secret.mjs is the sole owner of
