@@ -939,4 +939,214 @@ mod workspace_override_tests {
         };
         assert!(format!("{error:#}").contains("Project EROFS lower"));
     }
+
+    /// Verify that reject_referenced_composite produces the expected error
+    /// for a ResolvedGrantImage with composite metadata (#3784).
+    #[test]
+    fn reject_referenced_composite_produces_actionable_error() {
+        let resolved = ResolvedGrantImage {
+            manifest_digest: Some("sha256:manifest".to_string()),
+            layer_digest: "sha256:metadata".to_string(),
+            layer_path: PathBuf::from("/cache/metadata"),
+            usage: None,
+            composite: Some(ResolvedCompositeGrant {
+                descriptor_digest: "sha256:descriptor".to_string(),
+                metadata_digest: "sha256:metadata".to_string(),
+                device_digests: vec!["sha256:device1".to_string()],
+                metadata_path: PathBuf::from("/cache/metadata"),
+                device_paths: vec![PathBuf::from("/cache/device1")],
+            }),
+        };
+        let error = reject_referenced_composite(&resolved).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("not yet selectable by the Sandbox composition"),
+            "error message should explain the composite is not selectable: {message}"
+        );
+        assert!(
+            message.contains("sha256:metadata"),
+            "error message should include the layer digest: {message}"
+        );
+        assert!(
+            message.contains("#3697"),
+            "error message should reference the related issue: {message}"
+        );
+    }
+
+    /// Verify that a non-composite ResolvedGrantImage passes the check (#3784).
+    #[test]
+    fn reject_referenced_composite_accepts_plain_image() {
+        let resolved = ResolvedGrantImage {
+            manifest_digest: Some("sha256:manifest".to_string()),
+            layer_digest: "sha256:layer".to_string(),
+            layer_path: PathBuf::from("/cache/layer"),
+            usage: None,
+            composite: None,
+        };
+        reject_referenced_composite(&resolved).expect("plain image should be accepted");
+    }
+
+    /// Helper to create a composite grant with the required object structure (#3784).
+    fn composite_grant(
+        role: ManagedImageRole,
+        manifest_digest: &str,
+        target: Option<&str>,
+    ) -> ManagedImageGrant {
+        use nession_protocol::contracts::session::v1::ManagedImageObject;
+        ManagedImageGrant {
+            role,
+            digest: manifest_digest.to_string(),
+            path: format!("/images/blobs/{manifest_digest}"),
+            target: target.map(str::to_string),
+            objects: vec![
+                ManagedImageObject {
+                    digest: manifest_digest.to_string(),
+                    media_type: nession_erofs::oci::MEDIA_TYPE_MANIFEST.to_string(),
+                    size_bytes: 100,
+                    path: format!("/images/blobs/{manifest_digest}"),
+                },
+                ManagedImageObject {
+                    digest: "sha256:composite-descriptor".to_string(),
+                    media_type: nession_erofs::oci::MEDIA_TYPE_COMPOSITE.to_string(),
+                    size_bytes: 200,
+                    path: "/images/blobs/sha256:composite-descriptor".to_string(),
+                },
+            ],
+        }
+    }
+
+    /// Verify that a composite Base image is rejected at the preparation boundary (#3784).
+    #[tokio::test]
+    async fn prepare_rejects_composite_base_before_workspace_creation() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let manifest_digest = "sha256:base-manifest";
+        let server = Server::run();
+        // Mock the manifest fetch to return invalid JSON (will fail before composite check)
+        server.expect(
+            Expectation::matching(request::method_path(
+                "GET",
+                format!("/images/blobs/{manifest_digest}"),
+            ))
+            .respond_with(Response::builder().status(200).body(b"not json").unwrap()),
+        );
+
+        let result = prepare(
+            &cache,
+            &[composite_grant(ManagedImageRole::Base, manifest_digest, None)],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        // The preparation should fail (either during fetch or composite rejection)
+        assert!(result.is_err(), "composite Base should be rejected");
+
+        // Verify no workspace was created (cleanup occurred)
+        let workspace_root = state_dir.path().join("sandbox-workspaces");
+        let workspace_count = std::fs::read_dir(&workspace_root)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(
+            workspace_count, 0,
+            "no workspace should remain after composite rejection"
+        );
+    }
+
+    /// Verify that a composite Workspace image is rejected at the preparation boundary (#3784).
+    #[tokio::test]
+    async fn prepare_rejects_composite_workspace_before_mount() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let base = digest_for(&base_bytes);
+        let workspace_manifest = "sha256:workspace-manifest";
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/images/blobs/{base}")))
+                .respond_with(Response::builder().status(200).body(base_bytes).unwrap()),
+        );
+        server.expect(
+            Expectation::matching(request::method_path(
+                "GET",
+                format!("/images/blobs/{workspace_manifest}"),
+            ))
+            .respond_with(Response::builder().status(200).body(b"not json").unwrap()),
+        );
+
+        let result = prepare(
+            &cache,
+            &[
+                grant(ManagedImageRole::Base, &base, None),
+                composite_grant(ManagedImageRole::Workspace, workspace_manifest, None),
+            ],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        assert!(result.is_err(), "composite Workspace should be rejected");
+
+        let workspace_root = state_dir.path().join("sandbox-workspaces");
+        let workspace_count = std::fs::read_dir(&workspace_root)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(
+            workspace_count, 0,
+            "workspace should be cleaned up after composite rejection"
+        );
+    }
+
+    /// Verify that a composite Toolchain image is rejected at the preparation boundary (#3784).
+    #[tokio::test]
+    async fn prepare_rejects_composite_toolchain_before_mount() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let base = digest_for(&base_bytes);
+        let toolchain_manifest = "sha256:toolchain-manifest";
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/images/blobs/{base}")))
+                .respond_with(Response::builder().status(200).body(base_bytes).unwrap()),
+        );
+        server.expect(
+            Expectation::matching(request::method_path(
+                "GET",
+                format!("/images/blobs/{toolchain_manifest}"),
+            ))
+            .respond_with(Response::builder().status(200).body(b"not json").unwrap()),
+        );
+
+        let result = prepare(
+            &cache,
+            &[
+                grant(ManagedImageRole::Base, &base, None),
+                composite_grant(ManagedImageRole::Toolchain, toolchain_manifest, Some("/opt/rust")),
+            ],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        assert!(result.is_err(), "composite Toolchain should be rejected");
+
+        let workspace_root = state_dir.path().join("sandbox-workspaces");
+        let workspace_count = std::fs::read_dir(&workspace_root)
+            .map(|entries| entries.count())
+            .unwrap_or(0);
+        assert_eq!(
+            workspace_count, 0,
+            "workspace should be cleaned up after composite rejection"
+        );
+    }
 }
