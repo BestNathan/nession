@@ -694,7 +694,7 @@ async fn terminate_and_wait(child: &mut Child) {
 /// An actual standalone process supports headerless clients only when explicitly enabled.
 #[tokio::test]
 async fn standalone_query_token_authentication_is_opt_in() {
-    let (server_addr, server_task) = start_server_with_mcp(false).await;
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
     let dir = tempfile::tempdir().expect("tempdir");
     let config_path = write_routed_config(dir.path(), server_addr);
     let mut child = spawn_standalone(&config_path);
