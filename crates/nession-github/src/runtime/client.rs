@@ -234,22 +234,38 @@ pub struct GithubClient {
 }
 
 impl GithubClient {
-    /// Build from the Agent's environment: a host-appropriate token and the
-    /// fixed GitHub API origin. An absent token is not a construction failure;
-    /// operations answer `not_authenticated`.
-    pub fn from_env() -> Self {
-        let token = std::env::var("GITHUB_TOKEN")
-            .or_else(|_| std::env::var("GH_TOKEN"))
-            .ok()
-            .map(|token| token.trim().to_string())
-            .filter(|token| !token.is_empty());
+    /// The fixed GitHub API transport, without a credential.
+    ///
+    /// A credential is selected **per Session request** (#4080) and attached
+    /// with [`Self::with_token`]: an Agent-composed client must not freeze the
+    /// Agent's process environment as every Session's identity. The origin is
+    /// configuration, never client input.
+    pub fn api_transport() -> Self {
         let http = Client::builder()
             .redirect(reqwest::redirect::Policy::none())
             .timeout(REQUEST_TIMEOUT)
             .user_agent("nession-agent")
-            .build();
+            .build()
+            .map_err(|error| error.to_string());
         let api_base = Url::parse("https://api.github.com/").ok();
-        Self::with_parts(http, api_base, token, MAX_RESPONSE_BYTES)
+        Self::with_parts(http, api_base, None, MAX_RESPONSE_BYTES)
+    }
+
+    /// This transport carrying `token`, for one targeted Session request.
+    ///
+    /// The HTTP connection pool and API origin are reused; only the
+    /// credential identity changes. An absent or empty token is anonymous —
+    /// it is never sent as an empty `Authorization` header.
+    pub fn with_token(&self, token: Option<String>) -> Self {
+        let token = token
+            .map(|token| token.trim().to_string())
+            .filter(|token| !token.is_empty());
+        Self::with_parts(
+            self.http.clone(),
+            self.api_base.clone(),
+            token,
+            self.max_bytes,
+        )
     }
 
     /// A client over an explicit origin, for tests and for a future approved
@@ -259,12 +275,13 @@ impl GithubClient {
             .redirect(reqwest::redirect::Policy::none())
             .timeout(REQUEST_TIMEOUT)
             .user_agent("nession-agent")
-            .build();
+            .build()
+            .map_err(|error| error.to_string());
         Self::with_parts(http, Some(api_base), token, MAX_RESPONSE_BYTES)
     }
 
     fn with_parts(
-        http: Result<Client, reqwest::Error>,
+        http: Result<Client, String>,
         api_base: Option<Url>,
         token: Option<String>,
         max_bytes: usize,
@@ -277,7 +294,7 @@ impl GithubClient {
             })
             .unwrap_or_else(|| "anonymous".to_string());
         Self {
-            http: http.map_err(|error| error.to_string()),
+            http,
             api_base,
             token,
             auth_fingerprint,
@@ -853,79 +870,7 @@ fn has_next(link: &Option<String>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Arc, Mutex};
-    use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    use tokio::net::TcpListener;
-
-    struct FakeResponse {
-        status: u16,
-        headers: Vec<(String, String)>,
-        body: String,
-    }
-
-    impl FakeResponse {
-        fn json(status: u16, body: serde_json::Value) -> Self {
-            Self {
-                status,
-                headers: vec![("content-type".into(), "application/json".into())],
-                body: body.to_string(),
-            }
-        }
-
-        fn empty(status: u16) -> Self {
-            Self {
-                status,
-                headers: Vec::new(),
-                body: String::new(),
-            }
-        }
-    }
-
-    struct FakeGithub {
-        base: Url,
-        requests: Arc<Mutex<Vec<String>>>,
-    }
-
-    async fn fake_github(responses: Vec<FakeResponse>) -> FakeGithub {
-        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let address = listener.local_addr().unwrap();
-        let requests = Arc::new(Mutex::new(Vec::new()));
-        let recorded = Arc::clone(&requests);
-        tokio::spawn(async move {
-            for response in responses {
-                let Ok((mut stream, _)) = listener.accept().await else {
-                    break;
-                };
-                let mut buffer = vec![0u8; 8192];
-                let read = stream.read(&mut buffer).await.unwrap_or(0);
-                let request = String::from_utf8_lossy(&buffer[..read]).to_string();
-                recorded.lock().unwrap().push(request);
-                let reason = match response.status {
-                    200 => "OK",
-                    302 => "Found",
-                    401 => "Unauthorized",
-                    403 => "Forbidden",
-                    404 => "Not Found",
-                    _ => "Error",
-                };
-                let mut head = format!(
-                    "HTTP/1.1 {} {reason}\r\nconnection: close\r\n",
-                    response.status
-                );
-                for (name, value) in &response.headers {
-                    head.push_str(&format!("{name}: {value}\r\n"));
-                }
-                head.push_str(&format!("content-length: {}\r\n\r\n", response.body.len()));
-                let _ = stream.write_all(head.as_bytes()).await;
-                let _ = stream.write_all(response.body.as_bytes()).await;
-                let _ = stream.shutdown().await;
-            }
-        });
-        FakeGithub {
-            base: Url::parse(&format!("http://{address}/")).unwrap(),
-            requests,
-        }
-    }
+    use crate::test_support::{fake_github, FakeResponse};
 
     fn identity() -> GithubIdentity {
         GithubIdentity {
@@ -976,6 +921,29 @@ mod tests {
         );
         assert_eq!(anonymous.auth_fingerprint(), "anonymous");
         assert!(!anonymous.authenticated());
+    }
+
+    /// #4080: a credential is attached per Session-addressed request, never
+    /// frozen into the composed transport. An empty token is anonymous.
+    #[test]
+    fn a_credential_is_attached_per_derived_client_and_fingerprinted() {
+        let transport = GithubClient::api_transport();
+        assert!(!transport.authenticated());
+        assert_eq!(transport.auth_fingerprint(), "anonymous");
+
+        let session = transport.with_token(Some("session-token".into()));
+        assert!(session.authenticated());
+        assert_ne!(session.auth_fingerprint(), "session-token");
+        assert_ne!(
+            session.auth_fingerprint(),
+            transport.auth_fingerprint(),
+            "different credentials must have different cache identities"
+        );
+        assert!(
+            !transport.with_token(Some("   ".into())).authenticated(),
+            "an empty value is not a credential"
+        );
+        assert!(!session.with_token(None).authenticated());
     }
 
     #[test]
