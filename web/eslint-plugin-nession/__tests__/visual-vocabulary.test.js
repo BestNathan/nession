@@ -207,7 +207,7 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         filename: MARKDOWN_ADAPTER,
       },
       {
-        code: 'export const cls = "flex gap-[var(--nession-rhythm-inline)] text-muted-foreground";',
+        code: 'export const cls = "flex gap-[var(--nession-panel-padding)] text-muted-foreground";',
         filename: NESSION_RECIPE,
       },
       {
