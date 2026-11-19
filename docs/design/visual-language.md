@@ -70,6 +70,11 @@ whitespace -> background shift -> border -> radius -> elevation
 
 Floating controls and overlays may use elevation because their spatial role requires it.
 
+For the **owner** and measurable meaning of whitespace between unlike content
+(icon/text, row/metadata, Section/Section, prose/tool/code), see the canonical
+[Spatial Relationships / Content Rhythm](design-system/spatial-relationships.md).
+A legal spacing token alone does not prove the correct relationship or inset.
+
 ### P8 — Color communicates state or action
 
 Color should communicate selection, action, or state. It should not decorate generic chrome or give every extension a competing brand identity.
