@@ -89,7 +89,7 @@ export function DetailHeader({
           {eyebrow}
         </p>
       ) : null}
-      <div className="flex min-w-0 items-start justify-between gap-3">
+      <div className="flex min-w-0 items-start justify-between gap-[var(--nession-shell-space-3)]">
         <div className="flex min-w-0 flex-1 flex-col gap-[var(--nession-rhythm-text-stack)]">
           {title !== undefined ? (
             <div className="flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]">
@@ -124,7 +124,7 @@ export function DetailHeader({
           ) : null}
         </div>
         {actions ? (
-          <div data-recipe-part="detail-actions" className="flex shrink-0 items-center gap-1">
+          <div data-recipe-part="detail-actions" className="flex shrink-0 items-center gap-[var(--nession-rhythm-text-stack)]">
             {actions}
           </div>
         ) : null}
@@ -165,7 +165,7 @@ export function DetailSection({
       data-testid={testId}
       className={cn('flex min-w-0 flex-col gap-[var(--nession-rhythm-section-content)]', className)}
     >
-      <div className="flex min-w-0 items-center justify-between gap-2">
+      <div className="flex min-w-0 items-center justify-between gap-[var(--nession-rhythm-inline)]">
         <Heading
           id={titleId}
           data-recipe-part="detail-section-title"
@@ -195,7 +195,7 @@ export function DetailFacts({ className, ...props }: React.ComponentProps<'dl'>)
   return (
     <dl
       data-recipe-part="detail-facts"
-      className={cn('flex min-w-0 flex-col gap-3', className)}
+      className={cn('flex min-w-0 flex-col gap-[var(--nession-shell-space-3)]', className)}
       {...props}
     />
   );
@@ -232,7 +232,7 @@ export function DetailFact({
       data-testid={testId}
       className={cn(
         'min-w-0',
-        inline ? 'flex items-baseline gap-[var(--nession-rhythm-inline)]' : 'flex flex-col gap-0.5',
+        inline ? 'flex items-baseline gap-[var(--nession-rhythm-inline)]' : 'flex flex-col gap-[var(--nession-rhythm-fact-stack)]',
         className,
       )}
     >
