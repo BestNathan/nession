@@ -355,6 +355,14 @@ for(const delta of [
   {state:{...cState,issue:3785}},
   {state:{...cState,target_sha:B}},
   {state:{...cState,repair_attempts:1}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===1
+    ?{...t,outcome:'approved'}:t)}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===3
+    ?{...t,run_id:44466992693}:t)}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===0
+    ?{...t,run_id:44281178407}:t)}},
+  {state:{...cState,transitions:saved.map((t,i)=>i===2
+    ?{...t,target_sha:C}:t)}},
   {intent:{...cIntent,publisher_run_id:44495243036}},
   {intent:{...cIntent,source_sha:A}},
   {intent:{...cIntent,branch:'refs/heads/agent/3784/qwen-forged00000000'}},
