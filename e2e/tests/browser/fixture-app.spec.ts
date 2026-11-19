@@ -388,17 +388,19 @@ test('the shell return swipe still respects a pushed detail and its dirty guard 
   await expect(page.getByTestId('files-app-layout')).toBeVisible();
   await openFixtureFile(page);
 
-  // A pushed detail owns its leave: the shell must not discard the open
-  // document behind the capability's Back.
+  // A pushed detail is operated by the capability's own inner stack: the same
+  // right swipe Pops one level (the directory that held the file), and the
+  // outer Workspace layer does not slide. It is the same leave Back takes.
   let anchor = await shellAnchor(page);
   await swipe(page, {
     from: { x: anchor.leftX, y: anchor.y },
     to: { x: anchor.rightX, y: anchor.y },
   });
   await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'workspace');
-  await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
+  await expect(page.getByTestId('app-page-header').locator('h1')).toHaveText('src');
 
-  // A dirty editor still asks before leaving through that Back.
+  // Re-open the file so a dirty editor can prove the guard on Back.
+  await page.getByTestId('file-row-web/src/App.tsx').click();
   await page.getByRole('button', { name: 'Edit' }).click();
   await page.locator('.cm-content').click();
   await page.keyboard.type('draft');
