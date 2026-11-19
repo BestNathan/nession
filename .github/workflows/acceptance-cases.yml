@@ -98,6 +98,7 @@ jobs:
           CASE_CRITERION: ${{ inputs.criterion }}
           CASE_TARGET: ${{ inputs.target_sha }}
           CASE_STAGE: ${{ inputs.stage }}
+          CASE_ENVIRONMENT: ${{ inputs.environment }}
           CASE_RUNTIME: ${{ inputs.runtime_profile }}
           CASE_PLATFORM: ${{ inputs.platform }}
           CASE_COMMENT: ${{ inputs.source_comment_id }}
@@ -106,7 +107,7 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Case comment routing only runs trusted main" >&2; exit 1; }
           node trusted/scripts/github-comment-case-request.mjs verify \
             "$CASE_ISSUE" "$CASE_CRITERION" "$CASE_TARGET" \
-            "$CASE_STAGE" "$CASE_RUNTIME" "$CASE_PLATFORM" "$CASE_COMMENT"
+            "$CASE_STAGE" "$CASE_RUNTIME" "$CASE_PLATFORM" "$CASE_COMMENT" "$CASE_ENVIRONMENT"
 
       # GitHub evaluates step.name from workflow_dispatch inputs before target
       # code executes. Ingest reads this GitHub-owned job/step metadata rather
@@ -696,6 +697,7 @@ jobs:
           CASE_CRITERION: ${{ inputs.criterion }}
           CASE_TARGET: ${{ inputs.target_sha }}
           CASE_STAGE: ${{ inputs.stage }}
+          CASE_ENVIRONMENT: ${{ inputs.environment }}
           CASE_RUNTIME: ${{ inputs.runtime_profile }}
           CASE_PLATFORM: ${{ inputs.platform }}
           CASE_COMMENT: ${{ inputs.source_comment_id }}
@@ -704,7 +706,7 @@ jobs:
           [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::Case comment routing only runs trusted main" >&2; exit 1; }
           node trusted/scripts/github-comment-case-request.mjs verify \
             "$CASE_ISSUE" "$CASE_CRITERION" "$CASE_TARGET" \
-            "$CASE_STAGE" "$CASE_RUNTIME" "$CASE_PLATFORM" "$CASE_COMMENT"
+            "$CASE_STAGE" "$CASE_RUNTIME" "$CASE_PLATFORM" "$CASE_COMMENT" "$CASE_ENVIRONMENT"
 
       # GitHub evaluates step.name from workflow_dispatch inputs before target
       # code executes. Ingest reads this GitHub-owned job/step metadata rather

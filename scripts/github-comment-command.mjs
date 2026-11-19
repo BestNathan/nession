@@ -126,6 +126,7 @@ export function dispatchInputs(plan) {
       return {
         issue_number: String(plan.issue_number), criterion: plan.criterion,
         target_sha: plan.target_sha, stage: plan.stage,
+        environment: plan.environment ?? '',
         runtime_profile: plan.runtime_profile, platform: plan.platform,
         source_comment_id: String(plan.comment_id),
       };
@@ -239,7 +240,16 @@ function fixtures() {
   check(caseDispatch.source_comment_id === '333' &&
     caseDispatch.issue_number === '12' && caseDispatch.criterion === 'SC-03' &&
     caseDispatch.stage === 'staging' && caseDispatch.target_sha === 'a'.repeat(40) &&
-    caseDispatch.runtime_profile === 'full-stack-local', 'Case dispatch binds all fields');
+    caseDispatch.runtime_profile === 'full-stack-local' &&
+    caseDispatch.environment === '', 'Case dispatch binds all fields');
+  const deployedDispatch = dispatchInputs({ ...casePlan, target_sha: 'b'.repeat(40),
+    stage: 'deployed', environment: 'staging', platform: 'linux',
+    runtime_profile: 'full-stack-local' });
+  check(deployedDispatch.environment === 'staging' &&
+    deployedDispatch.stage === 'deployed' &&
+    deployedDispatch.target_sha === 'b'.repeat(40) &&
+    deployedDispatch.source_comment_id === '333',
+    'deployed Case dispatch binds trusted environment and source SHA');
 
   check(parseCommand('/case SC-3') === null &&
     parseCommand('/case SC-03 extra') === null &&
