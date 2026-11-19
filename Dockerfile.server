@@ -59,7 +59,7 @@ RUN cargo build --release --bin nession-server
 # extraction helpers therefore come from one pinned upstream build in
 # `deploy/build-erofs-utils.sh`. They are linked against this bookworm base,
 # which the runtime stages below also use.
-FROM debian:bookworm-slim AS erofs-utils-builder
+FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS erofs-utils-builder
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential autoconf automake libtool pkg-config libfuse3-dev \
@@ -90,7 +90,7 @@ RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
 # three URLs fail from a laptop as from a runner. The builder stages above stay
 # on `rust:1.96-bullseye` on purpose: they install nothing, and a binary linked
 # against glibc 2.31 runs fine on bookworm's 2.36.
-FROM debian:bookworm-slim AS runtime-tools
+FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime-tools
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
