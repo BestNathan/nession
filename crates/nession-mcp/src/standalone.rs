@@ -347,20 +347,20 @@ mod credential_tests {
     fn duplicate_sources_and_empty_environment_fail_closed() {
         let mut configured = "literal".to_string();
         assert!(resolve_credential_value(
-                &mut configured,
-                Some("env"),
-                "NESSION_MCP_INBOUND_TOKEN",
-                "[mcp].auth_token"
+            &mut configured,
+            Some("env"),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
         )
         .is_err());
         assert_eq!(configured, "literal");
 
         let mut missing = String::new();
         assert!(resolve_credential_value(
-                &mut missing,
-                Some("   "),
-                "NESSION_MCP_INBOUND_TOKEN",
-                "[mcp].auth_token"
+            &mut missing,
+            Some("   "),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
         )
         .is_err());
     }
@@ -369,19 +369,19 @@ mod credential_tests {
     fn unresolved_placeholder_is_not_a_valid_bearer_token() {
         let mut token = concat!("$", "{NESSION_MCP_INBOUND_TOKEN}").to_string();
         assert!(resolve_credential_value(
-                &mut token,
-                None,
-                "NESSION_MCP_INBOUND_TOKEN",
-                "[mcp].auth_token"
+            &mut token,
+            None,
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
         )
         .is_err());
 
         let mut another = String::new();
         assert!(resolve_credential_value(
-                &mut another,
-                Some(concat!("$", "{MISSING}")),
-                "NESSION_MCP_INBOUND_TOKEN",
-                "[mcp].auth_token"
+            &mut another,
+            Some(concat!("$", "{MISSING}")),
+            "NESSION_MCP_INBOUND_TOKEN",
+            "[mcp].auth_token"
         )
         .is_err());
     }
