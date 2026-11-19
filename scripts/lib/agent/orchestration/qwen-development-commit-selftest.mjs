@@ -1032,6 +1032,12 @@ try {
   const treeC=git(repairSource,'rev-parse',shaC+'^{tree}');
   const blobC=git(repairSource,'rev-parse',shaC+':calc.js');
   const treeB=git(repairSource,'rev-parse',shaB+'^{tree}');
+  // The trusted Publisher checks out the exact reviewed B as inert Git
+  // data. The fixture's mock Git remote now contains future C as well.
+  const secondPubCheckout=path.join(home,'second-repair-pr-B-checkout');
+  git(home,'clone','--no-hardlinks',repairSource,secondPubCheckout);
+  git(secondPubCheckout,'checkout','--detach',shaB);
+  assert.equal(git(secondPubCheckout,'rev-parse','HEAD'),shaB);
   let secondLiveSha=shaB;
   const secondCalls=[];
   const secondPrAt=sha=>({number:prNumber,state:'open',
@@ -1087,7 +1093,7 @@ try {
   secondCalls.length=0;
   const secondPR=await publishQwenRepairToSamePR({
     preflight:secondPreflight,intent:secondWriteIntent,
-    sourceCheckout:repairSource,api:secondApi});
+    sourceCheckout:secondPubCheckout,api:secondApi});
   assert.equal(secondPR.head_sha,shaC);
   assert.equal(secondPR.previous_sha,shaB);
   assert.equal(secondPR.pull_request,prNumber);
@@ -1098,12 +1104,12 @@ try {
   const writes=secondCalls.filter(x=>!x.startsWith('GET:')).length;
   const readC=await readBackQwenRepairPR({
     preflight:secondPreflight,intent:secondReadonlyIntent,
-    sourceCheckout:repairSource,api:secondApi});
+    sourceCheckout:secondPubCheckout,api:secondApi});
   assert.deepEqual(readC,secondPR);
   assert.equal(secondCalls.filter(x=>!x.startsWith('GET:')).length,writes);
   await assert.rejects(()=>publishQwenRepairToSamePR({
     preflight:secondPreflight,intent:secondReadonlyIntent,
-    sourceCheckout:repairSource,api:secondApi}),
+    sourceCheckout:secondPubCheckout,api:secondApi}),
     /Store-fenced|Repair PR update/);
   const safeCallCount=secondCalls.length;
   for(const invalid of [
