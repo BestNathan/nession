@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
-import {assertQwenPublisherRunAuthority}
-  from './qwen-trusted-publisher.mjs';
+import {assertQwenPublisherRunAuthority,isQwenPrewriteOwnerRecovery,
+  QWEN_PREWRITE_RECOVERY_COMMAND} from './qwen-trusted-publisher.mjs';
+import {SOURCE as QWEN_PREWRITE_FAILURE}
+  from './qwen-repair-prewrite-failure.mjs';
 import {composeQwenDeveloperResult,appendAuthenticatedResult}
   from '../orchestration/result-artifact.mjs';
 import fs from 'node:fs';
@@ -83,6 +85,52 @@ for(const bad of [
   assert.throws(()=>assertQwenPublisherRunAuthority(
     bad.env??env,bad.event??event,bad.ingester??ingester,
     bad.receipt??receipt),/trusted Qwen Publisher Runner/);
+}
+// #4046: a very narrow Owner/main comment (not a generic Owner request)
+// may recover exactly one pre-write Publisher failure. The completed original
+// Store Ingest is independently reauthenticated against one real Worker.
+const historical=QWEN_PREWRITE_FAILURE;
+const ownerEnv={...env,GITHUB_EVENT_NAME:'issue_comment',
+  GITHUB_ACTOR:'BestNathan',GITHUB_RUN_ID:'44479999999'};
+const ownerEvent={action:'created',repository:{full_name:REPO},
+  sender:{login:'BestNathan'},issue:{number:historical.issue,state:'open'},
+  comment:{id:7002991001,user:{login:'BestNathan'},
+    body:QWEN_PREWRITE_RECOVERY_COMMAND}};
+const ownerIngest={...botIngester,id:historical.source_ingest_run_id,
+  name:'Qwen Developer Ingest worker:'+historical.worker_run_id};
+const ownerReceipt={...receipt,ingester_run_id:ownerIngest.id,
+  issue:historical.issue,run_id:historical.worker_run_id,
+  action_id:historical.action_id};
+assert.equal(isQwenPrewriteOwnerRecovery(ownerEnv,ownerEvent),true);
+assert.equal(assertQwenPublisherRunAuthority(ownerEnv,ownerEvent,
+  ownerIngest,ownerReceipt).source_run_id,historical.worker_run_id);
+for(const wrong of [
+  {env:{...ownerEnv,GITHUB_ACTOR:'github-actions[bot]'}},
+  {env:{...ownerEnv,GITHUB_RUN_ATTEMPT:'2'}},
+  {env:{...ownerEnv,GITHUB_REF:'refs/heads/staging'}},
+  {event:{...ownerEvent,action:'edited'}},
+  {event:{...ownerEvent,issue:{number:historical.issue,state:'closed'}}},
+  {event:{...ownerEvent,issue:{number:historical.issue,state:'open',
+      pull_request:{url:'https://evil.invalid'}}}},
+  {event:{...ownerEvent,comment:{...ownerEvent.comment,id:0}}},
+  {event:{...ownerEvent,comment:{...ownerEvent.comment,
+      body:QWEN_PREWRITE_RECOVERY_COMMAND+' '}}},
+  {event:{...ownerEvent,comment:{...ownerEvent.comment,
+      body:'/nession recover-qwen-publisher issue=3784 failed_run=44476308904'}}},
+  {event:{...ownerEvent,comment:{...ownerEvent.comment,
+      user:{login:'attacker'}}}},
+  {event:{...ownerEvent,sender:{login:'attacker'}}},
+  {ingester:{...ownerIngest,id:ownerIngest.id+1}},
+  {ingester:{...ownerIngest,actor:{login:'attacker'}}},
+  {ingester:{...ownerIngest,name:'Store / Agent Development Ingest'}},
+  {receipt:{...ownerReceipt,run_id:ownerReceipt.run_id+1}},
+  {receipt:{...ownerReceipt,issue:4046}},
+  {receipt:{...ownerReceipt,action_id:'f'.repeat(64)}},
+]){
+  assert.throws(()=>assertQwenPublisherRunAuthority(
+    wrong.env??ownerEnv,wrong.event??ownerEvent,
+    wrong.ingester??ownerIngest,wrong.receipt??ownerReceipt),
+    /trusted Qwen Publisher Runner/);
 }
 // A Worker cannot invent a PR HEAD. Only a producer that already verified
 // the original ZIP/claim and Publisher's exact GitHub readback can compose v2.
