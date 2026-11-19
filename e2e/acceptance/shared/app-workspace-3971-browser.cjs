@@ -112,16 +112,32 @@ async function contentPoint(page, selector, { fx = 0.5, fy = 0.25 } = {}) {
   };
 }
 
-/** Measure the visible icons/actions a Case asserts touch geometry on. */
+/**
+ * Measure the visible icons/actions a Case asserts touch geometry on.
+ *
+ * A control's accessible name is its explicit `aria-label`/`aria-labelledby`,
+ * or — when neither is present — its own text content. Icon-only controls must
+ * therefore carry an explicit label; a row that shows its resource name is
+ * already named by that text.
+ */
 async function boxes(page, selector) {
   return page.locator(selector + ':visible').evaluateAll((elements) =>
     elements.map((element) => {
       const rect = element.getBoundingClientRect();
+      const explicit = (element.getAttribute('aria-label') || '').trim();
+      const labelledBy = element.getAttribute('aria-labelledby');
+      const referenced = labelledBy
+        ? labelledBy
+          .split(/\s+/)
+          .map((id) => document.getElementById(id)?.textContent || '')
+          .join(' ')
+          .trim()
+        : '';
       return {
         testid: element.getAttribute('data-testid') || element.getAttribute('aria-label'),
         width: Math.round(rect.width * 100) / 100,
         height: Math.round(rect.height * 100) / 100,
-        label: element.getAttribute('aria-label'),
+        label: explicit || referenced || (element.textContent || '').trim(),
       };
     }),
   );

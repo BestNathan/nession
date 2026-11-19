@@ -61,7 +61,13 @@ test('SC-02: one App header with truthful titles, ancestry and guarded navigatio
   await expect(title(page)).toHaveText('Transcripts');
   await expect(page.getByTestId('app-page-subtitle-text')).toHaveText('Claude Code');
 
-  await page.getByTestId('transcript-open').first().click();
+  // The fixture lists the session's own transcript after its sidechain, whose
+  // label is its agent identity. Choose the primary transcript by the title the
+  // header is required to show rather than assuming list order.
+  await page
+    .getByTestId('transcript-open')
+    .filter({ hasText: 'Transcript execution view' })
+    .click();
   await oneHeader(page);
   await expect(title(page)).toHaveText('Transcript execution view');
   await expect(page.getByTestId('app-page-subtitle-text')).toHaveText(
