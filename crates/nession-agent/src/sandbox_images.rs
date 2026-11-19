@@ -33,7 +33,7 @@ use crate::erofs_cache::{
 fn reject_referenced_composite(resolved: &ResolvedGrantImage) -> Result<()> {
     if resolved.composite.is_some() {
         anyhow::bail!(
-            "referenced Composite image {} is not yet selectable by the Sandbox composition;              the EROFS mount manager owns its verified composite lease (#3697)",
+            "referenced Composite image {} is not yet selectable by the Sandbox composition; the EROFS mount manager owns its verified composite lease (#3697)",
             resolved.layer_digest
         );
     }
