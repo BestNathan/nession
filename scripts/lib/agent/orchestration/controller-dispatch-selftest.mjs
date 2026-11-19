@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
+import {REVIEWER_PREMODEL_FAILURE_3784_C} from './outbox.mjs';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
@@ -367,7 +368,6 @@ const cLeasePr={number:3919,state:'open',draft:false,merged_at:null,
   head:{sha:cProductHead,ref:cProductBranch,repo:{full_name:'BestNathan/nession'}},
   base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
 const cLeaseRef={ref:'refs/heads/'+cProductBranch,object:{sha:cProductHead}};
-import {REVIEWER_PREMODEL_FAILURE_3784_C} from './outbox.mjs';
 assert.equal(assertReviewerRecoveryPrLease(REVIEWER_PREMODEL_FAILURE_3784_C,
   cLeasePr,cLeaseRef),true);
 for(const [pr,ref] of [
