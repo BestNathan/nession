@@ -12,10 +12,19 @@ commonLabels:
 
 resources:
 - sealed-tls.json
+# Legacy configuration Secret retained during the staged migration/rollback.
+# Remove after ConfigMap + inbound token have been verified live.
 - sealed-secret.json
 - deployment.yaml
 - service.yaml
 - ingress.yaml
+
+# Non-secret standalone MCP config lives only in this GitOps source file.
+# Keep the default Kustomize content hash so config edits roll the MCP Pod.
+configMapGenerator:
+- name: nession-mcp-settings
+  files:
+  - mcp.toml
 
 images:
 - name: ghcr.io/bestnathan/nession-mcp

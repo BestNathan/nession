@@ -42,6 +42,20 @@ spec:
           env:
             - name: NESSION_MCP_CONFIG
               value: /etc/nession/mcp.toml
+            - name: NESSION_MCP_INBOUND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nession-mcp-inbound-staging
+                  key: token
+                  optional: false
+            # Same canonical staging credential as Server and Agent.
+            # Do not create an MCP-owned copy of the backend credential.
+            - name: NESSION_MCP_BACKEND_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nession-secret-staging
+                  key: auth-token
+                  optional: false
           volumeMounts:
             - name: mcp-config
               mountPath: /etc/nession
@@ -77,11 +91,12 @@ spec:
               cpu: "1"
               memory: 256Mi
       volumes:
-        # Operator-managed Secret, intentionally NOT checked into GitOps.
-        # Missing Secret prevents pod startup; never fall back to anonymous MCP.
+        # Kustomize-generated ConfigMap from checked-in token-free mcp.toml.
+        # Its name is content-hashed and rewritten by Kustomize, so updates
+        # change the Pod template and cause a new read-only config mount.
         - name: mcp-config
-          secret:
-            secretName: nession-mcp-config-staging
+          configMap:
+            name: nession-mcp-settings
             items:
               - key: mcp.toml
                 path: mcp.toml

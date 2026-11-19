@@ -1,0 +1,22 @@
+# Nession standalone MCP nonsecret staging configuration (#3914).
+# This file is the GitOps source of truth. NEVER add auth_token or tokens here.
+# Credential env: NESSION_MCP_INBOUND_TOKEN, NESSION_MCP_BACKEND_SERVER_TOKEN.
+[mcp]
+listen_address = "0.0.0.0:9090"
+path = "/mcp"
+# Explicit opt-in for headerless MCP clients; require HTTPS end-to-end and
+# redact query strings in Higress, origin Nginx and edge request logs.
+allow_query_token = true
+allowed_hosts = [
+  "staging-mcp-nession.bestnathan.top",
+  "nession-mcp-staging",
+  "nession-mcp-staging.nession.svc",
+  "nession-mcp-staging.nession.svc.cluster.local",
+  "localhost",
+  "127.0.0.1"
+]
+# Native MCP clients do not send Origin; browsers remain denied by default.
+allowed_origins = []
+
+[backend.server]
+endpoint = "ws://nession-server-staging:18080"
