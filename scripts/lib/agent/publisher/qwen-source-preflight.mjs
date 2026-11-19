@@ -202,11 +202,28 @@ export function assertQwenRepairPublisherOrigin({
          state.transitions.indexOf(prior[0]))
       fail('Repair Publisher lacks original PR and predecessor Review lineage');
   }
+  // #4046: first PR HEAD A is based on original main; after one Repair
+  // the current reviewed HEAD B is based on A, NEVER directly on main.
+  // Trust the ordered Store publisher transitions, not commit messages,
+  // PR description, or a model-provided parent list.
+  const published=state.transitions.filter(t=>t.kind==='publisher'&&
+    t.outcome==='published');
+  if(published.length!==checkpoint.version-1||
+     published[0]?.run_id!==first.publisher_run_id||
+     published[0]?.attempt!==1||
+     published.at(-1)?.target_sha!==state.target_sha||
+     published.some(t=>!SHA.test(t.target_sha??'')||t.attempt!==1)||
+     new Set(published.map(t=>t.target_sha)).size!==published.length||
+     published.some((t,i)=>i>0&&
+       state.transitions.indexOf(published[i-1])>=state.transitions.indexOf(t)))
+    fail('signed Qwen Repair lacks ordered original-to-current PR ancestry');
+  const publishedHeads=Object.freeze(published.map(t=>t.target_sha));
   return Object.freeze({
     issue:state.issue,action_id:admission.action_id,
     review_sha:state.target_sha,branch:'refs/heads/'+first.branch,
     original_main_sha:first.target_main_sha,
     original_publisher_run_id:first.publisher_run_id,
+    published_head_shas:publishedHeads,
     original_developer_run_id:first.worker_run_id,
     original_checkpoint_version:origin.checkpoint_version,
     repair_checkpoint_version:checkpoint.version,
