@@ -13,11 +13,11 @@ commonLabels:
 resources:
   - sealed-backend-server.json
   - sealed-inbound.json
-- sealed-tls.json
-- sealed-secret.json
-- deployment.yaml
-- service.yaml
-- ingress.yaml
+  - sealed-tls.json
+  - sealed-secret.json
+  - deployment.yaml
+  - service.yaml
+  - ingress.yaml
 
 images:
 - name: ghcr.io/bestnathan/nession-mcp
