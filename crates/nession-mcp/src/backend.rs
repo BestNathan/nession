@@ -33,8 +33,9 @@ use nession_protocol::contracts::project::v1::{
 use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
-    SessionMetadataPatchPayload, SessionMetadataResponse, WebSessionsListResponse,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
+    SessionInitialMetadata, SessionKillResponse, SessionMetadataPatchPayload,
+    SessionMetadataResponse, WebSessionsListResponse,
 };
 use serde_json::{Map, Value};
 
@@ -146,11 +147,16 @@ pub trait NodeBackend: Send + Sync {
     async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError>;
 
     /// `nession_agent_create_session`.
+    ///
+    /// `initial_metadata` is the optional creation-time work context (#4081).
+    /// The Tool validates it before calling this seam; every adapter forwards
+    /// the same value to the Agent that owns the create.
     async fn create_session(
         &self,
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError>;
 
     /// `nession_agent_kill_session`.
@@ -326,6 +332,7 @@ impl NodeBackend for UnavailableNodeBackend {
         _agent_id: &str,
         _name: &str,
         _working_dir: Option<&str>,
+        _initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }

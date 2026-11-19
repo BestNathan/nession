@@ -22,7 +22,8 @@ use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
 use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
 use nession_mcp::{McpService, ServiceConfig};
 use nession_protocol::contracts::session::v1::{
-    SessionKillResponse, SessionListResponse, SessionMetadataPatchPayload, SessionMetadataResponse,
+    SessionInitialMetadata, SessionKillResponse, SessionListResponse, SessionMetadataPatchPayload,
+    SessionMetadataResponse,
 };
 
 use crate::config::AgentConfig;
@@ -34,7 +35,7 @@ use crate::session::metadata::{
     attach_session_summaries, error_kind_and_detail, SessionMetadataSnapshot, SessionMetadataStore,
 };
 use crate::session::registry::SessionRegistry;
-use crate::tmux::manager::{SessionBindingInput, SessionManager};
+use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use nession_runtime::lane::KeyedLane;
 
 /// The label MCP-originated lane waits carry in logs, so a mutation queued by
@@ -213,6 +214,7 @@ impl NodeBackend for AgentNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         self.ensure_target(agent_id)?;
         let working_dir = match working_dir {
@@ -220,29 +222,44 @@ impl NodeBackend for AgentNodeBackend {
                 .map_err(|error| ToolError::invalid_argument(error.to_string()))?,
             None => self.default_working_dir.clone(),
         };
+        // The Tool validates too; this is the owner's own refusal before the
+        // create runs, through the same shared contract.
+        let normalized = initial_metadata
+            .map(SessionInitialMetadata::normalized)
+            .transpose()
+            .map_err(|error| ToolError::invalid_argument(error.to_string()))?;
         let tmux = Arc::clone(&self.tmux);
+        let store = Arc::clone(&self.session_metadata);
         let terminal_cols = self.terminal_cols;
         let session_name = name.to_string();
         let queued_name = session_name.clone();
         let response = self
             .run_keyed(&session_name, async move {
+                let initial = normalized.as_ref().map(|metadata| InitialSessionMetadata {
+                    store: store.as_ref(),
+                    metadata,
+                });
                 let outcome = tmux
-                    .create_session_with_binding(
+                    .create_session_with_options(
                         &queued_name,
                         terminal_cols,
                         24,
                         &working_dir,
-                        SessionBindingInput {
+                        Some(SessionBindingInput {
                             revision: 0,
                             profiles: &[],
                             snapshots: &[],
-                        },
+                        }),
+                        None,
+                        initial.as_ref(),
                     )
                     .await
                     .map_err(|error| ToolError::backend(format!("{error:#}")))?;
                 Ok(SessionCreatedOutput {
                     name: queued_name,
                     warnings: outcome.warnings,
+                    instance_id: outcome.instance_id,
+                    metadata: outcome.metadata,
                 })
             })
             .await?;

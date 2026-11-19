@@ -630,6 +630,7 @@ async fn test_session_lifecycle() {
         terminal_cols: None,
         sandbox: None,
         managed: None,
+        initial_metadata: None,
     };
     let req = new_message(agent_msg_types::SESSION_CREATE, create);
     let json = serde_json::to_string(&req).unwrap();

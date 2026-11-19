@@ -3,9 +3,19 @@
 // bearing on what it proves. The protocol gate prints this exemption on every
 // run so it cannot spread unnoticed.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { WebSocketService } from '@/platform/socket/WebSocketService';
+import {
+  DEFAULT_MAX_BUFFERED_SEND_BYTES,
+  SocketSendBufferFullError,
+  WebSocketService,
+} from '@/platform/socket/WebSocketService';
+import { InvalidSocketEnvelopeError } from '@/platform/socket/envelope';
 import { MockWebSocket } from '@/test/mockWebSocket';
-import type { TransportPlugin, HandshakeSurface, SocketMessage } from '@/platform/socket/types';
+import type {
+  TransportPlugin,
+  HandshakeSurface,
+  SocketMessage,
+  WebSocketServiceOptions,
+} from '@/platform/socket/types';
 
 const OriginalWebSocket = globalThis.WebSocket;
 
@@ -44,6 +54,33 @@ function controlledHandshake(): {
     resolve: () => resolveHandshake(),
     reject: (error) => rejectHandshake(error),
   };
+}
+
+/** Fresh mock-socket + fake-timer setup for a self-contained describe block. */
+function useMockSocket(): void {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    globalThis.WebSocket = OriginalWebSocket;
+  });
+}
+
+/** A connected service and the mock socket it opened. */
+async function connectedService(
+  options: WebSocketServiceOptions = {},
+): Promise<{ service: WebSocketService; socket: MockWebSocket }> {
+  const service = new WebSocketService('ws://server/ws', [], options);
+  const connected = service.connect();
+  const socket = MockWebSocket.instances[0];
+  socket.open();
+  await connected;
+  return { service, socket };
 }
 
 function makePlugin(name: string, events: string[]): TransportPlugin {
@@ -1141,5 +1178,286 @@ describe('WebSocketService', () => {
       await flushTimers(50);
       expect(MockWebSocket.instances).toHaveLength(1);
     });
+  });
+});
+
+// #4069: the generic transport owns byte-level outbound admission. A browser
+// native send buffer is unbounded until the browser gives up on it; these
+// fixtures keep the budget finite and observable without a real network.
+describe('bounded outbound send admission (#4069)', () => {
+  useMockSocket();
+
+  it('refuses a message that would exceed the budget and does not enqueue it', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 100 });
+    socket.bufferedAmount = 80;
+
+    expect(() => service.send('agent.ping', { padding: 'x'.repeat(40) }))
+      .toThrow(SocketSendBufferFullError);
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it('reports bounded-pressure facts on the typed error', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 100 });
+    socket.bufferedAmount = 80;
+
+    let caught: unknown;
+    try {
+      service.send('agent.ping', { padding: 'x'.repeat(40) });
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(SocketSendBufferFullError);
+    const error = caught as SocketSendBufferFullError;
+    expect(error.bufferedBytes).toBe(80);
+    expect(error.limitBytes).toBe(100);
+    expect(error.messageBytes).toBeGreaterThan(20);
+  });
+
+  it('admits messages under the limit in order, exactly once each', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 10_000 });
+    socket.bufferedAmount = 0;
+
+    service.send('agent.ping', { n: 1 });
+    service.send('agent.ping', { n: 2 });
+    service.send('agent.ping', { n: 3 });
+
+    expect(socket.send).toHaveBeenCalledTimes(3);
+    expect(frameAt(socket, 0).payload).toEqual({ n: 1 });
+    expect(frameAt(socket, 1).payload).toEqual({ n: 2 });
+    expect(frameAt(socket, 2).payload).toEqual({ n: 3 });
+  });
+
+  it('uses a finite default budget when the caller configures none', async () => {
+    const { service, socket } = await connectedService();
+    expect(Number.isFinite(DEFAULT_MAX_BUFFERED_SEND_BYTES)).toBe(true);
+
+    socket.bufferedAmount = DEFAULT_MAX_BUFFERED_SEND_BYTES;
+    expect(() => service.send('agent.ping', {})).toThrow(SocketSendBufferFullError);
+
+    socket.bufferedAmount = 0;
+    service.send('agent.ping', {});
+    expect(socket.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts UTF-8 bytes, not JavaScript string length', async () => {
+    // 40 CJK characters are 40 code units but 120 UTF-8 bytes. With this budget
+    // a length-based check admits the frame (~160 bytes of text) while the
+    // browser would actually queue ~240 bytes.
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 200 });
+    socket.bufferedAmount = 0;
+
+    expect(() => service.send('agent.ping', { text: '漢'.repeat(40) }))
+      .toThrow(SocketSendBufferFullError);
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it('settles a request refused by admission without leaking a pending entry', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 500 });
+    socket.bufferedAmount = 500;
+
+    const refused = service.request('agents.list', {});
+    await expect(refused).rejects.toBeInstanceOf(SocketSendBufferFullError);
+    expect(socket.send).not.toHaveBeenCalled();
+
+    // The pending slot is gone, so the next request correlates normally once
+    // the socket drains.
+    socket.bufferedAmount = 0;
+    const accepted = service.request<{ ok: boolean }>('agents.list', {});
+    const frame = frameAt(socket, 0);
+    socket.message(JSON.stringify({
+      msg_type: 'agents.list',
+      id: frame.id,
+      timestamp: Date.now(),
+      payload: { ok: true },
+    }));
+    await expect(accepted).resolves.toEqual({ ok: true });
+  });
+
+  it('sendTracked claims no id or generation when admission refuses the frame', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 100 });
+    socket.bufferedAmount = 100;
+
+    expect(() => service.sendTracked('agent.ping', {})).toThrow(SocketSendBufferFullError);
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it('keeps bounded behaviour across repeated saturation', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 1_000 });
+    socket.bufferedAmount = 1_000;
+
+    for (let i = 0; i < 50; i += 1) {
+      expect(() => service.send('agent.ping', { n: i }))
+        .toThrow(SocketSendBufferFullError);
+    }
+    expect(socket.send).not.toHaveBeenCalled();
+
+    socket.bufferedAmount = 0;
+    service.send('agent.ping', { n: 50 });
+    expect(socket.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('resets with the physical socket: no refused message is replayed after reconnect', async () => {
+    const { service, socket } = await connectedService({
+      maxBufferedSendBytes: 1_000,
+      reconnectBaseDelay: 5,
+      maxReconnectAttempts: 5,
+    });
+    socket.bufferedAmount = 1_000;
+    expect(() => service.send('agent.ping', { n: 1 })).toThrow(SocketSendBufferFullError);
+
+    socket.serverClose();
+    await flushTimers(10);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    const next = MockWebSocket.instances[1];
+    next.open();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('connected');
+
+    next.bufferedAmount = 0;
+    service.send('agent.ping', { n: 2 });
+    expect(next.send).toHaveBeenCalledTimes(1);
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it('dispose() drops the saturated socket without replaying refused messages', async () => {
+    const { service, socket } = await connectedService({ maxBufferedSendBytes: 100 });
+    socket.bufferedAmount = 500;
+    expect(() => service.send('agent.ping', { n: 1 })).toThrow(SocketSendBufferFullError);
+
+    service.dispose();
+    expect(socket.send).not.toHaveBeenCalled();
+    expect(() => service.send('agent.ping', { n: 2 })).toThrow('WebSocketService disposed');
+  });
+
+  it('treats admission pressure during the handshake as a loss, not a refusal', async () => {
+    const handshake = vi.fn(async (surface: HandshakeSurface) => {
+      surface.send('auth.begin', {});
+    });
+    const service = new WebSocketService('ws://server/ws', [], {
+      handshake,
+      maxBufferedSendBytes: 50,
+      maxReconnectAttempts: 2,
+      reconnectBaseDelay: 5,
+    });
+
+    const connected = service.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.bufferedAmount = 50;
+    socket.open();
+
+    await expect(connected).rejects.toBeInstanceOf(SocketSendBufferFullError);
+    await drainMicrotasks();
+    // Bounded pressure is not the peer's answer; it must stay recoverable.
+    expect(service.connectionState).toBe('reconnecting');
+    await flushTimers(10);
+    expect(MockWebSocket.instances.length).toBeGreaterThan(1);
+  });
+});
+
+// #4070: TypeScript's `as SocketMessage` does not validate the wire. The
+// generic transport is the one place every server frame crosses, so it owns
+// the shared-envelope check; payload contracts stay with their plugins.
+describe('inbound envelope validation (#4070)', () => {
+  useMockSocket();
+
+  it('rejects malformed frames before routing and emits bounded, redacted diagnostics', async () => {
+    const onError = vi.fn();
+    const onDiagnostic = vi.fn();
+    const { service, socket } = await connectedService({ onError, onDiagnostic });
+    const handler = vi.fn();
+    service.subscribe('agent.ping', handler);
+    const secret = 'super-secret-token-value';
+
+    // Not JSON, and the raw text carries a credential that must not surface.
+    socket.message(`{"msg_type":"agent.ping","id":"1","timestamp":1,"auth_token":"${secret}"`);
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(1);
+    expect(onError.mock.calls[0]?.[0]).toBeInstanceOf(InvalidSocketEnvelopeError);
+    expect(onDiagnostic).toHaveBeenCalledWith(expect.objectContaining({
+      event: 'invalid-envelope',
+      generation: 1,
+      frameClass: 'malformed-json',
+    }));
+    expect(JSON.stringify(onDiagnostic.mock.calls)).not.toContain(secret);
+    const reported = onError.mock.calls[0]?.[0] as Error;
+    expect(reported.message).not.toContain(secret);
+  });
+
+  it('rejects non-envelope JSON without reaching subscribers', async () => {
+    const onError = vi.fn();
+    const { service, socket } = await connectedService({ onError });
+    const handler = vi.fn();
+    service.subscribe('agent.ping', handler);
+
+    for (const raw of ['"just-a-string"', 'null', '[]', '42',
+      JSON.stringify({ msg_type: 'agent.ping', timestamp: 1, payload: {} }),
+      JSON.stringify({ msg_type: 'agent.ping', id: 'i', timestamp: 1 }),
+    ]) {
+      socket.message(raw);
+    }
+
+    expect(handler).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledTimes(6);
+  });
+
+  it('does not settle an unrelated pending request from an invalid frame carrying its id', async () => {
+    const { service, socket } = await connectedService();
+    const request = service.request<{ ok: boolean }>('agents.list', {});
+    const frame = frameAt(socket, 0);
+
+    // Correct id, but not a canonical envelope: it must never reach the
+    // pending map and settle a request it does not answer.
+    socket.message(JSON.stringify({ id: frame.id, timestamp: Date.now(), payload: { ok: false } }));
+    await drainMicrotasks();
+    let settled = false;
+    void request.then(() => { settled = true; }, () => { settled = true; });
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+
+    socket.message(JSON.stringify({
+      msg_type: 'agents.list',
+      id: frame.id,
+      timestamp: Date.now(),
+      payload: { ok: true },
+    }));
+    await expect(request).resolves.toEqual({ ok: true });
+  });
+
+  it('a malformed error frame cannot reject a pending request, while a valid error envelope still does', async () => {
+    const { service, socket } = await connectedService();
+    const request = service.request('agents.list', {});
+    const frame = frameAt(socket, 0);
+
+    socket.message(JSON.stringify({ msg_type: 'error', id: frame.id, timestamp: Date.now() }));
+    await drainMicrotasks();
+    let settled = false;
+    void request.then(() => { settled = true; }, () => { settled = true; });
+    await drainMicrotasks();
+    expect(settled).toBe(false);
+
+    socket.message(JSON.stringify({
+      msg_type: 'error',
+      id: frame.id,
+      timestamp: Date.now(),
+      payload: { message: 'denied' },
+    }));
+    await expect(request).rejects.toThrow('denied');
+  });
+
+  it('delivers a valid unknown future wire exactly once', async () => {
+    const { service, socket } = await connectedService();
+    const handler = vi.fn();
+    service.subscribe('future.subject.event', handler);
+
+    socket.message(JSON.stringify({
+      msg_type: 'future.subject.event',
+      id: 'f-1',
+      timestamp: Date.now(),
+      payload: [1, 2],
+    }));
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0]?.[0]).toEqual([1, 2]);
   });
 });

@@ -226,6 +226,7 @@ impl ToolHandler for NessionServerProjectSessionCreate {
             sandbox: None,
             project_id: Some(project_id.clone()),
             managed,
+            initial_metadata: None,
         };
         let reply = context.cluster.create_project_session(payload).await?;
         if !reply.success {

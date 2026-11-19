@@ -36,9 +36,9 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionKillResponse, SessionMetadataPatchPayload,
-    SessionMetadataResponse, SessionRefusal, WebSessionMetadataGetPayload,
-    WebSessionMetadataPatchPayload, WebSessionsListResponse,
+    ServerSessionListReply, SessionInitialMetadata, SessionKillResponse, SessionMetadata,
+    SessionMetadataPatchPayload, SessionMetadataResponse, SessionRefusal,
+    WebSessionMetadataGetPayload, WebSessionMetadataPatchPayload, WebSessionsListResponse,
 };
 use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
@@ -419,12 +419,14 @@ impl NodeBackend for ServerNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         self.require_online(agent_id).await?;
         let handler = self.handler.clone();
         let target = agent_id.to_string();
         let session_name = name.to_string();
         let working_dir = working_dir.map(str::to_owned);
+        let initial_metadata = initial_metadata.cloned();
         let response = self
             .run_keyed(
                 ResourceKey::Session(format!("{agent_id}:{name}")),
@@ -443,6 +445,9 @@ impl NodeBackend for ServerNodeBackend {
                                 "env_snapshots": [],
                                 "binding_profiles": [],
                                 "binding_revision": null,
+                                // Initial work context committed with the
+                                // create by the Agent (#4081).
+                                "initial_metadata": initial_metadata,
                             }),
                             std::time::Duration::from_secs(35),
                         )
@@ -465,6 +470,22 @@ impl NodeBackend for ServerNodeBackend {
                         "the Agent's create warnings do not match their typed contract: {error}"
                     ))
                 })?;
+        let instance_id = response
+            .get("instance_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let metadata: Option<SessionMetadata> = response
+            .get("metadata")
+            .filter(|value| !value.is_null())
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value).map_err(|error| {
+                    ToolError::backend(format!(
+                        "the Agent's committed metadata does not match its typed contract: {error}"
+                    ))
+                })
+            })
+            .transpose()?;
         Ok(SessionCreatedOutput {
             name: response
                 .get("session_name")
@@ -472,6 +493,8 @@ impl NodeBackend for ServerNodeBackend {
                 .unwrap_or(name)
                 .to_string(),
             warnings,
+            instance_id,
+            metadata,
         })
     }
 

@@ -88,12 +88,69 @@ binding_revision?: number | null,
  * and the Agent uses its own configuration. Creation only: an existing
  * Session keeps its pane's width.
  */
-terminal_cols?: number | null, };
+terminal_cols?: number | null, 
+/**
+ * Initial Session work context committed by this create (#4081).
+ *
+ * Same field on the direct and Server-relayed projections, so every
+ * hosting route reaches the Agent with one create payload. Absent
+ * preserves the pre-#4081 create exactly.
+ */
+initial_metadata?: SessionInitialMetadata | null, };
 export type SessionCreateResponse = { name: string, 
 /**
  * Non-fatal warnings from materializing the initial Environment Binding.
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The durable tmux instance identity of the Session this create made
+ * (#4081). Present on success.
+ */
+instance_id?: string | null, 
+/**
+ * The initial work context committed with this create (#4081). Present
+ * only when the request supplied `initial_metadata`.
+ */
+metadata?: SessionMetadata | null, };
+export type SessionInitialMetadata = { 
+/**
+ * Display alias for the Session. Absent or `null` means unset.
+ */
+title?: string | null, 
+/**
+ * Longer work-context text. Absent or `null` means unset.
+ */
+description?: string | null, 
+/**
+ * Ordered tags; an empty list means no tags.
+ */
+tags?: Array<string>, };
+export type SessionMetadata = { 
+/**
+ * 0 means no metadata has been recorded (a legacy Session).
+ */
+revision: number, 
+/**
+ * Display alias shown in navigation; never a tmux rename. Absent is the
+ * tmux-name fallback.
+ */
+title?: string | null, 
+/**
+ * What this work is about, in the user's or AI's own words.
+ */
+description?: string | null, 
+/**
+ * User-chosen labels, normalized and case-insensitively unique.
+ */
+tags: Array<string>, 
+/**
+ * Unix seconds when the first revision was saved.
+ */
+created_at?: number | null, 
+/**
+ * Unix seconds of the last committed revision.
+ */
+updated_at?: number | null, };
 
 // ── Operations ──
 
@@ -131,12 +188,30 @@ binding_revision?: number | null,
  * and the Agent uses its own configuration. Creation only: an existing
  * Session keeps its pane's width.
  */
-terminal_cols?: number | null, };
+terminal_cols?: number | null, 
+/**
+ * Initial Session work context committed by this create (#4081).
+ *
+ * Same field on the direct and Server-relayed projections, so every
+ * hosting route reaches the Agent with one create payload. Absent
+ * preserves the pre-#4081 create exactly.
+ */
+initial_metadata?: SessionInitialMetadata | null, };
 
 /** The payload the provider answers with. */
 export type SessionCreateReply = { name: string, 
 /**
  * Non-fatal warnings from materializing the initial Environment Binding.
  */
-warnings: Array<string>, };
+warnings: Array<string>, 
+/**
+ * The durable tmux instance identity of the Session this create made
+ * (#4081). Present on success.
+ */
+instance_id?: string | null, 
+/**
+ * The initial work context committed with this create (#4081). Present
+ * only when the request supplied `initial_metadata`.
+ */
+metadata?: SessionMetadata | null, };
 

@@ -18,8 +18,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
 use nession_protocol::contracts::session::v1::{
-    validate_session_metadata, SessionInfo, SessionMetadata, SessionMetadataAvailability,
-    SessionMetadataPatch,
+    validate_session_metadata, NormalizedSessionMetadata, SessionInfo, SessionMetadata,
+    SessionMetadataAvailability, SessionMetadataPatch,
 };
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -257,6 +257,51 @@ impl SessionMetadataStore {
         Ok(SessionMetadataSnapshot {
             instance_id: instance,
             metadata: next,
+        })
+    }
+
+    /// Commit the initial metadata of a Session this Agent just created
+    /// (#4081).
+    ///
+    /// This is a **create step**, not an update: it runs inside the create's
+    /// post-create phase, after the tmux Session exists and its
+    /// `@nession_instance_id` is recorded, and before the create reports
+    /// success. The record is keyed by that fresh instance and starts at
+    /// revision 1 with `created_at`. A failure is returned to the create,
+    /// whose compensation removes the Session and its binding state.
+    ///
+    /// The value is already normalized by
+    /// [`SessionInitialMetadata::normalized`](nession_protocol::contracts::session::v1::SessionInitialMetadata::normalized);
+    /// the per-instance writer lock still serializes against any concurrent
+    /// metadata writer for the same incarnation.
+    pub async fn initialize_for_create(
+        &self,
+        session_name: &str,
+        normalized: &NormalizedSessionMetadata,
+    ) -> Result<SessionMetadataSnapshot> {
+        let instance = self.instance_id(session_name).await?;
+        let lock = self.lock_for(&instance);
+        let _guard = lock.lock().await;
+        let current = self.read_at(&instance).await?;
+        if current.revision != 0 {
+            anyhow::bail!(
+                "conflict: the newly created incarnation already has metadata at revision {}",
+                current.revision
+            );
+        }
+        let now = unix_now();
+        let metadata = SessionMetadata {
+            revision: 1,
+            title: normalized.title.clone(),
+            description: normalized.description.clone(),
+            tags: normalized.tags.clone(),
+            created_at: Some(now),
+            updated_at: Some(now),
+        };
+        self.write_at(&instance, &metadata).await?;
+        Ok(SessionMetadataSnapshot {
+            instance_id: instance,
+            metadata,
         })
     }
 
@@ -610,6 +655,114 @@ mod tests {
         let recreated = store.get(&name).await.unwrap();
         assert_eq!(recreated.revision, 0);
         assert!(recreated.title.is_none());
+    }
+
+    /// #4081: the create-time initializer commits revision 1 for the exact
+    /// fresh incarnation, and the normal readback surfaces see it.
+    #[tokio::test]
+    async fn initial_metadata_is_committed_as_revision_one_for_the_new_incarnation() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let (dir, manager, session) = store_with_session("metadata-initial").await;
+        let name = session.name().to_string();
+        let store = SessionMetadataStore::with_root(Arc::clone(&manager), dir.path().to_path_buf());
+        let normalized = validate_session_metadata(
+            Some("  OAuth implementation  "),
+            Some("  Implement the flow.  "),
+            &["backend".to_string(), "oauth".to_string()],
+        )
+        .expect("valid values");
+
+        let snapshot = store
+            .initialize_for_create(&name, &normalized)
+            .await
+            .expect("initial metadata commits with the create");
+        assert_eq!(snapshot.metadata.revision, 1);
+        assert_eq!(
+            snapshot.metadata.title.as_deref(),
+            Some("OAuth implementation")
+        );
+        assert_eq!(
+            snapshot.metadata.description.as_deref(),
+            Some("Implement the flow.")
+        );
+        assert_eq!(snapshot.metadata.tags, vec!["backend", "oauth"]);
+        assert!(snapshot.metadata.created_at.is_some());
+        assert_eq!(
+            snapshot.instance_id,
+            manager.session_instance_id(&name).await.unwrap()
+        );
+
+        // The owner's own readback sees exactly the committed record.
+        assert_eq!(store.get(&name).await.unwrap(), snapshot.metadata);
+        assert_eq!(
+            store.read_current(&name).await.unwrap().metadata,
+            snapshot.metadata
+        );
+        // A fresh store over the same tmux Session is the Agent-restart shape:
+        // the tmux instance identity still owns the record.
+        let restarted =
+            SessionMetadataStore::with_root(Arc::clone(&manager), dir.path().to_path_buf());
+        assert_eq!(restarted.get(&name).await.unwrap(), snapshot.metadata);
+        // The list summary is the same record, not a separate projection.
+        let mut sessions = manager.list_sessions().await.unwrap();
+        attach_session_summaries(&store, &mut sessions).await;
+        let listed = sessions
+            .iter()
+            .find(|session| session.name == name)
+            .expect("the fixture Session is listed");
+        assert_eq!(
+            listed.metadata.as_ref().expect("summary"),
+            &SessionMetadataAvailability::available(snapshot.metadata.summary())
+        );
+    }
+
+    /// #4081: a same-name recreation gets its own record. The old incarnation
+    /// is retained, the new one starts at revision 0, and its own initial
+    /// metadata commits against the new identity.
+    #[tokio::test]
+    async fn initial_metadata_is_fenced_to_the_incarnation_it_was_created_with() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let (dir, manager, session) = store_with_session("metadata-initial-recreate").await;
+        let name = session.name().to_string();
+        let store = SessionMetadataStore::with_root(Arc::clone(&manager), dir.path().to_path_buf());
+        let first = validate_session_metadata(Some("First"), None, &[]).unwrap();
+        let committed = store
+            .initialize_for_create(&name, &first)
+            .await
+            .expect("first incarnation initializes");
+
+        manager.kill_session(&name).await.expect("kill");
+        manager
+            .create_session(&name, 80, 24, "/tmp", &[])
+            .await
+            .expect("recreate");
+        assert_ne!(
+            manager.session_instance_id(&name).await.unwrap(),
+            committed.instance_id
+        );
+        // The successor starts empty, never inheriting the old record.
+        assert_eq!(store.get(&name).await.unwrap().revision, 0);
+        // Its own create-time initializer writes its own revision 1.
+        let second = validate_session_metadata(Some("Second"), None, &[]).unwrap();
+        let successor = store
+            .initialize_for_create(&name, &second)
+            .await
+            .expect("successor initializes");
+        assert_eq!(successor.metadata.revision, 1);
+        assert_eq!(successor.metadata.title.as_deref(), Some("Second"));
+        assert!(
+            dir.path()
+                .join(&committed.instance_id)
+                .join("metadata.json")
+                .exists(),
+            "the previous incarnation's record is retained"
+        );
     }
 
     #[test]

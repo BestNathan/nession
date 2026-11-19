@@ -139,7 +139,7 @@ types**:
 
 | Path | Tool | Ownership |
 |---|---|---|
-| Agent-owned creation | `nession_agent_create_session` | unchanged; no `project_id` argument and no implicit Project lookup |
+| Agent-owned creation | `nession_agent_create_session` | no `project_id` argument and no implicit Project lookup; an optional initial `metadata` object is committed with the create (#4081) |
 | Project-context creation | `nession_server_project_session_create` | Server validates the Project and target, resolves Project defaults, delegates the create to the Agent through `server.session.create`, and persists the association |
 
 There is no `session_type`, `is_project_session`, creation-source flag or
@@ -237,6 +237,32 @@ unavailable. The Agent joins the summary from its own store by the list's
 already-reported instance identity; the Server projects it into
 `server.session.list` and refreshes it when the MCP list forces live Agent
 state. Listing never creates or writes metadata.
+
+### Creation-time initial metadata (#4081)
+
+`nession_agent_create_session` accepts an optional
+`metadata: { title?, description?, tags? }`. It is **initial input**, not the
+persisted read model: `revision`, timestamps and the tmux instance identity are
+owner-written and rejected as unknown fields. The same
+`validate_session_metadata` normalization and bounds as Get/Update apply, and
+are checked before the Session backend is called and again by the Agent at its
+own boundary.
+
+Every hosting route — Agent-embedded, Server-embedded, Server-routed standalone
+and direct-Agent standalone — carries the object as `initial_metadata` on the
+canonical create payload. The Agent commits it as the new incarnation's
+revision 1 inside the create's post-create phase: after the tmux Session and
+its instance fence exist, and before the create reports success or publishes
+the Session. A metadata failure is a create failure — the same identity-verified
+compensation removes the Session and the binding state the attempt wrote, and
+the name is immediately retryable. A duplicate-name refusal never touches the
+live Session's record.
+
+The success reply carries the committed `metadata` and the authoritative
+`instance_id`, and both Get and the list summary observe them immediately; there
+is no `create → get → update` round trip and no separate metadata store. An
+omitted `metadata` preserves the pre-#4081 create and a confirmed revision-0
+record.
 
 ## Flat Tool structure
 

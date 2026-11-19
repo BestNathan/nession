@@ -3,6 +3,7 @@
 use anyhow::{Context, Result};
 use nession_protocol::contracts::env::v1::{EnvSnapshot, SessionEnvProfile};
 use nession_protocol::contracts::sandbox::v1::{SandboxExecutionReport, SandboxPolicy};
+use nession_protocol::contracts::session::v1::{NormalizedSessionMetadata, SessionMetadata};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -11,6 +12,7 @@ use std::time::Duration;
 use super::cmd::{self, TmuxCmd};
 use super::env::{EffectiveOverlay, EnvManager, ShellAdapter};
 use super::ops::{TmuxDep, TmuxOps};
+use crate::session::metadata::SessionMetadataStore;
 
 /// The environment that tells a Claude Code integration which Nession session it
 /// is in, and where to report what it is doing (`#1005`).
@@ -283,7 +285,7 @@ fn base_session_environment(
 
 /// How far one create attempt got, shared between the create future and the
 /// outer deadline that may drop it (#2812).
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 enum CreateStage {
     /// No tmux mutation was requested yet, so a cancellation created nothing.
     Preparing,
@@ -293,7 +295,11 @@ enum CreateStage {
     /// `new-session` returned Ok: this attempt owns the Session with this name.
     Created,
     /// Every post-create step finished. This is the caller's result.
-    Completed(SessionCreateOutcome),
+    ///
+    /// Boxed because the outcome now carries the committed metadata as well as
+    /// the sandbox report; every non-completed stage would otherwise pay that
+    /// size.
+    Completed(Box<SessionCreateOutcome>),
 }
 
 type CreateProgress = Arc<Mutex<CreateStage>>;
@@ -414,12 +420,29 @@ pub struct SessionManager {
 }
 
 /// The result of one Session create.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SessionCreateOutcome {
     /// Non-fatal Environment Binding warnings.
     pub warnings: Vec<String>,
     /// What the Sandbox backend verified, for a sandboxed create.
     pub sandbox: Option<SandboxExecutionReport>,
+    /// The durable tmux instance identity of the Session this create made
+    /// (#4081). Present on every successful create.
+    pub instance_id: Option<String>,
+    /// The initial work context committed with this create (#4081). Present
+    /// only when the caller supplied initial metadata.
+    pub metadata: Option<SessionMetadata>,
+}
+
+/// Initial Session Metadata committed by one create (#4081).
+///
+/// The metadata store is the one owner; the value has already passed the
+/// shared contract validation. The create commits it inside its post-create
+/// phase, so a metadata failure is a create failure with the same
+/// identity-verified rollback and timeout.
+pub struct InitialSessionMetadata<'a> {
+    pub store: &'a SessionMetadataStore,
+    pub metadata: &'a NormalizedSessionMetadata,
 }
 
 impl SessionManager {
@@ -813,9 +836,19 @@ impl SessionManager {
         working_dir: &str,
         env: &[(String, String)],
     ) -> Result<()> {
-        self.create_session_inner(name, width, height, working_dir, env, None, None, None)
-            .await
-            .map(|_| ())
+        self.create_session_inner(
+            name,
+            width,
+            height,
+            working_dir,
+            env,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Create a Session whose initial process, future panes, and shell adapter
@@ -846,16 +879,24 @@ impl SessionManager {
             Some(binding),
             None,
             None,
+            None,
         )
         .await
     }
 
-    /// Create a Session with an optional Environment Binding and an optional
-    /// Sandbox policy (#2681).
+    /// Create a Session with an optional Environment Binding, an optional
+    /// Sandbox policy (#2681) and optional initial Session Metadata (#4081).
     ///
     /// The policy is compiled and prepared before `new-session`, and the
     /// create fails closed when the host cannot install a requested guarantee.
-    /// A successful create returns the mechanisms the Agent verified.
+    /// A successful create returns the mechanisms the Agent verified and, when
+    /// initial metadata was requested, the committed record and the instance
+    /// identity it belongs to.
+    ///
+    /// Initial metadata is one of the create's **post-create steps**: a
+    /// metadata failure removes the Session and binding state this attempt
+    /// wrote, exactly like every other required post-create step.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_session_with_options(
         &self,
         name: &str,
@@ -864,6 +905,7 @@ impl SessionManager {
         working_dir: &str,
         binding: Option<SessionBindingInput<'_>>,
         sandbox: Option<&SandboxPolicy>,
+        initial_metadata: Option<&InitialSessionMetadata<'_>>,
     ) -> Result<SessionCreateOutcome> {
         self.create_session_inner(
             name,
@@ -874,6 +916,7 @@ impl SessionManager {
             binding,
             sandbox,
             None,
+            initial_metadata,
         )
         .await
     }
@@ -896,6 +939,7 @@ impl SessionManager {
         sandbox_working_dir: &str,
         binding: Option<SessionBindingInput<'_>>,
         sandbox: &SandboxPolicy,
+        initial_metadata: Option<&InitialSessionMetadata<'_>>,
     ) -> Result<SessionCreateOutcome> {
         self.create_session_inner(
             name,
@@ -906,6 +950,7 @@ impl SessionManager {
             binding,
             Some(sandbox),
             Some(sandbox_working_dir),
+            initial_metadata,
         )
         .await
     }
@@ -921,6 +966,7 @@ impl SessionManager {
         binding: Option<SessionBindingInput<'_>>,
         sandbox: Option<&SandboxPolicy>,
         sandbox_working_dir: Option<&str>,
+        initial_metadata: Option<&InitialSessionMetadata<'_>>,
     ) -> Result<SessionCreateOutcome> {
         // Check memory pressure before creating a new session. This prevents
         // container-level OOM by refusing new sessions when memory usage is too
@@ -973,6 +1019,7 @@ impl SessionManager {
                 sandbox_working_dir.unwrap_or(working_dir),
                 &token,
                 &progress,
+                initial_metadata,
             )
             .await
         };
@@ -984,7 +1031,7 @@ impl SessionManager {
                 // the only record of how far it got. `Completed` means it
                 // actually finished in the same tick — still a success.
                 if let CreateStage::Completed(outcome) = create_stage(&progress) {
-                    return Ok(outcome);
+                    return Ok(*outcome);
                 }
                 let note = match tokio::time::timeout(
                     TMUX_CREATE_RECONCILE_TIMEOUT,
@@ -1025,6 +1072,7 @@ impl SessionManager {
         sandbox_working_dir: &str,
         token: &str,
         progress: &CreateProgress,
+        initial_metadata: Option<&InitialSessionMetadata<'_>>,
     ) -> Result<SessionCreateOutcome> {
         nession_common::config::validate_terminal_cols(width).map_err(anyhow::Error::msg)?;
         // History depth needs nothing here: it travels as `-f` on every tmux
@@ -1376,9 +1424,29 @@ impl SessionManager {
                 sandbox_report = Some(report);
             }
 
+            // Initial Session Metadata is the last required create step
+            // (#4081): the tmux Session and its instance fence already exist,
+            // and nothing after this can fail. A metadata failure therefore
+            // removes this attempt's Session through the same compensation
+            // every other required post-create step uses, and the create never
+            // reports success with the Session alone.
+            let metadata = match initial_metadata {
+                Some(initial) => {
+                    let snapshot = initial
+                        .store
+                        .initialize_for_create(name, initial.metadata)
+                        .await
+                        .context("commit the Session's initial metadata")?;
+                    Some(snapshot.metadata)
+                }
+                None => None,
+            };
+
             Ok::<SessionCreateOutcome, anyhow::Error>(SessionCreateOutcome {
                 warnings,
                 sandbox: sandbox_report,
+                instance_id: Some(instance_id.clone()),
+                metadata,
             })
         };
 
@@ -1386,7 +1454,7 @@ impl SessionManager {
             Ok(Ok(outcome)) => {
                 // Record completion before returning so a deadline firing in
                 // the same tick reads success, not a stale in-progress stage.
-                set_create_stage(progress, CreateStage::Completed(outcome.clone()));
+                set_create_stage(progress, CreateStage::Completed(Box::new(outcome.clone())));
                 Ok(outcome)
             }
             Ok(Err(error)) => {
@@ -1723,6 +1791,252 @@ mod binding_create_tests {
             );
             tokio::time::sleep(Duration::from_millis(50)).await;
         }
+    }
+}
+
+#[cfg(test)]
+mod metadata_create_tests {
+    use super::*;
+    use crate::session::metadata::SessionMetadataStore;
+    use crate::test_support::TestSession;
+    use nession_protocol::contracts::session::v1::validate_session_metadata;
+
+    fn normalized(title: &str) -> NormalizedSessionMetadata {
+        validate_session_metadata(
+            Some(title),
+            Some("fixture description"),
+            &["fixture".to_string()],
+        )
+        .expect("valid fixture metadata")
+    }
+
+    async fn tmux_available() -> bool {
+        cmd::global()
+            .tokio()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .await
+            .is_ok()
+    }
+
+    fn manager() -> Arc<SessionManager> {
+        let state = tempfile::tempdir().unwrap();
+        // The binding state must outlive this manager for the test; the temp
+        // directory is intentionally leaked for the duration of the process.
+        Arc::new(
+            SessionManager::new()
+                .with_env_state_dir(Box::leak(Box::new(state)).path().to_path_buf()),
+        )
+    }
+
+    /// #4081: the create commits the initial work context for its own
+    /// incarnation and reports it in the outcome.
+    #[tokio::test]
+    async fn create_with_initial_metadata_commits_it_before_success() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mgr = manager();
+        let store = SessionMetadataStore::with_root(Arc::clone(&mgr), root.path().to_path_buf());
+        let session = TestSession::new("metadata-create");
+        let name = session.name();
+        let metadata = normalized("OAuth implementation");
+
+        let outcome = mgr
+            .create_session_with_options(
+                name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                None,
+                Some(&InitialSessionMetadata {
+                    store: &store,
+                    metadata: &metadata,
+                }),
+            )
+            .await
+            .expect("the create commits its initial metadata");
+
+        let committed = outcome.metadata.expect("committed metadata");
+        assert_eq!(committed.revision, 1);
+        assert_eq!(committed.title.as_deref(), Some("OAuth implementation"));
+        assert_eq!(
+            outcome.instance_id.as_deref(),
+            Some(store.read_current(name).await.unwrap().instance_id.as_str())
+        );
+        assert_eq!(store.get(name).await.unwrap(), committed);
+        mgr.kill_session(name).await.ok();
+    }
+
+    /// #4081: an omitted metadata object preserves the pre-#4081 create: a
+    /// confirmed revision-0 record, no committed metadata in the outcome.
+    #[tokio::test]
+    async fn create_without_initial_metadata_still_starts_at_revision_zero() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mgr = manager();
+        let store = SessionMetadataStore::with_root(Arc::clone(&mgr), root.path().to_path_buf());
+        let session = TestSession::new("metadata-create-empty");
+        let name = session.name();
+
+        let outcome = mgr
+            .create_session_with_options(
+                name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("create without metadata");
+
+        assert!(outcome.metadata.is_none());
+        assert!(outcome.instance_id.is_some());
+        assert_eq!(store.get(name).await.unwrap().revision, 0);
+        mgr.kill_session(name).await.ok();
+    }
+
+    /// #4081: a duplicate-name refusal never touches the live Session's
+    /// metadata, even though the request carried a new metadata object.
+    #[tokio::test]
+    async fn a_duplicate_name_refusal_leaves_the_existing_metadata_intact() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let mgr = manager();
+        let store = SessionMetadataStore::with_root(Arc::clone(&mgr), root.path().to_path_buf());
+        let session = TestSession::new("metadata-duplicate");
+        let name = session.name();
+        let first = normalized("First");
+        let committed = mgr
+            .create_session_with_options(
+                name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                None,
+                Some(&InitialSessionMetadata {
+                    store: &store,
+                    metadata: &first,
+                }),
+            )
+            .await
+            .expect("first create")
+            .metadata
+            .expect("first metadata");
+
+        let second = normalized("Second");
+        let error = mgr
+            .create_session_with_options(
+                name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                None,
+                Some(&InitialSessionMetadata {
+                    store: &store,
+                    metadata: &second,
+                }),
+            )
+            .await
+            .expect_err("a duplicate name is refused");
+        assert!(format!("{error:#}").contains("already exists"), "{error:#}");
+        assert_eq!(store.get(name).await.unwrap(), committed);
+        mgr.kill_session(name).await.ok();
+    }
+
+    /// #4081: a metadata-write failure is a create failure. The new Session
+    /// and the binding state this attempt wrote are removed, and the name is
+    /// immediately retryable.
+    #[tokio::test]
+    async fn a_metadata_failure_removes_the_new_session_and_binding_state() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        let session = TestSession::new("metadata-write-failure");
+        let name = session.name().to_string();
+        // A store root whose parent is a regular file: every write/read fails
+        // with ENOTDIR, deterministically.
+        let blocker = tempfile::tempdir().unwrap();
+        let not_a_directory = blocker.path().join("blocked");
+        std::fs::write(&not_a_directory, b"x").unwrap();
+        let broken =
+            SessionMetadataStore::with_root(Arc::clone(&mgr), not_a_directory.join("sessions"));
+        let metadata = normalized("Will not commit");
+        let binding = SessionBindingInput {
+            revision: 1,
+            profiles: &[],
+            snapshots: &[],
+        };
+
+        let error = mgr
+            .create_session_with_options(
+                &name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                Some(binding),
+                None,
+                Some(&InitialSessionMetadata {
+                    store: &broken,
+                    metadata: &metadata,
+                }),
+            )
+            .await
+            .expect_err("a metadata failure fails the create");
+        assert!(
+            format!("{error:#}").contains("initial metadata"),
+            "the failure names the failing create step: {error:#}"
+        );
+        assert!(
+            !mgr.list_sessions()
+                .await
+                .unwrap()
+                .iter()
+                .any(|session| session.name == name),
+            "the Session created by the failed attempt was removed"
+        );
+        assert!(
+            !mgr.env().state_dir().join(&name).exists(),
+            "the binding state this attempt wrote was removed"
+        );
+
+        // The name is retryable with a working store.
+        let good_root = tempfile::tempdir().unwrap();
+        let good =
+            SessionMetadataStore::with_root(Arc::clone(&mgr), good_root.path().to_path_buf());
+        let retried = mgr
+            .create_session_with_options(
+                &name,
+                SESSION_WIDTH,
+                SESSION_HEIGHT,
+                "/tmp",
+                None,
+                None,
+                Some(&InitialSessionMetadata {
+                    store: &good,
+                    metadata: &metadata,
+                }),
+            )
+            .await
+            .expect("the retry starts from an absent Session");
+        assert_eq!(retried.metadata.expect("committed metadata").revision, 1);
+        mgr.kill_session(&name).await.ok();
     }
 }
 
@@ -2080,6 +2394,7 @@ mod sandbox_refusal_tests {
                 "/tmp",
                 None,
                 Some(&policy),
+                None,
             )
             .await
             .expect_err("a disabled policy with constraints must fail closed");
@@ -2120,6 +2435,7 @@ mod sandbox_refusal_tests {
                 "/tmp",
                 None,
                 Some(&policy),
+                None,
             )
             .await
             .expect_err("a policy this Agent cannot honour must fail closed");
