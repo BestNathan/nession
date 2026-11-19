@@ -109,6 +109,7 @@ pub(crate) fn build(
     let service_config = ServiceConfig {
         path: config.mcp.path.clone(),
         auth_token: nession_protocol::TokenVerifier::new(config.auth_token.clone()),
+        allow_query_token: false, // Embedded hosts remain Bearer-only.
         tool_timeout: std::time::Duration::from_secs(config.mcp.tool_timeout_secs),
         max_concurrent_calls: config.mcp.max_concurrent_calls,
         allowed_origins: config.mcp.allowed_origins.clone(),

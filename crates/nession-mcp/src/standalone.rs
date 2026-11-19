@@ -18,6 +18,7 @@
 //! [mcp]
 //! listen_address = "127.0.0.1:9090"
 //! auth_token = "<mcp-inbound-token>"
+//! # allow_query_token = true  # Optional, default false; query credentials need HTTPS.
 //!
 //! [backend.server]
 //! endpoint = "wss://nession.example.com/ws"
@@ -63,9 +64,14 @@ pub struct StandaloneMcpConfig {
     pub path: String,
     /// The address this program listens on.
     pub listen_address: String,
-    /// The bearer token every MCP request must present (or NESSION_MCP_INBOUND_TOKEN).
+    /// The inbound MCP token. Normally supplied as Authorization: Bearer,
+    /// or via NESSION_MCP_INBOUND_TOKEN.
     #[serde(default)]
     pub auth_token: String,
+    /// Allow the same MCP inbound token in the URL query for headerless clients.
+    /// Explicitly opt in; default remains Bearer-only.
+    #[serde(default)]
+    pub allow_query_token: bool,
     /// Optional TLS certificate for the MCP listener.
     #[serde(default)]
     pub tls_cert_path: Option<String>,
@@ -236,6 +242,7 @@ impl StandaloneConfig {
         ServiceConfig {
             path: self.mcp.path.clone(),
             auth_token: nession_protocol::TokenVerifier::new(self.mcp.auth_token.clone()),
+            allow_query_token: self.mcp.allow_query_token,
             tool_timeout: Duration::from_secs(self.mcp.tool_timeout_secs),
             max_concurrent_calls: self.mcp.max_concurrent_calls,
             allowed_origins: self.mcp.allowed_origins.clone(),

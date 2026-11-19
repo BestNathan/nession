@@ -61,8 +61,11 @@ type RmcpBody = BoxBody<Bytes, Infallible>;
 pub struct ServiceConfig {
     /// The endpoint path, normally `/mcp`.
     pub path: String,
-    /// The required inbound bearer token, owned by this endpoint.
+    /// The required inbound MCP token, owned by this endpoint.
     pub auth_token: TokenVerifier,
+    /// Allow an exact `?token=...` as a credential on this MCP endpoint.
+    /// Off by default; the standalone host must explicitly opt in.
+    pub allow_query_token: bool,
     /// Bound on one tool execution (and on waiting for a concurrency slot).
     pub tool_timeout: Duration,
     /// Maximum concurrent tool executions.
@@ -85,6 +88,7 @@ impl ServiceConfig {
         Self {
             path: protocol::DEFAULT_PATH.to_string(),
             auth_token: TokenVerifier::new(auth_token),
+            allow_query_token: false,
             tool_timeout: Duration::from_secs(protocol::DEFAULT_TOOL_TIMEOUT_SECS),
             max_concurrent_calls: protocol::DEFAULT_MAX_CONCURRENT_CALLS,
             allowed_origins: Vec::new(),
@@ -300,6 +304,7 @@ impl McpService {
                 inner,
                 path: Arc::from(config.path.as_str()),
                 auth_token: config.auth_token,
+                allow_query_token: config.allow_query_token,
             },
         })
     }
@@ -550,6 +555,7 @@ struct AuthorizedMcp {
     inner: StreamableHttpService<RegistryServer, LocalSessionManager>,
     path: Arc<str>,
     auth_token: TokenVerifier,
+    allow_query_token: bool,
 }
 
 impl AuthorizedMcp {
@@ -587,10 +593,18 @@ where
         if request.uri().path() != &*self.path {
             return Box::pin(async { Ok(Self::not_found()) });
         }
-        if !authorized_by(&request, &self.auth_token) {
-            warn!("MCP request refused: no valid bearer token");
+        if !authorized_by(&request, &self.auth_token, self.allow_query_token) {
+            // Do not log the request target: it may contain the query credential.
+            warn!("MCP request refused: no valid credential");
             return Box::pin(async { Ok(Self::unauthorized()) });
         }
+        // The MCP protocol uses the path, not URL query parameters. Strip the
+        // credential-bearing query before forwarding to rmcp's transport.
+        let mut request = request;
+        let Ok(path_only) = request.uri().path().parse::<http::Uri>() else {
+            return Box::pin(async { Ok(Self::unauthorized()) });
+        };
+        *request.uri_mut() = path_only;
         let mut inner = self.inner.clone();
         Box::pin(async move {
             match inner.call(request).await {
@@ -605,23 +619,105 @@ where
     }
 }
 
-fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier) -> bool {
-    let Some(value) = request
-        .headers()
-        .get(http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return false;
+/// Extract the single query credential, never exposing it in an error or log.
+/// Form-query decoding accepts percent-encoded reserved characters (including
+/// '+' as %2B) and rejects incomplete escapes rather than normalizing them.
+fn query_token(query: Option<&str>) -> Result<Option<String>, ()> {
+    let Some(query) = query else {
+        return Ok(None);
     };
-    let mut parts = value.splitn(2, ' ');
-    let scheme = parts.next().unwrap_or_default();
-    if !scheme.eq_ignore_ascii_case("bearer") {
+    let mut token = None;
+    for parameter in query.split('&') {
+        let (key, value) = parameter.split_once('=').unwrap_or((parameter, ""));
+        if decode_query_component(key).ok_or(())? == "token" {
+            if token.is_some() {
+                return Err(());
+            }
+            let decoded = decode_query_component(value).ok_or(())?;
+            if decoded.is_empty() {
+                return Err(());
+            }
+            token = Some(decoded);
+        }
+    }
+    Ok(token)
+}
+
+fn decode_query_component(component: &str) -> Option<String> {
+    let bytes = component.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut offset = 0;
+    while let Some(&byte) = bytes.get(offset) {
+        match byte {
+            b'%' => {
+                let high = hex_digit(*bytes.get(offset + 1)?)?;
+                let low = hex_digit(*bytes.get(offset + 2)?)?;
+                decoded.push((high << 4) | low);
+                offset += 3;
+            }
+            b'+' => {
+                decoded.push(b' ');
+                offset += 1;
+            }
+            _ => {
+                decoded.push(byte);
+                offset += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier, allow_query: bool) -> bool {
+    // Authorization must not be ambiguous even when multiple headers appear.
+    let all_headers = request.headers().get_all(http::header::AUTHORIZATION);
+    let mut headers = all_headers.iter();
+    let header = headers.next();
+    if headers.next().is_some() {
         return false;
     }
-    let Some(presented) = parts.next() else {
-        return false;
+    let query = match query_token(request.uri().query()) {
+        Ok(query) => query,
+        Err(()) => return false,
     };
-    verifier.verify(presented.trim())
+    if query.is_some() && !allow_query {
+        return false;
+    }
+
+    let bearer = match header {
+        None => None,
+        Some(value) => {
+            let Ok(value) = value.to_str() else {
+                return false;
+            };
+            let mut parts = value.splitn(2, ' ');
+            if !parts
+                .next()
+                .is_some_and(|scheme| scheme.eq_ignore_ascii_case("bearer"))
+            {
+                return false;
+            }
+            let Some(presented) = parts.next() else {
+                return false;
+            };
+            Some(presented.trim())
+        }
+    };
+    match (bearer, query.as_deref()) {
+        (Some(bearer), Some(query)) => bearer == query && verifier.verify(bearer),
+        (Some(bearer), None) => verifier.verify(bearer),
+        (None, Some(query)) => verifier.verify(query),
+        (None, None) => false,
+    }
 }
 
 #[cfg(test)]
@@ -682,6 +778,91 @@ mod tests {
         assert!(!verifier.verify("abd"));
         assert!(!verifier.verify("ab"));
         assert!(!verifier.verify(""));
+    }
+
+    #[test]
+    fn query_credentials_require_opt_in_and_do_not_override_bearer() {
+        fn allowed(uri: &str, headers: &[&str], allow_query: bool) -> bool {
+            let mut request = Request::builder().uri(uri);
+            for header in headers {
+                request = request.header(http::header::AUTHORIZATION, *header);
+            }
+            let request = request.body(()).expect("test request");
+            authorized_by(
+                &request,
+                &TokenVerifier::new("value+with/slash"),
+                allow_query,
+            )
+        }
+
+        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &[], false));
+        assert!(allowed("/mcp", &["Bearer value+with/slash"], false));
+        assert!(allowed("/mcp?token=value%2Bwith%2Fslash", &[], true));
+        assert!(allowed(
+            "/mcp?irrelevant=a&token=value%2Bwith%2Fslash",
+            &[],
+            true
+        ));
+        assert!(allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer value+with/slash"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer wrong"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=wrong",
+            &["Bearer value+with/slash"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Basic wrong"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer value+with/slash", "Bearer value+with/slash"],
+            true
+        ));
+        for target in [
+            "/mcp",
+            "/mcp?token=",
+            "/mcp?token=wrong",
+            "/mcp?token=value+with%2Fslash",
+            "/mcp?token=value%2Bwith%2Fslash&token=value%2Bwith%2Fslash",
+            "/mcp?token=value%",
+            "/mcp?token=value%2",
+            "/mcp?token=value%ZZ",
+            "/mcp?%74oken=wrong",
+        ] {
+            assert!(
+                !allowed(target, &[], true),
+                "unexpected authorization: {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn query_token_decoding_rejects_invalid_encoding_and_duplicate_keys() {
+        assert_eq!(query_token(None), Ok(None));
+        assert_eq!(
+            query_token(Some("token=a%2Bb%26c")),
+            Ok(Some("a+b&c".into()))
+        );
+        assert_eq!(query_token(Some("%74oken=value")), Ok(Some("value".into())));
+        assert_eq!(query_token(Some("foo=bar")), Ok(None));
+        assert_eq!(query_token(Some("token=%")), Err(()));
+        assert_eq!(query_token(Some("token=%FF")), Err(()));
+        assert_eq!(query_token(Some("token=x&%74oken=x")), Err(()));
     }
 
     #[test]

@@ -369,9 +369,20 @@ async fn send(
     session: Option<&str>,
     body: &str,
 ) -> Option<HttpResponse> {
+    send_to(addr, "/mcp", method, token, session, body).await
+}
+
+async fn send_to(
+    addr: SocketAddr,
+    target: &str,
+    method: &str,
+    token: Option<&str>,
+    session: Option<&str>,
+    body: &str,
+) -> Option<HttpResponse> {
     let mut stream = TcpStream::connect(addr).await.ok()?;
     let mut head = format!(
-        "{method} /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
          text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
          Connection: close\r\n",
         body.len()
@@ -678,6 +689,130 @@ async fn terminate_and_wait(child: &mut Child) {
         }
     }
     panic!("nession-mcp did not exit after SIGTERM");
+}
+
+/// An actual standalone process supports headerless clients only when explicitly enabled.
+#[tokio::test]
+async fn standalone_query_token_authentication_is_opt_in() {
+    let (server_addr, server_task, _db) = start_server_with_mcp(false).await;
+    let dir = tempfile::tempdir().expect("tempdir");
+    let config_path = write_routed_config(dir.path(), server_addr);
+    let mut child = spawn_standalone(&config_path);
+    let addr = await_listen_addr(&mut child.0).await;
+    let initialize = json!({
+        "jsonrpc": "2.0", "id": 1, "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-03-26",
+            "capabilities": {},
+            "clientInfo": { "name": "query-test", "version": "1" }
+        }
+    })
+    .to_string();
+
+    let disabled = send_to(
+        addr,
+        "/mcp?token=mcp-inbound-token",
+        "POST",
+        None,
+        None,
+        &initialize,
+    )
+    .await
+    .expect("default HTTP response");
+    assert_eq!(disabled.status, 401);
+    assert!(!disabled.body.contains(MCP_TOKEN));
+    assert_eq!(
+        send(addr, "POST", Some(MCP_TOKEN), None, &initialize)
+            .await
+            .expect("header authentication")
+            .status,
+        200
+    );
+    terminate_and_wait(&mut child.0).await;
+
+    let original = std::fs::read_to_string(&config_path).expect("read standalone config");
+    let enabled = original.replacen(
+        &format!("auth_token = \"{MCP_TOKEN}\""),
+        &format!("auth_token = \"{MCP_TOKEN}\"\nallow_query_token = true"),
+        1,
+    );
+    std::fs::write(&config_path, enabled).expect("enable query authentication");
+    let mut child = spawn_standalone(&config_path);
+    let addr = await_listen_addr(&mut child.0).await;
+    let query = "/mcp?token=mcp%2Dinbound%2Dtoken";
+    let initialized = send_to(addr, query, "POST", None, None, &initialize)
+        .await
+        .expect("query HTTP response");
+    assert_eq!(initialized.status, 200, "{}", initialized.body);
+    let session = initialized
+        .header("Mcp-Session-Id")
+        .expect("legacy MCP session");
+    let listed = send_to(
+        addr,
+        query,
+        "POST",
+        None,
+        Some(session),
+        &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }).to_string(),
+    )
+    .await
+    .expect("query-only tools/list");
+    assert_eq!(listed.status, 200, "{}", listed.body);
+    assert_eq!(
+        listed.json()["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .len(),
+        11
+    );
+
+    for target in [
+        "/mcp?token=wrong",
+        "/mcp?token=",
+        "/mcp?token=mcp-inbound-token&token=mcp-inbound-token",
+        "/mcp?token=mcp-inbound-token%",
+    ] {
+        let denied = send_to(addr, target, "POST", None, None, &initialize)
+            .await
+            .expect("refusal");
+        assert_eq!(denied.status, 401, "{target}");
+        assert!(!denied.body.contains(MCP_TOKEN));
+    }
+    let conflict = send_to(addr, query, "POST", Some("wrong"), None, &initialize)
+        .await
+        .expect("conflicting header");
+    assert_eq!(conflict.status, 401);
+    assert_eq!(
+        send_to(addr, query, "POST", Some(MCP_TOKEN), None, &initialize)
+            .await
+            .expect("matching credentials")
+            .status,
+        200
+    );
+    assert_eq!(
+        send_to(
+            addr,
+            "/other?token=mcp-inbound-token",
+            "POST",
+            None,
+            None,
+            &initialize
+        )
+        .await
+        .expect("wrong path")
+        .status,
+        404
+    );
+    assert_eq!(
+        send(addr, "POST", Some(MCP_TOKEN), None, &initialize)
+            .await
+            .expect("legacy bearer")
+            .status,
+        200
+    );
+
+    terminate_and_wait(&mut child.0).await;
+    server_task.abort();
 }
 
 #[tokio::test]
