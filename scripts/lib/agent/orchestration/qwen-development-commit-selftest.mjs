@@ -940,6 +940,50 @@ try {
     .find(x=>x.id===secondRepair.id);
   assert.equal(secondSource.task.repair_checkpoint.checkpoint_version,2);
   assert.equal(secondSource.task.repair_checkpoint.source_run_id,repairWorkerId);
+  // The next signed Worker/Publisher must also be authorized against the
+  // repaired PR's v2 predecessor, while preserving the original branch.
+  // This is an isolated admission fixture, not a forged production Worker.
+  const secondWorkerRun=repairWorkerId+91;
+  const secondPreparedWorker=recordDispatchIntent(
+    readIssueWorkflowState(post,issue).state,
+    readIssueWorkflowState(post,issue).version,secondRepair.id,{
+      status:'prepared',dispatch_id:secondRepair.id,
+      issuer_run_id:secondWorkerRun-1,ticket_sha256:'a'.repeat(64)});
+  const secondDispatchedWorker=recordDispatch(secondPreparedWorker,
+    secondPreparedWorker.version,secondRepair.id,{
+      status:'verified',dispatch_id:secondRepair.id,
+      source_run_id:secondWorkerRun});
+  const secondAdmission={...repairAdmission,action_id:secondRepair.id,
+    input_sha:shaB,run_id:secondWorkerRun,
+    resume_from:secondSource.task.repair_checkpoint};
+  const secondCheckpoint={...repairAccepted.checkpoint,
+    version:3,action_status:'dispatched',
+    commit_sha:'e'.repeat(40),ciphertext_sha256:'f'.repeat(64)};
+  const secondPublisherSource={state:secondDispatchedWorker,
+    admission:secondAdmission,checkpoint:secondCheckpoint,
+    originalIntent:repairWalIntent.record,initialIntent:intent.record};
+  const secondPublisherOrigin=assertQwenRepairPublisherOrigin(secondPublisherSource);
+  assert.equal(secondPublisherOrigin.review_sha,shaB);
+  assert.equal(secondPublisherOrigin.branch,'refs/heads/'+branch);
+  assert.equal(secondPublisherOrigin.original_main_sha,inputSha);
+  assert.equal(secondPublisherOrigin.original_publisher_run_id,publisherRun);
+  assert.equal(secondPublisherOrigin.original_checkpoint_version,2);
+  assert.equal(secondPublisherOrigin.repair_checkpoint_version,3);
+  for(const wrong of [
+    {originalIntent:{...repairWalIntent.record,
+      original_publisher_run_id:publisherRun+1}},
+    {originalIntent:{...repairWalIntent.record,source_sha:shaB}},
+    {initialIntent:{...intent.record,branch:'agent/'+issue+'/qwen-'+
+      'f'.repeat(16)}},
+    {admission:{...secondAdmission,resume_from:{...secondAdmission.resume_from,
+      source_run_id:repairWorkerId+1}}},
+    {checkpoint:{...secondCheckpoint,version:4}},
+    {state:{...secondDispatchedWorker,
+      transitions:secondDispatchedWorker.transitions.filter(x=>
+        !(x.kind==='reviewer'&&x.target_sha===commitSha))}},
+  ])assert.throws(()=>assertQwenRepairPublisherOrigin({
+    ...secondPublisherSource,...wrong}),
+    /Qwen Repair|Qwen Repair write-ahead|Publisher/);
   assert.throws(()=>qwenRepairPublishedSource({
     storeRoot:post,issue,actionId:secondRepair.id,sha:commitSha}),
     /trusted Qwen Repair origin/);
