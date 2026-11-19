@@ -12,6 +12,8 @@ import {qwenCommittedPublisherIntent,qwenCommittedReviewIntent}
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
+import {SOURCE as QWEN_PREWRITE_FAILURE}
+  from './qwen-repair-prewrite-failure.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/,HEX=/^[a-f0-9]{64}$/;
@@ -250,4 +252,122 @@ export function commitQwenRepairPublisherIntent({
     return {status:'committed',may_publish:true,
       store_commit_sha:pushed.commit_sha,record};
   }finally{fs.rmSync(tmp,{recursive:true,force:true});}
+}
+
+ // #4046: real failed original Publisher already committed its immutable WAL
+ // but failed before even the first GitHub blob POST. A second Publisher Run
+ // CANNOT reuse that WAL by itself. A source-attested, independent failed Run
+ // grants at most ONE new durable pre-write recovery. This marker is immutable,
+ // has its own canonical Run-store path, and is committed BEFORE any GitHub
+ // mutation. Any later invocation is readback-only, not a second write grant.
+export function qwenRepairPrewriteRecoveryPath(){
+  const f=QWEN_PREWRITE_FAILURE;
+  const id=sha256(JSON.stringify([
+    f.issue,f.run_id,f.worker_run_id,f.action_id,'prewrite-recovery-v1']));
+  return 'workflows/issues/'+f.issue+'/results/'+f.run_id+'-1-'+id+'.json';
+}
+export function commitQwenRepairPrewriteRecovery({
+  remote,intent,source,recovery_run_id,publishStore=publish,
+}){
+  const f=QWEN_PREWRITE_FAILURE;
+  const record=validateQwenRepairPublisherIntent(intent?.record);
+  if(intent.status!=='reconcile'||intent.may_publish!==false||
+     !SHA.test(intent.store_commit_sha??'')||
+     !Number.isSafeInteger(recovery_run_id)||recovery_run_id<=f.run_id||
+     record.issue!==f.issue||record.publisher_run_id!==f.run_id||
+     record.action_id!==f.action_id||
+     record.worker_run_id!==f.worker_run_id||
+     record.source_sha!==f.source_sha||
+     record.checkpoint_version!==f.checkpoint_version||
+     source?.verified!==true||source.issue!==f.issue||
+     source.run_id!==f.run_id||source.attempt!==1||
+     source.run_head_sha!==f.head_sha||
+     source.source_ingest_run_id!==f.source_ingest_run_id||
+     source.worker_run_id!==f.worker_run_id||
+     source.action_id!==f.action_id||
+     source.source_sha!==f.source_sha||
+     source.failure_code!==f.failure_code||
+     typeof remote!=='string'||!remote||remote.length>2000||
+     /\s/.test(remote)||
+     (process.env.NODE_ENV!=='test'&&
+       !remote.startsWith('https://x-access-token:')))
+    fail('failed Publisher pre-write recovery lacks exact independently signed source');
+  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-prewrite-wal-'));
+  const root=path.join(temp,'agent-store');
+  try{
+    try{
+      execFileSync('git',['clone','--quiet','--no-tags','--single-branch',
+        '--branch','agent-store','--',remote,root],{
+        timeout:45000,stdio:['ignore','pipe','pipe'],
+        env:{...process.env,GIT_TERMINAL_PROMPT:'0',
+          GIT_NO_REPLACE_OBJECTS:'1'}});
+    }catch{fail('canonical pre-write recovery agent-store unavailable');}
+    if(git(root,'symbolic-ref','--short','HEAD')!=='agent-store')
+      fail('invalid pre-write recovery Store branch');
+    const originalPath=qwenRepairPublisherIntentPath(record);
+    const original=read(root,originalPath);
+    const committedAuthor=git(root,'log','-1','--format=%H','HEAD',
+      '--',originalPath);
+    if(JSON.stringify(original)!==JSON.stringify(record)||
+       committedAuthor!==intent.store_commit_sha)
+      fail('failed Publisher immutable WAL differs from committed source');
+    const location=qwenRepairPrewriteRecoveryPath();
+    const prior=read(root,location);
+    const claimed={
+      schema_version:1,kind:'trusted_qwen_repair_prewrite_recovery_grant',
+      repository:REPO,issue:f.issue,
+      original_publisher_run_id:f.run_id,
+      original_wal_commit_sha:committedAuthor,
+      source_ingest_run_id:f.source_ingest_run_id,
+      worker_run_id:f.worker_run_id,action_id:f.action_id,
+      source_sha:f.source_sha,checkpoint_version:f.checkpoint_version,
+      source_run_head_sha:f.head_sha,
+      failure_code:f.failure_code,
+      recovery_run_id,
+      publication:'one_new_write_attempt_not_yet_verified',
+    };
+    if(prior){
+      // Even after an ambiguous first POST/PATCH, an identical Issue command
+      // or new job gets NO write authorization. Do not mutate old receipt.
+      if(prior.kind!==claimed.kind||
+         prior.original_publisher_run_id!==f.run_id||
+         prior.original_wal_commit_sha!==committedAuthor||
+         prior.source_sha!==f.source_sha||
+         prior.worker_run_id!==f.worker_run_id||
+         prior.action_id!==f.action_id||
+         !Number.isSafeInteger(prior.recovery_run_id)||
+         prior.recovery_run_id<=f.run_id)
+        fail('conflicting pre-write recovery already committed');
+      return {status:'replayed',may_publish:false,
+        store_commit_sha:git(root,'log','-1','--format=%H','HEAD','--',location),
+        record,source_run_id:f.run_id};
+    }
+    const state=confirmStore(root,record);
+    if(state.version!==f.state_version)
+      fail('failed Publisher Store version or target advanced');
+    verifyCommittedCheckpoint({remote,identity:{
+      role:'developer',agent_id:'dev-qwen-01',issue:f.issue},
+      commit_sha:record.checkpoint_commit_sha,
+      version:record.checkpoint_version,
+      ciphertext_sha256:record.checkpoint_ciphertext_sha256});
+    const full=path.join(root,location);
+    fs.mkdirSync(path.dirname(full),{recursive:true});
+    fs.writeFileSync(full,JSON.stringify(claimed,null,2)+'\n',
+      {flag:'wx',mode:0o600});
+    git(root,'add','--',location);
+    if(auditStagedRunStore(root,'agent-store').checked_changes!==1)
+      fail('pre-write recovery mutated foreign Store paths');
+    git(root,'-c','user.name=nession-agent-publisher',
+      '-c','user.email=nession-agent-publisher@users.noreply.github.com',
+      'commit','-m','agent-store: one source-attested Qwen prewrite recovery');
+    const saved=publishStore('agent-store',root,4);
+    if(saved.replayed)
+      fail('ambiguous pre-write recovery Store CAS; deny any GitHub POST');
+    return {status:'prewrite_recovery',may_publish:true,
+      store_commit_sha:saved.commit_sha,record,
+      recovery:Object.freeze({verified:true,
+        failed_run_id:f.run_id,run_id:recovery_run_id,
+        wal_commit_sha:committedAuthor,
+        marker_path:location,marker_store_commit_sha:saved.commit_sha})};
+  }finally{fs.rmSync(temp,{recursive:true,force:true});}
 }
