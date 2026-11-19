@@ -5,6 +5,15 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const BASELINE_PATH = join(HERE, '..', 'contracts', 'visual-token-debt.json');
+// Pinned Git blob of the approved pre-migration inventory. A PR cannot silently
+// grow the allowance by editing JSON; the canonical Gate itself must be
+// consciously revised and reviewed, with explicit migration rationale.
+export const PINNED_LEGACY_BASELINE_BLOB = '51de139b34944136eba1998c5ef47b2b0011d698';
+
+export function gitBlobSha(content) {
+  const bytes = Buffer.from(content, 'utf8');
+  return createHash('sha1').update(`blob ${bytes.length}\0`).update(bytes).digest('hex');
+}
 
 /**
  * A ratcheted inventory of *old* non-token visual metrics. Never regenerate
@@ -12,7 +21,13 @@ const BASELINE_PATH = join(HERE, '..', 'contracts', 'visual-token-debt.json');
  * A scoped reviewer can explicitly shrink the inventory after migration.
  */
 export function readLegacyMetricBaseline() {
-  return JSON.parse(readFileSync(BASELINE_PATH, 'utf8'));
+  const raw = readFileSync(BASELINE_PATH, 'utf8');
+  if (gitBlobSha(raw) !== PINNED_LEGACY_BASELINE_BLOB) {
+    throw new Error('non-token visual baseline changed without Design Gate owner approval');
+  }
+  const manifest = JSON.parse(raw);
+  if (manifest.schema_version !== 1 || !manifest.files) throw new Error('invalid visual baseline');
+  return manifest;
 }
 
 export function normalizeStyleFile(filename) {
@@ -107,19 +122,13 @@ export function findNonTokenInlineMetrics(source) {
   return out;
 }
 
-export function metricDebtFingerprint(literal, token) {
-  return createHash('sha256').update(literal + '\0' + token).digest('hex').slice(0, 24);
-}
-
-/** A count cap means copying an existing legacy literal cannot evade the Gate. */
-export function rejectNewMetricDebt(file, observations, baseline = readLegacyMetricBaseline()) {
+/** Entire original source blobs are immutable debt exceptions, not a mutable
+ * per-class allowlist. Any edit to a file containing non-token metrics must
+ * actually migrate those metrics; copying a legacy class can never hide.
+ */
+export function rejectNewMetricDebt(file, source, observations, baseline = readLegacyMetricBaseline()) {
+  if (!observations.length) return [];
   const normalized = normalizeStyleFile(file);
-  const allowed = baseline.entries?.[normalized] ?? {};
-  const seen = new Map();
-  return observations.filter(item => {
-    const key = metricDebtFingerprint(item.literal, item.token);
-    const count = (seen.get(key) ?? 0) + 1;
-    seen.set(key, count);
-    return count > (allowed[key] ?? 0);
-  });
+  const allowed = baseline.files?.[normalized] ?? [];
+  return allowed.includes(gitBlobSha(source)) ? [] : observations;
 }
