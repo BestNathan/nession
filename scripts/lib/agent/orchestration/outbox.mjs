@@ -47,6 +47,20 @@ export const REVIEWER_PREMODEL_FAILURE=Object.freeze({
   publisher_run_id:43607502468,
   failure_code:'qwen_reviewer_publisher_trigger_pre_model_failure',
 });
+// #4001: separately authenticated pre-model Reviewer failure for #3784.
+export const REVIEWER_PREMODEL_FAILURE_3784=Object.freeze({
+  issue:3784,
+  action_id:'1251328b3288d32c751a347a016ff5d25740704cd8b16e227bd49a6bdd672087',
+  run_id:44431618028,
+  source_sha:'5d7e9118b7e954e760cc680fff7d43b4f9e17612',
+  main_sha:'65da9467375627baa6ea19359b3abedd4515f3ef',
+  publisher_run_id:44281178406,
+  failure_code:'qwen_reviewer_base_file_premodel_failure',
+  state_version:12,
+});
+export const REVIEWER_PREMODEL_FAILURE_SOURCES=Object.freeze([
+  REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
+]);
 export const REVIEWER_JSON_FAILURE=Object.freeze({
   issue:3433,
   action_id:'8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7',
@@ -244,6 +258,7 @@ export function validateDevelopmentState(state) {
             QWEN_CLI_FAILURE.failure_code,
             QWEN_TOOL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
+            REVIEWER_PREMODEL_FAILURE_3784.failure_code,
             REVIEWER_JSON_FAILURE.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
             state.issue!==QWEN_PREFLIGHT_FAILURE.issue||
@@ -274,6 +289,14 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_PREMODEL_FAILURE_3784.failure_code&&(
+            state.issue!==REVIEWER_PREMODEL_FAILURE_3784.issue||
+            item.id!==REVIEWER_PREMODEL_FAILURE_3784.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||
+            item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784.source_sha||
+            r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_TOOL_FAILURE.failure_code&&(
             state.issue!==QWEN_TOOL_FAILURE.issue||
@@ -314,6 +337,7 @@ export function validateDevelopmentState(state) {
           (item.task.role!=='developer'&&
             !(item.task.role==='reviewer'&&
               [REVIEWER_PREMODEL_FAILURE.failure_code,
+                REVIEWER_PREMODEL_FAILURE_3784.failure_code,
                 REVIEWER_JSON_FAILURE.failure_code].includes(r.failure_code))))
         reject('invalid authenticated failure receipt');
     } else if (item.receipt !== null) reject('unacknowledged item has receipt');
@@ -581,9 +605,9 @@ export function hasOnlyRetiredReviewerForQwenRepair(state){
   const entries=state?.outbox?.filter(x=>x.task?.role==='reviewer');
   if(!Array.isArray(entries))return false;
   if(entries.length===0)return true;
-  if(entries.length!==1||state.issue!==REVIEWER_PREMODEL_FAILURE.issue)
-    return false;
-  const old=entries[0],f=REVIEWER_PREMODEL_FAILURE;
+  const f=REVIEWER_PREMODEL_FAILURE_SOURCES.find(x=>x.issue===state?.issue);
+  if(entries.length!==1||!f)return false;
+  const old=entries[0];
   return old.id===f.action_id&&old.status==='failed'&&
     old.task.type==='dispatch'&&old.task.task==='review'&&
     old.task.agent_id==='review-qwen-01'&&old.task.sha===f.source_sha&&
@@ -852,24 +876,33 @@ export function recordControlledReviewerRecoveryIntent(state,expectedVersion,act
 // #3578: an authenticated pre-model Reviewer failure gets one new Action ID.
 // The previous signed dispatch and its Run are immutable; no replay of the old POST.
 export function reviewerPremodelSuccessorId(issue,actionId,runId){
-  const f=REVIEWER_PREMODEL_FAILURE;
-  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
-    reject('unrecognized Reviewer pre-model recovery source');
+  const f=REVIEWER_PREMODEL_FAILURE_SOURCES.find(x=>
+    x.issue===issue&&x.action_id===actionId&&x.run_id===runId);
+  if(!f)reject('unrecognized Reviewer pre-model recovery source');
   return hash([issue,actionId,runId,'qwen-reviewer-admission-premodel-recovery-v1']);
 }
 export function recordAttestedReviewerPremodelFailure(state,version,proof){
-  const f=REVIEWER_PREMODEL_FAILURE;
+  const f=REVIEWER_PREMODEL_FAILURE_SOURCES.find(x=>
+    x.issue===proof?.issue&&x.action_id===proof?.action_id&&
+    x.run_id===proof?.run_id);
+  if(!f)reject('unrecognized Reviewer pre-model recovery source');
   validateDevelopmentState(state);
   onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
     'source_sha','failure_code'],'Reviewer admission failure proof');
   const old=state.outbox.find(x=>x.id===f.action_id);
-  if(state.issue!==f.issue||version!==6||state.version!==version||
+  if(state.issue!==f.issue||version!==(f.state_version??6)||
+     state.version!==version||
      state.phase!=='review'||state.target_sha!==f.source_sha||
      state.transitions.length!==1||
      !state.transitions.some(t=>t.kind==='publisher'&&
        t.run_id===f.publisher_run_id&&t.attempt===1&&
        t.target_sha===f.source_sha&&t.outcome==='published')||
-     state.outbox.length!==1||state.assignments.developer!=='dev-qwen-01'||
+     (f.issue===3784
+       ?(state.outbox.length!==3||
+         !state.outbox.some(x=>x.id===QWEN_CLI_FAILURE.action_id&&x.status==='failed')||
+         !state.outbox.some(x=>x.id===QWEN_TOOL_FAILURE.action_id&&x.status==='failed'))
+       :state.outbox.length!==1)||
+     state.assignments.developer!=='dev-qwen-01'||
      state.assignments.reviewer!=='review-qwen-01'||
      proof.verified!==true||proof.issue!==f.issue||
      proof.action_id!==f.action_id||proof.run_id!==f.run_id||
