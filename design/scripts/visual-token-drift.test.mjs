@@ -36,6 +36,7 @@ test('CSS and inline styles cannot hide non-token visual metrics', () => {
   assert.equal(findNonTokenCssMetrics('.x { color: var(--nession-foreground); }').length, 0);
   assert.deepEqual(findNonTokenInlineMetrics('style={{ padding: 12, gap: 0, width: 44 }}')
     .map(x => x.token), ['padding: 12', 'width: 44']);
+  assert.deepEqual(findNonTokenInlineMetrics('const stats = { width: 44, height: 120 };'), []);
 });
 
 test('immutable original source is grandfathered, edited file with old values is rejected', () => {
