@@ -34,10 +34,10 @@ const positive = value => Number.isSafeInteger(value) && value > 0;
 
 export function requiresPrVisualEvidenceCriterion(criterion) {
   const text = String(criterion?.text ?? '');
-  return /\\b(?:browser|viewport)\\b/i.test(text) &&
-    /\\b(?:Quality|CI|Gate)\\b/i.test(text) &&
-    /\\b(?:exact|source-aligned)\\b/i.test(text) &&
-    /\\b(?:PR|head)\\b/i.test(text);
+  return /\b(?:browser|viewport)\b/i.test(text) &&
+    /\b(?:Quality|CI|Gate)\b/i.test(text) &&
+    /\b(?:exact|source-aligned)\b/i.test(text) &&
+    /\b(?:PR|head)\b/i.test(text);
 }
 
 export function requiresPrCiTriadCriterion(criterion) {
