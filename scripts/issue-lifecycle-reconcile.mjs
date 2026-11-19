@@ -673,6 +673,18 @@ async function selfTest() {
     async path => path.includes('/compare/') ? verifiedCompare
       : [{...samePrWitness[0],number:9999}]),
   /lacks authenticated same-PR ancestry/);
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/') ? verifiedCompare
+      : [{...samePrWitness[0],head:{...samePrWitness[0].head,
+          repo:{full_name:'attacker/fork'}}}]),
+  /lacks authenticated same-PR ancestry/,
+  'forked or spoofed PR association may not attest an accepted old head');
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[{...mergedSamePr,merged_at:null}],updatedHead,
+    'fixture-token',ancestryRead),
+  /ambiguous or missing merged implementing PR/,
+  'an unmerged implementing PR never authorizes historic source recovery');
   const secondAnchor = 'c'.repeat(40);
   const multiAnchorBody = twoScBody
     .replace('- [ ] SC-02 exact-head Quality receipt',
