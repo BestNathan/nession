@@ -20,12 +20,13 @@ import {deriveDispatchKey}
 import {preflightTrustedQwenPublisher,preflightTrustedQwenRepairPublisher}
   from './qwen-source-preflight.mjs';
 import {commitQwenRepairPublisherIntent,
-  commitQwenRepairPrewriteRecovery} from './qwen-repair-intent.mjs';
+  commitQwenRepairSecondPrewriteRecovery} from './qwen-repair-intent.mjs';
 import {SOURCE as QWEN_PREWRITE_FAILURE,
-  verifyQwenRepairPrewriteFailureLive}
+  verifyQwenRepairPrewriteFailureLive,
+  verifySecondQwenRepairPrewriteFailureLive}
   from './qwen-repair-prewrite-failure.mjs';
-import {publishQwenRepairToSamePR,readBackQwenRepairPR}
-  from './qwen-repair-github.mjs';
+import {publishQwenRepairToSamePR,readBackQwenRepairPR,
+  attestUnmodifiedQwenRepairPR} from './qwen-repair-github.mjs';
 import {commitQwenPublisherIntent}
   from './store-intent.mjs';
 import {publishTrustedQwenGitHubPR,readBackQwenPublishedPR}
@@ -217,16 +218,26 @@ export async function runTrustedQwenPublication({
       const recoveryProof=ownerRecovery
         ?await verifyQwenRepairPrewriteFailureLive(env.ACTIONS_READ_TOKEN)
         :null;
+      const secondProof=ownerRecovery
+        ?await verifySecondQwenRepairPrewriteFailureLive(env.ACTIONS_READ_TOKEN)
+        :null;
       const intent=commitQwenRepairPublisherIntent({
         remote,preflight,publisher_run_id:Number(env.GITHUB_RUN_ID)});
       let writer=intent;
       if(ownerRecovery){
-        // The old WAL stays immutable/GET-only. A separately authenticated
-        // failed Run + Store CAS grants exactly one distinct write attempt.
+        // Run 44495243036 already consumed the FIRST immutable marker,
+        // then failed in read-only patch materialization before any POST.
+        // Deny a new grant unless GitHub still proves original PR #3919 at B.
         if(intent.status!=='reconcile'||intent.may_publish!==false)
-          fail('Owner pre-write recovery requires unchanged original WAL');
-        writer=commitQwenRepairPrewriteRecovery({
+          fail('Owner second pre-write recovery requires original immutable WAL');
+        const pr=await attestUnmodifiedQwenRepairPR({
+          preflight,intent,api});
+        if(pr.pr_number!==3919||pr.source_sha!==
+           QWEN_PREWRITE_FAILURE.source_sha)
+          fail('second recovery cannot update a foreign or already moved PR');
+        writer=commitQwenRepairSecondPrewriteRecovery({
           remote,intent,source:recoveryProof,
+          second_source:secondProof,
           recovery_run_id:Number(env.GITHUB_RUN_ID)});
       }
       const published=writer.may_publish

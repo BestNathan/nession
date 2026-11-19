@@ -8,9 +8,11 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {preflightAgentPatch,validPublisherFile} from './patch-preflight.mjs';
-import {validateQwenRepairPublisherIntent,qwenRepairPrewriteRecoveryPath}
+import {validateQwenRepairPublisherIntent,qwenRepairPrewriteRecoveryPath,
+  qwenRepairSecondPrewriteRecoveryPath}
   from './qwen-repair-intent.mjs';
-import {SOURCE as QWEN_PREWRITE_FAILURE}
+import {SOURCE as QWEN_PREWRITE_FAILURE,
+  SECOND_SOURCE as SECOND_QWEN_PREWRITE_FAILURE}
   from './qwen-repair-prewrite-failure.mjs';
 
 const REPO='BestNathan/nession',SHA=/^[a-f0-9]{40}$/;
@@ -41,11 +43,14 @@ function plan(preflight,intent,{write=false}={}){
   // A previously immutable WAL can be recovered after a PROVEN pre-write
   // failure only by a separate Store-CAS marker. Replay after a possible
   // GitHub write is GET-only. Initial Publisher write grants are unchanged.
-  const prewrite=write&&isValidQwenPrewriteRecoveryGrant(intent,x);
+  const prewrite=isValidQwenPrewriteRecoveryGrant(intent,x);
+  // The protected READ-ONLY materialization that runs before any GitHub
+  // write must recognize the same exact Store-CAS grant as the write layer.
+  // It may not grant a new write, nor accept an arbitrary status string.
   if(!SHA.test(intent?.store_commit_sha??'')||
       (write
         ?!(intent.status==='committed'&&intent.may_publish===true)&&!prewrite
-        :!['committed','reconcile'].includes(intent.status))||
+        :!['committed','reconcile'].includes(intent.status)&&!prewrite)||
       e?.schema_version!==1||e.kind!=='trusted_qwen_repair_preflight_only'||
       e.status!=='preflight_only'||e.issue!==x.issue||
       e.action_id!==x.action_id||e.developer_run_id!==x.worker_run_id||
@@ -66,13 +71,19 @@ function plan(preflight,intent,{write=false}={}){
   return x;
 }
 export function isValidQwenPrewriteRecoveryGrant(intent,record){
-  const f=QWEN_PREWRITE_FAILURE,r=intent?.recovery;
+  const f=QWEN_PREWRITE_FAILURE,g=SECOND_QWEN_PREWRITE_FAILURE,
+    r=intent?.recovery;
+  const first=r?.marker_path===qwenRepairPrewriteRecoveryPath()&&
+    r.run_id>f.run_id&&r.second_attested!==true;
+  const second=r?.marker_path===qwenRepairSecondPrewriteRecoveryPath()&&
+    r.run_id>g.run_id&&r.second_attested===true&&
+    r.second_failed_run_id===g.run_id&&
+    r.first_marker_store_sha===g.previous_marker_store_sha;
   return intent?.status==='prewrite_recovery'&&
     intent.may_publish===true&&
     r?.verified===true&&r.failed_run_id===f.run_id&&
-    Number.isSafeInteger(r.run_id)&&r.run_id>f.run_id&&
-    SHA.test(r.wal_commit_sha??'')&&
-    r.marker_path===qwenRepairPrewriteRecoveryPath()&&
+    Number.isSafeInteger(r.run_id)&&
+    SHA.test(r.wal_commit_sha??'')&&(first||second)&&
     r.marker_store_commit_sha===intent.store_commit_sha&&
     SHA.test(intent.store_commit_sha??'')&&
     record?.issue===f.issue&&record.action_id===f.action_id&&
@@ -178,6 +189,17 @@ async function uniqueOriginalPR(api,record,expectedSha){
   if(ref.ref!==record.branch||ref.object?.sha!==expectedSha)
     fail('existing original PR ref was moved or rewritten');
   return pr;
+}
+// Before consuming the second immutable Store write grant, require that
+// the previous attempt left the ORIGINAL GitHub PR/branch at signed SHA B.
+// This is a GET-only check and can never authorize an arbitrary new PR.
+export async function attestUnmodifiedQwenRepairPR({preflight,intent,api}){
+  if(typeof api!=='function')fail('GET-only PR source required');
+  const record=plan(preflight,intent);
+  const pr=await uniqueOriginalPR(api,record,record.source_sha);
+  await attestQwenRepairPriorGitHistory({preflight,intent,api});
+  return Object.freeze({issue:record.issue,pr_number:pr.number,
+    branch:record.branch,source_sha:record.source_sha,verified:true});
 }
 async function prFiles(api,number,limit=8){
   const files=await get(api,'pulls/'+number+'/files?per_page=100');
