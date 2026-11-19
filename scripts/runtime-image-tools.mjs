@@ -33,6 +33,9 @@ const RUNTIME_BASE = 'debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4
 const NODESOURCE_SETUP = 'deploy/setup-nodesource.sh';
 const NODESOURCE_FINGERPRINT = '6F71F525282841EEDAF851B42F59B5F99B1BE0B4';
 const MCP_IMAGE = 'Dockerfile.mcp.prebuilt';
+const RUST_BUILDER_BASE = 'rust:1.96-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f';
+const NODE_WEB_BASE = 'node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293';
+const NGINX_UI_BASE = 'nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10';
 
 export const IMAGES = [
   { file: 'Dockerfile.server', role: 'server', variant: 'from-source' },
@@ -307,6 +310,18 @@ export function checkFiles(files) {
     const stages = parsed.get(file);
     if (!stages) continue;
     const contract = ROLE_CONTRACT[role];
+    if (!file.endsWith('.prebuilt')) {
+      for (const stageName of ['planner', 'cacher', 'rust-builder']) {
+        const stage = stageNamed(stages, stageName, file, errors);
+        if (stage?.from !== RUST_BUILDER_BASE) {
+          errors.push(file + ': ' + stageName + ' must use audited Rust multi-platform digest');
+        }
+      }
+      const webStage = stageNamed(stages, 'web-builder', file, errors);
+      if (webStage?.from !== NODE_WEB_BASE) {
+        errors.push(file + ': web-builder must use audited Node multi-platform digest');
+      }
+    }
 
     const builder = stageNamed(stages, BUILDER_STAGE, file, errors);
     const runtimeTools = stageNamed(stages, RUNTIME_STAGE, file, errors);
@@ -439,6 +454,9 @@ export function checkFiles(files) {
   // The UI image serves static files; runtime test/build tooling must stay out.
   const unrelated = files.get(UNRELATED_IMAGE);
   if (typeof unrelated === 'string') {
+    if (!unrelated.includes('FROM ' + NGINX_UI_BASE + '\n')) {
+      errors.push(UNRELATED_IMAGE + ': must use audited nginx multi-platform digest');
+    }
     for (const forbidden of UNRELATED_FORBIDDEN) {
       if (unrelated.includes(forbidden)) {
         errors.push(`${UNRELATED_IMAGE}: must not carry EROFS runtime tool \`${forbidden}\``);
@@ -613,6 +631,9 @@ function selfTest(files) {
     ['NodeSource registration skips fingerprint', NODESOURCE_SETUP, (text) => replaceOnce(text, '[ "$actual" = "$expected" ]', 'true'), 'must refuse mismatched signing key'],
     ['NodeSource registration drops signed-by', NODESOURCE_SETUP, (text) => replaceOnce(text, 'Signed-By: /usr/share/keyrings/nodesource.gpg', 'Trusted: yes'), 'must scope APT trust to verified key'],
     ['MCP reverts to mutable Debian base', MCP_IMAGE, (text) => replaceOnce(text, 'FROM ' + RUNTIME_BASE + ' AS runtime', 'FROM debian:bookworm-slim AS runtime'), 'must use audited Debian Bookworm multi-platform digest'],
+    ['Rust builder reverts to floating tag', 'Dockerfile.agent', (text) => replaceOnce(text, 'FROM ' + RUST_BUILDER_BASE + ' AS planner', 'FROM rust:1.96-bullseye AS planner'), 'planner must use audited Rust multi-platform digest'],
+    ['Web builder reverts to floating tag', 'Dockerfile.server', (text) => replaceOnce(text, 'FROM ' + NODE_WEB_BASE + ' AS web-builder', 'FROM node:20-alpine AS web-builder'), 'web-builder must use audited Node multi-platform digest'],
+    ['UI reverts to floating nginx base', UNRELATED_IMAGE, (text) => replaceOnce(text, 'FROM ' + NGINX_UI_BASE, 'FROM nginx:1.27-alpine'), 'must use audited nginx multi-platform digest'],
     ['GHA cross-role cache collision', RELEASE_WORKFLOW, (text) => replaceOnce(text, 'cache-from: type=gha,scope=nession-build-agent-amd64', 'cache-from: type=gha,scope=nession-build-server-amd64'), 'cache scope must be isolated'],
     ['GHA cache mode regression', RELEASE_WORKFLOW, (text) => replaceOnce(text, 'cache-to: type=gha,scope=nession-build-agent-arm64,mode=min', 'cache-to: type=gha,scope=nession-build-agent-arm64,mode=max'), 'cache scope must be isolated'],
     ['UI image gains sandbox tooling', UNRELATED_IMAGE, (text) => `${text}\nRUN apt-get install -y fuse3 erofsfuse\n`, 'must not carry EROFS runtime tool'],
