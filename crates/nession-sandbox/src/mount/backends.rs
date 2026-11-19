@@ -758,7 +758,7 @@ mod tests {
     impl LowerProvider for FakeLowerProvider {
         fn acquire_lower(
             &self,
-            _image: &VerifiedImage,
+            image: &VerifiedImage,
             consumer_id: &str,
         ) -> anyhow::Result<Box<dyn LowerLease>> {
             self.acquired
@@ -769,7 +769,11 @@ mod tests {
                 acquired: Arc::clone(&self.acquired),
                 released: Arc::clone(&self.released),
                 consumer_id: consumer_id.to_string(),
-                digest: format!("sha256:{}", "b".repeat(64)),
+                // The lease must name the image it actually serves. A lease
+                // with a different digest would make the manager's ordered-
+                // lower comparison refuse the second consumer, which is the
+                // real contract this fixture is meant to exercise (#4064).
+                digest: image.digest().to_string(),
                 mountpoint: self.mountpoint.clone(),
             }))
         }
