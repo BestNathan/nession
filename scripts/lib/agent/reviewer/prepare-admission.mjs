@@ -115,6 +115,11 @@ export async function prepareQwenReviewAdmission({
   // writer Run, which can have failed after the PR-B GitHub write.
   const publisherRun=await fetcher('actions/runs/'+
     (committed.publisher_run_id??intent.publisher_run_id));
+  // GET-only recovery of the exact original failed PR writer was completed
+  // independently. No new model, Publisher or Store write in Reviewer prep.
+  const recoveryRun=!committed.repair&&issue===3784&&
+    intent.publisher_run_id===44281178406
+    ?await fetcher('actions/runs/44431297473'):null;
   const pullRequests=await fetcher('pulls?state=all&head=BestNathan:'+
     encodeURIComponent(branch)+'&per_page=100');
   if(!Array.isArray(pullRequests)||pullRequests.length!==1||
@@ -140,7 +145,7 @@ export async function prepareQwenReviewAdmission({
   return committed.repair
     ? admitQwenRepairPublishedReview({state,intent,publisherRun,pullRequests,
       pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles})
-    : admitQwenPublishedReview({state,intent,publisherRun,pullRequests,
+    : admitQwenPublishedReview({state,intent,publisherRun,recoveryRun,pullRequests,
       pr,ref,commit,files,tree,actionId,reviewerAgentId,base_files:baseFiles});
 }
 
