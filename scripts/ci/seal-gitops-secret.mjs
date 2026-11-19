@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import { X509Certificate } from 'node:crypto';
+import { X509Certificate, createPrivateKey } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const TARGETS = Object.freeze({
@@ -15,6 +15,15 @@ const TARGETS = Object.freeze({
       key: 'mcp.toml',
       type: 'Opaque',
       resource: 'environments/staging/mcp/sealed-secret.json',
+      kustomization: 'environments/staging/mcp/kustomization.yaml'
+    }),
+    MCP_TLS_PEM_BUNDLE: Object.freeze({
+      namespace: 'nession',
+      name: 'nession-mcp-staging-tls',
+      keys: Object.freeze(['tls.crt', 'tls.key']),
+      type: 'kubernetes.io/tls',
+      hostname: 'staging-mcp-nession.bestnathan.top',
+      resource: 'environments/staging/mcp/sealed-tls.json',
       kustomization: 'environments/staging/mcp/kustomization.yaml'
     })
   })
@@ -38,13 +47,89 @@ export function validateRaw(raw) {
   return raw;
 }
 
+
+// A raw Environment Secret is a PEM certificate fullchain followed by exactly
+// one matching, unencrypted private key. This is one GH Secret -> one K8s TLS
+// Secret (two mandatory data keys); it is NOT a JSON bundle or a second owner
+// of the controller's public sealing certificate.
+export function parseTlsPemBundle(raw, hostname) {
+  validateRaw(raw);
+  if (typeof hostname !== 'string' || !hostname) {
+    throw new Error('TLS hostname must be a registered exact hostname');
+  }
+  const pemBlocks = [];
+  const pattern = /-----BEGIN ([A-Z0-9 ]+)-----[\s\S]*?-----END \1-----/g;
+  let cursor = 0;
+  for (const match of raw.matchAll(pattern)) {
+    if (raw.slice(cursor, match.index).trim()) {
+      throw new Error('Unexpected content outside TLS PEM blocks');
+    }
+    pemBlocks.push({ kind: match[1], text: match[0] + '\n' });
+    cursor = match.index + match[0].length;
+  }
+  if (!pemBlocks.length || raw.slice(cursor).trim()) {
+    throw new Error('TLS PEM bundle is incomplete or contains unexpected material');
+  }
+  const certBlocks = pemBlocks.filter(block => block.kind === 'CERTIFICATE');
+  const keys = pemBlocks.filter(block =>
+    ['PRIVATE KEY', 'RSA PRIVATE KEY', 'EC PRIVATE KEY'].includes(block.kind));
+  if (!certBlocks.length || keys.length !== 1 ||
+      pemBlocks.length !== certBlocks.length + 1 ||
+      pemBlocks[pemBlocks.length - 1] !== keys[0] ||
+      pemBlocks.slice(0, -1).some(block => block.kind !== 'CERTIFICATE')) {
+    throw new Error('TLS PEM bundle requires leaf/fullchain then one unencrypted private key');
+  }
+  let certificates, key;
+  try {
+    certificates = certBlocks.map(block => new X509Certificate(block.text));
+    key = createPrivateKey(keys[0].text);
+  } catch {
+    throw new Error('Invalid TLS certificate or unencrypted private key');
+  }
+  const leaf = certificates[0];
+  // Avoid Subject Common Name fallback: public TLS identity must be in SAN.
+  if (!leaf.checkHost(hostname, { subject: 'never' })) {
+    throw new Error('TLS leaf certificate does not cover registered hostname');
+  }
+  const now = Date.now();
+  if (!(Date.parse(leaf.validFrom) <= now) ||
+      !(Date.parse(leaf.validTo) > now + 7 * 86400000)) {
+    throw new Error('TLS leaf certificate is not yet valid or expires within seven days');
+  }
+  if (!leaf.checkPrivateKey(key)) {
+    throw new Error('TLS certificate does not match private key');
+  }
+  for (let i = 0; i < certificates.length - 1; i++) {
+    if (!certificates[i].checkIssued(certificates[i + 1]) ||
+        !certificates[i].verify(certificates[i + 1].publicKey)) {
+      throw new Error('TLS certificate chain is invalid or out of order');
+    }
+  }
+  return {
+    certificateChain: certBlocks.map(block => block.text).join(''),
+    privateKey: keys[0].text
+  };
+}
+
+function expectedEncryptedKeys(target) {
+  return target.keys ?? [target.key];
+}
+
 export function createPlainSecret(environment, secretName, raw) {
   const target = getTarget(environment, secretName);
+  const data = target.type === 'kubernetes.io/tls'
+    ? (() => {
+        const pem = parseTlsPemBundle(raw, target.hostname);
+        return {
+          'tls.crt': Buffer.from(pem.certificateChain, 'utf8').toString('base64'),
+          'tls.key': Buffer.from(pem.privateKey, 'utf8').toString('base64')
+        };
+      })()
+    : { [target.key]: Buffer.from(validateRaw(raw), 'utf8').toString('base64') };
   return {
     apiVersion: 'v1', kind: 'Secret',
     metadata: { name: target.name, namespace: target.namespace },
-    type: target.type,
-    data: { [target.key]: Buffer.from(validateRaw(raw), 'utf8').toString('base64') }
+    type: target.type, data
   };
 }
 
@@ -74,13 +159,15 @@ export function validateSealed(doc, environment, secretName) {
     throw new Error('SealedSecret Kubernetes identity mismatch');
   }
   const encrypted = doc.spec?.encryptedData;
+  const expectedKeys = expectedEncryptedKeys(target);
   if (!encrypted || typeof encrypted !== 'object' || Array.isArray(encrypted) ||
-      Object.keys(encrypted).length !== 1 ||
-      typeof encrypted[target.key] !== 'string' || !encrypted[target.key]) {
-    throw new Error('SealedSecret must have exactly one matching encrypted data key');
+      Object.keys(encrypted).length !== expectedKeys.length ||
+      expectedKeys.some(key => typeof encrypted[key] !== 'string' || !encrypted[key])) {
+    throw new Error('SealedSecret must have only the exact registered encrypted data keys');
   }
   const template = doc.spec?.template;
-  if ((template?.metadata?.name && template.metadata.name !== target.name) ||
+  if ((target.type === 'kubernetes.io/tls' && template?.type !== target.type) ||
+      (template?.metadata?.name && template.metadata.name !== target.name) ||
       (template?.metadata?.namespace && template.metadata.namespace !== target.namespace) ||
       (template?.type && template.type !== target.type) ||
       template?.data || template?.stringData ||
@@ -101,10 +188,13 @@ export function validateSealed(doc, environment, secretName) {
 
 export function addResource(yaml, resource) {
   const filename = path.posix.basename(resource);
-  if (filename !== 'sealed-secret.json') throw new Error('unsupported resource name');
+  if (!['sealed-secret.json', 'sealed-tls.json'].includes(filename)) {
+    throw new Error('unsupported resource name');
+  }
   if (!/^resources:\s*$/m.test(yaml)) throw new Error('Kustomization resources list absent');
-  if (/^\s*-\s*sealed-secret\.json\s*$/m.test(yaml)) return yaml;
-  return yaml.replace(/^resources:\s*\r?\n/m, 'resources:\n  - sealed-secret.json\n');
+  const resources = yaml.split(/\r?\n/);
+  if (resources.some(line => line.trim() === '- ' + filename)) return yaml;
+  return yaml.replace(/^resources:\s*\r?\n/m, 'resources:\n  - ' + filename + '\n');
 }
 
 

@@ -130,6 +130,29 @@ export function matchesQualificationReadback(created,inventory,state) {
     latest.context===QUALIFICATION_CONTEXT;
 }
 
+// A successful GitHub Status POST may not be immediately visible through the
+// independent commits/:sha/statuses GET. Retry ONLY that read (never POST),
+// while still proving that our created ID is the newest qualifying context.
+// A newer conflicting Status is terminal: retries must not launder another
+// writer's decision into our own.
+export function verifyQualificationReadback(created,state,read,pause=()=>{}) {
+  if (!created || !Number.isSafeInteger(created.id) || created.id<=0) {
+    throw Error('invalid created GitHub status identity');
+  }
+  for (let attempt=1; attempt<=4; attempt++) {
+    const inventory=read();
+    if(matchesQualificationReadback(created,inventory,state)) return attempt;
+    const latest=Array.isArray(inventory)
+      ? inventory.find(item=>item.context===QUALIFICATION_CONTEXT) : null;
+    if(latest?.id===created.id || (Number.isSafeInteger(latest?.id) &&
+        latest.id>created.id)) {
+      throw Error('GitHub qualification status was superseded or altered');
+    }
+    if(attempt<4) pause(attempt);
+  }
+  throw Error('GitHub status readback does not match exact HEAD and latest context');
+}
+
 export function publishQualificationStatus(repo,headSha,state,reason) {
   if(repo!==REPO || !SHA.test(headSha) || !['pending','success','failure'].includes(state))
     throw Error('invalid source-bound convergence status publication');
@@ -142,10 +165,11 @@ export function publishQualificationStatus(repo,headSha,state,reason) {
     args.push('-f','target_url=https://github.com/'+repo+'/actions/runs/'+run);
   const token=process.env.STATUS_GITHUB_TOKEN;
   const status=api(token,args);
-  const statuses=api(process.env.READ_GITHUB_TOKEN,
-    ['repos/'+repo+'/commits/'+headSha+'/statuses?per_page=100']);
-  if(!matchesQualificationReadback(status,statuses,state))
-    throw Error('GitHub status readback does not match exact HEAD and latest context');
+  const attempts=verifyQualificationReadback(status,state,()=>api(
+    process.env.READ_GITHUB_TOKEN,
+    ['repos/'+repo+'/commits/'+headSha+'/statuses?per_page=100']),
+    ()=>execFileSync('sleep',['0.5'],{stdio:'ignore'}));
+  if(attempts>1) console.log('Qualification Status GET became visible after '+attempts+' attempts');
   return status;
 }
 
@@ -237,6 +261,25 @@ function selfTest(){
   assert.equal(matchesQualificationReadback(created,[created,
     ...Array.from({length:99},(_,i)=>({...created,id:i+1}))], 'pending'),true,
     'historical status count cannot strand the latest authenticated write');
+
+  // #3689: GET may briefly return the previous status after a successful
+  // POST. No second write is authorized; retry only exact status readback.
+  let reads=0,pauses=0;
+  const confirmed=verifyQualificationReadback(created,'pending',()=>{
+    reads++;
+    return reads<3 ? [previous] : [created,previous];
+  },()=>{pauses++});
+  assert.equal(confirmed,3);
+  assert.equal(reads,3);
+  assert.equal(pauses,2);
+  assert.throws(()=>verifyQualificationReadback(created,'pending',
+    ()=>[previous]),/does not match exact HEAD and latest context/);
+  assert.throws(()=>verifyQualificationReadback(created,'pending',
+    ()=>[{...created,id:109}]),/superseded or altered/);
+  assert.throws(()=>verifyQualificationReadback(created,'pending',
+    ()=>[{...created,state:'failure'}]),/superseded or altered/);
+  assert.equal(verifyQualificationReadback(created,'pending',
+    ()=>[created]),1);
 
   const pr={state:'open',draft:false,user:{login:PUBLISHER},
     base:{ref:'main',repo:{full_name:REPO}},head:{ref:'staging',

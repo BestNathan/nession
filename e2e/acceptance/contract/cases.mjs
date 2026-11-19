@@ -9,6 +9,13 @@ export const CASE_RUNTIMES = new Set(['full-stack-local']);
 // the trusted selector routes each platform to its own job. Defaults to linux
 // for every historical manifest.
 export const CASE_PLATFORMS = new Set(['linux', 'macos', 'both']);
+// Which execution lane a Case needs. `standard` is the default and never
+// receives provider credentials. `live-cli` Cases need a real, authenticated
+// external agent CLI; the trusted workflow runs them in a separate step whose
+// environment carries the test gateway credential, while the standard batch
+// never sees it. The Case contract is trusted-main data; target Case code is
+// still untrusted, which is why the credential is scoped to the declared lane.
+export const CASE_RUNNERS = new Set(['standard', 'live-cli']);
 // Only a Case that provably leaves no observable state may join a shared
 // job-scoped runtime (#1866 SC-05). Anything else keeps its own runtime.
 export const CASE_ISOLATIONS = new Set(['isolated', 'shared']);
@@ -100,6 +107,7 @@ export function validateCaseManifest(raw, caseDir) {
     'criterion',
     'stage',
     'platform',
+    'runner',
     'runtime',
     'isolation',
     'verifiers',
@@ -118,6 +126,8 @@ export function validateCaseManifest(raw, caseDir) {
   if (!CASE_STAGES.has(stage)) throw new Error('unsupported case stage: ' + (stage || '(empty)'));
   const platform = String(raw.platform ?? 'linux').trim().toLowerCase();
   if (!CASE_PLATFORMS.has(platform)) throw new Error('unsupported case platform: ' + (platform || '(empty)'));
+  const runner = String(raw.runner ?? 'standard').trim().toLowerCase();
+  if (!CASE_RUNNERS.has(runner)) throw new Error('unsupported case runner: ' + (runner || '(empty)'));
   const runtime = String(raw.runtime ?? '').trim();
   if (!CASE_RUNTIMES.has(runtime)) throw new Error('unsupported runtime profile: ' + (runtime || '(empty)'));
   const resultPolicy = String(raw.result_policy ?? '').trim();
@@ -173,6 +183,7 @@ export function validateCaseManifest(raw, caseDir) {
     criterion,
     stage,
     platform,
+    runner,
     runtime,
     isolation,
     verifiers,
