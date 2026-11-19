@@ -84,6 +84,9 @@ for(const bad of [
   {ingester:{...ingester,head_sha:'0'.repeat(40)}},
   {receipt:{...receipt,action_id:'a'.repeat(64)}},
   {receipt:{...receipt,checkpoint_commit_sha:'0'.repeat(40)}},
+  {receipt:{...receipt,worker_sha:'0'.repeat(40)}},
+  {receipt:{...receipt,ciphertext_sha256:'0'.repeat(64)}},
+  {receipt:{...receipt,status:'unverified'}},
 ]){
   assert.throws(()=>assertOwnerQwenPublisherRecovery({...valid,...bad}),
     /Qwen original Publisher GET-only recovery|trusted Qwen Publisher Runner/);
