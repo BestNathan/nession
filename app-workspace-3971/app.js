@@ -248,7 +248,7 @@ function handle(action,id){
     case 'cap':navigate({type:'cap',cap:id});break;
     case 'refresh':closeOverlay();toast('Mock view refreshed');record('Refresh');break;
     case 'retry':state.fixture='normal';updateReviewFixtures();render('Retry mock source');break;
-    case 'copy':closeOverlay();toast('Mock reference copied');record('Copy mock reference');break;
+    case 'copy': { closeOverlay(); const reference='mock://nession/'+state.cap+'/'+active().kind; record('Copy mock reference'); if(typeof navigator!=='undefined'&&navigator.clipboard?.writeText){navigator.clipboard.writeText(reference).then(()=>toast('Mock reference copied')).catch(()=>toast('Clipboard unavailable in preview'));} else {toast('Clipboard unavailable in preview');} break; }
     case 'save':state.dirty=false;state.editorValue=$('#editor-input')?.value??state.editorValue;toast('Mock draft saved locally');record('Mock draft saved');break;
     case 'guard-cancel':closeOverlay();record('Guard cancelled');break;
     case 'guard-discard':{const op=state.pending;state.dirty=false;state.editorValue='// App workspace header\nexport const title = "Workspace";\n';closeOverlay();if(op)commitNav(op);break;}

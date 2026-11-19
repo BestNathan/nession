@@ -50,14 +50,14 @@ The real Terminal remains mounted below spatial layers; pushed capability depth 
 | Gesture behavior | Browser-only exploration; **not** actual iOS/Safari/TUI gesture proof |
 | UI tokens | Selected roles from generated `web.css`; independent static CSS approximation, not pixel-verified React/shadcn |
 | Navigation | Local mock state, not Nession routing or stored Session history |
-| Published preview | **Unverified until Pages manifest SHA + HTTPS HTML readback** |
+| Local interaction smoke | 11/11 mock state transitions passed in V8 DOM-stub (not Chromium) |\n| Published preview | **Unverified until Pages manifest SHA + HTTPS HTML readback** |
 | Production Acceptance | Not attempted; Issue #3971 SCs remain Pending |
 
 ## Validation commands
 
 ```sh
 node --check app-workspace-3971/app.js
-node --test app-workspace-3971/prototype.test.mjs
+node --test app-workspace-3971/prototype.test.mjs app-workspace-3971/interaction.test.mjs
 ```
 
 Browser walkthrough (if supported): serve the shared `prototype` checkout as static files and open `app-workspace-3971/index.html`. Inspect 375/390/430, focus, zero console errors, single header, Stack Sheet, Browse, Pop/Forward, dirty confirmation, long Reader and bottom Capsule clearance. A static test is not a Chromium proof.
