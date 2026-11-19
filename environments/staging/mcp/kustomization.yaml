@@ -11,22 +11,22 @@ commonLabels:
   env: staging
 
 resources:
-  - sealed-backend-server.json
-  - sealed-inbound.json
-  - sealed-tls.json
-  - sealed-secret.json
-  - deployment.yaml
-  - service.yaml
-  - ingress.yaml
+- sealed-backend-server.json
+- sealed-inbound.json
+- sealed-tls.json
+- sealed-secret.json
+- deployment.yaml
+- service.yaml
+- ingress.yaml
 
 # Non-secret standalone MCP config lives only in this GitOps source file.
 # Keep the default Kustomize content hash so config edits roll the MCP Pod.
 configMapGenerator:
-- name: nession-mcp-settings
-  files:
+- files:
   - mcp.toml
+  name: nession-mcp-settings
 
 images:
 - name: ghcr.io/bestnathan/nession-mcp
-  newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: mcp-4774f3e
+  newName: ghcr.io/bestnathan/nession
+  newTag: mcp-bd4ba6b
