@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # The shared GitOps writer verifies ACR multi-arch manifests when
+      # The shared GitOps writer verifies GHCR multi-arch manifests when
       # targeting staging; other environments keep their existing GHCR path.
       - uses: docker/setup-buildx-action@v3
         if: ${{ github.event.inputs.environment == 'staging' }}
@@ -44,7 +44,11 @@ jobs:
           short="${sha:0:7}"
           TOKEN=$(curl -s "https://ghcr.io/token?scope=repository:${GITHUB_REPOSITORY_OWNER,,}/nession:pull" \
             | python3 -c 'import sys, json; print(json.load(sys.stdin)["token"])')
-          for p in server agent ui; do
+          roles=(server agent ui)
+          if [[ "${{ github.event.inputs.environment }}" == "staging" ]]; then
+            roles+=(mcp)
+          fi
+          for p in "${roles[@]}"; do
             code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" \
               -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
               "https://ghcr.io/v2/${GITHUB_REPOSITORY_OWNER,,}/nession/manifests/${p}-${short}")
