@@ -39,13 +39,13 @@ function harness(){
     const button={dataset:{action,id},closest(){return this;}};
     nodes['#product'].listeners.click({target:button,preventDefault(){}});
   }
-  function drag(dx,{excluded=false}={}){
+  function drag(dx,{excluded=false,startX=140}={}){
     const target=new Element('canvas');
     target.closest=selector=>selector==='#app-content'?nodes['#app-content']:excluded&&selector.includes('data-swipe-owner')?target:null;
-    const base={target,pointerId:5,pointerType:'mouse',clientX:140,clientY:300};
+    const base={target,pointerId:5,pointerType:'mouse',clientX:startX,clientY:300};
     nodes['#product'].listeners.pointerdown(base);
-    nodes['#product'].listeners.pointermove({...base,clientX:140+dx,clientY:302});
-    nodes['#product'].listeners.pointerup({...base,clientX:140+dx,clientY:302});
+    nodes['#product'].listeners.pointermove({...base,clientX:startX+dx,clientY:302});
+    nodes['#product'].listeners.pointerup({...base,clientX:startX+dx,clientY:302});
   }
   return {nodes,fixtures,click,drag,state:()=>JSON.parse(nodes['#inspector'].textContent)};
 }
@@ -81,6 +81,8 @@ test('Capabilities share grouped surfaces, root swipe returns to Terminal, Sessi
   assert.match(x.nodes['#app-content'].innerHTML,/Staged changes/);
   x.click('cap','sandbox');assert.match(x.nodes['#app-content'].innerHTML,/Filesystem/);
   x.click('cap','claude');x.drag(120);
+  assert.equal(x.state().surface,'workspace','root central drag must not steal shell navigation');
+  x.drag(120,{startX:34});
   assert.equal(x.state().surface,'terminal');assert.equal(x.nodes['#workspace'].hidden,true);
   x.click('open-workspace');assert.equal(x.state().surface,'workspace');
   x.fixtures[3].listeners.click();assert.equal(x.state().index,0);

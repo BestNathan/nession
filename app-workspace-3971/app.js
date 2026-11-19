@@ -290,6 +290,9 @@ function begin(ev,kind){
  const pt=point(ev);const bounds=$('#product').getBoundingClientRect();
  // Outer 18px remains platform owned. The meaningful body is otherwise gesture-enabled.
  if(pt.clientX<bounds.left+18||pt.clientX>bounds.right-18)return;
+ // Preserve #2724: root Workspace spatial return is shell-edge-only after the OS guard.
+ // A pushed capability detail is an inner stack; non-interactive body space can own its swipe.
+ if(state.cursor===0&&pt.clientX>bounds.left+46)return;
  move={kind,id:kind==='touch'?pt.identifier:ev.pointerId,x:pt.clientX,y:pt.clientY,
    lastX:pt.clientX,lastY:pt.clientY,start:Date.now(),phase:'candidate',dx:0,dir:null};
 }

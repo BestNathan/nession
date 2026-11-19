@@ -35,7 +35,7 @@ The real Terminal remains mounted below spatial layers; pushed capability depth 
 
 ## Gesture and accessibility decision
 
-- One active contact: gesture candidate → horizontal claimed or yielded to vertical/content → release commit/cancel. The central content only is eligible; controls, editable fields, code/diff, row actions, Capsule and native 18px outer guard are excluded.
+- One active contact: gesture candidate → horizontal claimed or yielded to vertical/content → release commit/cancel. At pushed depth, non-interactive content can claim the inner stack swipe. At Workspace root, the outer spatial return remains limited to a 28px shell-owned left band **after** the 18px native platform guard (#2724). Controls, editable fields, code/diff, row actions and Capsule always retain touch ownership.
 - **Rightward** = Pop existing stack depth; from root leave to Terminal. **Leftward** = Forward **only** when a recorded forward item exists. Missing route resists and cancels.
 - The internal work area translates under the finger; the underlying surface indicates the destination; release threshold ~75 CSS px is an **illustrative mock value**, *not* the established production #2724 threshold.
 - Button labels are accessible; header touch targets ~44px; no icon-only destructive final confirmation; long content is scrollable; reduced motion applies.
