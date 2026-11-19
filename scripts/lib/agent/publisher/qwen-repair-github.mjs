@@ -8,7 +8,7 @@ import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
 import {preflightAgentPatch,validPublisherFile} from './patch-preflight.mjs';
-import {validateQwenRepairPublisherIntent}
+import {validateQwenRepairPublisherIntent,qwenRepairPrewriteRecoveryPath}
   from './qwen-repair-intent.mjs';
 import {SOURCE as QWEN_PREWRITE_FAILURE}
   from './qwen-repair-prewrite-failure.mjs';
@@ -41,22 +41,7 @@ function plan(preflight,intent,{write=false}={}){
   // A previously immutable WAL can be recovered after a PROVEN pre-write
   // failure only by a separate Store-CAS marker. Replay after a possible
   // GitHub write is GET-only. Initial Publisher write grants are unchanged.
-  const recovery=intent?.recovery;
-  const prewrite=write&&intent.status==='prewrite_recovery'&&
-    intent.may_publish===true&&
-    recovery?.verified===true&&
-    recovery.failed_run_id===QWEN_PREWRITE_FAILURE.run_id&&
-    recovery.run_id>recovery.failed_run_id&&
-    recovery.wal_commit_sha&&SHA.test(recovery.wal_commit_sha)&&
-    recovery.marker_path&&
-    /^workflows\/issues\/3784\/results\/44476308903-1-[a-f0-9]{64}\.json$/.test(recovery.marker_path)&&
-    recovery.marker_store_commit_sha===intent.store_commit_sha&&
-    x.issue===QWEN_PREWRITE_FAILURE.issue&&
-    x.action_id===QWEN_PREWRITE_FAILURE.action_id&&
-    x.worker_run_id===QWEN_PREWRITE_FAILURE.worker_run_id&&
-    x.source_sha===QWEN_PREWRITE_FAILURE.source_sha&&
-    x.checkpoint_version===QWEN_PREWRITE_FAILURE.checkpoint_version&&
-    x.publisher_run_id===QWEN_PREWRITE_FAILURE.run_id;
+  const prewrite=write&&isValidQwenPrewriteRecoveryGrant(intent,x);
   if(!SHA.test(intent?.store_commit_sha??'')||
       (write
         ?!(intent.status==='committed'&&intent.may_publish===true)&&!prewrite
@@ -79,6 +64,22 @@ function plan(preflight,intent,{write=false}={}){
       hash(Buffer.from(preflight.patch))!==x.patch_sha256)
     fail('missing exact immutable Store-fenced Repair grant or manifest');
   return x;
+}
+export function isValidQwenPrewriteRecoveryGrant(intent,record){
+  const f=QWEN_PREWRITE_FAILURE,r=intent?.recovery;
+  return intent?.status==='prewrite_recovery'&&
+    intent.may_publish===true&&
+    r?.verified===true&&r.failed_run_id===f.run_id&&
+    Number.isSafeInteger(r.run_id)&&r.run_id>f.run_id&&
+    SHA.test(r.wal_commit_sha??'')&&
+    r.marker_path===qwenRepairPrewriteRecoveryPath()&&
+    r.marker_store_commit_sha===intent.store_commit_sha&&
+    SHA.test(intent.store_commit_sha??'')&&
+    record?.issue===f.issue&&record.action_id===f.action_id&&
+    record.worker_run_id===f.worker_run_id&&
+    record.source_sha===f.source_sha&&
+    record.checkpoint_version===f.checkpoint_version&&
+    record.publisher_run_id===f.run_id;
 }
 export function materializeQwenRepairGitTree({preflight,intent,sourceCheckout}){
   const record=plan(preflight,intent);
