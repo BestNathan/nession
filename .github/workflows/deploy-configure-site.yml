@@ -11,16 +11,18 @@ on:
           - staging-mcp
         required: true
       action:
-        description: Read-only plan or bounded DNS apply
+        description: DNS plan, DNS apply, or explicit Origin CA TLS issuance
         type: choice
         options:
           - plan
           - apply
+          - issue-tls
         default: plan
         required: true
 
 concurrency:
-  group: cloudflare-site-staging-mcp
+  # Shared lock for all writers to the orphan gitops branch.
+  group: gitops-writer
   cancel-in-progress: false
 
 permissions:
@@ -42,10 +44,11 @@ jobs:
       - name: Validate bounded Cloudflare site provider and tests
         run: |
           set -euo pipefail
-          node --test scripts/ci/configure-cloudflare-site.test.mjs
+          node --test scripts/ci/configure-cloudflare-site.test.mjs scripts/ci/issue-cloudflare-origin-ca.test.mjs
           node --input-type=module -e "import {getSite} from './scripts/ci/configure-cloudflare-site.mjs'; if(getSite('staging-mcp').environment !== 'staging') process.exit(1)"
 
   configure:
+    if: inputs.action != 'issue-tls'
     needs: verify
     runs-on: ubuntu-24.04
     environment:
@@ -72,3 +75,66 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/ci/configure-cloudflare-site.mjs "$TARGET_ACTION" "$TARGET_SITE"
+
+  issue_tls:
+    if: inputs.action == 'issue-tls'
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment:
+      name: staging
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          path: source
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: gitops
+          path: gitops
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install pinned kubeseal with upstream checksum validation
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=0.27.1
+          tarball="kubeseal-$version-linux-amd64.tar.gz"
+          base="https://github.com/bitnami/sealed-secrets/releases/download/v$version"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$tarball" "$base/$tarball"
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/checksums.txt" "$base/sealed-secrets_${version}_checksums.txt"
+          expected="$(grep -F "$tarball" "$RUNNER_TEMP/checksums.txt" | grep -Eo '[0-9a-f]{64}' | head -n1)"
+          test -n "$expected" || { echo "::error::missing upstream checksum"; exit 1; }
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/$tarball" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$tarball" -C "$RUNNER_TEMP" kubeseal
+          chmod +x "$RUNNER_TEMP/kubeseal"
+      - name: Create Cloudflare Origin CA cert and stage encrypted TLS only
+        env:
+          TARGET_ENVIRONMENT: staging
+          TARGET_SITE: ${{ inputs.site }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_ORIGIN_IPV4: ${{ vars.CLOUDFLARE_ORIGIN_IPV4 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SEALED_SECRETS_CERT_PEM: ${{ vars.SEALED_SECRETS_CERT_PEM }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          trap 'rm -rf "$RUNNER_TEMP/nession-seal"' EXIT
+          node source/scripts/ci/issue-cloudflare-origin-ca.mjs issue-tls "$TARGET_SITE"
+          openssl x509 -in "$RUNNER_TEMP/nession-seal/cert.pem" -noout -checkend 86400
+          "$RUNNER_TEMP/kubeseal" --cert "$RUNNER_TEMP/nession-seal/cert.pem" \
+            --scope strict --format json \
+            < "$RUNNER_TEMP/nession-seal/secret.json" \
+            > "$RUNNER_TEMP/nession-seal/sealed.json"
+          node source/scripts/ci/seal-gitops-secret.mjs stage staging MCP_TLS_PEM_BUNDLE "$GITHUB_WORKSPACE/gitops"
+      - name: Publish only encrypted staging MCP TLS resource
+        shell: bash
+        run: |
+          set -euo pipefail
+          node source/scripts/ci/seal-gitops-secret.mjs publish staging MCP_TLS_PEM_BUNDLE "$GITHUB_WORKSPACE/gitops"
