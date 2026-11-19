@@ -109,6 +109,36 @@ function findRawColor(node, path = '') {
   return null;
 }
 
+test('shared content rhythm roles emit Web/App CSS, App TS and lint vocabulary (#4050)', () => {
+  const tokens = loadTokens();
+  const expected = {
+    sectionStack: 20,
+    sectionContent: 8,
+    textStack: 4,
+    inline: 8,
+    fieldStack: 6,
+  };
+  const css = generateWebCss(tokens);
+  const appTs = generateAppTs(tokens);
+  const meta = generateLintMetadata(tokens);
+  const rootCss = css.match(/:root \{([^}]*)\}/s)?.[1] ?? '';
+  const appCss = css.match(/\[data-experience="app"\] \{([^}]*)\}/s)?.[1] ?? '';
+  assert.match(appTs, /export const rhythm = \{/);
+  for (const [role, px] of Object.entries(expected)) {
+    const cssName = role.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+    const variable = `--nession-rhythm-${cssName}`;
+    assert.equal(resolveRef(tokens.experience.web.rhythm[role], tokens).value, `${px}px`);
+    assert.equal(resolveRef(tokens.experience.app.rhythm[role], tokens).value, `${px}px`);
+    assert.match(rootCss, new RegExp(`${variable}: ${px}px;`));
+    assert.match(appCss, new RegExp(`${variable}: ${px}px;`));
+    assert.ok(meta.cssVariables.includes(variable), variable);
+    assert.ok(meta.legacyCssVariables.includes(`--rhythm-${cssName}`));
+    assert.match(appTs, new RegExp(`\\b${role}: ${px},`));
+  }
+  assert.equal(Object.keys(tokens.experience.web.rhythm).filter(k => !k.startsWith('$')).length, 5);
+  assert.equal(Object.keys(tokens.experience.app.rhythm).filter(k => !k.startsWith('$')).length, 5);
+});
+
 test('resolveRef follows primitive color refs to a value object', () => {
   assert.deepEqual(resolveRef({ ref: 'primitive.color.green.500' }, fixture), {
     value: 'oklch(0.63 0.17 145)',
