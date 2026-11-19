@@ -18,6 +18,11 @@ allowed_hosts = [
   "localhost",
   "127.0.0.1"
 ]
+# Optional, disabled by default in the runtime. Once the deployed MCP image
+# includes standalone query authentication and ALL gateway access logs redact
+# query parameters, enable this explicit opt-in in the protected MCP_CONFIG_TOML
+# and reseal it with Deploy / Seal GitOps Secret. Do not put credentials here.
+# allow_query_token = true
 # No browser origins by default. Native MCP clients omit Origin.
 allowed_origins = []
 
