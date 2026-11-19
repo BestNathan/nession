@@ -85,6 +85,13 @@ jobs:
          github.event.comment.body == '/nession recover-qwen-cli issue=3784 run=44250586057') ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
+         github.event.issue.number == 3784 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession recover-qwen-turns issue=3784 run=44470557905') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
          github.event.issue.number == 3433 &&
          github.event.issue.state == 'open' &&
          !github.event.issue.pull_request &&
