@@ -20,7 +20,8 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   repairRuntimeSuccessorId,REVIEWER_PREMODEL_FAILURE,
   reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
   REVIEWER_JSON_FAILURE,reviewerJsonSuccessorId,
-  recordAttestedReviewerJsonFailure}
+  recordAttestedReviewerJsonFailure,
+  recordAttestedQwenBaseReviewFailure,qwenBaseReviewSuccessorId}
   from './outbox.mjs';
 import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
@@ -37,6 +38,7 @@ import {SOURCE as QWEN_KEY_FAILURE,
   SOURCE_V3 as QWEN_KEY_FAILURE_V3} from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_BASE_FAILURE} from './qwen-review-base-failure.mjs';
 
 const REF='agent-store';
 function fail(message){throw Error('trusted dispatch Store: '+message);}
@@ -162,6 +164,37 @@ export function recoverAttestedReviewerPremodelFailure({remote,source}){
     if(pushed.replayed)fail('ambiguous new Reviewer recovery Store CAS');
     return {status:'recovered',issue:f.issue,action_id:id,
       state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// #3885: failed original #3784 Qwen Reviewer admission, no model or
+// verdict Artifact, with an exact Store-ACKed Run. CAS appends one successor.
+export function recoverAttestedQwenBaseReviewFailure({remote,source}){
+  const f=QWEN_BASE_FAILURE;
+  if(source?.verified!==true||source.issue!==f.issue||
+      source.action_id!==f.action_id||source.run_id!==f.run_id||
+      source.attempt!==1||source.run_head_sha!==f.run_head_sha||
+      source.source_sha!==f.source_sha||
+      source.publisher_run_id!==f.publisher_run_id||
+      source.failure_code!==f.failure_code)
+    fail('Qwen Reviewer base failure not independently authenticated');
+  const id=qwenBaseReviewSuccessorId(f.issue,f.action_id,f.run_id);
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,f.issue),state=prior.state;
+    if(!state)fail('missing Qwen Review Source Store');
+    const old=state.outbox.find(x=>x.id===f.action_id);
+    if(state.outbox.some(x=>x.id===id)){
+      if(old?.status!=='failed'||old.receipt?.source_run_id!==f.run_id||
+         old.receipt?.failure_code!==f.failure_code)
+        fail('conflicting Reviewer base successor CAS replay');
+      return {status:'replayed',issue:f.issue,action_id:id,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const next=recordAttestedQwenBaseReviewFailure(state,prior.version,source);
+    const published=persist(dir,next,prior.version,f.issue);
+    if(published.replayed)fail('ambiguous signed Reviewer base recovery CAS');
+    return {status:'recovered',issue:f.issue,action_id:id,
+      state_version:next.version,store_commit_sha:published.commit_sha};
   });
 }
 
