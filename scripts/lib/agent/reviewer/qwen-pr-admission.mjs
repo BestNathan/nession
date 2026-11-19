@@ -56,6 +56,15 @@ export function attestedQwenRepairPublisherRecovery({
     intent.original_publisher_run_id===44281178406&&
     intent.publisher_run_id===44476308903&&
     intent.branch==='refs/heads/agent/3784/qwen-39c01222a8d00fa3'&&
+    state.transitions.length===5&&
+    state.transitions[1]?.kind==='reviewer'&&
+    state.transitions[1].outcome==='changes_requested'&&
+    state.transitions[1].run_id===44457049411&&
+    state.transitions[1].target_sha==='5d7e9118b7e954e760cc680fff7d43b4f9e17612'&&
+    state.transitions[3]?.kind==='reviewer'&&
+    state.transitions[3].outcome==='changes_requested'&&
+    state.transitions[3].run_id===44466992692&&
+    state.transitions[3].target_sha===intent.source_sha&&
     published.length===3&&
     published[0]?.run_id===44281178406&&
     published[0].target_sha==='5d7e9118b7e954e760cc680fff7d43b4f9e17612'&&
