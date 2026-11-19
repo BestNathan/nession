@@ -208,6 +208,10 @@ keeps its station; the Workspace layer stays opaque so the Terminal is never exp
 by an internal-depth gesture. A capability that has been switched away cannot retake
 the header or the gesture.
 
+The live artifact, immutable source pin, manifest readback and browser
+walkthrough are recorded in
+[app-workspace-3971-prototype.md](app-workspace-3971-prototype.md).
+
 ### Web: the capability capsule
 
 Capability navigation on Web is a **capsule** of fixed-width labeled slots in the

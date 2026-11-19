@@ -507,6 +507,13 @@ toolbar row:
   decision in
   [workspace-navigation.md](../design-system/patterns/workspace-navigation.md)).
 
+**Prototype history.** The unified [#3971 prototype record](../design-system/patterns/app-workspace-3971-prototype.md)
+supersedes the deep-detail presentation of the #3829 Claude prototype and the
+inner-gesture presentation of the #2724 mobile-swipe prototype. Those older
+prototype pages carry in-place historical/superseded notices on the orphan
+`prototype` branch and remain IA/outer-gesture references only; their
+production owners are unchanged.
+
 See `#1051`, `#3971` and [workspace.md](../workspace.md). The App presentation of this rule —
 including where the capability switcher may appear — is in
 [workspace-navigation.md](../design-system/patterns/workspace-navigation.md).
