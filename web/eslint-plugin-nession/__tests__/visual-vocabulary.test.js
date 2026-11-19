@@ -222,7 +222,7 @@ test('visual-vocabulary reports non-canonical production variables', () => {
         errors: [{ messageId: 'utilityViolation' }, { messageId: 'utilityViolation' }],
       },
       {
-        code: 'export const x = "var(--terminal-content-bottom-inset, 0px)";
+        code: 'export const x = "var(--terminal-content-bottom-inset, 0px)";',
         filename: TERMINAL_VIEWPORT,
         errors: [{ messageId: 'violation' }],
       },
