@@ -11,7 +11,7 @@
 # context supplies the binary for the target architecture, and the probe below
 # fails the build when it is absent or built for the other architecture.
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime
 ARG DEBIAN_FRONTEND=noninteractive
 
 # CA certificates for outbound TLS to the configured Nession Server. `curl` is
