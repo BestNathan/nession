@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {REVIEWER_PREMODEL_FAILURE as F,
   REVIEWER_PREMODEL_FAILURE_3784 as F3784,
+  REVIEWER_PREMODEL_FAILURE_3784_C as FC,
   hasOnlyRetiredReviewerForQwenRepair,validateDevelopmentState,
   recordAttestedReviewerPremodelFailure,reviewerPremodelSuccessorId}
   from './outbox.mjs';
@@ -222,3 +224,66 @@ assert.throws(()=>recordAttestedReviewerPremodelFailure(v13,13,proof3784),
 assert.throws(()=>reviewerPremodelSuccessorId(3784,F.action_id,F3784.run_id),
   /agent outbox/);
 console.log('✓ #3784 Reviewer pre-model: authentic v12→v13, exact SHA, unique successor, forgery and replay denial');
+
+
+// #4097: immutable real Store v35, third-cycle Owner-published PR-C. No
+// authored Reviewer verdict or synthetic reset may stand in for this source.
+const v35=JSON.parse(readFileSync(new URL(
+  './fixtures/issue-3784-reviewer-v35.json',import.meta.url),'utf8'));
+validateDevelopmentState(v35);
+const runC={...run,id:FC.run_id,head_sha:FC.main_sha};
+const jobsC={...jobs,jobs:jobs.jobs.map(j=>({...j,run_id:FC.run_id}))};
+const proofC=attestReviewerPremodelFailure(runC,jobsC,FC);
+assert.equal(proofC.action_id,FC.action_id);
+assert.equal(v35.version,FC.state_version);
+assert.equal(v35.target_sha,FC.source_sha);
+const v36=recordAttestedReviewerPremodelFailure(v35,35,proofC);
+const successorC=reviewerPremodelSuccessorId(3784,FC.action_id,FC.run_id);
+assert.equal(v36.version,36);
+assert.equal(v36.target_sha,v35.target_sha);
+assert.deepEqual(v36.transitions,v35.transitions);
+assert.equal(v36.outbox.length,v35.outbox.length+1);
+assert.deepEqual(v36.outbox.slice(0,-2),v35.outbox.slice(0,-1));
+assert.equal(v36.outbox.at(-2).status,'failed');
+assert.deepEqual(v36.outbox.at(-2).receipt,{
+  status:'failed',dispatch_id:FC.action_id,
+  source_run_id:FC.run_id,source_attempt:1,failure_code:FC.failure_code});
+assert.equal(v36.outbox.at(-1).id,successorC);
+assert.equal(v36.outbox.at(-1).status,'pending');
+assert.deepEqual(v36.outbox.at(-1).task,v35.outbox.at(-1).task);
+for(const delta of [
+  {run_attempt:2},{event:'issue_comment'},
+  {actor:{login:'BestNathan'}},{head_sha:'f'.repeat(40)},
+  {conclusion:'success'},{name:'Agent / Development'},
+])assert.throws(()=>attestReviewerPremodelFailure(
+  {...runC,...delta},jobsC,FC),/trusted Reviewer pre-model failure/);
+for(const mutated of [
+  {...jobsC,total_count:4},
+  {...jobsC,jobs:jobsC.jobs.map((j,i)=>i===0?{...j,conclusion:'success'}:j)},
+  {...jobsC,jobs:jobsC.jobs.map((j,i)=>i===1?{...j,conclusion:'failure'}:j)},
+  {...jobsC,jobs:jobsC.jobs.map((j,i)=>i===0?{...j,steps:[
+    {name:'Run model',status:'completed',conclusion:'failure'}]}:j)},
+])assert.throws(()=>attestReviewerPremodelFailure(runC,mutated,FC),
+  /trusted Reviewer pre-model failure/);
+for(const delta of [
+  {version:36},{phase:'repair'},
+  {target_sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'},
+  {repair_attempts:1},
+  {transitions:v35.transitions.slice(0,4)},
+  {transitions:v35.transitions.map((t,i)=>i===4
+    ?{...t,write_ahead_publisher_run_id:44495243036}:t)},
+  {outbox:v35.outbox.map((x,i)=>i===5
+    ?{...x,receipt:{...x.receipt,source_run_id:1}}:x)},
+  {outbox:v35.outbox.map((x,i)=>i===0
+    ?{...x,status:'pending',receipt:null}:x)},
+])assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  {...v35,...delta},35,proofC),/agent outbox/);
+for(const delta of [
+  {verified:false},{run_id:FC.run_id+1},
+  {source_sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'},
+  {failure_code:'forged'},
+])assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  v35,35,{...proofC,...delta}),/agent outbox/);
+assert.throws(()=>recordAttestedReviewerPremodelFailure(v36,36,proofC),
+  /agent outbox/);
+console.log('✓ #4097 real Store v35→v36 exactly one pre-model Reviewer successor, replay/forgery denial');
