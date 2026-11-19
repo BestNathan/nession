@@ -27,9 +27,12 @@ function harness(){
   const themes=['light','dark'].map(kind=>{
     const el=new Element(kind);el.dataset.awTheme=kind;el.setAttribute=(key,value)=>{el[key]=value;};return el;
   });
+  const scenarios=['claude','git','sandbox','files'].map(kind=>{
+    const el=new Element(kind);el.dataset.scenario=kind;el.setAttribute=(key,value)=>{el[key]=value;};return el;
+  });
   const document={
     querySelector:s=>nodes[s]||null,
-    querySelectorAll:s=>s==='[data-fixture]'?fixtures:s==='[data-aw-theme]'?themes:[],
+    querySelectorAll:s=>s==='[data-fixture]'?fixtures:s==='[data-aw-theme]'?themes:s==='[data-scenario]'?scenarios:[],
     addEventListener(){},
   };
   let t=100000;
@@ -50,7 +53,7 @@ function harness(){
     nodes['#product'].listeners.pointermove({...base,clientX:startX+dx,clientY:302});
     nodes['#product'].listeners.pointerup({...base,clientX:startX+dx,clientY:302});
   }
-  return {nodes,fixtures,themes,click,drag,state:()=>JSON.parse(nodes['#inspector'].textContent)};
+  return {nodes,fixtures,themes,scenarios,click,drag,state:()=>JSON.parse(nodes['#inspector'].textContent)};
 }
 test('Claude current work is primary with one host Header and four Capsule choices',()=>{
   const x=harness();
@@ -105,4 +108,29 @@ test('Light/Dark changes the product token scope without changing capability nav
   x.themes[0].listeners.click();
   assert.equal(x.nodes['#product'].dataset.theme,'light');
   assert.equal(x.state().capability,'git');
+});
+
+test('Review presets share the Host and preserve dirty editor leave protection',()=>{
+  const x=harness();
+  assert.equal(x.scenarios[0]['aria-pressed'],'true');
+  x.scenarios[1].listeners.click();
+  assert.equal(x.state().capability,'git');
+  assert.match(x.nodes['#app-content'].innerHTML,/Staged changes/);
+  x.scenarios[2].listeners.click();
+  assert.equal(x.state().capability,'sandbox');
+  assert.equal(x.state().index,1);
+  assert.match(x.nodes['#app-header'].innerHTML,/Resource policy/);
+  x.scenarios[3].listeners.click();
+  assert.equal(x.state().capability,'files');
+  assert.equal(x.state().index,2);
+  x.nodes['#product'].listeners.input({target:{id:'editor-input',value:'changed'}});
+  x.scenarios[0].listeners.click();
+  assert.equal(x.state().overlay,'guard');
+  assert.equal(x.state().capability,'files');
+  x.click('guard-cancel');
+  assert.equal(x.state().index,2);
+  x.scenarios[0].listeners.click();x.click('guard-discard');
+  assert.equal(x.state().capability,'claude');
+  assert.equal(x.state().index,0);
+  assert.equal(x.state().dirty,false);
 });

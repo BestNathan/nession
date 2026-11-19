@@ -21,6 +21,10 @@ test('shared review frame and single product shell owners',()=>{
   assert.match(html,/href="\.\/review\.css"/);
   assert.match(html,/data-aw-theme="light"/);
   assert.match(html,/data-aw-theme="dark"/);
+  for(const scenario of ['claude','git','sandbox','files']) {
+    assert.match(html,new RegExp('data-scenario="'+scenario+'"'));
+  }
+  assert.match(html,/跨能力的统一关系/);
 });
 test('semantic surfaces and shared icon/actions',()=>{
   for(const role of ['surface','surface-head','row-item','field-list','reader','cap-capsule']){
@@ -57,6 +61,10 @@ test('App tokens are canonical scoped snapshot; presentation has no second palet
   assert.match(tokens,/--nession-control-md: 44px/);
   assert.match(tokens,/--nession-row-lg: 56px/);
   assert.match(tokens,/--nession-icon-md: 20px/);
+  assert.match(tokens,/--nession-rhythm-section-stack: 20px/);
+  assert.match(tokens,/--nession-rhythm-text-stack: 4px/);
+  assert.match(css,/\.row-text\{[^}]*gap:var\(--nession-rhythm-text-stack\)/);
+  assert.doesNotMatch(css,/\.row-meta\{[^}]*margin-top/);
   assert.match(tokens,/\.product\[data-theme="dark"\]/);
   assert.match(tokens,/--aw-canvas: var\(--nession-surface\)/);
   assert.match(tokens,/--aw-surface: var\(--nession-card\)/);
