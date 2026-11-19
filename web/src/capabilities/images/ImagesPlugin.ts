@@ -14,6 +14,7 @@ import {
 } from '@/generated/protocol/core/server-image-get/v1';
 import {
   WIRE as BUILD_SUBMIT_WIRE,
+  type ImageBuildAttempt,
   type ImageBuildDescriptor,
   type ImageBuildSubmitResponsePayload,
 } from '@/generated/protocol/core/server-image-build-submit/v1';
@@ -24,6 +25,8 @@ import {
 import {
   WIRE as BUILD_LIST_WIRE,
   type ImageBuildListResponsePayload,
+  type ImageBuildSourceKind,
+  type ImageBuildStatus,
 } from '@/generated/protocol/core/server-image-build-list/v1';
 import {
   WIRE as BUILD_CANCEL_WIRE,
@@ -33,9 +36,42 @@ import {
   WIRE as BUILD_RETRY_WIRE,
   type ImageBuildRetryResponsePayload,
 } from '@/generated/protocol/core/server-image-build-retry/v1';
+import {
+  WIRE as LIBRARY_LIST_WIRE,
+  type ImageLibraryEntry,
+  type ImageLibraryLayer,
+  type ImageLibraryListResponsePayload,
+  type ImageLibraryRepresentation,
+  type ImageReferenceImpact,
+} from '@/generated/protocol/core/server-image-library-list/v1';
+import {
+  WIRE as TAG_SET_WIRE,
+  type ImageTagSetResponsePayload,
+  type ImageTagUpdate,
+} from '@/generated/protocol/core/server-image-tag-set/v1';
+import {
+  WIRE as TAG_REMOVE_WIRE,
+  type ImageTagRemoveResponsePayload,
+} from '@/generated/protocol/core/server-image-tag-remove/v1';
+import {
+  WIRE as IMPACT_GET_WIRE,
+  type ImageImpactResponsePayload,
+} from '@/generated/protocol/core/server-image-impact-get/v1';
 import type { ConnectionState, PluginSurface, TransportPlugin } from '@/platform/socket/types';
 
-export type { ImageBuildDescriptor, ImageDescriptor, ImageSource };
+export type {
+  ImageBuildAttempt,
+  ImageBuildDescriptor,
+  ImageBuildSourceKind,
+  ImageBuildStatus,
+  ImageDescriptor,
+  ImageLibraryEntry,
+  ImageLibraryLayer,
+  ImageLibraryRepresentation,
+  ImageReferenceImpact,
+  ImageSource,
+  ImageTagUpdate,
+};
 
 /** The Server-pushed durable build transition (#3334). */
 export const IMAGE_BUILD_UPDATED_WIRE = 'server.image.build.updated';
@@ -172,11 +208,23 @@ export class ImagesPlugin implements TransportPlugin {
 
   /** One page of the durable build inventory, newest first. */
   async listBuilds(
-    options: { offset?: number; limit?: number } = {},
+    options: {
+      offset?: number;
+      limit?: number;
+      statuses?: readonly ImageBuildStatus[];
+      sources?: readonly ImageBuildSourceKind[];
+      query?: string;
+    } = {},
   ): Promise<ImageBuildPage> {
     const response = await this.requireConnection().request<ImageBuildListResponsePayload>(
       BUILD_LIST_WIRE,
-      { offset: options.offset ?? 0, limit: options.limit ?? 50 },
+      {
+        offset: options.offset ?? 0,
+        limit: options.limit ?? 50,
+        statuses: [...(options.statuses ?? [])],
+        sources: [...(options.sources ?? [])],
+        query: options.query ?? '',
+      },
     );
     if (response.error) {
       throw new Error(response.error);
@@ -188,11 +236,15 @@ export class ImagesPlugin implements TransportPlugin {
     };
   }
 
-  /** Cancel one build and return its truthful (possibly still running) record. */
-  async cancelBuild(buildId: string): Promise<ImageBuildDescriptor> {
+  /** Cancel one build at the observed attempt. */
+  async cancelBuild(buildId: string, attempt?: number): Promise<ImageBuildDescriptor> {
+    const payload: Record<string, unknown> = { build_id: buildId };
+    if (attempt !== undefined) {
+      payload.attempt = attempt;
+    }
     const response = await this.requireConnection().request<ImageBuildCancelResponsePayload>(
       BUILD_CANCEL_WIRE,
-      { build_id: buildId },
+      payload,
     );
     if (!response.success || !response.build) {
       throw new Error(response.error ?? 'Image build cancellation was refused');
@@ -200,11 +252,15 @@ export class ImagesPlugin implements TransportPlugin {
     return response.build;
   }
 
-  /** Retry one failed/canceled build as a new attempt in the same record. */
-  async retryBuild(buildId: string): Promise<ImageBuildDescriptor> {
+  /** Retry one failed/canceled build at the observed attempt. */
+  async retryBuild(buildId: string, attempt?: number): Promise<ImageBuildDescriptor> {
+    const payload: Record<string, unknown> = { build_id: buildId };
+    if (attempt !== undefined) {
+      payload.attempt = attempt;
+    }
     const response = await this.requireConnection().request<ImageBuildRetryResponsePayload>(
       BUILD_RETRY_WIRE,
-      { build_id: buildId },
+      payload,
     );
     if (!response.success || !response.build) {
       throw new Error(response.error ?? 'Image build retry was refused');
@@ -270,6 +326,130 @@ export class ImagesPlugin implements TransportPlugin {
     return response.image;
   }
 
+  /**
+   * One Server Catalog Library page (#3799). The catalog projection carries
+   * Manifest/Index identity, Tags, representation, closure and known impact;
+   * it never contains Agent cache readiness.
+   */
+  async listLibrary(
+    options: {
+      offset?: number;
+      limit?: number;
+      query?: string;
+      repository?: string;
+    } = {},
+  ): Promise<ImageLibraryPage> {
+    const response = await this.requireConnection().request<ImageLibraryListResponsePayload>(
+      LIBRARY_LIST_WIRE,
+      {
+        offset: options.offset ?? 0,
+        limit: options.limit ?? 50,
+        query: options.query ?? '',
+        repository: options.repository ?? '',
+      },
+    );
+    if (response.error) {
+      throw new Error(response.error);
+    }
+    return {
+      entries: response.entries,
+      total: response.total,
+      next_offset: response.next_offset,
+    };
+  }
+
+  /**
+   * Create or move one Tag with an expected-previous Compare-and-Set.
+   *
+   * A conflict carries the digest the Tag actually resolves to so the caller
+   * must re-review the operation rather than retrying blindly.
+   */
+  async setTag(payload: {
+    repository: string;
+    tag: string;
+    digest: string;
+    expected_digest?: string;
+  }): Promise<ImageTagUpdate> {
+    const response = await this.requireConnection().request<ImageTagSetResponsePayload>(
+      TAG_SET_WIRE,
+      payload,
+    );
+    if (!response.success || !response.update) {
+      throw new ImageTagMutationError(
+        response.error ?? 'The Tag could not be changed',
+        response.error_kind ?? 'unavailable',
+        response.current_digest ?? undefined,
+      );
+    }
+    return response.update;
+  }
+
+  /** Read the known reference impact before a deliberate unlink. */
+  async tagImpact(repository: string, tag: string): Promise<ImageReferenceImpact> {
+    const response = await this.requireConnection().request<ImageImpactResponsePayload>(
+      IMPACT_GET_WIRE,
+      { repository, tag },
+    );
+    if (!response.success || !response.impact) {
+      throw new ImageTagMutationError(
+        response.error ?? 'Reference impact could not be observed',
+        response.error_kind ?? 'impact_unknown',
+      );
+    }
+    return response.impact;
+  }
+
+  /**
+   * Unlink one Tag. This is a logical reference change only: no CAS blob is
+   * deleted, no pinned consumer moves and no Agent cache is evicted.
+   */
+  async removeTag(payload: {
+    repository: string;
+    tag: string;
+    expected_digest: string;
+    accept_reference_impact: boolean;
+  }): Promise<ImageReferenceImpact> {
+    const response = await this.requireConnection().request<ImageTagRemoveResponsePayload>(
+      TAG_REMOVE_WIRE,
+      payload,
+    );
+    if (!response.success || !response.impact) {
+      throw new ImageTagMutationError(
+        response.error ?? 'The Tag could not be unlinked',
+        response.error_kind ?? 'unavailable',
+        response.current_digest ?? undefined,
+        response.impact ?? undefined,
+      );
+    }
+    return response.impact;
+  }
+}
+
+/** One Server Catalog Library page. */
+export interface ImageLibraryPage {
+  entries: ImageLibraryEntry[];
+  total: number;
+  next_offset?: number | null;
+}
+
+/** A Tag/impact refusal with the Server's conflict and review evidence. */
+export class ImageTagMutationError extends Error {
+  readonly kind: string;
+  readonly currentDigest?: string;
+  readonly impact?: ImageReferenceImpact;
+
+  constructor(
+    message: string,
+    kind: string,
+    currentDigest?: string,
+    impact?: ImageReferenceImpact,
+  ) {
+    super(message);
+    this.name = 'ImageTagMutationError';
+    this.kind = kind;
+    this.currentDigest = currentDigest;
+    this.impact = impact;
+  }
 }
 
 export const imagesApi = new ImagesPlugin();

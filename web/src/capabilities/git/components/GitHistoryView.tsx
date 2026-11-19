@@ -1,9 +1,10 @@
-import { useCallback, useState } from 'react';
+import { useCallback } from 'react';
 import { gitApi } from '../GitPlugin';
 import { useGitHistory } from '../hooks/useGitHistory';
 import { useGitHistoryPagination } from '../hooks/useGitHistoryPagination';
+import { useGitHistorySelection } from '../hooks/useGitHistorySelection';
 import { useGitCommitDetail } from '../hooks/useGitCommitDetail';
-import { useGitRequest } from '../hooks/useGitRequest';
+import { gitRequestTargetKey, useGitRequest } from '../hooks/useGitRequest';
 import { describeUnavailable } from '../state';
 import { GitNotice } from './GitNotice';
 import { GitDiffView } from './GitDiffView';
@@ -22,8 +23,14 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
     agentId,
     sessionId,
   );
-  const [selected, setSelected] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const targetKey =
+    agentId && sessionId
+      ? gitRequestTargetKey({ agent_id: agentId, session: sessionId })
+      : null;
+  const { selected, selectedFile, onSelectCommit, onSelectFile } = useGitHistorySelection({
+    targetKey,
+    commits,
+  });
 
   const { detail, loading: detailLoading, error: detailError } = useGitCommitDetail({
     agentId,
@@ -54,11 +61,6 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
     sessionId: selected && selectedFile ? sessionId : undefined,
     load: loadDiff,
   });
-
-  const onSelectCommit = useCallback((hash: string) => {
-    setSelected(hash);
-    setSelectedFile(null);
-  }, []);
 
   if (loading) {
     return <GitNotice testId="git-history-loading">Reading history…</GitNotice>;
@@ -120,7 +122,7 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
           loading={detailLoading}
           error={detailError}
           selectedFile={selectedFile}
-          onSelectFile={setSelectedFile}
+          onSelectFile={onSelectFile}
         />
         {selectedFile ? (
           <div className="min-h-0 flex-1 overflow-y-auto border-t">

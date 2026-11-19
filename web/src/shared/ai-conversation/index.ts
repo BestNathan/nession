@@ -86,6 +86,7 @@ export { groupRows, summarizeTools } from './model/grouping'
 export type { ConversationRow, ToolGroupSummary } from './model/grouping'
 
 export { ConversationList } from './components/ConversationList'
+export { ConversationListSurface } from './components/ConversationListSurface'
 export { ConversationView } from './components/ConversationView'
 export type { ConversationLayout } from './components/ConversationView'
 

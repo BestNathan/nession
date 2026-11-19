@@ -5,6 +5,7 @@ import {
   imagesApi,
   type ImageBuildDescriptor,
   type ImageDescriptor,
+  type ImageLibraryEntry,
 } from '@/capabilities/images';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import { ProjectImageReferenceField } from '../../ProjectImageReferenceField';
@@ -63,6 +64,26 @@ function build(overrides: Partial<ImageBuildDescriptor> = {}): ImageBuildDescrip
   };
 }
 
+function libraryEntry(
+  descriptor: ImageDescriptor,
+  imageKind: string,
+): ImageLibraryEntry {
+  return {
+    image: descriptor,
+    repository: 'nession/fixtures',
+    tags: [],
+    manifest_digest: null,
+    media_type: null,
+    kind: null,
+    image_kind: imageKind,
+    mount_default: null,
+    platform: 'linux/amd64',
+    representation: 'single_layer',
+    layers: [],
+    closure: [],
+  };
+}
+
 const draft: ProjectDraft = {
   name: 'Nession',
   source: { repository_url: 'https://github.com/BestNathan/nession', ref: 'main' },
@@ -97,10 +118,13 @@ describe('Project image reference field', () => {
     expect(surface.requests[0]?.type).toBe('server.image.build.list');
     surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
     await userEvent.click(screen.getByTestId('project-image-choose'));
-    const list = surface.requests.find((request) => request.type === 'server.image.list');
-    expect(list?.payload).toEqual({ offset: 0, limit: 50, query: '' });
-    surface.resolveNext('server.image.list', {
-      images: [image()],
+    const list = surface.requests.find(
+      (request) => request.type === 'server.image.library.list',
+    );
+    expect(list?.payload).toEqual({ offset: 0, limit: 50, query: '', repository: '' });
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(image(), 'directory')],
       total: 1,
     });
     await screen.findByText('workspace-runtime');

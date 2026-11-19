@@ -180,6 +180,125 @@ async fn managed_create_pins_and_authorizes_every_artifact() {
 }
 
 #[tokio::test]
+async fn a_created_managed_session_keeps_its_pinned_snapshot_after_project_edits() {
+    let deps = managed_deps(Some(WORKSPACE_DIGEST)).await;
+    deps.db
+        .insert_image(&image_row(
+            "image-w",
+            WORKSPACE_DIGEST,
+            "ready",
+            Some(SOURCE_SHA),
+        ))
+        .await
+        .unwrap();
+    deps.db
+        .insert_image(&image_row("image-b", BASE_DIGEST, "ready", None))
+        .await
+        .unwrap();
+    let mut h = deps.handler("");
+    h.authenticated_client = true;
+    register_agent_id(&h, "a1", None).await;
+
+    let (reply, _request) = create_with_agent(
+        &mut h,
+        "managed-pinned",
+        json!({ "success": true, "workspace": "/state/managed/pinned/workspace" }),
+    )
+    .await;
+    assert_eq!(reply["payload"]["success"], json!(true));
+    let before =
+        h.db.get_session_managed_context("a1:managed-pinned")
+            .await
+            .unwrap()
+            .expect("managed context recorded");
+
+    // The Project is a declaration: a later edit changes what a new Session
+    // would receive, never the running Session's realized snapshot (#3794
+    // SC-02).
+    let mut project = h.db.get_project(PROJECT).await.unwrap().unwrap();
+    project.image_digest = Some(BASE_DIGEST.to_string());
+    project.source = Some(nession_protocol::contracts::project::v1::ProjectSource {
+        repository_url: "https://github.com/BestNathan/other".to_string(),
+        reference: "release".to_string(),
+    });
+    project.updated_at += 1;
+    h.db.update_project(&project).await.unwrap();
+
+    let after =
+        h.db.get_session_managed_context("a1:managed-pinned")
+            .await
+            .unwrap()
+            .expect("managed context survives the Project edit");
+    assert_eq!(after.workspace_digest, WORKSPACE_DIGEST);
+    assert_eq!(after.base_digest, BASE_DIGEST);
+    assert_eq!(after.source_sha.as_deref(), Some(SOURCE_SHA));
+    assert_eq!(
+        after.workspace.as_deref(),
+        Some("/state/managed/pinned/workspace")
+    );
+    assert_eq!(after.resolved_images, before.resolved_images);
+}
+
+#[tokio::test]
+async fn a_changed_project_git_source_refuses_a_stale_pinned_image() {
+    let deps = managed_deps(Some(WORKSPACE_DIGEST)).await;
+    let mut project = deps.db.get_project(PROJECT).await.unwrap().unwrap();
+    project.source = Some(nession_protocol::contracts::project::v1::ProjectSource {
+        repository_url: "https://github.com/BestNathan/other".to_string(),
+        reference: "main".to_string(),
+    });
+    deps.db.update_project(&project).await.unwrap();
+    deps.db
+        .insert_image(&crate::db::ImageRow {
+            source_json: serde_json::to_string(&ImageSource::GitHub {
+                repository_url: "https://github.com/BestNathan/nession".to_string(),
+                reference: "main".to_string(),
+            })
+            .unwrap(),
+            ..image_row("image-w", WORKSPACE_DIGEST, "ready", Some(SOURCE_SHA))
+        })
+        .await
+        .unwrap();
+    deps.db
+        .insert_image(&image_row("image-b", BASE_DIGEST, "ready", None))
+        .await
+        .unwrap();
+    let mut h = deps.handler("");
+    h.authenticated_client = true;
+    register_agent_id(&h, "a1", None).await;
+
+    let reply = parse_reply(
+        h.handle_message(proto_msg(
+            "server.session.create",
+            json!({
+                "agent_id": "a1",
+                "name": "stale-source",
+                "project_id": PROJECT,
+                "managed": { "base_digest": BASE_DIGEST },
+            }),
+        ))
+        .await
+        .unwrap(),
+    );
+    assert_eq!(reply["payload"]["success"], json!(false));
+    assert!(
+        reply["payload"]["error"]
+            .as_str()
+            .unwrap()
+            .contains("Git Source changed"),
+        "{}",
+        reply["payload"]
+    );
+    assert!(
+        h.db.get_session_managed_context("a1:stale-source")
+            .await
+            .unwrap()
+            .is_none(),
+        "a refused stale create records no managed context"
+    );
+}
+
+#[tokio::test]
 async fn a_managed_create_without_a_pinned_project_image_is_refused() {
     let deps = managed_deps(None).await;
     let mut h = deps.handler("");

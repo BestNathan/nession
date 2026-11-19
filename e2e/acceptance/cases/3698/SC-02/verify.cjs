@@ -49,6 +49,22 @@ if (!capabilities.backend) {
     assert.equal(facts.transient_upper_removed, true, 'cleanup removes the transient upper/work');
     assert.equal(facts.base_image_unchanged, true, 'the immutable Base image bytes are unchanged');
     assert.equal(facts.later_execution_isolated, true, 'a later execution cannot see the write');
+
+    const recoveryOutput = runLinuxRuntimeTest(
+      'a_failed_transient_rootfs_preparation_keeps_a_durable_recovery_record',
+    );
+    const recovery = runtimeEvidence(recoveryOutput);
+    for (const [key, message] of [
+      ['pending_record_written', 'the failed preparation persisted its rollback identity before mounting'],
+      ['rollback_unmount_failed', 'the injected strict unmount failed'],
+      ['transient_view_retained', 'the live transient view was retained'],
+      ['lower_consumer_retained', 'the read-only lower consumer was retained'],
+      ['restart_cleanup_succeeded', 'a restart cleaned the pending record'],
+      ['lower_released_after_unmount', 'the lower was released only after the verified unmount'],
+    ]) {
+      assert.equal(recovery[key], true, message);
+    }
+
     const kernel = checked('uname', ['-r'], 30000).trim();
     evidence.push({
       type: 'runtime',
@@ -56,11 +72,15 @@ if (!capabilities.backend) {
         'exact SHA ' + sha + ' on Linux kernel ' + kernel + ': a writable RootFS wrote through an ' +
         'execution-owned transient upper, the write was recorded and visible only in that ' +
         'execution; cleanup strictly unmounted and removed the transient upper/work, the Base ' +
-        'image bytes stayed identical, and a later execution was isolated',
+        'image bytes stayed identical, and a later execution was isolated. A preparation that ' +
+        'failed after mounting kept its durable recovery record; the failed strict unmount ' +
+        'retained the view and lower consumer, and a restart released the lower only after the ' +
+        'verified unmount',
     });
     return (
       'Writable RootFS writes stay in a disposable execution-owned upper, never mutate the ' +
-      'immutable image, and disappear after verified cleanup'
+      'immutable image, disappear after verified cleanup, and a failed preparation stays ' +
+      'retryable through its durable record'
     );
   });
 }

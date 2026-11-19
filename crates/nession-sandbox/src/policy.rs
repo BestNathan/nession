@@ -95,9 +95,10 @@ impl CompiledWorkspace {
 /// The compiled minimal composable root.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CompiledComposition {
-    pub base: CompiledImage,
+    /// The Base Runtime at `/`; `None` is a Host-root composition (#3792).
+    pub base: Option<CompiledImage>,
     /// Whether the Base Runtime is merged with an execution-owned transient
-    /// upper/work (#3698).
+    /// upper/work (#3698). Never true without a Base Runtime.
     pub base_writable: bool,
     pub workspace: Option<CompiledWorkspace>,
     /// Sorted by target, so the mount order is deterministic.
@@ -121,7 +122,13 @@ impl CompiledFilesystem {
         let Some(composition) = &self.composition else {
             return Vec::new();
         };
-        let mut probes = vec![PathBuf::from("/bin/sh"), composition.workspace_probe()];
+        let mut probes = Vec::new();
+        if composition.base.is_some() {
+            probes.push(PathBuf::from("/bin/sh"));
+        }
+        if composition.workspace.is_some() {
+            probes.push(composition.workspace_probe());
+        }
         probes.extend(
             composition
                 .toolchains
@@ -166,8 +173,8 @@ impl CompiledComposition {
         let mut positions: BTreeMap<String, usize> = BTreeMap::new();
         for (name, value) in self
             .base
-            .env
             .iter()
+            .flat_map(|base| base.env.iter())
             .chain(self.toolchains.iter().flat_map(|image| image.env.iter()))
         {
             match positions.get(name) {
@@ -546,16 +553,24 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
     }
     match &filesystem.rootfs {
         Some(SandboxFilesystemRoot::Local) => {
-            if composition.is_some()
-                || !filesystem.mounts.is_empty()
-                || filesystem.workspace.is_some()
-            {
+            if let Some(composition) = composition {
+                if composition.base.is_some() {
+                    return Err(SandboxError::InvalidPolicy(
+                        "filesystem.rootfs Local cannot carry a prepared Base Runtime image"
+                            .to_string(),
+                    ));
+                }
+                if composition.base_writable {
+                    return Err(SandboxError::InvalidPolicy(
+                        "a Local RootFS cannot be writable".to_string(),
+                    ));
+                }
+            } else if !filesystem.mounts.is_empty() || filesystem.workspace.is_some() {
                 return Err(SandboxError::InvalidPolicy(
-                    "filesystem.rootfs Local cannot carry an image composition, mounts or a workspace"
+                    "filesystem mounts/workspace require a prepared Host-root composition"
                         .to_string(),
                 ));
             }
-            return Ok(());
         }
         Some(SandboxFilesystemRoot::Image { digest, writable }) => {
             validate_image_digest(digest)?;
@@ -565,10 +580,15 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
                         .to_string(),
                 ));
             };
-            if composition.base.digest != *digest {
+            let Some(base) = composition.base.as_ref() else {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.rootfs digest `{digest}` was not prepared as a Base Runtime"
+                )));
+            };
+            if base.digest != *digest {
                 return Err(SandboxError::InvalidPolicy(format!(
                     "filesystem.rootfs digest `{digest}` does not match the prepared Base Runtime `{}`",
-                    composition.base.digest
+                    base.digest
                 )));
             }
             let writable = writable.unwrap_or(false);
@@ -580,9 +600,11 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
             }
         }
         None => {
-            if composition.is_none() {
+            if composition.is_none()
+                && (!filesystem.mounts.is_empty() || filesystem.workspace.is_some())
+            {
                 return Err(SandboxError::InvalidPolicy(
-                    "filesystem mounts/workspace require an image RootFS prepared by the Agent"
+                    "filesystem mounts/workspace require an image RootFS or a prepared Host-root composition"
                         .to_string(),
                 ));
             }
@@ -681,63 +703,102 @@ fn validate_filesystem_declaration(filesystem: &SandboxFilesystemPolicy) -> Resu
 
 fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<CompiledComposition> {
     let base_env = validate_image_env(&composition.base_env, "filesystem.composition.base_env")?;
-    let base = compile_image(&composition.base, Path::new("/"), base_env)?;
-    let Some(workspace_config) = composition.workspace.as_ref() else {
+    if composition.base.is_none() && !base_env.is_empty() {
         return Err(SandboxError::InvalidPolicy(
-            "filesystem.composition requires workspace.write so the user has a writable tree"
-                .to_string(),
-        ));
-    };
-    if workspace_config.image.is_some() && !workspace_config.lowers.is_empty() {
-        return Err(SandboxError::InvalidPolicy(
-            "filesystem.composition.workspace carries both a legacy image and an ordered lower \
-             set; use exactly one representation"
-                .to_string(),
+            "filesystem.composition.base_env requires a Base Runtime image".to_string(),
         ));
     }
-    let requested_lowers = workspace_config.effective_lowers();
-    if requested_lowers.len() > MAX_WORKSPACE_LOWERS {
-        return Err(SandboxError::InvalidPolicy(format!(
-            "filesystem.composition.workspace accepts at most {MAX_WORKSPACE_LOWERS} ordered lowers"
-        )));
-    }
-    let mut lowers = requested_lowers
-        .into_iter()
-        .map(|image| compile_image(image, Path::new("/workspace"), Vec::new()))
-        .collect::<Result<Vec<_>>>()?;
-    let mut seen = std::collections::BTreeSet::new();
-    for lower in &lowers {
-        if !seen.insert(lower.digest.clone()) {
-            return Err(SandboxError::InvalidPolicy(format!(
-                "filesystem.composition.workspace repeats the lower digest {}",
-                lower.digest
-            )));
-        }
-    }
-    lowers.shrink_to_fit();
-    let write = validate_path(&workspace_config.write)?;
-    if write == Path::new("/") {
+    if composition.base.is_none() && composition.base_writable {
         return Err(SandboxError::InvalidPolicy(
-            "filesystem.composition.workspace.write must name a bounded \
-             Agent-owned directory, not the host root"
-                .to_string(),
+            "filesystem.composition.base_writable requires a Base Runtime image".to_string(),
         ));
     }
-    if workspace_config.ownership == SandboxWorkspaceOwnership::ProjectLocation
-        && !lowers.is_empty()
-    {
-        return Err(SandboxError::InvalidPolicy(
-            "filesystem.composition.workspace cannot combine a Project Location with a \
-             Project EROFS lower; the writable upper of a Project Location is user-owned"
-                .to_string(),
-        ));
-    }
-    let workspace = Some(CompiledWorkspace {
-        lowers,
-        write,
-        ownership: workspace_config.ownership,
-    });
+    let base = composition
+        .base
+        .as_ref()
+        .map(|base| compile_image(base, Path::new("/"), base_env))
+        .transpose()?;
 
+    let workspace = match composition.workspace.as_ref() {
+        Some(workspace_config) => {
+            if workspace_config.image.is_some() && !workspace_config.lowers.is_empty() {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.composition.workspace carries both a legacy image and an ordered lower \
+                     set; use exactly one representation"
+                        .to_string(),
+                ));
+            }
+            let requested_lowers = workspace_config.effective_lowers();
+            if requested_lowers.len() > MAX_WORKSPACE_LOWERS {
+                return Err(SandboxError::InvalidPolicy(format!(
+                    "filesystem.composition.workspace accepts at most {MAX_WORKSPACE_LOWERS} ordered lowers"
+                )));
+            }
+            let mut lowers = requested_lowers
+                .into_iter()
+                .map(|image| compile_image(image, Path::new("/workspace"), Vec::new()))
+                .collect::<Result<Vec<_>>>()?;
+            let mut seen = std::collections::BTreeSet::new();
+            for lower in &lowers {
+                if !seen.insert(lower.digest.clone()) {
+                    return Err(SandboxError::InvalidPolicy(format!(
+                        "filesystem.composition.workspace repeats the lower digest {}",
+                        lower.digest
+                    )));
+                }
+            }
+            lowers.shrink_to_fit();
+            let write = validate_path(&workspace_config.write)?;
+            if write == Path::new("/") {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.composition.workspace.write must name a bounded \
+                     Agent-owned directory, not the host root"
+                        .to_string(),
+                ));
+            }
+            if workspace_config.ownership == SandboxWorkspaceOwnership::ProjectLocation
+                && !lowers.is_empty()
+            {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.composition.workspace cannot combine a Project Location with a \
+                     Project EROFS lower; the writable upper of a Project Location is user-owned"
+                        .to_string(),
+                ));
+            }
+            Some(CompiledWorkspace {
+                lowers,
+                write,
+                ownership: workspace_config.ownership,
+            })
+        }
+        None => {
+            if base.is_some() {
+                return Err(SandboxError::InvalidPolicy(
+                    "filesystem.composition requires workspace.write so the user has a writable tree"
+                        .to_string(),
+                ));
+            }
+            None
+        }
+    };
+
+    let mut toolchains = compile_toolchains(composition)?;
+    if base.is_none() && workspace.is_none() && toolchains.is_empty() {
+        return Err(SandboxError::InvalidPolicy(
+            "filesystem.composition requires a Base Runtime, a Workspace or a Toolchain"
+                .to_string(),
+        ));
+    }
+    toolchains.shrink_to_fit();
+    Ok(CompiledComposition {
+        base,
+        base_writable: composition.base_writable,
+        workspace,
+        toolchains,
+    })
+}
+
+fn compile_toolchains(composition: &SandboxFilesystemComposition) -> Result<Vec<CompiledImage>> {
     let mut toolchains = composition
         .toolchains
         .iter()
@@ -779,12 +840,7 @@ fn compile_composition(composition: &SandboxFilesystemComposition) -> Result<Com
         }
     }
     validate_tool_env_precedence(&toolchains)?;
-    Ok(CompiledComposition {
-        base,
-        base_writable: composition.base_writable,
-        workspace,
-        toolchains,
-    })
+    Ok(toolchains)
 }
 
 fn compile_image(
@@ -1064,7 +1120,7 @@ fn invalid_toolchain_target(raw: &str) -> SandboxError {
 
 fn normalize_composition(composition: &CompiledComposition) -> SandboxFilesystemComposition {
     SandboxFilesystemComposition {
-        base: normalized_image(&composition.base),
+        base: composition.base.as_ref().map(normalized_image),
         base_writable: composition.base_writable,
         workspace: composition
             .workspace
@@ -1089,7 +1145,11 @@ fn normalize_composition(composition: &CompiledComposition) -> SandboxFilesystem
                     .map(|path| path.to_string_lossy().into_owned()),
             })
             .collect(),
-        base_env: normalized_env(&composition.base.env),
+        base_env: composition
+            .base
+            .as_ref()
+            .map(|base| normalized_env(&base.env))
+            .unwrap_or_default(),
     }
 }
 
@@ -1385,11 +1445,147 @@ mod tests {
     }
 
     #[test]
+    fn a_host_root_composition_compiles_a_toolchain_without_a_base() {
+        let tool = format!("sha256:{}", "c".repeat(64));
+        let compiled = compile(&policy(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "mounts": [{
+                    "source": { "kind": "image", "digest": tool },
+                    "target": "/opt/tool",
+                    "read_only": true,
+                }],
+                "composition": {
+                    "toolchains": [{
+                        "digest": tool,
+                        "source": "/data/erofs/sha256/tool",
+                        "target": "/opt/tool",
+                    }],
+                },
+            },
+        })))
+        .expect("a Local RootFS may carry a toolchain without a Base Runtime");
+        let composition = compiled
+            .filesystem
+            .expect("filesystem")
+            .composition
+            .expect("composition");
+        assert!(composition.base.is_none());
+        assert!(composition.workspace.is_none());
+        assert!(!composition.base_writable);
+        assert_eq!(composition.toolchains.len(), 1);
+        assert_eq!(composition.toolchains[0].target, PathBuf::from("/opt/tool"));
+        assert!(composition.image_env_defaults().is_empty());
+    }
+
+    #[test]
+    fn a_host_root_composition_with_a_workspace_keeps_the_workspace_view() {
+        let tool = format!("sha256:{}", "c".repeat(64));
+        let compiled = compile(&policy(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "workspace": { "kind": "auto" },
+                "mounts": [{
+                    "source": { "kind": "image", "digest": tool },
+                    "target": "/opt/tool",
+                    "read_only": true,
+                }],
+                "composition": {
+                    "workspace": {
+                        "write": "/data/sandbox/executions/e1/workspace"
+                    },
+                    "toolchains": [{
+                        "digest": tool,
+                        "source": "/data/erofs/sha256/tool",
+                        "target": "/opt/tool",
+                    }],
+                },
+            },
+        })))
+        .expect("a Host-root composition compiles with a Workspace and toolchain");
+        let filesystem = compiled.filesystem.expect("filesystem");
+        let probes = filesystem.composition_probes();
+        let composition = filesystem.composition.expect("composition");
+        assert!(composition.base.is_none());
+        assert_eq!(
+            composition
+                .workspace
+                .as_ref()
+                .map(|workspace| workspace.write.clone()),
+            Some(PathBuf::from("/data/sandbox/executions/e1/workspace"))
+        );
+        assert_eq!(probes.len(), 2);
+    }
+
+    #[test]
+    fn a_local_root_cannot_carry_a_prepared_base_and_a_host_root_never_writes_its_root() {
+        let base = format!("sha256:{}", "a".repeat(64));
+        let error = compile(&policy(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "composition": {
+                    "base": { "digest": base, "source": "/data/erofs/sha256/base" },
+                    "workspace": { "write": "/data/sandbox/executions/e1/workspace" },
+                },
+            },
+        })))
+        .unwrap_err();
+        assert!(
+            format!("{error}").contains("Local cannot carry a prepared Base Runtime"),
+            "{error}"
+        );
+
+        let tool = format!("sha256:{}", "c".repeat(64));
+        let error = compile(&policy(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "composition": {
+                    "base_writable": true,
+                    "toolchains": [{
+                        "digest": tool,
+                        "source": "/data/erofs/sha256/tool",
+                        "target": "/opt/tool",
+                    }],
+                },
+            },
+        })))
+        .unwrap_err();
+        assert!(
+            format!("{error}").contains("base_writable requires a Base Runtime"),
+            "{error}"
+        );
+
+        let error = compile(&policy(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "composition": {},
+            },
+        })))
+        .unwrap_err();
+        assert!(
+            format!("{error}").contains("requires a Base Runtime, a Workspace or a Toolchain"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn a_prepared_composition_compiles_and_sorts_its_toolchains() {
         let compiled = compile(&policy(composition_policy())).expect("valid composition");
         let filesystem = compiled.filesystem.expect("filesystem");
         let composition = filesystem.composition.expect("composition");
-        assert_eq!(composition.base.target, PathBuf::from("/"));
+        assert_eq!(
+            composition.base.as_ref().map(|base| base.target.clone()),
+            Some(PathBuf::from("/"))
+        );
         assert!(composition.workspace.as_ref().unwrap().has_lowers());
         assert_eq!(
             composition

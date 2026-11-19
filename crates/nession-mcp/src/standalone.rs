@@ -35,9 +35,12 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
+use nession_protocol::contracts::mcp::v1::McpToolManifest;
 use serde::Deserialize;
+use tracing::warn;
 
 use crate::backend::NodeBackend;
+use crate::catalog::McpCatalog;
 use crate::protocol;
 use crate::remote::{RemoteClusterBackend, RemoteNodeBackend, ServerRoutedNodeBackend};
 use crate::service::{allowed_hosts_for_bind, McpService, ServiceConfig};
@@ -241,7 +244,13 @@ impl StandaloneConfig {
     }
 
     /// Build the service from explicit backends.
-    pub fn build_service(&self) -> anyhow::Result<Arc<McpService>> {
+    ///
+    /// Before serving, it reads the Server's validated Extension contribution
+    /// manifest (`#3778`) so this host advertises the same Tool definitions
+    /// the Server does. A Server that cannot answer (offline, or predating the
+    /// unit) leaves this host with the baseline catalog: it never invents
+    /// contributed Tools, and execution still reports the backend truth.
+    pub async fn build_service(&self) -> anyhow::Result<Arc<McpService>> {
         let server = self
             .backend
             .server
@@ -265,7 +274,32 @@ impl StandaloneConfig {
                 Arc::new(routed)
             }
         };
-        let service = McpService::new(self.service_config(), Arc::new(cluster), node)?;
+        let manifest = match cluster.mcp_tool_manifest().await {
+            Ok(manifest) => manifest,
+            Err(error) => {
+                warn!(
+                    "the Server did not provide an Extension Tool manifest; advertising the \
+                     baseline catalog only: {error}"
+                );
+                McpToolManifest::new(Vec::new())
+            }
+        };
+        let catalog = match McpCatalog::from_manifest(&manifest) {
+            Ok(catalog) => catalog,
+            Err(error) => {
+                warn!(
+                    "the Server's Extension Tool manifest is not usable by this host; advertising \
+                     the baseline catalog only: {error}"
+                );
+                McpCatalog::baseline()?
+            }
+        };
+        let service = McpService::with_catalog(
+            self.service_config(),
+            Arc::new(cluster),
+            node,
+            Arc::new(catalog),
+        )?;
         Ok(Arc::new(service))
     }
 

@@ -22,9 +22,14 @@ impl ConnectionHandler {
             Ok(payload) => payload,
             Err(reply) => return Ok(reply),
         };
+        let filter = crate::image::builds::BuildListFilter {
+            statuses: payload.statuses,
+            sources: payload.sources,
+            query: payload.query,
+        };
         match self
             .image_manager
-            .list_builds(payload.offset, payload.limit)
+            .list_builds_filtered(payload.offset, payload.limit, &filter)
             .await
         {
             Ok(page) => Ok(image_build_list_reply(&msg.id, WIRE, &page)),

@@ -6,7 +6,8 @@
 // binary, carries no Server/Agent/UI/toolchain payload and no credential, the
 // staging and production lanes publish `mcp-<tag>` with the existing
 // provenance/ACR checks, the deployment sample is independently selectable and
-// read-only, and no GitOps rollout rule gains an MCP workload.
+// read-only, and only staging may add the separately owned MCP GitOps overlay.
+// Other environments must keep the existing three-workload rollout boundary.
 //
 // This is a source/deterministic guard, not runtime proof. The staging Case
 // owns container/protocol behavior and registry readback.
@@ -76,6 +77,7 @@ export function checkSources(files) {
     'FROM debian:bookworm-slim',
     'ca-certificates',
     'COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp',
+    'chmod +x /usr/local/bin/nession-mcp',
     'ARG TARGETARCH',
     'amd64) expected=3e00',
     'arm64) expected=b700',
@@ -182,8 +184,18 @@ export function checkSources(files) {
     '"mcp-${runtime_version}" "ui-${ui_version}"',
   ]);
 
-  // Independence: stopping or deploying MCP never changes the rollout rule.
-  rejects(GITOPS, /mcp/i, 'GitOps rollout must not gain an MCP workload');
+  // #3902: a distinct staging Argo Application may consume the fourth OCI
+  // role. The existing Nession app still has only three roles, and production,
+  // preprod and staging-01 must never acquire an implicit MCP workload.
+  includes(GITOPS, [
+    'if [[ "${env}" == "staging" ]]; then\n  for img in server agent ui mcp; do',
+    'for img in server agent ui; do',
+    'if [[ "${env}" == "staging" ]]; then\n  mcp_overlay="${tmp}/environments/staging/mcp"',
+    'if [[ ! -f "${mcp_overlay}/kustomization.yaml" ]]; then',
+    '"ghcr.io/${OWNER}/nession-mcp=${TARGET_IMAGE}:mcp-${ref}"',
+  ]);
+  rejects(GITOPS, /for img in mcp; do/,
+    'standalone MCP must not enter generic GitOps rollout');
   rejects(DEV_COMPOSE, /^\s*mcp:\s*$/m,
     'the Server/Agent dev stack must not auto-install the MCP service');
 
@@ -207,6 +219,9 @@ function selfTest(files) {
     ['Dockerfile loses the prebuilt binary', DOCKERFILE,
       (t) => replaceOnce(t, 'COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp\n', ''),
       'missing COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp'],
+    ['Dockerfile loses the artifact executable bit', DOCKERFILE,
+      (t) => replaceOnce(t, '    chmod +x /usr/local/bin/nession-mcp; \\\n', ''),
+      'missing chmod +x /usr/local/bin/nession-mcp'],
     ['Dockerfile loses the ELF architecture probe', DOCKERFILE,
       (t) => replaceOnce(t, 'amd64) expected=3e00', 'amd64) expected=0000'),
       'missing amd64) expected=3e00'],
@@ -237,9 +252,23 @@ function selfTest(files) {
     ['example carries a real token', EXAMPLE,
       (t) => replaceOnce(t, 'auth_token = ""\n\n# The authorities', 'auth_token = "fixture-secret"\n\n# The authorities'),
       'example must not carry a credential'],
-    ['GitOps gains an MCP workload', GITOPS,
+    ['Staging ACR verification drops MCP', GITOPS,
+      (t) => replaceOnce(t, 'for img in server agent ui mcp; do', 'for img in server agent ui; do'),
+      'missing if [[ "${env}" == "staging" ]]; then'],
+    ['Staging MCP loses its guarded overlay', GITOPS,
+      (t) => replaceOnce(t, 'if [[ "${env}" == "staging" ]]; then\n  mcp_overlay=',
+        'if true; then\n  mcp_overlay='),
+      'missing if [[ "${env}" == "staging" ]]; then'],
+    ['Staging MCP loses fail-closed overlay check', GITOPS,
+      (t) => replaceOnce(t, 'if [[ ! -f "${mcp_overlay}/kustomization.yaml" ]]; then',
+        'if [[ "${env}" == "unused" ]]; then'),
+      'missing if [[ ! -f "${mcp_overlay}/kustomization.yaml" ]]; then'],
+    ['Staging MCP loses source-pinned tag', GITOPS,
+      (t) => replaceOnce(t, 'mcp-${ref}"', 'mcp-latest"'),
+      'missing "ghcr.io/${OWNER}/nession-mcp=${TARGET_IMAGE}:mcp-${ref}"'],
+    ['GitOps gains a generic MCP workload', GITOPS,
       (t) => t + '\nfor img in mcp; do :; done\n',
-      'GitOps rollout must not gain an MCP workload'],
+      'standalone MCP must not enter generic GitOps rollout'],
     ['docs lose the release tags', DOCS,
       (t) => t.replaceAll('mcp-<short-sha>', 'mcp-tag'),
       'missing mcp-<short-sha>'],

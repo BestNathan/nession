@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { sessionsApi } from '@/product/session';
 import {
-  createEnvRequest,
   useCreateSessionEnvCatalog,
   useProjectEnvSelection,
 } from '@/product/session/hooks/useCreateSessionEnv';
-import { validateCreateSession } from '@/product/session/model/createSessionValidation';
+import { useManagedCreateForm } from '@/product/session/hooks/useManagedCreateForm';
+import { useCreateSessionSubmission } from '@/product/session/hooks/useCreateSessionSubmission';
 import { useDialogReset } from '@/shared/hooks/useDialogReset';
 import type { Agent, EnvFileRef } from '@/types';
 import type { Project, ProjectLocation } from '@/product/project/types';
@@ -20,20 +19,13 @@ interface CreateSessionFormOptions {
   onClose: () => void;
 }
 
-/** The form-event wrapper around the one submit action. */
-function preventDefaultSubmit(submit: () => Promise<void>) {
-  return (event: React.FormEvent) => {
-    event.preventDefault();
-    void submit();
-  };
-}
-
 /**
- * The create-session form state, project/location resolution and submit path.
+ * The create-session form state, Project runtime resolution and submit path.
  *
- * Kept out of the dialog component so the rendered form stays a description of
- * the fields: the Project branch changes where Agent and directory come from,
- * not what the form is.
+ * Kept out of the dialog component so the rendered form stays a description
+ * of the fields. A Project Session has two explicit runtimes: an Existing
+ * Location (Host) or a Managed EROFS composition (#3794). The global New
+ * Session flow keeps its pre-Project behavior.
  */
 export function useCreateSessionForm({
   isOpen,
@@ -48,14 +40,9 @@ export function useCreateSessionForm({
   const [sessionName, setSessionName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
   const { envFiles, envCatalogState } = useCreateSessionEnvCatalog(isOpen);
   const [selectedEnv, setSelectedEnv] = useState<EnvFileRef[]>([]);
-  /**
-   * The Project branch starts on `inherit`: the Server's legacy behavior is
-   * exactly what a user reading "Use Project defaults" expects. The mode is
-   * page state, not copied ENV state, so switching the Project while the dialog
-   * is open recomputes the effective preview from the new declaration.
-   */
   const [envSelectionMode, setEnvSelectionMode] =
     useState<CreateEnvSelectionMode>('inherit');
   const nameInputRef = useRef<HTMLInputElement>(null);
@@ -68,6 +55,41 @@ export function useCreateSessionForm({
     : undefined;
   const locationUnavailable = Boolean(project) && selectedLocationAgent?.status !== 'online';
 
+  const { effectiveEnv, unavailableEnv } = useProjectEnvSelection({
+    project,
+    envFiles,
+    envCatalogState,
+    selectedEnv,
+    envSelectionMode,
+  });
+  const managed = useManagedCreateForm({
+    isOpen,
+    project,
+    onlineAgents,
+    onSelectionChange: () => {
+      setReviewing(false);
+      setError(null);
+    },
+  });
+  const { submit, beginReview, handleSubmit } = useCreateSessionSubmission({
+    sessionName,
+    agentId,
+    project,
+    selectedLocation,
+    selectedLocationAgent,
+    envSelectionMode,
+    selectedEnv,
+    unavailableEnv,
+    reviewing,
+    setReviewing,
+    setError,
+    setLoading,
+    managed,
+    onCreated,
+    onClose,
+  });
+
+  const resetManaged = managed.resetManaged;
   const onlineAgentsRef = useRef(onlineAgents);
   onlineAgentsRef.current = onlineAgents;
 
@@ -80,7 +102,9 @@ export function useCreateSessionForm({
     setError(null);
     setSelectedEnv([]);
     setEnvSelectionMode('inherit');
-  }, [preselectedAgentId]);
+    setReviewing(false);
+    resetManaged();
+  }, [preselectedAgentId, resetManaged]);
   useDialogReset(isOpen, resetState);
 
   useEffect(() => {
@@ -89,69 +113,15 @@ export function useCreateSessionForm({
     }
   }, [isOpen]);
 
-  const { effectiveEnv, unavailableEnv } = useProjectEnvSelection({
-    project,
-    envFiles,
-    envCatalogState,
-    selectedEnv,
-    envSelectionMode,
-  });
-
-  /**
-   * The one create action. It is exposed without a form-event dependency so a
-   * surface whose anchored CTA lives outside its `<form>` (the App operation
-   * page, #3089) runs the same validation and submission.
-   */
-  const submit = async () => {
-    const invalid = validateCreateSession({
-      sessionName,
-      agentId,
-      project,
-      selectedLocation,
-      selectedLocationAgent,
-      envSelectionMode,
-      selectedEnv,
-      unavailableEnv,
-    });
-    if (invalid) {
-      setError(invalid);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const envRequest = createEnvRequest(project, envSelectionMode, selectedEnv);
-      const result = project && selectedLocation
-        ? await sessionsApi.createSession(
-            selectedLocation.agent_id,
-            sessionName.trim(),
-            envRequest.files,
-            {
-              workingDir: selectedLocation.path,
-              projectId: project.project_id,
-              envSelectionMode: envRequest.envSelectionMode,
-            },
-          )
-        : await sessionsApi.createSession(agentId, sessionName.trim(), envRequest.files);
-      if (result.success) {
-        onCreated(result.session_id);
-        onClose();
-      } else {
-        setError(result.error ?? 'Failed to create session');
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create session');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSubmit = preventDefaultSubmit(submit);
-
   return {
     submit,
     handleSubmit,
+    beginReview,
+    backToForm: () => {
+      setReviewing(false);
+      setError(null);
+    },
+    reviewing,
     agentId,
     setAgentId,
     locationIndex,
@@ -172,6 +142,9 @@ export function useCreateSessionForm({
     onlineAgents,
     locations,
     selectedLocation,
+    selectedLocationAgent,
     locationUnavailable,
+    project,
+    ...managed,
   };
 }

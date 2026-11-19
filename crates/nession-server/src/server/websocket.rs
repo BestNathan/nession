@@ -47,6 +47,10 @@ pub struct WebSocketServer {
     /// The MCP endpoint (`#565`), when `[mcp] enabled = true`. It shares this
     /// listener and the Server's business services.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// The validated Extension-contribution catalog (`#3778`). Registration
+    /// installs manifests here; the MCP endpoint and
+    /// `server.mcp.tool.call` route read the same owner.
+    extension_tools: Arc<super::extension_tools::ExtensionToolCatalog>,
     /// Global EROFS image manager (#3022), shared by every connection.
     image_manager: Arc<ImageManager>,
     /// Authorized blob HTTP route mounted on this listener.
@@ -70,6 +74,13 @@ impl WebSocketServer {
         session_registry.load_from_db().await;
 
         let command_broker = Arc::new(CommandBroker::new());
+        // One owner for Extension-contributed MCP Tool manifests (#3778):
+        // registration writes it, the MCP endpoint and the routing unit read
+        // it, and a rejected manifest leaves the previous generation intact.
+        let extension_tools = Arc::new(super::extension_tools::ExtensionToolCatalog::new(
+            Arc::clone(&agent_registry),
+            Arc::clone(&command_broker),
+        )?);
         let client_registry = Arc::new(ClientRegistry::new());
         let web_client_registry = Arc::new(WebClientRegistry::new());
 
@@ -131,6 +142,8 @@ impl WebSocketServer {
             ImageManagerOptions {
                 max_concurrent_builds: config.image_max_concurrent_builds,
                 build_root: std::path::PathBuf::from(&config.image_build_dir),
+                source_root: (!config.image_source_root.trim().is_empty())
+                    .then(|| std::path::PathBuf::from(config.image_source_root.trim())),
                 build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
                     .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),
                 build_log_max_bytes: config.image_build_log_max_bytes,
@@ -177,6 +190,7 @@ impl WebSocketServer {
                 env_service: Arc::clone(&env_service),
                 image_manager: Arc::clone(&image_manager),
                 db: Arc::clone(&db),
+                extension_tools: Some(Arc::clone(&extension_tools)),
             },
             Arc::clone(&mutations),
         )?;
@@ -192,6 +206,7 @@ impl WebSocketServer {
             db,
             mutations,
             mcp,
+            extension_tools,
             image_manager,
             image_http,
             listener: Some(listener),
@@ -418,6 +433,7 @@ impl WebSocketServer {
                         db: Arc::clone(&self.db),
                         mutations: Arc::clone(&self.mutations),
                         mcp: self.mcp.clone(),
+                        extension_tools: Arc::clone(&self.extension_tools),
                         mcp_enabled: self.config.mcp.enabled,
                         mcp_path: self.config.mcp.path.clone(),
                         image_manager: Arc::clone(&self.image_manager),
@@ -512,6 +528,8 @@ struct ServerContext {
     mutations: Arc<KeyedLane<ResourceKey>>,
     /// The MCP endpoint mounted on this listener, when enabled.
     mcp: Option<Arc<nession_mcp::McpService>>,
+    /// The validated Extension-contribution catalog (`#3778`).
+    extension_tools: Arc<super::extension_tools::ExtensionToolCatalog>,
     /// Whether `[mcp] enabled = true` (#3600). Stated separately from the
     /// mounted service so the protocol answer is the configuration that was
     /// actually applied at startup.
@@ -725,6 +743,7 @@ async fn handle_ws_stream(
         ws_auth_timeout,
         image_manager,
         mcp: _,
+        extension_tools,
         mcp_enabled,
         mcp_path,
         image_http: _,
@@ -749,6 +768,7 @@ async fn handle_ws_stream(
             env_service,
             image_manager,
             db,
+            extension_tools: Some(extension_tools),
         },
         crate::server::handler::ConnectionHandlerConfig {
             server_auth_token: auth_token,

@@ -71,6 +71,9 @@ libc = "0.2"
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
 nession-server = { path = "../nession-server" }
+# The fixture Extension Tool in the MCP composition test derives its typed
+# schemas the same way a real provider does (#3778).
+schemars.workspace = true
 base64.workspace = true
 rand.workspace = true
 tempfile = "3"

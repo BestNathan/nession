@@ -21,6 +21,7 @@
 
 use std::time::Duration;
 
+use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_protocol::contracts::session::v1::{
     AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionKillPayload,
     SessionKillResponse, SessionListResponse,
@@ -108,6 +109,36 @@ impl AgentConnection {
             .await?;
         serde_json::from_value(payload).map_err(|source| ClientError::Reply {
             wire: wire::AGENT_SESSION_LIST.to_string(),
+            source,
+        })
+    }
+
+    /// `agent.mcp.tool.call` — one Extension-contributed Tool call on the
+    /// direct Agent connection (`#3778`).
+    ///
+    /// The Agent validates that the named target is itself and executes
+    /// through the same composed catalog its embedded MCP endpoint serves.
+    pub async fn call_mcp_tool(
+        &mut self,
+        agent_id: &str,
+        tool: &str,
+        arguments: Value,
+    ) -> Result<McpToolCallReply, ClientError> {
+        let payload = self
+            .request(
+                proto_msg(
+                    wire::AGENT_MCP_TOOL_CALL,
+                    McpToolCallPayload {
+                        agent_id: agent_id.to_string(),
+                        tool: tool.to_string(),
+                        arguments,
+                    },
+                ),
+                DEFAULT_REQUEST_TIMEOUT,
+            )
+            .await?;
+        serde_json::from_value(payload).map_err(|source| ClientError::Reply {
+            wire: wire::AGENT_MCP_TOOL_CALL.to_string(),
             source,
         })
     }

@@ -179,11 +179,12 @@ pub enum WorkspaceMount {
 /// Host views the launcher binds into the Sandbox.
 #[derive(Debug, Clone)]
 pub struct ResolvedComposition {
-    pub base: PathBuf,
+    /// The Base Runtime host view; `None` is a Host-root composition (#3792).
+    pub base: Option<PathBuf>,
     /// Whether the launcher binds the Base host view writable. A transient
     /// RootFS is merged with an execution-owned upper/work.
     pub base_writable: bool,
-    pub workspace: WorkspaceMount,
+    pub workspace: Option<WorkspaceMount>,
     /// `(sandbox target, host view)`, sorted by target.
     pub toolchains: Vec<(PathBuf, PathBuf)>,
 }
@@ -196,26 +197,22 @@ pub struct MountedComposition {
 
 impl MountedComposition {
     pub(super) fn new(views: Vec<MountedView>) -> Result<Self> {
-        let base_view = views
-            .iter()
-            .find(|view| view.role() == MountRole::Base)
-            .ok_or_else(|| {
-                SandboxError::InvalidPolicy("the mount plan has no Base view".to_string())
-            })?;
-        let base = base_view.host_view().to_path_buf();
-        let base_writable = base_view.source_kind() == MountSourceKind::Overlay;
+        let base_view = views.iter().find(|view| view.role() == MountRole::Base);
+        let base = base_view.map(|view| view.host_view().to_path_buf());
+        let base_writable =
+            base_view.is_some_and(|view| view.source_kind() == MountSourceKind::Overlay);
         let workspace_view = views
             .iter()
-            .find(|view| view.role() == MountRole::Workspace)
-            .ok_or_else(|| {
-                SandboxError::InvalidPolicy("the mount plan has no Workspace view".to_string())
-            })?;
-        let workspace = match workspace_view.source_kind() {
-            MountSourceKind::Bind => WorkspaceMount::Bind(workspace_view.host_view().to_path_buf()),
-            MountSourceKind::Overlay => {
-                WorkspaceMount::Overlay(workspace_view.host_view().to_path_buf())
+            .find(|view| view.role() == MountRole::Workspace);
+        let workspace = match workspace_view.map(|view| (view.source_kind(), view)) {
+            None => None,
+            Some((MountSourceKind::Bind, view)) => {
+                Some(WorkspaceMount::Bind(view.host_view().to_path_buf()))
             }
-            MountSourceKind::Erofs => {
+            Some((MountSourceKind::Overlay, view)) => {
+                Some(WorkspaceMount::Overlay(view.host_view().to_path_buf()))
+            }
+            Some((MountSourceKind::Erofs, _)) => {
                 return Err(SandboxError::InvalidPolicy(
                     "the Workspace view cannot be a read-only EROFS image".to_string(),
                 ))

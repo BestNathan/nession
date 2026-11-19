@@ -14,6 +14,7 @@ description = "The Nession Protocol Kernel: identity, envelope, descriptors, man
 # docs/architecture/protocol.md.
 [dependencies]
 serde.workspace = true
+serde_json.workspace = true
 thiserror.workspace = true
 # Codegen only, and optional. `ts-rs` is not a Nession crate, so it does not
 # touch the rule above — but it is still kept off the default dependency list,
@@ -37,7 +38,6 @@ schema = ["dep:schemars"]
 codegen = ["dep:ts-rs", "schema"]
 
 [dev-dependencies]
-serde_json.workspace = true
 
 [lints]
 workspace = true

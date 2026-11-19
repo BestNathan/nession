@@ -30,16 +30,22 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
     ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::mcp::v1::{McpToolCallReply, McpToolManifest};
+use nession_protocol::contracts::project::v1::{
+    ProjectGetPayload, ProjectGetResponsePayload, ProjectListResponsePayload,
+};
 use nession_protocol::contracts::session::v1::{
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionKillResponse, SessionRefusal,
+    ServerSessionListReply, SessionKillResponse, SessionRefusal, WebSessionsListResponse,
 };
+use serde_json::Map;
 use std::time::Duration;
 use tracing::debug;
 
 use crate::backend::{ClusterBackend, NodeBackend};
-use crate::error::ToolError;
+use crate::error::{ToolError, ToolErrorKind};
 use crate::tools::nession_agent_create_session::SessionCreatedOutput;
 use crate::tools::nession_agent_list_sessions::SessionListOutput;
 
@@ -76,6 +82,20 @@ impl RemoteClusterBackend {
     async fn close(connection: ClientConnection) {
         close_server(connection).await;
     }
+
+    /// The Server's validated Extension contribution manifest (`#3778`).
+    ///
+    /// A standalone host advertises exactly what the Server would; the unit is
+    /// authenticated with the same Server token the cluster backend uses.
+    pub async fn mcp_tool_manifest(&self) -> Result<McpToolManifest, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .list_mcp_tools()
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        Ok(reply.manifest)
+    }
 }
 
 #[async_trait]
@@ -90,6 +110,50 @@ impl ClusterBackend for RemoteClusterBackend {
                 Err(refusal_error(status, message))
             }
         }
+    }
+
+    async fn list_sessions(
+        &self,
+        agent_id: Option<&str>,
+        force: bool,
+    ) -> Result<WebSessionsListResponse, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = list_server_sessions(&mut connection, agent_id, force).await;
+        Self::close(connection).await;
+        reply
+    }
+
+    async fn project_list(&self) -> Result<ProjectListResponsePayload, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection.project_list().await.map_err(map_client_error)?;
+        Self::close(connection).await;
+        Ok(reply)
+    }
+
+    async fn project_get(
+        &self,
+        payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .project_get(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        Ok(reply)
+    }
+
+    async fn create_project_session(
+        &self,
+        payload: ClientSessionCreatePayload,
+    ) -> Result<ClientSessionCreateResponsePayload, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .create_session_payload(payload)
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        Ok(reply)
     }
 
     async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
@@ -204,6 +268,28 @@ fn refusal_error(status: String, message: String) -> ToolError {
     ToolError::backend(format!("{status}: {message}"))
 }
 
+/// The Server's `server.session.list` union as a successful list or an error.
+///
+/// Shared by the Server-owned Project query and the Server-routed Agent view:
+/// both must interpret the refusal arm the same way, and neither may turn it
+/// into an empty list.
+async fn list_server_sessions(
+    connection: &mut ClientConnection,
+    agent_id: Option<&str>,
+    force: bool,
+) -> Result<WebSessionsListResponse, ToolError> {
+    match connection
+        .list_sessions_with_force(agent_id, force)
+        .await
+        .map_err(map_client_error)?
+    {
+        ServerSessionListReply::Listed(listed) => Ok(listed),
+        ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
+            Err(refusal_error(status, message))
+        }
+    }
+}
+
 /// Agent-owned Session tools routed through the Server's canonical Agent path.
 ///
 /// This is the standalone default. The Server owns authentication,
@@ -275,20 +361,15 @@ impl NodeBackend for ServerRoutedNodeBackend {
         let mut connection = self.connect_to_agent(agent_id).await?;
         // `force: true` asks the target Agent for its live tmux state; the
         // registry's cached view is not "Agent truth" and the Tool promises it.
-        let reply = connection
-            .list_sessions_with_force(Some(agent_id), true)
-            .await
-            .map_err(map_client_error)?;
+        // The reply is the Server projection, so the Session identity and its
+        // current Project association travel with the live state.
+        let reply = list_server_sessions(&mut connection, Some(agent_id), true).await;
         close_server(connection).await;
-        match reply {
-            ServerSessionListReply::Listed(listed) => Ok(SessionListOutput::from_web_sessions(
-                &listed.sessions,
-                listed.stale_agents,
-            )),
-            ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
-                Err(refusal_error(status, message))
-            }
-        }
+        let listed = reply?;
+        Ok(SessionListOutput::from_web_sessions(
+            &listed.sessions,
+            listed.stale_agents,
+        ))
     }
 
     async fn create_session(
@@ -341,6 +422,21 @@ impl NodeBackend for ServerRoutedNodeBackend {
         Ok(SessionKillResponse {
             name: name.to_string(),
         })
+    }
+
+    async fn call_extension_tool(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        arguments: Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, ToolError> {
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .call_mcp_tool(agent_id, tool, serde_json::Value::Object(arguments))
+            .await
+            .map_err(map_client_error)?;
+        close_server(connection).await;
+        reply_result(reply)
     }
 }
 
@@ -406,6 +502,7 @@ impl NodeBackend for RemoteNodeBackend {
         let reply = connection.list_sessions().await.map_err(map_client_error)?;
         Self::close(connection).await;
         Ok(SessionListOutput::from_agent_reply(
+            agent_id,
             &reply.sessions,
             reply.stale_agents,
         ))
@@ -444,6 +541,42 @@ impl NodeBackend for RemoteNodeBackend {
         Self::close(connection).await;
         Ok(reply)
     }
+
+    async fn call_extension_tool(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        arguments: Map<String, serde_json::Value>,
+    ) -> Result<serde_json::Value, ToolError> {
+        self.ensure_target(agent_id)?;
+        let mut connection = self.connect().await?;
+        let reply = connection
+            .call_mcp_tool(agent_id, tool, serde_json::Value::Object(arguments))
+            .await
+            .map_err(map_client_error)?;
+        Self::close(connection).await;
+        reply_result(reply)
+    }
+}
+
+/// Turn one routed Owner reply into the Tool result or the stable refusal.
+fn reply_result(reply: McpToolCallReply) -> Result<serde_json::Value, ToolError> {
+    if reply.success {
+        return reply.result.ok_or_else(|| {
+            ToolError::backend("the owning Agent reported success without a Tool result")
+        });
+    }
+    let error =
+        reply
+            .error
+            .unwrap_or_else(|| nession_protocol::contracts::mcp::v1::McpToolCallError {
+                kind: "backend".to_string(),
+                message: "the owning Agent refused the call without a reason".to_string(),
+            });
+    Err(ToolError::new(
+        ToolErrorKind::from_wire(&error.kind),
+        error.message,
+    ))
 }
 
 fn map_client_error(error: ClientError) -> ToolError {

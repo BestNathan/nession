@@ -29,10 +29,12 @@ function CandidateRow({
   row,
   open,
   onSelect,
+  touch,
 }: {
   row: ConversationRowContent
   open: boolean
   onSelect: (id: string) => void
+  touch: boolean
 }) {
   return (
     <li>
@@ -42,6 +44,9 @@ function CandidateRow({
         onClick={() => onSelect(row.id)}
         className={cn(
           'flex w-full items-start gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+          // The App's touch floor. Web keeps the denser pointer row, so this
+          // is a composition choice rather than a change to the shared row.
+          touch && 'min-h-11',
           'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
           open && 'bg-accent text-accent-foreground',
         )}
@@ -82,18 +87,27 @@ export function ConversationList({
   openId,
   onSelect,
   now,
+  touch = false,
 }: {
   conversations: AIConversationSummary[]
   openId: string | null
   onSelect: (id: string) => void
   /** The clock the buckets are measured against. Passed in so tests can stand on a boundary. */
   now?: Date
+  /** Raise rows to the App's 44px touch floor. Web omits it. */
+  touch?: boolean
 }) {
   const buckets = bucketRows(conversations, now)
   const undated = undatedRows(conversations, now)
 
   const row = (content: ConversationRowContent) => (
-    <CandidateRow key={content.id} row={content} open={content.id === openId} onSelect={onSelect} />
+    <CandidateRow
+      key={content.id}
+      row={content}
+      open={content.id === openId}
+      onSelect={onSelect}
+      touch={touch}
+    />
   )
 
   return (

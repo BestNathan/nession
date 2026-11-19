@@ -138,14 +138,14 @@ Prerequisites, all fail-closed:
    origin of the Agent's configured `server_url` (the address the Claude
    process on this host can reach);
 2. MCP enabled on that host;
-3. `NESSON_MCP_TOKEN` present in the Session's environment;
+3. `NESSION_MCP_TOKEN` present in the Session's environment;
 4. that credential accepted by a bounded MCP handshake against the endpoint;
 5. a supported Claude CLI;
 6. project-write confirmation when the scope is project;
 7. a resolved name collision, if any.
 
 The written entry is one HTTP server whose header is
-`Authorization: Bearer ${NESSON_MCP_TOKEN}`. The token's value is read from the
+`Authorization: Bearer ${NESSION_MCP_TOKEN}`. The token's value is read from the
 Session only to verify the endpoint and never appears in the protocol, a
 project `.mcp.json`, a log or a CLI argument. A missing prerequisite produces
 `blocked`; the operation does not enable MCP, mint a token or configure the
@@ -154,7 +154,7 @@ endpoint as a side effect. A matching existing entry is `already_configured`
 replaced with the same rollback as an update.
 
 The Session environment is the credential binding boundary. Provisioning
-`NESSON_MCP_TOKEN` is done through the Session environment binding; the view
+`NESSION_MCP_TOKEN` is done through the Session environment binding; the view
 does not export or copy an endpoint token on the user's behalf. For the Server
 embedded host the value is the Server's `auth_token`; for the Agent embedded
 host it is the Agent token that endpoint verifies.
@@ -176,3 +176,9 @@ Session.
   takeover.
 - No machine-wide scan, Agent picker or user-level mutation owner.
 - No claim that configured equals loaded.
+
+The canonical credential key is `NESSION_MCP_TOKEN`, not an internal
+`NESSION_RUNTIME_*` control name. The ENV Profile binder permits the
+credential while protecting all runtime controls. Surviving pre-migration
+Sessions can still use their old `NESSON_*` identity/hook variables;
+new Sessions only receive `NESSION_RUNTIME_*` controls.

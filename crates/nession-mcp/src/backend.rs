@@ -27,10 +27,16 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
     ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::project::v1::{
+    ProjectGetPayload, ProjectGetResponsePayload, ProjectListResponsePayload,
+};
 use nession_protocol::contracts::session::v1::{
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
     ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
+    WebSessionsListResponse,
 };
+use serde_json::{Map, Value};
 
 use crate::error::ToolError;
 use crate::tools::nession_agent_create_session::SessionCreatedOutput;
@@ -38,12 +44,49 @@ use crate::tools::nession_agent_list_sessions::SessionListOutput;
 
 /// The Server-owned cluster view.
 ///
-/// The Server owns registry discovery and ENV-file inventory and mutation.
+/// The Server owns registry discovery, Project declarations, ENV-file
+/// inventory and mutation, and Project-context Session orchestration.
 /// Agent-owned Session lifecycle and live state remain on the Node seam.
 #[async_trait]
 pub trait ClusterBackend: Send + Sync {
     /// `nession_server_list_agents` — the Server registry's Agent view.
     async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError>;
+
+    /// The Server's `server.session.list` view for Project association reads.
+    ///
+    /// This is the Server query behind Project-scoped Session listing and the
+    /// optional Server enrichment of Agent Session state. Each entry's
+    /// `project_id` is the Server's **current authoritative** association for
+    /// that Session incarnation; an absent value is a confirmed non-association
+    /// for a Session the Server listed.
+    async fn list_sessions(
+        &self,
+        agent_id: Option<&str>,
+        force: bool,
+    ) -> Result<WebSessionsListResponse, ToolError>;
+
+    /// `nession_server_project_list` — every Project declaration. A failed
+    /// read is an error, never an empty collection.
+    async fn project_list(&self) -> Result<ProjectListResponsePayload, ToolError>;
+
+    /// `nession_server_project_get` — one Project declaration by identity.
+    async fn project_get(
+        &self,
+        payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ToolError>;
+
+    /// `nession_server_project_session_create` — Server-owned Project-context
+    /// Session creation.
+    ///
+    /// Always routes through the Server's canonical `server.session.create`,
+    /// which validates the Project and its Existing Location (or the Managed
+    /// artifact grants), resolves Project defaults and persists the
+    /// authoritative association. There is no direct-Agent route for this
+    /// operation.
+    async fn create_project_session(
+        &self,
+        payload: ClientSessionCreatePayload,
+    ) -> Result<ClientSessionCreateResponsePayload, ToolError>;
 
     /// `nession_server_env_list` — server and online-agent file inventory.
     async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError>;
@@ -116,6 +159,24 @@ pub trait NodeBackend: Send + Sync {
         agent_id: &str,
         name: &str,
     ) -> Result<SessionKillResponse, ToolError>;
+
+    /// Execute one Extension-contributed Tool on the explicitly named Agent
+    /// (`#3778`).
+    ///
+    /// The default is a truthful refusal: a host that cannot route a
+    /// contribution (for example an Agent answering for somebody else) never
+    /// silently executes it locally. The Server broker and the standalone
+    /// routing backends override this with the canonical route.
+    async fn call_extension_tool(
+        &self,
+        _agent_id: &str,
+        _tool: &str,
+        _arguments: Map<String, Value>,
+    ) -> Result<Value, ToolError> {
+        Err(ToolError::unavailable(
+            "this MCP host cannot execute Extension-contributed Tools for the named Agent",
+        ))
+    }
 }
 
 /// The cluster backend of a host that has no Server configured.
@@ -139,6 +200,32 @@ impl UnavailableClusterBackend {
 #[async_trait]
 impl ClusterBackend for UnavailableClusterBackend {
     async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn list_sessions(
+        &self,
+        _agent_id: Option<&str>,
+        _force: bool,
+    ) -> Result<WebSessionsListResponse, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn project_list(&self) -> Result<ProjectListResponsePayload, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn project_get(
+        &self,
+        _payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ToolError> {
+        Err(ToolError::unavailable(self.reason.clone()))
+    }
+
+    async fn create_project_session(
+        &self,
+        _payload: ClientSessionCreatePayload,
+    ) -> Result<ClientSessionCreateResponsePayload, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }
 

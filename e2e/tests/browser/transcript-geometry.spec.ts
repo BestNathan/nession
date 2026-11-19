@@ -155,39 +155,52 @@ test.describe('transcript raw records on App (#3726)', () => {
       await page.getByTestId('app-header-workspace').click();
       await expect(page.getByTestId('workspace-tool-bar')).toBeVisible();
       await page.getByTestId('workspace-tool-claude-code').click();
-      await expect(page.getByTestId('claude-code-workspace')).toBeVisible();
+      await expect(page.getByTestId('claude-code-app-workspace')).toBeVisible();
+      await expect(page.getByTestId('claude-app-root')).toBeVisible();
 
-      await page.getByRole('tab', { name: 'Transcripts' }).click();
+      // The App is conversation-first: resources live behind one Browse sheet.
+      await page.getByRole('button', { name: 'Browse Claude' }).click();
+      await page.getByTestId('claude-browse-transcripts').click();
+      await expect(page.getByTestId('claude-app-transcripts')).toBeVisible();
       await page.getByTestId('transcript-open').last().click();
+      await expect(page.getByTestId('claude-app-transcript')).toBeVisible();
       await expect(page.getByTestId('transcript-record')).toHaveCount(4);
-      await expect(page.getByTestId('transcript-layout')).toHaveText('push');
 
       const first = page.getByTestId('transcript-record').first();
       await first.getByTestId('transcript-record-open').click();
 
-      // A pushed depth, not a shrunken master-detail: the transcript-level Back
-      // is gone, and there is exactly one Back for the record.
-      await expect(page.getByTestId('transcript-record-push')).toBeVisible();
+      // A pushed depth, not a shrunken master-detail: the transcript stays
+      // mounted underneath, and the shell owns the only Back.
+      await expect(page.getByTestId('claude-app-record')).toBeVisible();
+      await expect(page.getByTestId('claude-app-layer-transcript')).toHaveAttribute(
+        'data-covered',
+        'true',
+      );
+      await expect(page.getByTestId('app-page-back')).toHaveCount(1);
       await expect(page.getByTestId('transcript-back')).toHaveCount(0);
-      await expect(page.getByTestId('transcript-record-back')).toHaveCount(1);
 
-      // Raw is inside the same depth, not a second overlay with its own leave.
-      await page.getByTestId('transcript-raw-open').click();
-      await expect(page.getByTestId('transcript-raw-inspector')).toBeVisible();
+      // Raw is a further depth of the same record, not a second overlay.
+      await page.getByTestId('claude-app-record-raw').click();
+      await expect(page.getByTestId('claude-app-raw')).toBeVisible();
       await expect(page.getByTestId('transcript-raw-inspector')).toHaveAttribute(
         'data-variant',
         'pushed',
       );
       await expect(page.getByTestId('transcript-raw-close')).toHaveCount(0);
-      await expect(page.getByTestId('transcript-record-back')).toHaveCount(1);
+      await expect(page.getByTestId('app-page-back')).toHaveCount(1);
 
       const pageOverflow = await page.evaluate(
         () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
       );
       expect(pageOverflow).toBeLessThanOrEqual(1);
 
-      await page.getByTestId('transcript-record-back').click();
-      await expect(page.getByTestId('transcript-record-push')).toHaveCount(0);
+      await page.getByTestId('app-page-back').click();
+      await expect(page.getByTestId('claude-app-raw')).toHaveCount(0);
+      await expect(page.getByTestId('claude-app-record')).toBeVisible();
+
+      await page.getByTestId('app-page-back').click();
+      await expect(page.getByTestId('claude-app-record')).toHaveCount(0);
+      await expect(page.getByTestId('claude-app-transcript')).toBeVisible();
       await expect(page.getByTestId('transcript-record')).toHaveCount(4);
     });
   }

@@ -5,13 +5,12 @@ use super::{
     info, json, reply_json, warn, ClientSessionSandboxEnterPayload, ConnectionHandler, Duration,
     HandlerAction, ProtocolMessage, SandboxActionErrorKind, SandboxActionResult,
 };
-use nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX;
 use nession_protocol::contracts::sandbox::v1::{
     validate_image_selections, SandboxFieldError, SandboxImageMode, SandboxImageRole,
     SandboxImageSelection,
 };
-use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
 
+use super::server_session_sandbox_images::{managed_grant, managed_manifest_grant};
 use crate::image::ImageResolution;
 
 /// Enter may prepare a full image composition in the Agent's durable cache
@@ -232,52 +231,5 @@ impl ConnectionHandler {
             }
             Err(error) => Ok(refuse(SandboxActionErrorKind::Unavailable, &error)),
         }
-    }
-}
-
-fn managed_grant(
-    selection: &SandboxImageSelection,
-    grant: crate::image::ImageAccessGrant,
-) -> ManagedImageGrant {
-    let (role, target) = match selection.role {
-        SandboxImageRole::Base => (ManagedImageRole::Base, None),
-        SandboxImageRole::Workspace => (ManagedImageRole::Workspace, None),
-        SandboxImageRole::Toolchain => (ManagedImageRole::Toolchain, selection.target.clone()),
-    };
-    ManagedImageGrant {
-        role,
-        digest: selection.digest.clone(),
-        path: grant.path,
-        target,
-        objects: Vec::new(),
-    }
-}
-
-fn managed_manifest_grant(
-    selection: &SandboxImageSelection,
-    access: crate::image::ResolvedManifestAccess,
-) -> ManagedImageGrant {
-    let (role, target) = match selection.role {
-        SandboxImageRole::Base => (ManagedImageRole::Base, None),
-        SandboxImageRole::Workspace => (ManagedImageRole::Workspace, None),
-        SandboxImageRole::Toolchain => (ManagedImageRole::Toolchain, selection.target.clone()),
-    };
-    ManagedImageGrant {
-        role,
-        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", access.manifest_digest),
-        digest: access.manifest_digest,
-        target,
-        objects: access
-            .objects
-            .into_iter()
-            .map(
-                |object| nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
-                    digest: object.digest,
-                    media_type: object.media_type,
-                    size_bytes: object.size_bytes,
-                    path: object.path,
-                },
-            )
-            .collect(),
     }
 }

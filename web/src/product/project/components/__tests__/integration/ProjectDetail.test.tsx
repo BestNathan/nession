@@ -93,7 +93,7 @@ describe('ProjectDetailContent', () => {
     expect(onSettings).toHaveBeenCalledWith(PROJECT);
   });
 
-  it('fails Managed creation closed instead of falling back to Native', async () => {
+  it('offers one runtime-aware New Session entry instead of an unconditional Managed stub', async () => {
     const user = userEvent.setup();
     const onCreateSession = vi.fn();
     render(
@@ -105,11 +105,10 @@ describe('ProjectDetailContent', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('project-detail-managed-session'));
-    const dialog = screen.getByTestId('project-managed-unavailable');
-    expect(dialog).toHaveTextContent('Managed Session is not available yet');
-    expect(dialog).toHaveTextContent('Nothing was created and no Native fallback was attempted');
-    expect(onCreateSession).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('project-detail-managed-session')).toBeNull();
+    expect(screen.queryByTestId('project-managed-unavailable')).toBeNull();
+    await user.click(screen.getByTestId('project-detail-create-session'));
+    expect(onCreateSession).toHaveBeenCalledWith(PROJECT);
   });
 
   it('explains absent source, locations, defaults and image', () => {

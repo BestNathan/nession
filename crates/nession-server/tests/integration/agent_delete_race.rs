@@ -79,6 +79,7 @@ impl Fixture {
             env_service: Arc::clone(&self.env),
             image_manager: image_manager(Arc::clone(&self.db))?,
             db: Arc::clone(&self.db),
+            extension_tools: None,
         })
     }
 
@@ -222,6 +223,9 @@ async fn add_session_with_binding(
         foreground_command: None,
         working_dir: None,
         instance_id: None,
+        activity: None,
+        activity_epoch: None,
+        activity_generation: 0,
         created_at: Utc::now(),
         last_activity: Utc::now(),
     };

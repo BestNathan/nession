@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::contracts::default_image_tag;
+use crate::contracts::mcp::v1::McpToolManifest;
 use crate::{ProtocolManifest, RedactedToken};
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -54,6 +55,17 @@ pub struct AgentRegisterPayload {
     /// it cannot advertise a contract no handler serves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_manifest: Option<ProtocolManifest>,
+    /// The Extension-contributed MCP Tools this Agent advertises (`#3778`).
+    ///
+    /// Derived from the same composed catalog the Agent's embedded MCP
+    /// endpoint serves, so it cannot advertise a Tool the Agent cannot execute.
+    /// Optional: an Agent with no Extension contributions — and every Agent
+    /// predating this field — registers exactly as before. The Server validates
+    /// the names and typed output schemas before advertising them; the
+    /// manifest rides the registration round trip so a tool is never listed
+    /// before its owner's availability is known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mcp_tool_manifest: Option<McpToolManifest>,
 }
 
 /// Network category of an advertised agent address.

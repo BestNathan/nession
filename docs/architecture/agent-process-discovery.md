@@ -86,6 +86,16 @@ Coverage is always `partial`: a daemonized or adopted worker that left the tree
 is not discoverable. SID, PGID and TTY travel on each process as
 **lower-confidence association evidence** and never upgrade the coverage claim.
 
+### One-process group evidence (#3802)
+
+`process_groups(pid)` is a bounded single-process read — `/proc/<pid>/stat`'s
+`pgrp`/`tpgid` on Linux or `PROC_PIDTBSDINFO`'s `pbi_pgid`/`e_tpgid` on macOS —
+used by the Session Activity Shell provider to tell a prompt from a foreground
+job. It is not a membership method: it observes one PID's own and terminal
+foreground groups, and returns `None` rather than a guess when the process is
+gone or has no controlling terminal. It does not open the Pane's tty, so
+observing activity cannot change the Agent's controlling terminal.
+
 ## Agent Workspace presentation
 
 Owner decision 2026-11-02 (supersedes the earlier Session → Pane → Process

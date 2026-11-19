@@ -23,6 +23,7 @@ fn row(
         window_linked: true,
         window_active: false,
         pane_active: true,
+        pane_current_command: Some("bash".to_string()),
     }
 }
 

@@ -28,11 +28,15 @@ MCP client ── Streamable HTTP /mcp ──▶ nession-mcp
 
 ## Tools
 
-The advertised catalog has eleven Tools:
+The baseline catalog has fifteen Tools:
 
 | Semantic owner | Tool | Operation |
 |---|---|---|
 | Server | `nession_server_list_agents` | `server.agent.list` (registry discovery) |
+| Server | `nession_server_project_list` | `server.project.list` (Project discovery) |
+| Server | `nession_server_project_get` | `server.project.get` (canonical declaration) |
+| Server | `nession_server_project_session_list` | `server.session.list` filtered by current Project association |
+| Server | `nession_server_project_session_create` | `server.session.create` with Project validation and association |
 | Server | `nession_server_env_list` | `server.env.list` (Server and online-Agent file metadata) |
 | Server | `nession_server_env_get` | `server.env.get` (read raw file content) |
 | Server | `nession_server_env_write` | `server.env.write` (create/overwrite with in-use guards) |
@@ -44,11 +48,19 @@ The advertised catalog has eleven Tools:
 | Agent | `nession_agent_create_session` | `agent.session.create` on the named Agent |
 | Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent |
 
+A host that composes Extension contributions (`#3778`) advertises them after
+these under the same typed contract.
+
 `nession_server_list_agents` answers from the Server's registry — registration,
 heartbeat and advertised addresses — not from a live query of an Agent. The
 `nession_agent_*` Tools always require an explicit, non-empty `agent_id`; there
 is no implicit "this host" fallback, and a missing, empty or mismatched target
 is refused rather than redirected.
+
+The four Project Tools are Server-owned. `project_list`/`project_get` read the
+Project declaration store and work while every Agent is offline. The two
+Session Tools are **creation/query views over the one Session domain**, never a
+second Session registry or a Project-owned runtime.
 
 ### Removed Tools
 
@@ -83,6 +95,10 @@ its semantic backend use:
 | Tool owner | Successful reply type | Schema source |
 |---|---|---|
 | Server discovery | `WebAgentsListResponse` | Protocol contract |
+| Server Project discovery | `ProjectListOutput` + `ProjectSummary` | Tool module |
+| Server Project detail | `Project` | Protocol contract |
+| Server Project Session list | `ProjectSessionListOutput` + `ProjectSessionSummary` | Tool module |
+| Server Project Session create | `ProjectSessionCreatedOutput` | Tool module |
 | Server ENV | `ClientEnvListResponsePayload` / `ClientEnvGetResponsePayload` / `ClientEnvWriteResponsePayload` / `ClientEnvDeleteResponsePayload` | Protocol contract |
 | Server Session ENV binding | `ClientSessionEnvBindingResponsePayload` | Protocol contract |
 | Agent Session kill | `SessionKillResponse` | Protocol contract |
@@ -112,12 +128,84 @@ result. The source-pinned exporter, semantic digest, publication validation and
 Documents reader all require and hash both schemas; a missing or malformed
 output contract fails publication.
 
+## Project-context Session access (#3910)
+
+A Project is a Server-owned declaration; a Session remains one Agent-owned
+runtime domain. MCP therefore exposes **two creation paths, not two Session
+types**:
+
+| Path | Tool | Ownership |
+|---|---|---|
+| Agent-owned creation | `nession_agent_create_session` | unchanged; no `project_id` argument and no implicit Project lookup |
+| Project-context creation | `nession_server_project_session_create` | Server validates the Project and target, resolves Project defaults, delegates the create to the Agent through `server.session.create`, and persists the association |
+
+There is no `session_type`, `is_project_session`, creation-source flag or
+Project-owned tmux/SessionManager. The only Session state Project adds is an
+optional, durable `project_id` on the Server-owned association, keyed to the
+Session **incarnation** so a reused `agent_id:session_name` never inherits a
+previous Project.
+
+`nession_server_project_session_create` accepts a discriminated `target`:
+
+- `target.kind=existing` names a `working_dir` that must be an Existing
+  Location `{agent_id, path}` the Project declares. The Server rejects an
+  undeclared or mismatched location and an offline/missing Project or Agent;
+  the caller cannot attach an arbitrary directory by asserting a Project id.
+- `target.kind=managed` reuses the canonical `ClientManagedCreate` contract
+  (`base_digest`, optional toolchains) and the Server-resolved Project image.
+  Image authorization, cache preparation and Sandbox capability validation
+  remain with their existing owners (#3062, #3794). Unsupported Agents refuse
+  the create; there is no Native fallback.
+
+Create-time ENV intent routes through the existing `EnvSelectionMode` and
+Server Session ENV Binding. Absent `environment` and `environment.mode=inherit`
+resolve the Project's ordered Server ENV references at **create time**;
+`environment.mode=replace` requires an explicit `env_files` list, including
+`[]` to bind no environment. The resolved set becomes the Session's own
+binding; a later Project edit never rebinds an existing Session.
+
+The reply is not a request echo: it carries `session_id`, `name`, the
+**confirmed** `project_id`, and warnings. If the Agent created the Session but
+the Server could not persist the association, the Tool returns a recoverable
+partial/ambiguous error naming the created Session and requiring readback
+before retry; it never reports an unconfirmed association as successful and
+never performs a destructive rollback or duplicate create.
+
+`nession_server_project_session_list` is a filtered Server query view over the
+same `server.session.list` registry. It returns Sessions whose **current
+authoritative** `project_id` matches, including Sessions Web-rebound into the
+Project (`server.session.project.set`) and excluding Sessions rebound away.
+Membership changes never send an Agent command and never replace the Session
+incarnation. `force=true` refreshes live Agent state and reports
+`stale_agents`; an incomplete view is never presented as a complete one.
+
+`nession_agent_list_sessions` adds `session_id` and the Project association to
+its stabilized Agent Session projection. The three states are distinct:
+
+| Output | Meaning |
+|---|---|
+| `project_id: "project-…"` | the Server confirms the current association |
+| `project_id: null` | the Server confirms the Session is unassociated |
+| field omitted | Project metadata is unresolved (no reachable Server or the Server did not list the Session); never a guess |
+
+A direct-Agent route has no Project metadata, so the Tool enriches it from the
+configured Server where the Session id matches; an unavailable Server leaves
+the field omitted rather than turning Agent truth into a failure. No Project
+name or detail is copied into Session results: a caller uses
+`nession_server_project_get` when it needs the declaration.
+
+MCP never exposes Project association set/unset/move/convert operations. The
+Web's `server.session.project.set` remains their only owner; the MCP list
+projections simply observe its current result.
+
 ## Flat Tool structure
 
 ```text
 crates/nession-mcp/src/
 ├── lib.rs
 ├── service.rs             # protocol/transport adapter, auth, deadlines
+├── catalog.rs             # McpCatalog: immutable generations, explicit swap
+├── provider.rs            # McpToolProvider: Extension-contributed Tools
 ├── registry.rs            # ToolRegistry: register/list/lookup/call
 ├── tool.rs                # ToolHandler / ToolContext contracts
 ├── backend.rs             # semantic backend seams
@@ -125,8 +213,12 @@ crates/nession-mcp/src/
 ├── protocol.rs            # claimed versions and endpoint defaults
 ├── http.rs                # standalone HTTP host request classification
 └── tools/
-    ├── mod.rs             # module declarations + explicit registration ONLY
+    ├── mod.rs             # module declarations + baseline registration ONLY
     ├── nession_server_list_agents.rs
+    ├── nession_server_project_list.rs
+    ├── nession_server_project_get.rs
+    ├── nession_server_project_session_list.rs
+    ├── nession_server_project_session_create.rs
     ├── nession_agent_list_sessions.rs
     ├── nession_agent_create_session.rs
     └── nession_agent_kill_session.rs
@@ -141,20 +233,79 @@ crates/nession-mcp/src/
 ```
 
 Every Tool is **one file named exactly like the MCP Tool**, flat under
-`tools/` (no `tools/server` or `tools/agent` directories). The module owns its
-name, description, typed argument contract, typed success output contract,
-emitted JSON Schemas and focused tests; each schema is generated from the same
-`serde` type the Tool parses or returns, so `additionalProperties: false` and
-runtime validation cannot drift. `tools/mod.rs` only declares modules and
-registers their handlers with one `ToolRegistry`; there is no central
-`match name` dispatch and no automatic or macro registration.
+`tools/` in its owning crate (no `tools/server` or `tools/agent` directories).
+The module owns its name, description, typed argument contract, typed success
+output contract, emitted JSON Schemas and focused tests; each schema is
+generated from the same `serde` type the Tool parses or returns, so
+`additionalProperties: false` and runtime validation cannot drift.
+`tools/mod.rs` only declares modules and registers the baseline handlers with
+one `ToolRegistry`; there is no central `match name` dispatch and no automatic
+or macro registration. A contributed Tool follows the same one-file contract
+in its Extension's crate.
 
-The registry is built **once at service startup**. Duplicate Tool names and any
-missing or placeholder output contract fail startup. An unknown Tool call is a
+The baseline `ToolRegistry` is built **once at service startup**. The advertised
+catalog is one immutable generation: those baseline Tools plus, on a host that
+composes Extension contributions, the Tools each explicitly listed
+`McpToolProvider` (see `crates/nession-mcp/src/provider.rs`) returns. A
+generation is built and validated in full before it becomes visible — a
+provider that cannot enumerate its Tools, a name claimed by multiple semantic
+owners, or a missing/placeholder output contract rejects the update and leaves
+the previous generation in place. Only an explicit host reconfiguration
+(Extension install/enable/disable/reconfigure, an incompatible schema change or
+a capability-manifest update) atomically swaps generations and advances the
+monotonic revision; `tools/list` and `tools/call` only read the current
+generation and never re-enumerate a provider. An unknown Tool call is a
 tool-level argument error, not a transport failure. A host may omit an
 unconfigured optional backend's Tools only by an explicit, tested policy; a
 temporarily offline target keeps the Tool listed and answers with a truthful
 unavailable error, never a changed identity or schema.
+
+### Extension-contributed Tools (`#3778`)
+
+The Extension owns a contributed Tool's semantics and its typed contract; the
+owning Agent composes the `McpToolProvider` explicitly and executes the Tool;
+the Server remains the authority for Agent discovery, authorization and
+routing; `nession-mcp` owns MCP protocol, catalog validation, authentication,
+concurrency, deadlines and result shape. There is **no** separate MCP server per
+Extension and no second Session management plane. `nession-mcp` never depends
+on `nession-agent`, `nession-server`, `nession-common` or a concrete provider,
+and a provider is never reached by side-effect registration. Live runtime state
+— a Session appearing, an Extension switching between idle and busy, a
+transient disconnect — is not a catalog mutation.
+
+An Agent advertises its contributions in `server.agent.register` as a typed
+`McpToolManifest` (`mcp_tool_manifest`): the exact name, owning provider,
+description, input schema and output schema of each contributed Tool. The
+manifest is derived from the same catalog the Agent's embedded endpoint serves,
+so it cannot advertise a Tool the Agent cannot execute. The Server validates it
+— supported manifest version, one contract per Tool name across the fleet, a
+required `agent_id` argument, a typed output contract — and merges the
+compatible Tools into its own catalog generation. A refused manifest leaves the
+previous generation live and is logged; the Agent still registers and serves
+its Sessions. `server.mcp.tools.list` exposes the validated merged manifest (a
+standalone host adopts it at startup); `server.mcp.tool.call` and
+`agent.mcp.tool.call` carry one explicitly targeted call.
+
+Every contributed call names a non-empty `agent_id` in its own arguments.
+Server-embedded and Server-routed standalone hosts broker it to exactly that
+Agent through the canonical Agent route; direct-Agent standalone mode uses the
+P2P unit; an Agent-embedded host executes only Tools its own catalog
+advertises. An offline Agent keeps its Tools listed and answers `unavailable`;
+an unknown Agent, or a Tool absent from that Agent's validated manifest, is
+`not_found`. There is never a cross-Agent fallback.
+
+Each catalog generation has a monotonic revision, exposed as
+`_meta["nession/catalogRevision"]` on `tools/list`. Only an explicit manifest
+install/removal or host reconfiguration advances it; a reconnection that
+advertises an unchanged manifest does not rebuild the catalog, and no Session,
+Extension-runtime or connection-state change triggers one. A connected legacy
+session receives `notifications/tools/list_changed` after an explicit change. A
+stateless `2026-07-28` request has no notification channel and observes the new
+revision and definitions on its next `tools/list`, bounded by the advertised
+TTL. The source-pinned static export (Pages/Documents) is built from the
+baseline registry, never from a runtime manifest: a dynamic Agent capability
+can change what an endpoint advertises, never the Rust-owned contract source
+that publication verifies.
 
 `McpService` owns the protocol lifecycle, transport, inbound authentication,
 Origin policy, body size, concurrency and deadlines. A handler only validates
@@ -163,9 +314,9 @@ arguments and executes the business operation through the injected
 
 ## Backend and routing contract
 
-| Hosting mode | Server-owned discovery, ENV and binding tools | `nession_agent_*` |
+| Hosting mode | Server-owned discovery, Project, ENV and binding tools | `nession_agent_*` |
 |---|---|---|
-| Server embedded | Server registry via the real `server_routes!` dispatch | the unnamed target is routed to the named Agent through the Server's command broker |
+| Server embedded | Server registry and Project store via the real `server_routes!` dispatch | the unnamed target is routed to the named Agent through the Server's command broker |
 | Agent embedded | the configured Server (or an explicit "standalone Agent" unavailable error) | this Agent's local `SessionManager`, refusing any other `agent_id` |
 | Standalone, Server routing (default) | configured Server | **through the Server's canonical Agent route**, after the Server registry confirms the target is online |
 | Standalone, direct Agent (explicit) | configured Server | the one configured Agent's P2P endpoint, refusing any other `agent_id` |
@@ -226,10 +377,11 @@ acceptance proof:
   versions above. There is no fake modern negotiation over a legacy lifecycle.
 - Tool parameters may be mirrored into `Mcp-Param-{Name}` headers through the
   `x-mcp-header` schema extension. The validation mechanism is implemented and
-  tested; none of the four baseline Tools annotates a parameter today, so none
+  tested; none of the baseline Tools annotates a parameter today, so none
   requires such a header.
-- `tools/list` carries `ttlMs` and `cacheScope: private`: the catalog is fixed
-  for the process and is not shared across authorization contexts.
+- `tools/list` carries `ttlMs` and `cacheScope: private`: the catalog changes
+  only on an explicit host reconfiguration, never per request, and is not
+  shared across authorization contexts.
 - GET and DELETE on the MCP endpoint are `405`; no session is minted or echoed.
 
 ### `2025-03-26`

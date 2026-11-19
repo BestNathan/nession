@@ -7,10 +7,75 @@
 //! that transport shape here instead of requiring a second client object.
 //! Nothing is downloaded or authorized in this module.
 
+use nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX;
 use nession_protocol::contracts::sandbox::v1::{
     SandboxFilesystemRoot, SandboxImageMode, SandboxImageRole, SandboxImageSelection,
     SandboxMountSource, SandboxPolicyDraft,
 };
+use nession_protocol::contracts::session::v1::{ManagedImageGrant, ManagedImageRole};
+
+use crate::image::{ImageAccessGrant, ImageResolution, ResolvedManifestAccess};
+
+/// Project one scoped legacy Blob grant into the Server→Agent contract.
+pub(super) fn managed_grant(
+    selection: &SandboxImageSelection,
+    grant: ImageAccessGrant,
+) -> ManagedImageGrant {
+    let (role, target) = managed_role(selection);
+    ManagedImageGrant {
+        role,
+        digest: selection.digest.clone(),
+        path: grant.path,
+        target,
+        objects: Vec::new(),
+    }
+}
+
+/// Project one resolved Manifest closure into the Server→Agent contract.
+pub(super) fn managed_manifest_grant(
+    selection: &SandboxImageSelection,
+    access: ResolvedManifestAccess,
+) -> ManagedImageGrant {
+    let (role, target) = managed_role(selection);
+    ManagedImageGrant {
+        role,
+        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", access.manifest_digest),
+        digest: access.manifest_digest,
+        target,
+        objects: access
+            .objects
+            .into_iter()
+            .map(
+                |object| nession_protocol::contracts::session::v1::ManagedImageObjectGrant {
+                    digest: object.digest,
+                    media_type: object.media_type,
+                    size_bytes: object.size_bytes,
+                    path: object.path,
+                },
+            )
+            .collect(),
+    }
+}
+
+fn managed_role(selection: &SandboxImageSelection) -> (ManagedImageRole, Option<String>) {
+    match selection.role {
+        SandboxImageRole::Base => (ManagedImageRole::Base, None),
+        SandboxImageRole::Workspace => (ManagedImageRole::Workspace, None),
+        SandboxImageRole::Toolchain => (ManagedImageRole::Toolchain, selection.target.clone()),
+    }
+}
+
+/// The scoped grant one authorized Image identity resolves to for a
+/// consumer-driven cache preparation (#3796).
+pub(super) fn prepare_grant(
+    selection: &SandboxImageSelection,
+    resolution: ImageResolution,
+) -> ManagedImageGrant {
+    match resolution {
+        ImageResolution::Manifest(access) => managed_manifest_grant(selection, access),
+        ImageResolution::Legacy(grant) => managed_grant(selection, grant),
+    }
+}
 
 fn selection_key(selection: &SandboxImageSelection) -> (String, String, String, String) {
     let role = match selection.role {
@@ -41,10 +106,11 @@ fn same_selections(left: &[SandboxImageSelection], right: &[SandboxImageSelectio
 /// Resolve the effective image transport for one preflight/Enter payload.
 ///
 /// - no declaration: the explicit `images` list is unchanged (older clients);
-/// - a declaration: Base Runtime and mount digests are derived into image
+/// - a declaration: a Base Runtime and mount digests are derived into image
 ///   selections, and an explicitly supplied list must agree with it;
-/// - an unmaterializable declaration (local root plus mounts, or mounts
-///   without an image root) is refused before routing.
+/// - a Local (or absent) RootFS with mounts is a Host-root composition: no
+///   Base selection is derived, and the toolchain digests remain the only
+///   added selection (#3792).
 pub(super) fn derive_sandbox_image_selections(
     policy: &SandboxPolicyDraft,
     explicit: Vec<SandboxImageSelection>,
@@ -60,38 +126,13 @@ pub(super) fn derive_sandbox_image_selections(
     }
 
     let mut derived = Vec::new();
-    match &filesystem.rootfs {
-        Some(SandboxFilesystemRoot::Local) => {
-            if !filesystem.mounts.is_empty() || filesystem.workspace.is_some() {
-                return Err(
-                    "filesystem.rootfs Local cannot carry mounts or a Workspace".to_string()
-                );
-            }
-            if !explicit.is_empty() {
-                return Err(
-                    "filesystem.rootfs Local conflicts with the explicit image selection"
-                        .to_string(),
-                );
-            }
-            return Ok(Vec::new());
-        }
-        Some(SandboxFilesystemRoot::Image {
-            digest,
-            writable: _,
-        }) => {
-            derived.push(SandboxImageSelection {
-                role: SandboxImageRole::Base,
-                digest: digest.clone(),
-                target: None,
-                mode: SandboxImageMode::ReadOnly,
-            });
-        }
-        None => {
-            if !filesystem.mounts.is_empty() || filesystem.workspace.is_some() {
-                return Err("filesystem mounts or Workspace require an image RootFS".to_string());
-            }
-            return Ok(explicit);
-        }
+    if let Some(SandboxFilesystemRoot::Image { digest, .. }) = &filesystem.rootfs {
+        derived.push(SandboxImageSelection {
+            role: SandboxImageRole::Base,
+            digest: digest.clone(),
+            target: None,
+            mode: SandboxImageMode::ReadOnly,
+        });
     }
 
     for mount in &filesystem.mounts {
@@ -176,24 +217,37 @@ mod tests {
     }
 
     #[test]
-    fn local_root_with_mounts_or_workspace_is_refused() {
-        for filesystem in [
-            serde_json::json!({
-                "access": { "read": [], "write": [] },
-                "rootfs": { "kind": "local" },
-                "mounts": [{
-                    "source": { "kind": "image", "digest": tool() },
-                    "target": "/opt/tool",
-                    "read_only": true,
-                }],
-            }),
-            serde_json::json!({
-                "access": { "read": [], "write": [] },
-                "rootfs": { "kind": "local" },
-                "workspace": { "kind": "auto" },
-            }),
-        ] {
-            assert!(derive_sandbox_image_selections(&draft(filesystem), Vec::new()).is_err());
-        }
+    fn a_local_root_derives_toolchains_without_a_base() {
+        let policy = draft(serde_json::json!({
+            "access": { "read": [], "write": [] },
+            "rootfs": { "kind": "local" },
+            "mounts": [{
+                "source": { "kind": "image", "digest": tool() },
+                "target": "/opt/tool",
+                "read_only": true,
+            }],
+        }));
+        let derived = derive_sandbox_image_selections(&policy, Vec::new()).unwrap();
+        assert_eq!(derived.len(), 1);
+        assert_eq!(derived[0].role, SandboxImageRole::Toolchain);
+        assert_eq!(derived[0].target.as_deref(), Some("/opt/tool"));
+        assert!(
+            derived
+                .iter()
+                .all(|selection| selection.role != SandboxImageRole::Base),
+            "a Local RootFS never derives a Base Runtime selection"
+        );
+
+        let workspace_only = draft(serde_json::json!({
+            "access": { "read": [], "write": [] },
+            "rootfs": { "kind": "local" },
+            "workspace": { "kind": "auto" },
+        }));
+        assert!(
+            derive_sandbox_image_selections(&workspace_only, Vec::new())
+                .unwrap()
+                .is_empty(),
+            "a Local Workspace preparation needs no image grant"
+        );
     }
 }

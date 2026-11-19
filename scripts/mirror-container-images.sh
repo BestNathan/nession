@@ -175,6 +175,43 @@ platform_digests() {
   '
 }
 
+# #3968: a completed transfer is not re-run when only the *read-only* ACR
+# manifest inspection encounters a transient OAuth/transport reset. Keep raw
+# registry stderr in a private file: it may contain signed authorization URLs.
+# The exact platform Digest equality check after this remains authoritative.
+destination_platform_digests() {
+  local destination="$1" diagnostic platforms status outcome attempt
+  diagnostic="$(mktemp)"
+  chmod 600 "$diagnostic"
+  for attempt in 1 2 3; do
+    : > "$diagnostic"
+    status=0
+    platforms="$(platform_digests "$destination" 2>"$diagnostic")" || status=$?
+    if [[ "$status" -eq 0 && -n "$platforms" ]]; then
+      echo "ACR_DESTINATION_READBACK_V1 attempt=$attempt outcome=success" >&2
+      rm -f "$diagnostic"
+      printf '%s\n' "$platforms"
+      return 0
+    fi
+    outcome="invalid_manifest"
+    if [[ "$status" -ne 0 ]]; then
+      outcome="$(failure_class "$status" "$diagnostic")"
+    fi
+    echo "ACR_DESTINATION_READBACK_V1 attempt=$attempt outcome=$outcome exit_code=$status" >&2
+    case "$outcome" in
+      connection_reset|network_transport|tls_handshake_timeout|transfer_deadline)
+        if (( attempt < 3 )); then
+          sleep "$((attempt * 3))"
+          continue
+        fi
+        ;;
+    esac
+    echo "ERROR: ACR destination manifest readback failed ($outcome); refusing unverifiable image" >&2
+    rm -f "$diagnostic"
+    return 1
+  done
+}
+
 for tag in "${tags[@]}"; do
   source_ref="${source_image}:${tag}"
   destination_ref="${destination_image}:${tag}"
@@ -223,7 +260,7 @@ for tag in "${tags[@]}"; do
 
   # The destination must preserve exactly the selected platform manifest
   # digests (not just their tags or architecture labels).
-  destination_platforms="$(platform_digests "${destination_ref}")"
+  destination_platforms="$(destination_platform_digests "${destination_ref}")"
   if [[ -z "${destination_platforms}" || "${source_platforms}" != "${destination_platforms}" ]]; then
     echo "ERROR: ACR mirror platform digests do not match GHCR for ${tag}" >&2
     exit 1

@@ -55,10 +55,10 @@ const SHELL_REVISION_FILE: &str = "shell-revision";
 /// The Agent's durable record for one Session's materialization.
 const BINDING_STATE_FILE: &str = "binding.json";
 
-const ENV_RUNTIME_VAR: &str = "NESSON_ENV_RUNTIME";
-const ENV_REVISION_VAR: &str = "NESSON_ENV_REVISION";
-const SHELL_REVISION_VAR: &str = "NESSON_ENV_SHELL_REVISION";
-const USER_ZDOTDIR_VAR: &str = "NESSON_USER_ZDOTDIR";
+const ENV_RUNTIME_VAR: &str = "NESSION_RUNTIME_ENV_RUNTIME";
+const ENV_REVISION_VAR: &str = "NESSION_RUNTIME_ENV_REVISION";
+const SHELL_REVISION_VAR: &str = "NESSION_RUNTIME_ENV_SHELL_REVISION";
+const USER_ZDOTDIR_VAR: &str = "NESSION_RUNTIME_USER_ZDOTDIR";
 
 const STATUS_IN_SYNC: &str = "in_sync";
 const STATUS_PENDING_SHELL: &str = "pending_shell";
@@ -294,10 +294,14 @@ impl EnvManager {
         let overlay = Self::merge_snapshots(snapshots)?;
         let warnings = overlay.warnings.clone();
         let dir = self.session_dir(session_name);
-        let mut state = self
-            .load_state(session_name)
-            .await
-            .unwrap_or_else(|| StoredBinding {
+        // An existing record that cannot be read or parsed is not "no binding":
+        // treating it as first use would capture the currently overlaid tmux
+        // values as the original baseline and persist them. Fail here, before
+        // the first tmux read or mutation and before any state file is
+        // rewritten; the untrusted record stays exactly as it was found.
+        let mut state = match self.load_state(session_name).await? {
+            Some(state) => state,
+            None => StoredBinding {
                 session_name: session_name.to_string(),
                 applied_revision: 0,
                 profiles: Vec::new(),
@@ -308,7 +312,8 @@ impl EnvManager {
                 status: STATUS_IN_SYNC.to_string(),
                 last_error: None,
                 updated_at: now_secs(),
-            });
+            },
+        };
 
         // Capture the base value of every newly managed key before changing
         // anything. A read failure aborts the whole apply: proceeding would
@@ -476,7 +481,21 @@ impl EnvManager {
     /// The observed binding state for one Session, or `None` when no binding
     /// was ever recorded (a Session that predates the binding model).
     pub(crate) async fn observe(&self, session_name: &str) -> Option<SessionEnvObservedState> {
-        let mut state = self.load_state(session_name).await?;
+        let mut state = match self.load_state(session_name).await {
+            Ok(Some(state)) => state,
+            Ok(None) => return None,
+            // A record exists but cannot be trusted. Reporting `None` would say
+            // "this Session never had a binding", which is just as false as any
+            // synthesized convergence; the honest answer is an error status
+            // with no claimed baseline.
+            Err(error) => {
+                tracing::warn!(
+                    "cannot report the observed environment binding for session \
+                     {session_name}: {error:#}"
+                );
+                return Some(untrusted_state_observed(&error));
+            }
+        };
         let shell_revision =
             read_revision(&self.session_dir(session_name).join(SHELL_REVISION_FILE)).await;
         state.status = self.status_for(
@@ -534,10 +553,14 @@ impl EnvManager {
     }
 
     /// The revision a locally-created binding should use next.
-    pub(crate) async fn next_local_revision(&self, session_name: &str) -> u64 {
-        self.load_state(session_name)
-            .await
-            .map_or(1, |state| state.applied_revision.saturating_add(1))
+    ///
+    /// An untrusted existing record is an error, not revision 1: the caller
+    /// must not proceed to `apply_binding` as though nothing had been applied.
+    pub(crate) async fn next_local_revision(&self, session_name: &str) -> Result<u64> {
+        Ok(self
+            .load_state(session_name)
+            .await?
+            .map_or(1, |state| state.applied_revision.saturating_add(1)))
     }
 
     /// Remove a Session's durable binding state. Called when the Session is
@@ -654,16 +677,45 @@ impl EnvManager {
         self.state_dir.join(sanitize_component(session_name))
     }
 
-    async fn load_state(&self, session_name: &str) -> Option<StoredBinding> {
-        let path = self.session_dir(session_name).join(BINDING_STATE_FILE);
-        let bytes = fs::read(&path).await.ok()?;
-        match serde_json::from_slice::<StoredBinding>(&bytes) {
-            Ok(state) => Some(state),
-            Err(e) => {
-                tracing::warn!("cannot parse env binding state {}: {e}", path.display());
-                None
+    /// Load the durable binding record for one Session.
+    ///
+    /// `Ok(None)` is **verified first use**: neither `binding.json` nor any
+    /// other durable materialization artifact exists, so this Session has never
+    /// had a binding applied. Every other outcome of a read — and any parse
+    /// failure — is an error, never `None`: the record exists but cannot be
+    /// trusted, and a caller that treated it as first use would capture the
+    /// currently overlaid tmux values as the original baseline. A missing
+    /// record beside surviving materialization files is the same damaged
+    /// state, not a first use.
+    async fn load_state(&self, session_name: &str) -> Result<Option<StoredBinding>> {
+        let dir = self.session_dir(session_name);
+        let path = dir.join(BINDING_STATE_FILE);
+        let bytes = match fs::read(&path).await {
+            Ok(bytes) => bytes,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                if has_materialization_artifacts(&dir).await {
+                    anyhow::bail!(
+                        "the durable Session environment binding state for session \
+                         {session_name} is missing while prior materialization files \
+                         exist; refusing to treat it as first use"
+                    );
+                }
+                return Ok(None);
             }
-        }
+            Err(error) => {
+                return Err(anyhow::Error::new(error).context(format!(
+                    "cannot read the durable Session environment binding state for session \
+                     {session_name}"
+                )))
+            }
+        };
+        let state = serde_json::from_slice::<StoredBinding>(&bytes).with_context(|| {
+            format!(
+                "cannot parse the durable Session environment binding state for session \
+                 {session_name}"
+            )
+        })?;
+        Ok(Some(state))
     }
 
     async fn save_state(&self, session_name: &str, state: &StoredBinding) -> Result<()> {
@@ -748,6 +800,55 @@ fn observed_from(state: &StoredBinding, shell_revision: Option<u64>) -> SessionE
     }
 }
 
+/// Whether a Session's state directory holds a durable artifact other than
+/// `binding.json`.
+///
+/// Such a directory proves this Agent materialized a binding before, so a
+/// missing `binding.json` is damaged state that must fail closed, never a
+/// first use whose baseline may be recaptured. The adapter directory counts
+/// because it is written before the Session starts: a crash after the initial
+/// process inherits the Layer A overlay but before `binding.json` is recorded
+/// leaves an overlaid environment with no recoverable baseline. An inspection
+/// failure cannot verify absence either and therefore counts as an artifact.
+async fn has_materialization_artifacts(dir: &Path) -> bool {
+    for name in [
+        ENV_RUNTIME_FILE,
+        ENV_REVISION_FILE,
+        SHELL_REVISION_FILE,
+        "shell",
+    ] {
+        match fs::try_exists(dir.join(name)).await {
+            Ok(true) => return true,
+            Ok(false) => {}
+            Err(error) => {
+                tracing::warn!(
+                    "cannot inspect the Session environment state path {}: {error}",
+                    dir.join(name).display()
+                );
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// The observed state to report when the durable record exists but cannot be
+/// trusted. It claims no revision, profile, managed key, shell or convergence:
+/// the Agent genuinely does not know what this Session's binding holds.
+fn untrusted_state_observed(error: &anyhow::Error) -> SessionEnvObservedState {
+    SessionEnvObservedState {
+        applied_revision: 0,
+        status: STATUS_ERROR.to_string(),
+        profiles: Vec::new(),
+        managed_keys: Vec::new(),
+        shell: None,
+        shell_revision: None,
+        last_error: Some(format!(
+            "the durable Session environment binding state cannot be trusted: {error:#}"
+        )),
+    }
+}
+
 /// Why Nession refuses to let an Environment profile control `key`.
 ///
 /// The policy is one place so the same key cannot be reserved on one path and
@@ -761,8 +862,11 @@ fn reserved_key_reason(key: &str) -> Option<&'static str> {
         "LANG" => Some("locale policy is owned by Nession"),
         "ZDOTDIR" => Some("the zsh Session-local adapter owns this directory"),
         _ if key.starts_with("LC_") => Some("locale policy is owned by Nession"),
-        _ if key.starts_with("NESSON_") => {
+        _ if key.starts_with("NESSION_RUNTIME_") => {
             Some("Nession runtime and integration variables are owned by Nession")
+        }
+        _ if key.starts_with("NESSON_") => {
+            Some("legacy Nession runtime variables cannot be profile-managed")
         }
         _ => None,
     }
@@ -883,15 +987,15 @@ elif [ -r "$HOME/.profile" ]; then
 fi
 
 __nession_env_sync() {
-  [ -n "${NESSON_ENV_RUNTIME:-}" ] || return 0
-  [ -r "${NESSON_ENV_RUNTIME}" ] || return 0
+  [ -n "${NESSION_RUNTIME_ENV_RUNTIME:-}" ] || return 0
+  [ -r "${NESSION_RUNTIME_ENV_RUNTIME}" ] || return 0
   local __nession_rev
-  __nession_rev=$(cat "${NESSON_ENV_REVISION}" 2>/dev/null) || return 0
-  [ "$__nession_rev" = "${NESSON_ENV_APPLIED_REVISION:-}" ] && return 0
-  . "${NESSON_ENV_RUNTIME}"
-  export NESSON_ENV_APPLIED_REVISION="$__nession_rev"
-  if [ -n "${NESSON_ENV_SHELL_REVISION:-}" ]; then
-    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSON_ENV_SHELL_REVISION}" ) 2>/dev/null
+  __nession_rev=$(cat "${NESSION_RUNTIME_ENV_REVISION}" 2>/dev/null) || return 0
+  [ "$__nession_rev" = "${NESSION_RUNTIME_ENV_APPLIED_REVISION:-}" ] && return 0
+  . "${NESSION_RUNTIME_ENV_RUNTIME}"
+  export NESSION_RUNTIME_ENV_APPLIED_REVISION="$__nession_rev"
+  if [ -n "${NESSION_RUNTIME_ENV_SHELL_REVISION:-}" ]; then
+    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSION_RUNTIME_ENV_SHELL_REVISION}" ) 2>/dev/null
   fi
 }
 
@@ -910,7 +1014,7 @@ const ZSH_ADAPTER_FILES: [(&str, &str); 5] = [
         ".zshenv",
         r#"# Nession Session-local zsh adapter (#170 Phase B).
 __nession_session_zdotdir="${ZDOTDIR:-$HOME}"
-__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zshenv" ]; then
   . "${__nession_user_zdotdir}/.zshenv"
 fi
@@ -922,7 +1026,7 @@ export ZDOTDIR
     ),
     (
         ".zprofile",
-        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zprofile" ]; then
   . "${__nession_user_zdotdir}/.zprofile"
 fi
@@ -931,21 +1035,21 @@ fi
     (
         ".zshrc",
         r#"# Nession Session-local zsh adapter (#170 Phase B).
-__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zshrc" ]; then
   . "${__nession_user_zdotdir}/.zshrc"
 fi
 
 __nession_env_sync() {
-  [ -n "${NESSON_ENV_RUNTIME:-}" ] || return 0
-  [ -r "${NESSON_ENV_RUNTIME}" ] || return 0
+  [ -n "${NESSION_RUNTIME_ENV_RUNTIME:-}" ] || return 0
+  [ -r "${NESSION_RUNTIME_ENV_RUNTIME}" ] || return 0
   local __nession_rev
-  __nession_rev=$(cat "${NESSON_ENV_REVISION}" 2>/dev/null) || return 0
-  [ "$__nession_rev" = "${NESSON_ENV_APPLIED_REVISION:-}" ] && return 0
-  . "${NESSON_ENV_RUNTIME}"
-  export NESSON_ENV_APPLIED_REVISION="$__nession_rev"
-  if [ -n "${NESSON_ENV_SHELL_REVISION:-}" ]; then
-    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSON_ENV_SHELL_REVISION}" ) 2>/dev/null
+  __nession_rev=$(cat "${NESSION_RUNTIME_ENV_REVISION}" 2>/dev/null) || return 0
+  [ "$__nession_rev" = "${NESSION_RUNTIME_ENV_APPLIED_REVISION:-}" ] && return 0
+  . "${NESSION_RUNTIME_ENV_RUNTIME}"
+  export NESSION_RUNTIME_ENV_APPLIED_REVISION="$__nession_rev"
+  if [ -n "${NESSION_RUNTIME_ENV_SHELL_REVISION:-}" ]; then
+    ( umask 077; printf '%s\n' "$__nession_rev" > "${NESSION_RUNTIME_ENV_SHELL_REVISION}" ) 2>/dev/null
   fi
 }
 
@@ -959,7 +1063,7 @@ fi
     ),
     (
         ".zlogin",
-        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zlogin" ]; then
   . "${__nession_user_zdotdir}/.zlogin"
 fi
@@ -967,7 +1071,7 @@ fi
     ),
     (
         ".zlogout",
-        r#"__nession_user_zdotdir="${NESSON_USER_ZDOTDIR:-$HOME}"
+        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
 if [ -r "${__nession_user_zdotdir}/.zlogout" ]; then
   . "${__nession_user_zdotdir}/.zlogout"
 fi
@@ -1007,6 +1111,24 @@ mod tests {
         assert_eq!(overlay.warnings.len(), 2);
         assert!(overlay.warnings.iter().any(|w| w.contains("TERM")));
         assert!(overlay.warnings.iter().any(|w| w.contains("TMUX")));
+    }
+
+    #[test]
+    fn mcp_token_is_bindable_while_internal_identity_is_protected() {
+        let overlay = EnvManager::merge_snapshots(&[snapshot(
+            "mcp.env",
+            &[
+                ("NESSION_MCP_TOKEN", "fixture-token"),
+                ("NESSION_RUNTIME_SESSION_INSTANCE_ID", "forged"),
+                ("NESSON_SESSION_INSTANCE_ID", "legacy-forged"),
+            ],
+        )])
+        .expect("credential may be bound from an explicit Profile");
+        assert_eq!(
+            overlay.vars,
+            vec![("NESSION_MCP_TOKEN".to_string(), "fixture-token".to_string())]
+        );
+        assert_eq!(overlay.warnings.len(), 2);
     }
 
     #[test]
@@ -1096,9 +1218,9 @@ mod tests {
             .find(|(name, _)| *name == ".zshrc")
             .expect("the hook belongs in .zshrc")
             .1;
-        assert!(zshrc.contains("NESSON_USER_ZDOTDIR"));
+        assert!(zshrc.contains("NESSION_RUNTIME_USER_ZDOTDIR"));
         assert!(zshrc.contains("add-zsh-hook precmd"));
-        assert!(zshrc.contains("NESSON_ENV_RUNTIME"));
+        assert!(zshrc.contains("NESSION_RUNTIME_ENV_RUNTIME"));
         assert!(!zshrc.contains("tmux show-environment"));
     }
 
@@ -1108,7 +1230,7 @@ mod tests {
         assert!(!BASH_ADAPTER.contains("send-keys"));
         assert!(!BASH_ADAPTER.contains("show-environment"));
         assert!(BASH_ADAPTER.contains("PROMPT_COMMAND"));
-        assert!(BASH_ADAPTER.contains("NESSON_ENV_RUNTIME"));
+        assert!(BASH_ADAPTER.contains("NESSION_RUNTIME_ENV_RUNTIME"));
     }
 
     #[test]
@@ -1128,12 +1250,17 @@ mod tests {
             "LANG",
             "LC_ALL",
             "ZDOTDIR",
-            "NESSON_PS1",
+            "NESSION_RUNTIME_PS1",
         ] {
             assert!(reserved_key_reason(key).is_some(), "{key} must be reserved");
         }
         assert!(reserved_key_reason("PATH").is_none());
         assert!(reserved_key_reason("ANTHROPIC_API_KEY").is_none());
+        // Integration credentials are user-provisioned, not internal runtime state.
+        assert!(reserved_key_reason("NESSION_MCP_TOKEN").is_none());
+        assert!(reserved_key_reason("NESSION_TEST").is_none());
+        assert!(reserved_key_reason("NESSION_RUNTIME_ENV_REVISION").is_some());
+        assert!(reserved_key_reason("NESSON_ENV_REVISION").is_some());
     }
 
     // ── the binding engine, against a fake tmux ──────────────────────────────
@@ -1409,6 +1536,7 @@ esac"#,
         let pending = mgr
             .load_state(session)
             .await
+            .expect("the state is readable")
             .expect("the failed apply is recorded");
         assert_eq!(
             pending.baseline.get("MODE"),
@@ -1456,6 +1584,7 @@ esac"#,
         let released = restarted
             .load_state(session)
             .await
+            .expect("the state is readable")
             .expect("the state is durable");
         assert!(
             !released.baseline.contains_key("MODE"),
@@ -1516,6 +1645,7 @@ esac"#,
         let pending = mgr
             .load_state(session)
             .await
+            .expect("the state is readable")
             .expect("the failed apply is recorded");
         assert_eq!(
             pending.baseline.get("ABSENT"),
@@ -1550,6 +1680,7 @@ esac"#,
         assert!(!restarted
             .load_state(session)
             .await
+            .expect("the state is readable")
             .expect("the state is durable")
             .baseline
             .contains_key("ABSENT"));
@@ -1597,6 +1728,7 @@ esac"#,
             let state = mgr
                 .load_state(session)
                 .await
+                .expect("the state is readable")
                 .expect("the failed apply is recorded");
             assert_eq!(
                 state.baseline.get("MODE"),
@@ -1631,9 +1763,368 @@ esac"#,
         assert!(mgr
             .load_state(session)
             .await
+            .expect("the state is readable")
             .expect("the state is durable")
             .baseline
             .is_empty());
+    }
+
+    /// #3882: an unreadable durable record is not "no binding". The apply fails
+    /// before any tmux read or mutation, the untrusted path is left exactly as
+    /// found, and the error discloses neither a key nor a value.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn an_unreadable_binding_state_fails_closed_and_preserves_the_original_state() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, _fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let state_dir = dir.path().join("state");
+        let session = "nession-unreadable-state-sess";
+
+        let mut mgr = EnvManager::new(state_dir.clone());
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            session,
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile")])],
+        )
+        .await
+        .expect("the overlay applies");
+
+        let state_file = mgr.session_dir(session).join(BINDING_STATE_FILE);
+        let runtime_file = mgr.session_dir(session).join(ENV_RUNTIME_FILE);
+        let original_runtime = std::fs::read(&runtime_file).unwrap();
+        let calls_before = fake.calls();
+
+        // A transient read failure: replacing the record with a directory makes
+        // `fs::read` fail with EISDIR on every host, independent of the user
+        // the suite happens to run as.
+        std::fs::remove_file(&state_file).unwrap();
+        std::fs::create_dir(&state_file).unwrap();
+
+        let error = mgr
+            .apply_binding(
+                session,
+                2,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("MODE", "profile2")])],
+            )
+            .await
+            .expect_err("an unreadable durable record must fail the apply");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("durable Session environment binding state"),
+            "{message}"
+        );
+        for disclosed in ["default", "profile2", "MODE"] {
+            assert!(
+                !message.contains(disclosed),
+                "the error disclosed {disclosed:?}: {message}"
+            );
+        }
+        assert_eq!(
+            fake.calls(),
+            calls_before,
+            "the apply must not read or mutate tmux before the record is trusted: {:#?}",
+            fake.calls()
+        );
+        assert!(
+            state_file.is_dir(),
+            "the untrusted path must be preserved as found"
+        );
+        assert_eq!(
+            std::fs::read(&runtime_file).unwrap(),
+            original_runtime,
+            "the shell overlay must not be overwritten"
+        );
+
+        // The observed half never claims convergence while the record is
+        // untrusted.
+        let observed = mgr
+            .observe(session)
+            .await
+            .expect("the untrusted record is reported, not hidden");
+        assert_eq!(observed.status, STATUS_ERROR);
+        assert!(observed.managed_keys.is_empty());
+        assert!(observed
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("cannot be trusted")));
+    }
+
+    /// #3882: malformed JSON is not first use either. The bytes stay on disk
+    /// byte-for-byte and no tmux command runs.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_malformed_binding_state_fails_closed_and_keeps_the_original_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, _fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let state_dir = dir.path().join("state");
+        let session = "nession-malformed-state-sess";
+
+        let mut mgr = EnvManager::new(state_dir.clone());
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            session,
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile")])],
+        )
+        .await
+        .expect("the overlay applies");
+
+        let state_file = mgr.session_dir(session).join(BINDING_STATE_FILE);
+        let malformed = b"{ not json; secret-baseline-value".to_vec();
+        std::fs::write(&state_file, &malformed).unwrap();
+        let calls_before = fake.calls();
+
+        let error = mgr
+            .apply_binding(
+                session,
+                2,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("MODE", "profile2")])],
+            )
+            .await
+            .expect_err("a malformed durable record must fail the apply");
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("cannot parse the durable Session environment binding state"),
+            "{message}"
+        );
+        assert!(
+            !message.contains("secret-baseline-value") && !message.contains("profile2"),
+            "the error disclosed durable content: {message}"
+        );
+        assert_eq!(
+            fake.calls(),
+            calls_before,
+            "a malformed record must stop the apply before tmux: {:#?}",
+            fake.calls()
+        );
+        assert_eq!(
+            std::fs::read(&state_file).unwrap(),
+            malformed,
+            "the original malformed bytes must be preserved"
+        );
+        assert_eq!(
+            mgr.observe(session).await.map(|state| state.status),
+            Some(STATUS_ERROR.to_string()),
+            "a malformed record is an observed error, not an absent binding"
+        );
+    }
+
+    /// #3882: a missing record beside surviving materialization files is
+    /// damaged durable state, not a first use whose baseline may be recaptured.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_missing_record_beside_materialization_files_is_not_first_use() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, _fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let session = "nession-partial-state-sess";
+
+        let mut mgr = EnvManager::new(dir.path().join("state"));
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            session,
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile")])],
+        )
+        .await
+        .expect("the overlay applies");
+
+        let state_file = mgr.session_dir(session).join(BINDING_STATE_FILE);
+        std::fs::remove_file(&state_file).unwrap();
+        let calls_before = fake.calls();
+
+        let error = mgr
+            .apply_binding(
+                session,
+                2,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("MODE", "profile2")])],
+            )
+            .await
+            .expect_err("a missing record beside materialized state is not first use");
+        assert!(
+            format!("{error:#}").contains("refusing to treat it as first use"),
+            "{error:#}"
+        );
+        assert_eq!(
+            fake.calls(),
+            calls_before,
+            "a damaged partial record must stop the apply before tmux: {:#?}",
+            fake.calls()
+        );
+        assert!(
+            !state_file.exists(),
+            "the failed apply must not create a replacement record"
+        );
+        assert_eq!(
+            mgr.observe(session).await.map(|state| state.status),
+            Some(STATUS_ERROR.to_string())
+        );
+
+        // A crash before the record is written can leave only the adapter
+        // directory: the initial process already inherited the Layer A
+        // overlay, and no baseline is recoverable. That is still not first
+        // use.
+        for name in [ENV_RUNTIME_FILE, ENV_REVISION_FILE] {
+            std::fs::remove_file(mgr.session_dir(session).join(name)).unwrap();
+        }
+        // No interactive shell reported a revision in this test, so remove the
+        // shell-revision marker only if it exists.
+        let _ = std::fs::remove_file(mgr.session_dir(session).join(SHELL_REVISION_FILE));
+        std::fs::create_dir(mgr.session_dir(session).join("shell")).unwrap();
+        let shell_only = mgr
+            .apply_binding(
+                session,
+                3,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("MODE", "profile3")])],
+            )
+            .await
+            .expect_err("an adapter-only state dir still proves prior materialization");
+        assert!(
+            format!("{shell_only:#}").contains("refusing to treat it as first use"),
+            "{shell_only:#}"
+        );
+        assert_eq!(
+            fake.calls(),
+            calls_before,
+            "the adapter-only apply must not touch tmux: {:#?}",
+            fake.calls()
+        );
+    }
+
+    /// #3882: once the record is healthy again, a reapply and a clear restore
+    /// the original baseline for both an originally present and an originally
+    /// absent key, from a reconstructed manager that only has the state dir.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_recovered_binding_state_still_restores_the_original_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, _fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let state_dir = dir.path().join("state");
+        let session = "nession-recovered-state-sess";
+
+        let mut mgr = EnvManager::new(state_dir.clone());
+        mgr.with_tmux(fake.dep());
+        mgr.apply_binding(
+            session,
+            1,
+            &[profile_ref("a.env")],
+            &[snapshot(
+                "a.env",
+                &[("MODE", "profile"), ("ABSENT", "profile")],
+            )],
+        )
+        .await
+        .expect("the overlay applies");
+
+        let state_file = mgr.session_dir(session).join(BINDING_STATE_FILE);
+        let original_state = std::fs::read(&state_file).unwrap();
+        std::fs::write(&state_file, b"{ damaged").unwrap();
+        mgr.apply_binding(
+            session,
+            2,
+            &[profile_ref("a.env")],
+            &[snapshot("a.env", &[("MODE", "profile2")])],
+        )
+        .await
+        .expect_err("the damaged record still fails closed");
+        std::fs::write(&state_file, &original_state).unwrap();
+
+        // A new Agent process has only the durable state directory and the
+        // same tmux dependency.
+        let mut restarted = EnvManager::new(state_dir);
+        restarted.with_tmux(fake.dep());
+        let reapplied = restarted
+            .apply_binding(
+                session,
+                2,
+                &[profile_ref("a.env")],
+                &[snapshot(
+                    "a.env",
+                    &[("MODE", "profile2"), ("ABSENT", "profile2")],
+                )],
+            )
+            .await
+            .expect("a readable record resumes the apply");
+        assert_eq!(
+            reapplied.observed.managed_keys,
+            vec!["ABSENT".to_string(), "MODE".to_string()]
+        );
+
+        let cleared = restarted
+            .apply_binding(session, 3, &[], &[])
+            .await
+            .expect("clearing the binding restores the original baseline");
+        assert!(cleared.observed.managed_keys.is_empty());
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("default"),
+            "the original present key must be restored, not the overlaid value"
+        );
+        assert_eq!(
+            fake_environment_value(&env_dir, "ABSENT"),
+            None,
+            "the originally absent key must be unset"
+        );
+        assert!(restarted
+            .load_state(session)
+            .await
+            .expect("the state is readable")
+            .expect("the state is durable")
+            .baseline
+            .is_empty());
+    }
+
+    /// #3882 control: a Session with no durable state at all is verified first
+    /// use and still captures the real tmux baseline.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_first_use_session_with_no_state_still_captures_the_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let (fake, env_dir, _fail_marker) = fake_with_a_durable_environment(dir.path());
+        std::fs::write(env_dir.join("MODE"), "default").unwrap();
+        let state_dir = dir.path().join("state");
+        let session = "nession-first-use-sess";
+        assert!(
+            !state_dir.join(session).exists(),
+            "the control needs a Session that never materialized a binding"
+        );
+
+        let mut mgr = EnvManager::new(state_dir);
+        mgr.with_tmux(fake.dep());
+        let applied = mgr
+            .apply_binding(
+                session,
+                1,
+                &[profile_ref("a.env")],
+                &[snapshot("a.env", &[("MODE", "profile")])],
+            )
+            .await
+            .expect("first use is not a state failure");
+        assert_eq!(applied.observed.managed_keys, vec!["MODE".to_string()]);
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("profile")
+        );
+
+        mgr.apply_binding(session, 2, &[], &[])
+            .await
+            .expect("clearing first use restores the captured baseline");
+        assert_eq!(
+            fake_environment_value(&env_dir, "MODE").as_deref(),
+            Some("default"),
+            "the baseline captured on first use is the pre-overlay value"
+        );
     }
 
     #[cfg(unix)]
@@ -1774,6 +2265,72 @@ esac"#,
         );
     }
 
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn mcp_token_profile_materializes_in_real_tmux_without_spoofing_identity() {
+        if !crate::tmux::cmd::global()
+            .std()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success())
+        {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let manager = crate::tmux::manager::SessionManager::new();
+        let session = crate::test_support::TestSession::new("mcp-token-profile");
+        manager
+            .create_session(session.name(), 80, 24, "/tmp", &[])
+            .await
+            .expect("create real tmux Session");
+        let instance = manager
+            .session_instance_id(session.name())
+            .await
+            .expect("original instance identity");
+        let snapshots = vec![snapshot(
+            "mcp.env",
+            &[
+                ("NESSION_MCP_TOKEN", "fixture-token"),
+                ("NESSION_RUNTIME_SESSION_INSTANCE_ID", "forged"),
+            ],
+        )];
+        let profiles = profiles_from_snapshots(&snapshots, "attach");
+        let outcome = manager
+            .env()
+            .apply_binding(session.name(), 1, &profiles, &snapshots)
+            .await
+            .expect("apply authorized credential profile");
+
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|warning| { warning.contains("NESSION_RUNTIME_SESSION_INSTANCE_ID") }),
+            "forged runtime identity must be refused"
+        );
+        assert_eq!(
+            manager
+                .get_session_env(session.name(), "NESSION_MCP_TOKEN")
+                .await
+                .expect("observable tmux environment")
+                .as_deref(),
+            Some("fixture-token")
+        );
+        assert_eq!(
+            manager
+                .session_instance_id(session.name())
+                .await
+                .expect("identity remains anchored"),
+            instance
+        );
+        manager
+            .kill_session(session.name())
+            .await
+            .expect("cleanup tmux Session");
+    }
+
     // ── the shell adapter, against a real shell ──────────────────────────────
 
     /// Spawn the generated adapter in a real interactive shell and return the
@@ -1815,7 +2372,7 @@ esac"#,
         }
         // The test's user config lives in `home`; a ZDOTDIR inherited from the
         // developer's own shell must not redirect it.
-        command.env("NESSON_USER_ZDOTDIR", home);
+        command.env("NESSION_RUNTIME_USER_ZDOTDIR", home);
         let mut child = command.spawn().expect("the shell starts");
         let stdin = child.stdin.take().expect("piped stdin");
         let stdout = child.stdout.take().expect("piped stdout");
@@ -1941,6 +2498,86 @@ esac"#,
     /// A child started before the binding changes keeps the environment it was
     /// born with. The shell converges at its next prompt; processes already
     /// running are not rewritten.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_surviving_legacy_bash_adapter_converges_after_runtime_rename() {
+        let shell = "/bin/bash";
+        assert!(std::path::Path::new(shell).exists(), "bash is required");
+        let dir = tempfile::tempdir().unwrap();
+        let home = dir.path().join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let mgr = EnvManager::new(dir.path().join("state"));
+        let mut adapter = mgr.install_shell_adapter("legacy-bash", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+
+        // This rcfile is the old Agent's previously installed adapter. The
+        // upgraded Agent changes its *new* template, not this surviving file.
+        let rcfile = std::path::PathBuf::from(&adapter.command[2]);
+        let legacy_script = BASH_ADAPTER.replace("NESSION_RUNTIME_", "NESSON_");
+        std::fs::write(&rcfile, legacy_script).expect("legacy rcfile");
+        for (key, _) in &mut adapter.env {
+            *key = key.replace("NESSION_RUNTIME_", "NESSON_");
+        }
+
+        let session_dir = mgr.session_dir("legacy-bash");
+        mgr.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let (mut child, mut stdin, mut lines) = spawn_adapter_shell(shell, &adapter, &home).await;
+        let first = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY1:$NESSION_TEST\"",
+            "LEGACY1:",
+        )
+        .await;
+        assert!(first.contains("LEGACY1:one"), "{first}");
+
+        mgr.write_runtime_files(
+            &session_dir,
+            2,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "two".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+        let _ = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY_SYNC\"",
+            "LEGACY_SYNC",
+        )
+        .await;
+        let second = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"LEGACY2:$NESSION_TEST\"",
+            "LEGACY2:",
+        )
+        .await;
+        assert!(second.contains("LEGACY2:two"), "{second}");
+        assert_eq!(
+            tokio::fs::read_to_string(session_dir.join(SHELL_REVISION_FILE))
+                .await
+                .unwrap()
+                .trim(),
+            "2"
+        );
+        drop(stdin);
+        let _ = child.wait().await;
+    }
+
     #[cfg(unix)]
     #[tokio::test]
     async fn a_running_child_keeps_its_environment_when_the_binding_changes() {

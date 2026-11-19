@@ -480,6 +480,7 @@ fn a_build_descriptor_never_serializes_an_unmeasured_progress_fraction() {
         size_bytes: 0,
         alias: None,
         deduplicated: false,
+        attempts: Vec::new(),
         created_at: 1,
         updated_at: 2,
     };
