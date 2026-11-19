@@ -92,6 +92,10 @@ function isRuntime(file) {
 
 function isTooling(file) {
   if (file.endsWith('.md') || file.startsWith('docs/')) return true;
+  // Pages' Node.js test-only sources are not shipped by pages/scripts/build.mjs.
+  // Do not broaden this to pages/ assets or publisher build scripts: those
+  // may change the public runtime and must remain risk-bearing/unknown.
+  if (file.startsWith('pages/tests/')) return true;
   if (file.startsWith('gates/')) return true; // executor/suite paths handled first
   if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
   if (file.startsWith('scripts/')) return true; // e2e/ci paths handled first
@@ -212,6 +216,7 @@ function selfTest() {
     'scripts/staging-lane-scheduler.mjs',
     'scripts/acceptance-case-ingest.mjs',
     'scripts/deployment-binding-lookup.mjs',
+    'pages/tests/public-deployment.test.mjs', // #4018: publisher verification, not public runtime
   ];
   for (const file of tooling) {
     assert.equal(categorizeChangedPath(file), 'tooling', file + ' must be tooling');
@@ -292,6 +297,28 @@ function selfTest() {
   ]);
   assert.equal(mcpImageConvergence.category, 'mixed');
   assert.equal(mcpImageConvergence.applicable, true);
+  // #4018: actual #4017 integration changed only the Pages publisher router
+  // and a Node.js test. This pair is known tooling, not unknown or browser
+  // runner code. It cannot bypass the normal PR Quality required checks.
+  const pagesTestConvergence = classifyChangedPaths([
+    '.github/workflows/deploy-pages.yml',
+    'pages/tests/public-deployment.test.mjs',
+  ]);
+  assert.equal(pagesTestConvergence.category, 'tooling-only');
+  assert.equal(pagesTestConvergence.applicable, false);
+  assert.equal(notRequiredReceipt('a'.repeat(40),pagesTestConvergence).full_regression,
+    'NOT_REQUIRED');
+  // Only the *test* subtree is recognized. Public Pages app assets and the
+  // source-backed Pages build script are not safe to classify as tooling.
+  for(const file of ['pages/index.html','pages/app.js','pages/scripts/build.mjs']){
+    assert.equal(categorizeChangedPath(file),'unknown',file+' must fail closed');
+  }
+  assert.equal(classifyChangedPaths([
+    'pages/tests/public-deployment.test.mjs','pages/scripts/build.mjs',
+  ]).category,'unknown','an unknown Pages runtime path must not be laundered');
+  assert.equal(classifyChangedPaths([
+    'pages/tests/public-deployment.test.mjs','web/src/App.tsx',
+  ]).category,'mixed','Pages test-only paths must not hide runtime changes');
   assert.throws(() => notRequiredReceipt('a'.repeat(40), ignoreRules),
     /not-required classification/,
     'build-input ignore changes must never emit a Full Not Required receipt');
