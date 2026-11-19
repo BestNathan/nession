@@ -215,7 +215,7 @@ async function selfTest() {
   // implementation; the *current exact staging tip* is the deployment target.
   // No human comment may supply either source SHA or the environment.
   const deployedIssue = { ...issue, body: issue.body.replace(
-    'when: merged\\n    branch: staging', 'when: deployed\\n    environment: staging') };
+    'when: merged\n    branch: staging', 'when: deployed\n    environment: staging') };
   const deployedManifest = manifest.replace('stage: staging','stage: post-merge');
   const deployedRead = async p => p.includes('/contents/') ? {
     type:'file',encoding:'base64',
