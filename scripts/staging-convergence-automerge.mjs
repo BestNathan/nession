@@ -224,7 +224,7 @@ function selfTest(){
   assert.equal(qualifierConcurrencyIsolated(current),true,
     'required PR classifier must not share controller workflow-global queue');
   assert.equal(qualifierConcurrencyIsolated(current.replace(/^jobs:\s*$/m,
-    'concurrency:\\n  group: release-staging-convergence\\n  cancel-in-progress: false\\n\\njobs:')),false,
+    'concurrency:\n  group: release-staging-convergence\n  cancel-in-progress: false\n\njobs:')),false,
     'reintroducing a workflow-global lock must strand qualification tests');
   assert.equal(qualifierConcurrencyIsolated(current.replace(
     '      group: release-staging-convergence',
