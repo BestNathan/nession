@@ -15,10 +15,7 @@ resources:
 - sealed-secret.json
 - deployment.yaml
 - service.yaml
-  # Staging MCP public Ingress intentionally staged but inactive during
-  # the hostname/TLS/Host-allowlist rotation (#3945). Re-enable ingress.yaml
-  # by separate reviewed PR only after both Secrets, DNS, Edge/Origin TLS
-  # and HTTPS/auth preflight for staging-mcp-nession.bestnathan.top pass.
+- ingress.yaml
 
 images:
 - name: ghcr.io/bestnathan/nession-mcp
