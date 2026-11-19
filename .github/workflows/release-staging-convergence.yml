@@ -38,13 +38,13 @@ on:
   # #3211/#3689: PR-native staging -> main promotion has exact-head PR
   # checks; wake on completion including failures to revoke stale status.
   # Only the independent canonical policy may publish qualified success.
-  # #3674: wake on successful post-mirror Staging deploy push only after
+  # #3674: wake on successful GHCR-driven Staging GitOps deploy push only after
   # release proof exists. This is NEVER approval; reconcile independently
   # re-attests exact HEAD checks, deployment and all source acceptance.
   # Wake only on completed checks for repository-owned immutable sync heads;
   # the trusted controller still revalidates every source and receipt.
   workflow_run:
-    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'Deploy / Staging ACR']
+    workflows: ['CI / Quality Gate', 'Acceptance / Case Smoke', 'E2E / Tests', 'Deploy / Staging GHCR']
     types: [completed]
 
 permissions:
@@ -54,10 +54,9 @@ permissions:
   pull-requests: read
   statuses: write # only exact-HEAD canonical qualification context (#3689)
 
-concurrency:
-  group: release-staging-convergence
-  cancel-in-progress: false
-
+# Job-level controller serialization keeps required PR qualification independent:
+# a newer unrelated schedule/workflow_run must not cancel pull_request_target
+# before it publishes the required nession/convergence-qualification status.
 jobs:
   # GitHub required contexts are branch-wide. Every regular main/staging PR
   # must receive a trusted "not applicable" success while the Publisher's
@@ -88,6 +87,11 @@ jobs:
         run: node scripts/staging-convergence-automerge.mjs classify
 
   converge:
+    # Only the mutating controller is serialized; ordinary PR classifiers must
+    # always run and publish their exact-HEAD required status.
+    concurrency:
+      group: release-staging-convergence
+      cancel-in-progress: false
     needs: [classify_pr]
     # The no-approval recheck wakes the same fail-closed controller.
     # Owner PR comments are wake signals only; trusted source/digest checks remain mandatory.
@@ -159,8 +163,8 @@ jobs:
             (
               (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch') &&
               github.event.workflow_run.head_branch == 'staging' &&
-              github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml' &&
-              github.event.workflow_run.name == 'Deploy / Staging ACR' &&
+              github.event.workflow_run.path == '.github/workflows/deploy-staging-ghcr.yml' &&
+              github.event.workflow_run.name == 'Deploy / Staging GHCR' &&
               github.event.workflow_run.repository.full_name == github.repository
             )
           )

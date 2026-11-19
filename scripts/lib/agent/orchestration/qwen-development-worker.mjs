@@ -185,9 +185,19 @@ export function classifyQwenCliFailure(proc) {
   detail.push('stderr_category=' + category);
   return 'Qwen CLI failed (' + detail.join(', ') + '); raw model output withheld';
 }
-function cliCall({prompt,sessionId,resuming,plan,configDir,workspace}){
+// #3885: the real second native Repair exhausted the original 10-turn
+// bound without creating a patch. Increase only the independently admitted
+// Repair budget; keep a finite limit, identical tools and unchanged Run fence.
+export function qwenDeveloperTurnBudget(task,resuming){
+  if(!['implement','repair'].includes(task)||
+      typeof resuming!=='boolean'||(task==='repair'&&!resuming))
+    fail('invalid signed task / native Resume turn policy');
+  return task==='repair'?24:10;
+}
+function cliCall({prompt,sessionId,resuming,task,plan,configDir,workspace}){
   const argv=['-p',prompt,'--output-format','stream-json','--verbose',
-    '--max-turns','10','--model',plan.model,'--strict-mcp-config',
+    '--max-turns',String(qwenDeveloperTurnBudget(task,resuming)),
+    '--model',plan.model,'--strict-mcp-config',
     ...claudeCliToolPolicy(plan.tools,{restricted:true}),
     ...(resuming?['--resume',sessionId]:['--session-id',sessionId])];
   const cliEnv={...process.env,CLAUDE_CONFIG_DIR:configDir,
@@ -264,7 +274,7 @@ async function main(){
     fail('untrusted output destination');
   let events=[],envelope=null,started=Date.now(),status='error',error=null;
   try{
-    const called=cliCall({prompt,sessionId,resuming,plan,configDir,
+    const called=cliCall({prompt,sessionId,resuming,task:admission.task,plan,configDir,
       workspace:snapshot.workspace});
     ({events,envelope,started}=called);
     const patch=collectQwenDevelopmentPatch(snapshot,{events});

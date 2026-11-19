@@ -1,5 +1,5 @@
 name: Deploy / Staging ACR
-# #3674: ACR mirroring/rollout is independent of successful GHCR release.
+# #3674: ACR mirroring is independent and never controls GitOps deployment (#4032).
 on:
   push:
     branches: ['staging']
@@ -46,8 +46,7 @@ jobs:
         run: node scripts/ci/verify-staging-ghcr-source.mjs wait "$GITHUB_SHA"
 
   # Mirror published multi-arch GHCR images to ACR, without rebuilding.
-  # Staging GitOps promotion depends on successful ACR replication; an ACR
-  # outage must fail closed rather than publish unavailable image tags.
+  # Copy failures remain truthful ACR-only failures, with no GitOps side effect.
   mirror-acr:
     needs: verify-source
     strategy:
@@ -122,9 +121,8 @@ jobs:
           bash scripts/mirror-container-images.sh "$GHCR_IMAGE" "$ACR_IMAGE" "${{ needs.verify-source.outputs.short_sha }}" "${{ needs.verify-source.outputs.short_sha }}" "${{ matrix.image }}"
 
   # Bind the exact source SHA to the immutable digest of every registry this
-  # build was published to. The staging lane pulls from ACR while on-demand
-  # lanes pull GHCR; a mirror may rebuild the index, so both digests are
-  # recorded and the deployment identity collector selects the observed one.
+  # build was copied to. ACR provenance is retained for readback/diagnostics;
+  # GitOps and deployment identity use GHCR publication independently.
   provenance:
     needs: [verify-source, mirror-acr]
     runs-on: ubuntu-24.04
@@ -206,24 +204,3 @@ jobs:
           path: ${{ runner.temp }}/nession-build-provenance.json
           retention-days: 90
 
-  # Deploy to the retained staging environment (gitops/environments/staging).
-  # ArgoCD consumes the gitops branch; no more kustomize commits on main.
-  deploy-staging-gitops:
-    # Staging pulls exclusively from ACR, so wait for all four independent
-    # mirrors (both platforms) before advancing ArgoCD desired state.
-    needs: [verify-source, provenance]
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - name: Commit verified Staging GitOps
-        run: |
-          set -euo pipefail
-          current="$(git ls-remote origin refs/heads/staging | cut -f1)"
-          [[ "$current" == "$GITHUB_SHA" ]] ||
-            { echo "::error::staging advanced; refusing stale SHA rollback"; exit 1; }
-          ./scripts/gitops-commit.sh staging "${{ needs.verify-source.outputs.short_sha }}"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

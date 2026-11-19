@@ -5,12 +5,12 @@ name: Deploy / Identity
 # the source SHA currently deployed on an isolated staging lane matches the
 # trusted build provenance and the observed ready workloads.
 on:
-  # The source is a completed, GitHub-owned Staging ACR deployment,
-  # not the earlier GHCR-only build or a PR artifact.
+  # A GHCR-driven GitOps writer succeeds before read-only deployed attestation;
+  # ACR-only mirrors and GHCR-only build jobs are not deployment evidence.
   # The protected Main job independently checks original Run/Job/Step identity
   # before any access to the read-only Kubernetes observation credentials.
   workflow_run:
-    workflows: ["Deploy / Staging ACR"]
+    workflows: ["Deploy / Staging GHCR"]
     branches: [staging]
     types: [completed]
   workflow_dispatch:
@@ -40,10 +40,10 @@ jobs:
         github.event_name == 'workflow_dispatch' ||
         (
           github.event_name == 'workflow_run' &&
-          github.event.workflow_run.name == 'Deploy / Staging ACR' &&
+          github.event.workflow_run.name == 'Deploy / Staging GHCR' &&
           (
-            github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml' ||
-            github.event.workflow_run.path == '.github/workflows/deploy-staging-acr.yml@refs/heads/staging'
+            github.event.workflow_run.path == '.github/workflows/deploy-staging-ghcr.yml' ||
+            github.event.workflow_run.path == '.github/workflows/deploy-staging-ghcr.yml@refs/heads/staging'
           ) &&
           (
             github.event.workflow_run.event == 'push' ||
@@ -195,13 +195,9 @@ jobs:
         run: |
           set -euo pipefail
           REPO="$GITHUB_REPOSITORY"
-          # Independent ACR deploy emits dual-registry provenance; legacy
-          # successful release receipts remain readable during propagation.
-          if [[ "$ENVIRONMENT" == "staging" ]]; then
-            sources=(deploy-staging-acr.yml release-staging.yml)
-          else
-            sources=(release-staging.yml)
-          fi
+          # Only trusted GHCR build provenance can authorize deployed digests.
+          # ACR copy provenance remains an independent mirror-only receipt.
+          sources=(release-staging.yml)
           RUN_ID=""
           for source_workflow in "${sources[@]}"; do
             response=$(gh api "repos/$REPO/actions/workflows/$source_workflow/runs?head_sha=${DEPLOYED_SHA}&per_page=100")

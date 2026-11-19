@@ -1,0 +1,108 @@
+name: Deploy / Staging GHCR
+# #4032: GHCR is the sole deployment source. ACR is an independent mirror.
+on:
+  push:
+    branches: ['staging']
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.claude/**'
+      - '.githooks/**'
+      - '.github/**'
+      - 'LICENSE'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: deploy-staging-ghcr-${{ github.sha }}
+  cancel-in-progress: false
+jobs:
+  verify-source:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/staging' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 65
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      short_sha: ${{ steps.source.outputs.short_sha }}
+      source_run_id: ${{ steps.source.outputs.source_run_id }}
+      source_run_attempt: ${{ steps.source.outputs.source_run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate successful exact-SHA GHCR publishing run
+        id: source
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/verify-staging-ghcr-source.mjs wait "$GITHUB_SHA"
+  deploy-staging-gitops:
+    needs: verify-source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      actions: read
+      packages: read
+    concurrency:
+      group: gitops-writer
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Download authenticated GHCR release provenance
+        uses: actions/download-artifact@v4
+        with:
+          name: nession-build-provenance
+          run-id: ${{ needs.verify-source.outputs.source_run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/source-ghcr-provenance
+      - name: Verify exact-source GHCR digests and update Staging GitOps
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DEPLOY_SOURCE_SHA: ${{ github.sha }}
+          SHORT_SHA: ${{ needs.verify-source.outputs.short_sha }}
+          SOURCE_RUN_ID: ${{ needs.verify-source.outputs.source_run_id }}
+          SOURCE_ATTEMPT: ${{ needs.verify-source.outputs.source_run_attempt }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          current="$(git ls-remote origin refs/heads/staging | cut -f1)"
+          [[ "$current" == "$GITHUB_SHA" ]] ||
+            { echo "::error::staging advanced; refusing stale GHCR deployment"; exit 1; }
+          GHCR_IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/nession"
+          SOURCE="$RUNNER_TEMP/source-ghcr-provenance/nession-build-provenance.json"
+          [[ -s "$SOURCE" ]] || { echo "::error::missing trusted GHCR provenance"; exit 1; }
+          jq -e --arg sha "$GITHUB_SHA" --arg registry "$GHCR_IMAGE" --arg short "$SHORT_SHA" '
+            .schema_version == 1 and .kind == "nession_build_provenance" and
+            .source_sha == $sha and (.images | keys == ["agent","mcp","server","ui"]) and
+            (. as $doc | all(["agent","mcp","server","ui"][];
+              . as $role |
+              ($doc.images[$role].tag == ($role+"-"+$short)) and
+              ($doc.images[$role].digests[$registry] | test("^sha256:[a-f0-9]{64}$"))
+            ))
+          ' "$SOURCE" >/dev/null || { echo "::error::untrusted GHCR source artifact"; exit 1; }
+          for role in agent mcp server ui; do
+            expected="$(jq -r --arg role "$role" --arg registry "$GHCR_IMAGE"               '.images[$role].digests[$registry]' "$SOURCE")"
+            observed="$(docker buildx imagetools inspect --format '{{.Manifest.Digest}}'               "$GHCR_IMAGE:$role-$SHORT_SHA")"
+            [[ "$expected" == "$observed" ]] ||
+              { echo "::error::GHCR $role digest differs from Run $SOURCE_RUN_ID/$SOURCE_ATTEMPT"; exit 1; }
+          done
+          ./scripts/gitops-commit.sh staging "$SHORT_SHA"
