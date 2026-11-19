@@ -9,12 +9,20 @@ import { pathToFileURL } from 'node:url';
 
 const TARGETS = Object.freeze({
   staging: Object.freeze({
-    MCP_INBOUND_TOKEN: Object.freeze({
+    NESSION_MCP_INBOUND_TOKEN: Object.freeze({
       namespace: 'nession',
       name: 'nession-mcp-inbound-staging',
       key: 'token',
       type: 'Opaque',
       resource: 'environments/staging/mcp/sealed-inbound.json',
+      kustomization: 'environments/staging/mcp/kustomization.yaml'
+    }),
+    NESSION_MCP_BACKEND_SERVER_TOKEN: Object.freeze({
+      namespace: 'nession',
+      name: 'nession-mcp-backend-server-staging',
+      key: 'token',
+      type: 'Opaque',
+      resource: 'environments/staging/mcp/sealed-backend-server.json',
       kustomization: 'environments/staging/mcp/kustomization.yaml'
     }),
     // Legacy config SealedSecret remains registered for rollback only; the
@@ -129,9 +137,9 @@ export function createPlainSecret(environment, secretName, raw) {
   const target = getTarget(environment, secretName);
   // Inbound Bearer credentials must be single-line, visible text; a missing
   // or whitespace-only Environment Secret never becomes a usable key.
-  if (secretName === 'MCP_INBOUND_TOKEN' &&
+  if (['NESSION_MCP_INBOUND_TOKEN', 'NESSION_MCP_BACKEND_SERVER_TOKEN'].includes(secretName) &&
       (typeof raw !== 'string' || !/^[!-~]+$/.test(raw) || raw.length > 4096)) {
-    throw new Error('MCP inbound credential must be a nonempty single-line printable token');
+    throw new Error('MCP credential must be a nonempty single-line printable token');
   }
   const data = target.type === 'kubernetes.io/tls'
     ? (() => {
@@ -204,7 +212,7 @@ export function validateSealed(doc, environment, secretName) {
 
 export function addResource(yaml, resource) {
   const filename = path.posix.basename(resource);
-  if (!['sealed-secret.json', 'sealed-inbound.json', 'sealed-tls.json'].includes(filename)) {
+  if (!['sealed-secret.json', 'sealed-inbound.json', 'sealed-backend-server.json', 'sealed-tls.json'].includes(filename)) {
     throw new Error('unsupported resource name');
   }
   if (!/^resources:\s*$/m.test(yaml)) throw new Error('Kustomization resources list absent');

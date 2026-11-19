@@ -233,7 +233,7 @@ test('TLS Kustomize registration is repeatable, with no collision with MCP confi
     ['environments/staging/mcp/sealed-secret.json'], environment, tlsSecret));
 });
 
-const inboundSecret = 'MCP_INBOUND_TOKEN';
+const inboundSecret = 'NESSION_MCP_INBOUND_TOKEN';
 const inboundTarget = getTarget(environment, inboundSecret);
 
 test('staging MCP inbound token is a dedicated strict SealedSecret target', () => {
@@ -273,4 +273,48 @@ test('staging inbound sealing rejects foreign resources and remains idempotent',
   const wrong = structuredClone(sealedInbound);
   wrong.spec.encryptedData['mcp.toml'] = 'AgEncryptedOldConfig';
   assert.throws(() => validateSealed(wrong, environment, inboundSecret));
+});
+
+const backendServerSecret = 'NESSION_MCP_BACKEND_SERVER_TOKEN';
+const backendServerTarget = getTarget(environment, backendServerSecret);
+
+test('backend Server credential has a distinct strict sealed target', () => {
+  assert.equal(backendServerTarget.namespace, 'nession');
+  assert.equal(backendServerTarget.name, 'nession-mcp-backend-server-staging');
+  assert.equal(backendServerTarget.key, 'token');
+  assert.equal(backendServerTarget.resource, 'environments/staging/mcp/sealed-backend-server.json');
+  assert.notEqual(backendServerTarget.name, inboundTarget.name);
+  assert.throws(() => getTarget('staging', 'MCP_INBOUND_TOKEN'));
+  assert.throws(() => getTarget('staging', 'MCP_BACKEND_SERVER_TOKEN'));
+  assert.throws(() => getTarget('production', backendServerSecret));
+  const value = 'server-shared-token';
+  const doc = createPlainSecret(environment, backendServerSecret, value);
+  assert.deepEqual(Object.keys(doc.data), ['token']);
+  assert.equal(Buffer.from(doc.data.token, 'base64').toString('utf8'), value);
+  for (const invalid of ['', ' ', ' trailing', 'line\nbreak', 'bad\0null']) {
+    assert.throws(() => createPlainSecret(environment, backendServerSecret, invalid));
+  }
+});
+
+test('backend server sealing is strict, separately published and idempotent', () => {
+  const yaml = 'resources:\n- deployment.yaml\n';
+  const next = addResource(yaml, backendServerTarget.resource);
+  assert.match(next, /sealed-backend-server\.json/);
+  assert.equal(addResource(next, backendServerTarget.resource), next);
+  const allowed = [backendServerTarget.resource, backendServerTarget.kustomization];
+  assert.deepEqual(validateChangedPaths(allowed, environment, backendServerSecret), allowed);
+  assert.throws(() => validateChangedPaths([inboundTarget.resource], environment, backendServerSecret));
+  const sealedServer = {
+    apiVersion: 'bitnami.com/v1alpha1',
+    kind: 'SealedSecret',
+    metadata: {name: backendServerTarget.name, namespace: backendServerTarget.namespace},
+    spec: {
+      encryptedData: {token: 'AgEncryptedBackendServer'},
+      template: {metadata: {name: backendServerTarget.name, namespace: backendServerTarget.namespace}, type: 'Opaque'}
+    }
+  };
+  assert.equal(validateSealed(sealedServer, environment, backendServerSecret).kind, 'SealedSecret');
+  const unexpected = structuredClone(sealedServer);
+  unexpected.spec.encryptedData['auth-token'] = 'AgOther';
+  assert.throws(() => validateSealed(unexpected, environment, backendServerSecret));
 });

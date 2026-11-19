@@ -13,23 +13,27 @@ read-only ConfigMap. There is no GitHub Environment Variable for MCP
 configuration and no `${VARIABLE}` string interpolation.
 
 GitHub Environment `staging` contains **Secrets only** for the MCP
-credential cutover: `MCP_INBOUND_TOKEN` is an independent, raw bearer
-credential sealed to Kubernetes Secret `nession/nession-mcp-inbound-staging`
-with key `token`. The MCP backend references the existing Server/Agent
-shared Secret `nession-secret-staging` key `auth-token` directly; never
-create a second independently rotating MCP backend Server credential.
-The current Server credential is historical plaintext debt and must be
-rotated in coordination with Server and Agent, not implicitly by MCP.
+credential cutover: `NESSION_MCP_INBOUND_TOKEN` is an independent, raw bearer
+credential sealed to `nession/nession-mcp-inbound-staging` key `token`;
+`NESSION_MCP_BACKEND_SERVER_TOKEN` is a separate raw GitHub Environment
+Secret sealed to `nession/nession-mcp-backend-server-staging` key `token`.
+The **backend credential value must match** the canonical staging Server/Agent
+shared token; the additional MCP Secret object is a deployment boundary,
+not permission to invent or independently rotate a different Server token.
+Coordinate Server, Agent, and MCP credential changes together.
 
 After the new MCP OCI image includes the env-credential loader and the
-operator has added the `staging/MCP_INBOUND_TOKEN` GitHub **Secret**,
+operator has added **both** GitHub Environment Secrets
+`staging/NESSION_MCP_INBOUND_TOKEN` and `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`,
 manually dispatch **Deploy / Seal GitOps Secret** (environment `staging`).
-This workflow accepts no dynamic resource name or YAML path, reads only
-`secrets.MCP_INBOUND_TOKEN`, and publishes only
-`environments/staging/mcp/sealed-inbound.json` plus its checked
-Kustomization enrollment. Verify the SealedSecrets controller materializes
+This workflow accepts only a fixed choice of the two Secret names, not
+arbitrary resource names or YAML paths. Each invocation reads the selected
+raw Secret and publishes only the corresponding `sealed-inbound.json` or
+`sealed-backend-server.json` plus its checked Kustomization enrollment. Verify the SealedSecrets controller materializes
 the exact namespace/name/key *before* cutting over the MCP Deployment.
-The operator must approve the protected GitHub Environment.
+The operator must approve the protected GitHub Environment for each of
+the two manual SealedSecret publications. The second token's value must match
+the staging Server's existing auth token, or MCP backend calls will fail.
 
 **Migration safety:** Existing `MCP_CONFIG_TOML` Environment Secret,
 `sealed-secret.json` and its Kubernetes Secret remain legacy rollback
@@ -56,7 +60,7 @@ GitHub Environment names must match GitOps environment directory names:
 - production -> gitops/environments/production
 
 The **Deploy / Seal GitOps Secret** workflow now exposes only
-**staging/MCP_INBOUND_TOKEN**. The existing legacy full-TOML registry remains
+**staging/NESSION_MCP_INBOUND_TOKEN** and **staging/NESSION_MCP_BACKEND_SERVER_TOKEN**. The existing legacy full-TOML registry remains
 for historical ciphertext validation and rollback only, not for the current
 manual workflow. The existing `MCP_TLS_PEM_BUNDLE` registry
 entry is retained solely as a bounded strict SealedSecret target consumed by
@@ -68,7 +72,7 @@ Secret. No workflow may accept an arbitrary namespace, output path or host.
 
 | GitHub Environment | GitHub Secret | Kubernetes Secret | data key | GitOps encrypted resource |
 |---|---|---|---|---|
-| staging | MCP_INBOUND_TOKEN | nession/nession-mcp-inbound-staging (Opaque) | token | environments/staging/mcp/sealed-inbound.json |\n| staging | MCP_CONFIG_TOML (legacy/rollback only) | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
+| staging | NESSION_MCP_INBOUND_TOKEN | nession/nession-mcp-inbound-staging (Opaque) | token | environments/staging/mcp/sealed-inbound.json |\n| staging | NESSION_MCP_BACKEND_SERVER_TOKEN | nession/nession-mcp-backend-server-staging (Opaque) | token | environments/staging/mcp/sealed-backend-server.json |\n| staging | MCP_CONFIG_TOML (legacy/rollback only) | nession/nession-mcp-config-staging (Opaque) | mcp.toml | environments/staging/mcp/sealed-secret.json |
 | staging | *issued by Configure Site / issue-tls* | nession/nession-mcp-staging-tls (kubernetes.io/tls) | tls.crt + tls.key | environments/staging/mcp/sealed-tls.json |
 
 The target registry in scripts/ci/seal-gitops-secret.mjs is the sole owner of
