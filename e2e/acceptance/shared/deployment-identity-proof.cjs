@@ -258,3 +258,12 @@ function run(issue) {
   });
 }
 module.exports={run,verify,validateIndexAndRecord,offlineFixtures};
+
+if (require.main === module) {
+  if (process.argv[2] !== 'self-test') {
+    process.stderr.write('Usage: deployed-identity-proof.cjs self-test\n');
+    process.exitCode = 2;
+  } else {
+    offlineFixtures();
+  }
+}
