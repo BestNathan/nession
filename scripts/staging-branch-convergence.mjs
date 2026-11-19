@@ -646,10 +646,14 @@ function reconcile(plan) {
           continue;
         }
       }
+      // Native admission has already authenticated the Publisher, exact HEAD
+      // and GitHub-required Qualification before permitting its own pending
+      // status to be the sole mergeability "blocked" dependency (#3689).
+      // Legacy direct-merge must retain its original strict clean/unstable rule.
       const decision = qualify({action,prNumber:receipt.number,
         mainSha:syncMainSha,laneSha:lane.sha,branch:lane.branch,
         syncRef:integration?.branch,syncHeadSha:integration?.sha,
-        deployment_workflows:lane.deployment_workflows});
+        deployment_workflows:lane.deployment_workflows,nativeAuto});
       if (!decision.ready) {
         record.outcome = 'BLOCKED';
         record.reason = decision.reason;
