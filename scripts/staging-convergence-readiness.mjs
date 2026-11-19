@@ -61,7 +61,7 @@ export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[],
   return okay({expectedHead});
 }
 
-export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
+export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[],nativeAuto=false}) {
   const branch=action==='sync-main-to-lane'?plan.branch:'main';
   const head=action==='sync-main-to-lane'?plan.sync_ref:plan.branch;
   if(!pr || !['sync-main-to-lane','promote-lane-to-main'].includes(action) ||
@@ -84,8 +84,19 @@ export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[]}) {
   // optional unrelated jobs into a fourth universal convergence Gate.
   // Still reject merge conflicts, behind/blocked/unknown and negative GitHub
   // mergeability. GitHub's protected merge API remains authoritative.
+  // #3689: With GitHub Native Auto-merge, our own required Qualification
+  // status is pending/failed until *this* check completes. GitHub therefore
+  // reports "blocked" even when all independent source checks are green.
+  // Allow only a trusted, already-armed Publisher MERGE request to resolve
+  // this circular dependency; GitHub still enforces every required check.
+  const nativeQualificationWaiting=nativeAuto===true&&
+    pr.user?.login==='nession-publisher[bot]'&&
+    pr.auto_merge?.merge_method==='merge'&&
+    pr.auto_merge?.enabled_by?.login==='nession-publisher[bot]'&&
+    pr.mergeable_state==='blocked';
   if(pr.mergeable!==true||
-     !['clean','unstable'].includes(pr.mergeable_state))
+     (!['clean','unstable'].includes(pr.mergeable_state)&&
+      !nativeQualificationWaiting))
     return fail('PR_NOT_CLEAN_OR_REQUIRED_CHECKS_PENDING');
   const checks=requiredSourceRuns(pr.number,expectedHead,workflowRuns);
   if(!checks.ready)return checks;
@@ -330,7 +341,7 @@ export function latestPromotionCandidateFull(pr,runs=[]){
 }
 
 export function qualify({action,prNumber,mainSha,laneSha,branch,
-    syncRef=null,syncHeadSha=null,deployment_workflows=[]}) {
+    syncRef=null,syncHeadSha=null,deployment_workflows=[],nativeAuto=false}) {
   if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(mainSha)||
      !SHA.test(laneSha)||!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$/.test(branch)||branch==='main'||
      (action==='promote-lane-to-main'&&!deployment_workflows.length))throw new Error('invalid exact convergence target');
@@ -340,7 +351,7 @@ export function qualify({action,prNumber,mainSha,laneSha,branch,
   const expectedHead=action==='sync-main-to-lane'?syncHeadSha:laneSha;
   const runs=getRuns('head_sha='+expectedHead+'&event=pull_request');
   const preliminary=evaluatePull({pr,action,plan:{branch,main_sha:mainSha,sha:laneSha,
-    sync_ref:syncRef,sync_head_sha:syncHeadSha},baseSha,workflowRuns:runs});
+    sync_ref:syncRef,sync_head_sha:syncHeadSha},baseSha,workflowRuns:runs,nativeAuto});
   if(!preliminary.ready) {
     // #3248: the controller has observed a missing exact-head check even
     // when public GitHub REST reports that run as successful. Emit the
@@ -486,6 +497,50 @@ function selfTest(){
       action:'sync-main-to-lane',plan,baseSha:b,workflowRuns:runs}).ready,false,
       'GitHub blocked/unknown state must fail closed: '+state);
   }
+  // #3689: The qualifier is itself a GitHub-required status, so GitHub
+  // reports blocked until it turns green. Only the already-armed, exact
+  // Publisher MERGE proposal may resolve that self-dependency, and ONLY when
+  // all three source CI / Case / E2E runs succeed at the exact PR HEAD.
+  const nativeBlocked={...pr,mergeable_state:'blocked',
+    user:{login:'nession-publisher[bot]'},
+    auto_merge:{merge_method:'merge',
+      enabled_by:{login:'nession-publisher[bot]'}}};
+  const nativeCheck=(candidate,receipts=runs,nativeAuto=true)=>
+    evaluatePull({pr:candidate,action:'sync-main-to-lane',plan,baseSha:b,
+      workflowRuns:receipts,nativeAuto});
+  assert.equal(nativeCheck(nativeBlocked).ready,true,
+    'native blocked state can resolve its own required qualification');
+  assert.equal(nativeCheck(nativeBlocked,runs,false).ready,false,
+    'legacy Controller must keep blocking a GitHub-blocked PR');
+  assert.equal(nativeCheck({...nativeBlocked,user:{login:'BestNathan'}}).ready,false,
+    'native admission requires the trusted Publisher PR');
+  assert.equal(nativeCheck({...nativeBlocked,auto_merge:{merge_method:'squash',
+    enabled_by:{login:'nession-publisher[bot]'}}}).ready,false,
+    'never qualify a native Squash proposal');
+  assert.equal(nativeCheck({...nativeBlocked,auto_merge:{merge_method:'merge',
+    enabled_by:{login:'BestNathan'}}}).ready,false,
+    'native auto-merge must have the expected Publisher actor');
+  assert.equal(nativeCheck({...nativeBlocked,auto_merge:null}).ready,false,
+    'native admission must be already armed');
+  assert.equal(nativeCheck({...nativeBlocked,mergeable:false}).ready,false,
+    'GitHub-negative mergeability is still a hard stop');
+  for(const state of ['unknown','behind','dirty']){
+    assert.equal(nativeCheck({...nativeBlocked,mergeable_state:state}).ready,false,
+      'native admission cannot bypass GitHub unsafe state: '+state);
+  }
+  for (const index of [0,1,2]) {
+    for (const badRun of [
+      {...runs[index],status:'in_progress',conclusion:null},
+      {...runs[index],status:'completed',conclusion:'failure'},
+      {...runs[index],head_sha:b},
+    ]) {
+      const unsafe=runs.map((run,i)=>i===index?badRun:run);
+      assert.equal(nativeCheck(nativeBlocked,unsafe).ready,false,
+        'native blocked state cannot bypass pending/failed/stale source CI');
+    }
+  }
+  assert.equal(nativeCheck({...nativeBlocked,head:{...nativeBlocked.head,sha:b}}).ready,false,
+    'native admission cannot bypass stale exact HEAD');
   // GitHub "unstable" is a coarse summary of ALL check runs. Independent
   // source-bound required checks above still refuse a newer red/pending run;
   // unrelated Docker build or optional PR Acceptance must not delay sync.
