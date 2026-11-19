@@ -80,7 +80,9 @@ cleanup() {
   # sockets, tmux, user workloads or entire runner temporary directories.
   rm -f -- "$RUNNER_TEMP/nession-ci-kubeconfig" \
     "$RUNNER_TEMP/gost-ci.log" "$RUNNER_TEMP/deployments.json" \
-    "$RUNNER_TEMP/pods.json" "$RUNNER_TEMP/overlay.yaml" \
+    "$RUNNER_TEMP/pods.json" "$RUNNER_TEMP/events.json" \
+    "$RUNNER_TEMP/staging-rollout-status.txt" \
+    "$RUNNER_TEMP/overlay.yaml" \
     "$RUNNER_TEMP/cluster-context" "$RUNNER_TEMP/gitops-revision" \
     "$RUNNER_TEMP/deployment-attestation.json" \
     "$RUNNER_TEMP/deployment-attestation.json.remote.tmp" \
