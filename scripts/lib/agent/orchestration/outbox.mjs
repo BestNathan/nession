@@ -4,6 +4,7 @@ import { advanceWorkflow } from './transition.mjs';
 import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2,
   SOURCE_V3 as QWEN_PREFLIGHT_FAILURE_V3 } from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
+import {SOURCE as QWEN_REPAIR_TURNS_FAILURE} from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -167,10 +168,16 @@ export function validateDevelopmentState(state) {
       const c=item.task.repair_checkpoint;
       onlyKeys(c,['checkpoint_version','checkpoint_commit_sha',
         'ciphertext_sha256','source_sha','source_run_id'], 'Repair checkpoint');
-      const historicalFailedRepair=item.status==='failed'&&
-        item.id===CONTROLLED_REPAIR_ACTION&&
-        item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE&&
-        item.task.sha===CONTROLLED_REVIEW_SHA;
+      const historicalFailedRepair=item.status==='failed'&&(
+        (item.id===CONTROLLED_REPAIR_ACTION&&
+         item.receipt?.failure_code===CONTROLLED_REPAIR_FAILURE&&
+         item.task.sha===CONTROLLED_REVIEW_SHA)||
+        (item.id===QWEN_REPAIR_TURNS_FAILURE.action_id&&
+         state.issue===QWEN_REPAIR_TURNS_FAILURE.issue&&
+         item.receipt?.source_run_id===QWEN_REPAIR_TURNS_FAILURE.run_id&&
+         item.receipt?.source_attempt===1&&
+         item.receipt?.failure_code===QWEN_REPAIR_TURNS_FAILURE.failure_code&&
+         item.task.sha===QWEN_REPAIR_TURNS_FAILURE.source_sha));
       if(Object.keys(c).length!==5||
           item.task.type!=='dispatch'||item.task.role!=='developer'||
           item.task.task!=='repair'||item.task.resume!==true||
@@ -271,6 +278,7 @@ export function validateDevelopmentState(state) {
             QWEN_PREFLIGHT_FAILURE_V2.failure_code,
             QWEN_PREFLIGHT_FAILURE_V3.failure_code,
             QWEN_CLI_FAILURE.failure_code,
+            QWEN_REPAIR_TURNS_FAILURE.failure_code,
             QWEN_TOOL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
@@ -321,6 +329,17 @@ export function validateDevelopmentState(state) {
             item.task.task!=='implement'||
             item.task.sha!==QWEN_TOOL_FAILURE.source_sha||
             r.source_run_id!==QWEN_TOOL_FAILURE.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===QWEN_REPAIR_TURNS_FAILURE.failure_code&&(
+            state.issue!==QWEN_REPAIR_TURNS_FAILURE.issue||
+            item.id!==QWEN_REPAIR_TURNS_FAILURE.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.role!=='developer'||item.task.task!=='repair'||
+            item.task.resume!==true||
+            item.task.sha!==QWEN_REPAIR_TURNS_FAILURE.source_sha||
+            item.task.repair_checkpoint?.checkpoint_version!==
+              QWEN_REPAIR_TURNS_FAILURE.checkpoint_version||
+            r.source_run_id!==QWEN_REPAIR_TURNS_FAILURE.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_CLI_FAILURE.failure_code&&(
             state.issue!==QWEN_CLI_FAILURE.issue||
@@ -1348,6 +1367,68 @@ export function recordAttestedQwenCliFailure(state,version,proof){
     attempts:0,receipt:null};
   return validateDevelopmentState({...state,version:version+1,
     outbox:[failed,successor]});
+}
+
+// #3885: one authenticated second native Repair model exited on the bounded
+// turn cap AFTER successful Store Restore. The v2 ciphertext is untouched;
+// terminal failed Run cannot be retried, and a new Action keeps same task.
+export function qwenRepairTurnsSuccessorId(issue,actionId,runId){
+  const f=QWEN_REPAIR_TURNS_FAILURE;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized Qwen second-Repair turn-budget recovery source');
+  return hash([issue,actionId,runId,'qwen-native-repair-max-turns-recovery-v1']);
+}
+export function recordAttestedQwenRepairTurnsFailure(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','run_head_sha','failure_code'],
+    'verified Qwen second-Repair max-turns failure');
+  const f=QWEN_REPAIR_TURNS_FAILURE;
+  const old=state.outbox.find(x=>x.id===f.action_id);
+  const origin=old?.task.repair_checkpoint;
+  if(state.version!==version||version!==f.state_version||
+     state.issue!==f.issue||state.phase!=='repair'||
+     state.target_sha!==f.source_sha||state.repair_attempts!==2||
+     state.outbox.length!==5||state.transitions.length!==4||
+     state.transitions.at(-1)?.kind!=='reviewer'||
+     state.transitions.at(-1)?.run_id!==44466992692||
+     state.transitions.at(-1)?.outcome!=='changes_requested'||
+     state.transitions.at(-1)?.target_sha!==f.source_sha||
+     !state.transitions.some(t=>t.kind==='publisher'&&
+       t.run_id===44457994853&&t.outcome==='published'&&
+       t.target_sha===f.source_sha)||
+     state.assignments.developer!=='dev-qwen-01'||
+     state.assignments.reviewer!=='review-qwen-01'||
+     proof?.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.run_head_sha!==f.run_head_sha||
+     proof.failure_code!==f.failure_code||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='developer'||
+     old.task.task!=='repair'||old.task.agent_id!=='dev-qwen-01'||
+     old.task.resume!==true||old.task.sha!==f.source_sha||
+     origin?.checkpoint_version!==f.checkpoint_version||
+     origin.checkpoint_commit_sha!==f.checkpoint_commit_sha||
+     origin.ciphertext_sha256!==f.checkpoint_ciphertext_sha256||
+     origin.source_sha!==f.checkpoint_source_sha||
+     origin.source_run_id!==f.checkpoint_source_run_id||
+     old.receipt?.status!=='verified'||
+     old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id||
+     state.outbox.some(x=>x.id!==f.action_id&&
+       ['pending','dispatching','dispatched'].includes(x.status)))
+    reject('Qwen second Repair source is not the exact failed v29 Worker');
+  const nextId=qwenRepairTurnsSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===nextId))
+    reject('Qwen Repair max-turns successor collision or replay');
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:f.action_id,source_run_id:f.run_id,
+    source_attempt:1,failure_code:f.failure_code}};
+  const next={id:nextId,task:{...old.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),next]});
 }
 
 // #3885: the second real Node Qwen Developer completed tool activity but
