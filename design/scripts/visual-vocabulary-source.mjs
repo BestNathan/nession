@@ -7,9 +7,7 @@ import {
   isForeignAdapter,
 } from '../../web/eslint-plugin-nession/rules/visual-vocabulary.js';
 import {
-  findNonTokenMetricUtilities,
-  findNonTokenCssMetrics,
-  findNonTokenInlineMetrics,
+  collectNonTokenSourceMetrics,
   isShippingStyleFile,
   readLegacyMetricBaseline,
   rejectNewMetricDebt,
@@ -367,30 +365,13 @@ export function scanNonTokenStyleSource(
   source, file = '<fixture>', baseline = readLegacyMetricBaseline(),
 ) {
   if (!isShippingStyleFile(file)) return [];
-  const masked = maskComments(source);
-  const observations = [];
-  const adapter = (
-    file.endsWith('/src/platform/editor/model/editorTheme.ts') ||
-    file.endsWith('/src/shared/markdown/markdownVisualGrammar.ts')
-  );
-  if (adapter) return []; // The renderer adapter owns its own styling contract.
-
-  if (file.endsWith('.css')) {
-    observations.push(...findNonTokenCssMetrics(masked));
-  } else {
-    for (const literal of stringLiterals(masked)) {
-      for (const metric of findNonTokenMetricUtilities(literal.value)) {
-        observations.push({...metric, literal: literal.value, index: literal.index});
-      }
-    }
-    observations.push(...findNonTokenInlineMetrics(masked));
-  }
-  return rejectNewMetricDebt(file, source, observations, baseline).map(hit => ({
+  const violations = collectNonTokenSourceMetrics(source, file);
+  return rejectNewMetricDebt(file, source, violations, baseline).map(hit => ({
     file,
     line: lineNumber(source, hit.index),
     kind: `untokenized-${hit.kind}`,
     actual: hit.token,
-    repair: 'use a generated --nession-* semantic/Experience token or an owned Recipe; unchanged legacy files are frozen until their next edit',
+    repair: 'replace the raw visual metric with an Experience/semantic --nession-* token, or consume an owned Recipe; the old file blob is frozen until migrated',
   }));
 }
 
