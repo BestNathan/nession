@@ -37,6 +37,7 @@ images:
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
+- patch-ui-ghcr-repull.yaml
 
 # Appended after the two index-based subPath patches so their indices stay
 # stable; the Sandbox Agent needs the host cgroup tree writable at its
