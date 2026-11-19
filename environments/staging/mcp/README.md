@@ -3,9 +3,12 @@
 This is a **separate Argo CD Application** (`nession-mcp-staging`) and a
 single stateless Deployment/ClusterIP Service (`nession-mcp-staging`) in the
 shared `nession` namespace. The Higress HTTPS Ingress manifest for
-`https://staging-mcp-nession.bestnathan.top/mcp` is **staged but temporarily excluded** from the
-Kustomization while the DNS hostname, TLS certificate, and private MCP config
-Secret are rotated (#3945). When enabled, HTTP must redirect to HTTPS.
+`https://staging-mcp-nession.bestnathan.top/mcp` is included in the
+staging MCP Kustomization (#3945). It is an Exact `/mcp` HTTPS route to
+`nession-mcp-staging:9090`, not a catch-all. Its presence in desired state
+does **not** prove the live Ingress, TLS Secret, Host allowlist, source
+Nginx-to-Higress forwarding, or external MCP authentication is working.
+HTTP must redirect to HTTPS before credentialed traffic is used.
 The previously deployed Kubernetes certificate was self-signed and issued for
 `staging.mcp.nession.bestnathan.top`, which does NOT cover the new hostname. Both the public
 Host allowlist and certificate must be replaced via protected Secrets before
@@ -60,7 +63,7 @@ either token or place it in a ConfigMap.
 
 ## Public HTTPS MCP entry point (operator prerequisites)
 
-The staging-only Ingress (present as a manifest, **not currently enabled** in Kustomize) is
+The staging-only Ingress (declared in the Kustomization, subject to Argo reconciliation) is
 `nession-mcp-staging`, with
 `ingressClassName: higress` and the single **Exact** path `/mcp` mapped to
 the MCP Service port 9090. The supported external endpoint is:
@@ -106,14 +109,25 @@ https://staging-mcp-nession.bestnathan.top/mcp
    Verify DNS, external Edge HTTPS trust, and origin TLS independently.
    Host allowlist must include the public
    hostname, and inbound/outbound bearer tokens must differ.
-4. **After all prior steps and Cloudflare Edge/Origin TLS trust pass**, add
-   `ingress.yaml` to `kustomization.yaml` by a separate reviewed activation
-   PR; then verify that Higress reconciles this Ingress and TLS
-   Secret, DNS resolves publicly, and its gateway is actually reachable
-   from the internet. The manifest explicitly requests TLS termination and
-   HTTP→HTTPS redirection using Higress-compatible
-   `higress.io/ssl-redirect: "true"` (no plaintext MCP forwarding).
+4. **Activation / live verification:** `ingress.yaml` is now declared by
+   `kustomization.yaml` in a separately reviewed GitOps activation (#3945).
+   Verify that Argo reconciles the real Higress Ingress, that its TLS
+   Secret serves the exact new SAN, and that DNS resolves publicly.
+   The external origin Nginx-to-K8s/Higress forwarding is independently
+   configured by the operator; until then an Nginx 404 is expected and
+   must not be mistaken for an MCP 404. Verify Cloudflare Full (strict)
+   origin trust, HTTPS redirect, and Host policy before credentialed use.
+   Roll back the GitOps activation if a prerequisite fails.
    MCP itself speaks plain HTTP **inside the cluster** behind TLS termination.
+   For query-token clients, first deploy the merged standalone query-token
+   implementation to the actual staging MCP image, and set
+   `[mcp].allow_query_token = true` in the **protected** `MCP_CONFIG_TOML`
+   before re-sealing it; the checked-in example is not live configuration.
+   Higress's default access log `path` can include query parameters.
+   Redact query parameters in **both** Higress gateway access logs and
+   the external origin Nginx/proxy logs before enabling URL tokens.
+   Do not include a real token in curl examples, Issues, PRs or logs.
+
 5. Do not enable permissive CORS or anonymous MCP calls to make clients work.
    `allowed_origins = []` rejects browser Origins by default; native MCP
    clients can call it with `Authorization: Bearer <inbound-token>`.
