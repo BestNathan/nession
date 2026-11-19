@@ -611,22 +611,46 @@ mod tests {
                 request = request.header(http::header::AUTHORIZATION, *header);
             }
             let request = request.body(()).expect("test request");
-            authorized_by(&request, &TokenVerifier::new("value+with/slash"), allow_query)
+            authorized_by(
+                &request,
+                &TokenVerifier::new("value+with/slash"),
+                allow_query,
+            )
         }
 
         assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &[], false));
         assert!(allowed("/mcp", &["Bearer value+with/slash"], false));
         assert!(allowed("/mcp?token=value%2Bwith%2Fslash", &[], true));
-        assert!(allowed("/mcp?irrelevant=a&token=value%2Bwith%2Fslash", &[], true));
+        assert!(allowed(
+            "/mcp?irrelevant=a&token=value%2Bwith%2Fslash",
+            &[],
+            true
+        ));
         assert!(allowed(
             "/mcp?token=value%2Bwith%2Fslash",
             &["Bearer value+with/slash"],
             true
         ));
-        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &["Bearer wrong"], true));
-        assert!(!allowed("/mcp?token=wrong", &["Bearer value+with/slash"], true));
-        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &["Basic wrong"], true));
-        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &["Bearer"], true));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer wrong"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=wrong",
+            &["Bearer value+with/slash"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Basic wrong"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer"],
+            true
+        ));
         assert!(!allowed(
             "/mcp?token=value%2Bwith%2Fslash",
             &["Bearer value+with/slash", "Bearer value+with/slash"],
@@ -643,14 +667,20 @@ mod tests {
             "/mcp?token=value%ZZ",
             "/mcp?%74oken=wrong",
         ] {
-            assert!(!allowed(target, &[], true), "unexpected authorization: {target}");
+            assert!(
+                !allowed(target, &[], true),
+                "unexpected authorization: {target}"
+            );
         }
     }
 
     #[test]
     fn query_token_decoding_rejects_invalid_encoding_and_duplicate_keys() {
         assert_eq!(query_token(None), Ok(None));
-        assert_eq!(query_token(Some("token=a%2Bb%26c")), Ok(Some("a+b&c".into())));
+        assert_eq!(
+            query_token(Some("token=a%2Bb%26c")),
+            Ok(Some("a+b&c".into()))
+        );
         assert_eq!(query_token(Some("%74oken=value")), Ok(Some("value".into())));
         assert_eq!(query_token(Some("foo=bar")), Ok(None));
         assert_eq!(query_token(Some("token=%")), Err(()));
