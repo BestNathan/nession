@@ -18,6 +18,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
   repairRuntimeSuccessorId,REVIEWER_PREMODEL_FAILURE,
+  REVIEWER_PREMODEL_FAILURE_SOURCES,
   reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
   REVIEWER_JSON_FAILURE,reviewerJsonSuccessorId,
   recordAttestedReviewerJsonFailure}
@@ -138,7 +139,10 @@ export function bindQwenRepairCheckpoint({remote,issue,actionId}){
 // original dispatched Action to Failed and create a new Pending Reviewer,
 // via the canonical single-writer CAS. Old action is never re-POSTed.
 export function recoverAttestedReviewerPremodelFailure({remote,source}){
-  const f=REVIEWER_PREMODEL_FAILURE;
+  const f=REVIEWER_PREMODEL_FAILURE_SOURCES.find(x=>
+    x.issue===source?.issue&&x.action_id===source?.action_id&&
+    x.run_id===source?.run_id);
+  if(!f)fail('unknown Reviewer recovery source');
   if(source?.verified!==true||source.issue!==f.issue||
       source.action_id!==f.action_id||source.run_id!==f.run_id||
       source.attempt!==1||source.source_sha!==f.source_sha||
