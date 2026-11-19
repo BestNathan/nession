@@ -66,6 +66,7 @@ server-handler-concurrency-selftest
 runtime-image-tools-selftest
 mcp-standalone-image-selftest
 acr-mirror-deadline-selftest
+ghcr-gitops-separation
 compose-storage-contract-selftest
 gitops-storage-contract-selftest
 agent-provider-contract
