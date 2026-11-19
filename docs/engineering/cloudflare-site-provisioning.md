@@ -1,7 +1,7 @@
 # Protected Cloudflare site configuration (#3963)
 
 This operator-owned [Deploy / Configure Site](../../.github/workflows/deploy-configure-site.yml)
-workflow manages the registered site's **Cloudflare DNS only**. The
+workflow manages the registered site's **Cloudflare DNS and explicit Origin CA TLS issuance**. The
 reviewed registry and provider implementation live in
 [scripts/ci/configure-cloudflare-site.mjs](../../scripts/ci/configure-cloudflare-site.mjs).
 DNS success does not prove external HTTPS, Cloudflare Origin TLS, MCP
@@ -18,8 +18,8 @@ authentication, or Argo CD reconciliation.
 | Record | `A`, `proxied: true`, TTL Auto |
 | Source | protected GitHub Environment origin IPv4 variable |
 
-The Actions dispatcher selects only a reviewed site key and `plan` or
-`apply`. It cannot supply a custom domain, Zone, record type or API endpoint.
+The Actions dispatcher selects only a reviewed site key and `plan`, `apply` or
+`issue-tls`. It cannot supply a custom domain, Zone, record type or API endpoint.
 
 ## GitHub Environment setup
 
@@ -27,13 +27,13 @@ In BestNathan/nession → Settings → Environments → `staging`, set:
 
 | Name | Kind | Value |
 |---|---|---|
-| `CLOUDFLARE_API_TOKEN` | Environment **Secret** | API Token limited to `bestnathan.top`, `Zone / DNS / Edit`; list/read is included in Edit. Grant `Zone / Zone / Read` only if required. Never use a Global API Key or an account-wide token. |
+| `CLOUDFLARE_API_TOKEN` | Environment **Secret** | **The existing operator-provided Cloudflare API Token is reused for DNS and Origin CA**; it must have rights for both `Zone / DNS / Edit` and `Zone / SSL and Certificates / Edit`. No second Token is required. Its access scope is an operator-owned policy decision. |
 | `CLOUDFLARE_ZONE_ID` | Environment **Variable** | Exact 32-hex-character Zone ID (not account ID). |
 | `CLOUDFLARE_ORIGIN_IPV4` | Environment **Variable** | Real **public IPv4** of the Higress ingress gateway/load balancer, reachable from Cloudflare on port 443. Not Cloudflare anycast IP from a proxied `curl` result. |
 
 Use required reviewers and restrict Environment deployment branches to
 `main`. The workflow also enforces exact repository and main-ref checks,
-reads only this registered site, and has no GitHub write permissions.
+reads only this registered site. DNS jobs have read-only GitHub permission; the TLS job uses scoped `contents: write` only to publish encrypted GitOps state.
 Token and origin IP are not printed in the workflow log.
 
 If exposure of origin IP is an operational concern, restrict access to
@@ -66,6 +66,37 @@ For operational rollback of a Nession-owned A record, restore the prior
 origin IP Environment Variable and run `plan` then `apply`. DNS deletion
 or adoption of an unmanaged record requires separate operator review.
 
+## Issue and seal Cloudflare Origin CA TLS (explicit action)
+
+After a successful DNS `apply` verified by Cloudflare API, choose
+`site=staging-mcp`, `action=issue-tls` in the **same** Actions workflow.
+
+The same existing `staging/CLOUDFLARE_API_TOKEN` is used in the protected TLS
+job; the workflow first verifies that the exact DNS record is Nession-owned,
+proxied and points to the configured Origin IPv4. Only then does it generate
+an RSA private key and CSR **locally on the runner**, request a certificate
+via Cloudflare `POST /client/v4/certificates` for exactly
+`staging-mcp-nession.bestnathan.top`, and validate the SAN, key match,
+validity and certificate scope.
+
+It uses existing `vars.SEALED_SECRETS_CERT_PEM` to encrypt a strict
+`SealedSecret` offline, reusing the registered Kubernetes identity
+`nession/nession-mcp-staging-tls` and encrypted
+`environments/staging/mcp/sealed-tls.json`. Plaintext key files are
+mode 0600 and removed from the runner. The shared `gitops-writer`
+concurrency group prevents competing GitOps writers.
+There are no extra TLS Environment Secrets to upload; the legacy
+`MCP_TLS_PEM_BUNDLE` manual selection is retired. This is an explicit
+issuance and rotation action, **not** part of repeatable DNS `apply`,
+which remains read-only when `plan` and DNS-only when `apply`.
+
+A successful action confirms Cloudflare issued a certificate and GitOps
+received ciphertext, **not** that the Kubernetes Secret was reconciled or
+Higress is serving the new certificate. Confirm the decrypted certificate
+**SAN on the running cluster**. Cloudflare Origin CA certs are trusted by
+Cloudflare on proxied origins using `Full (strict)`, not by direct public
+browsers. The workflow deliberately does **not** change Zone-wide SSL mode.
+
 ## TLS and application readiness are separate
 
 The one-label host `staging-mcp-nession.bestnathan.top` can be covered by
@@ -79,11 +110,9 @@ certificate. Origin CA may be trusted by Cloudflare but not by a direct
 off-proxy browser. Do not relax the whole Zone's SSL mode to make
 a broken Origin pass.
 
-The existing staging MCP Origin certificate is self-signed for the **old**
-hostname; replacing it remains required. Rotate
-`staging/MCP_TLS_PEM_BUNDLE` through the
-[protected SealedSecret workflow](sealed-secret-generation.md), verify the
-actual Kubernetes certificate SAN, then update and re-seal the
+The previously deployed staging MCP Origin certificate was self-signed for
+the **old** hostname. After `issue-tls`, verify that the actual Kubernetes
+certificate has rotated to the new SAN, then update and re-seal the
 `staging/MCP_CONFIG_TOML` Host allowlist. The future ConfigMap/ENV-token
 migration (#3914) is a separate change. The GitOps
 `environments/staging/mcp/ingress.yaml` is intentionally excluded from
@@ -91,12 +120,10 @@ Kustomize during the hostname migration (#3945); a separate reviewed
 GitOps activation is required after DNS, both TLS layers, authenticated
 MCP configuration and operator readback are verified.
 
-DNS workflow execution alone does **not** generate an Origin CA private key,
-write any Kubernetes/SealedSecret resource, activate public Ingress or
-modify the Cloudflare Zone's SSL/TLS mode. Automating Origin CA issuance,
-secure offline TLS sealing and live readiness is a later separately
-reviewed authority boundary. Never emit plaintext secrets or use insecure
-TLS verification with bearer tokens.
+DNS-only `plan/apply` never issues certificates or publishes Kubernetes
+resources. Explicit `issue-tls` does issue and seal the TLS Secret but
+**does not** activate public Ingress or alter the Zone's SSL mode.
+Never emit plaintext secrets or use insecure TLS verification with bearer tokens.
 
 ## Errors
 
