@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "issue": 3784,
+  "version": 14,
+  "phase": "review",
+  "target_sha": "5d7e9118b7e954e760cc680fff7d43b4f9e17612",
+  "repair_attempts": 0,
+  "transitions": [
+    {
+      "key": "884c1275d6fa1e9ddf6fd9d9aeac22d05cdf2be9c3054ff6e6aa584464f3056f",
+      "kind": "publisher",
+      "run_id": 44281178406,
+      "attempt": 1,
+      "target_sha": "5d7e9118b7e954e760cc680fff7d43b4f9e17612",
+      "outcome": "published"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "11ecfaa5fe0cc391b31f1d3ec5ce89cdb833856ad484f940b9e720da33282d34",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "76ed2d01195ad31ecdef97bc40ffa9f6d48427e6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "11ecfaa5fe0cc391b31f1d3ec5ce89cdb833856ad484f940b9e720da33282d34",
+        "source_run_id": 44250586057,
+        "source_attempt": 1,
+        "failure_code": "qwen_node_cli_invocation_failed"
+      }
+    },
+    {
+      "id": "3687526b2196cbad0db36ff935cc29a97f89d84e85494bdebe1c08503fa86549",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "76ed2d01195ad31ecdef97bc40ffa9f6d48427e6",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "3687526b2196cbad0db36ff935cc29a97f89d84e85494bdebe1c08503fa86549",
+        "source_run_id": 44256663685,
+        "source_attempt": 1,
+        "failure_code": "qwen_native_readonly_discovery_rejected"
+      }
+    },
+    {
+      "id": "1251328b3288d32c751a347a016ff5d25740704cd8b16e227bd49a6bdd672087",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "5d7e9118b7e954e760cc680fff7d43b4f9e17612",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "1251328b3288d32c751a347a016ff5d25740704cd8b16e227bd49a6bdd672087",
+        "source_run_id": 44431618028,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_base_file_premodel_failure"
+      }
+    },
+    {
+      "id": "e78e298df351bd0befe08c3ef661311a9b572a1a5926bbd441fbeaefb80a9dd0",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "5d7e9118b7e954e760cc680fff7d43b4f9e17612",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "dispatching",
+      "attempts": 1,
+      "receipt": {
+        "status": "prepared",
+        "dispatch_id": "e78e298df351bd0befe08c3ef661311a9b572a1a5926bbd441fbeaefb80a9dd0",
+        "issuer_run_id": 44456966714,
+        "ticket_sha256": "1aca9dc55b99574dd80e5619d9ad7e6632375733953cd698d9cfdd44ebbd7585"
+      }
+    }
+  ]
+}
