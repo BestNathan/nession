@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   getTarget, validateRaw, createPlainSecret, parseTlsPemBundle,
-  validatePublicCert, validateSealed, addResource, validateChangedPaths, parseGitStatusPaths
+  validatePublicCert, validateSealed, addResource, validateChangedPaths, parseGitStatusPaths,
+  getRequiredSecrets, prepareRequiredSecrets, addRequiredResources,
+  validateChangedPathsForRequired, stageRequired
 } from './seal-gitops-secret.mjs';
 
 const environment = 'staging', secret = 'MCP_CONFIG_TOML';
@@ -317,4 +319,118 @@ test('backend server sealing is strict, separately published and idempotent', ()
   const unexpected = structuredClone(sealedServer);
   unexpected.spec.encryptedData['auth-token'] = 'AgOther';
   assert.throws(() => validateSealed(unexpected, environment, backendServerSecret));
+});
+
+test('environment dispatch registers the COMPLETE fixed required Secret set', () => {
+  assert.deepEqual(getRequiredSecrets('staging'), [
+    'NESSION_MCP_INBOUND_TOKEN', 'NESSION_MCP_BACKEND_SERVER_TOKEN'
+  ]);
+  for (const other of ['', 'production', 'preprod', 'staging-01', '../staging']) {
+    assert.throws(() => getRequiredSecrets(other));
+  }
+  assert.ok(!getRequiredSecrets('staging').includes('MCP_CONFIG_TOML'));
+  assert.ok(!getRequiredSecrets('staging').includes('MCP_TLS_PEM_BUNDLE'));
+});
+
+test('all environment credentials are required and checked BEFORE any seal', () => {
+  const good = {
+    NESSION_MCP_INBOUND_TOKEN: 'client-random-token',
+    NESSION_MCP_BACKEND_SERVER_TOKEN: 'server-matching-token'
+  };
+  const all = prepareRequiredSecrets('staging', good);
+  assert.deepEqual(all.map(x => x.name), getRequiredSecrets('staging'));
+  assert.deepEqual(all.map(x => Object.keys(x.document.data)), [['token'], ['token']]);
+  assert.throws(() => prepareRequiredSecrets('staging', {}), /NESSION_MCP_INBOUND_TOKEN/);
+  assert.throws(() => prepareRequiredSecrets('staging', {
+    NESSION_MCP_INBOUND_TOKEN: good.NESSION_MCP_INBOUND_TOKEN
+  }), /NESSION_MCP_BACKEND_SERVER_TOKEN/);
+  assert.throws(() => prepareRequiredSecrets('staging', {
+    NESSION_MCP_BACKEND_SERVER_TOKEN: good.NESSION_MCP_BACKEND_SERVER_TOKEN
+  }), /NESSION_MCP_INBOUND_TOKEN/);
+  for (const name of getRequiredSecrets('staging')) {
+    for (const bad of ['', ' ', 'newline\\nvalue', 'prefix ']) {
+      assert.throws(() => prepareRequiredSecrets('staging', {...good, [name]: bad}),
+        new RegExp(name));
+    }
+  }
+  assert.throws(() => prepareRequiredSecrets('staging', {
+    ...good, NESSION_MCP_BACKEND_SERVER_TOKEN: good.NESSION_MCP_INBOUND_TOKEN
+  }), /must be distinct/);
+  // No Error should contain the raw credential value.
+  try {
+    prepareRequiredSecrets('staging', {...good, NESSION_MCP_BACKEND_SERVER_TOKEN: ''});
+    assert.fail('empty backend credential accepted');
+  } catch (e) {
+    assert.doesNotMatch(e.message, /client-random-token|server-matching-token/);
+  }
+});
+
+test('required encrypted GitOps resources are one bounded atomic file set', () => {
+  const registered = getRequiredSecrets('staging');
+  const targets = registered.map(name => getTarget('staging', name));
+  const full = [targets[0].resource, targets[1].resource, targets[0].kustomization];
+  assert.deepEqual(validateChangedPathsForRequired(full, 'staging'), full);
+  assert.deepEqual(validateChangedPathsForRequired(full.slice(0, 2), 'staging'), full.slice(0, 2));
+  assert.throws(() => validateChangedPathsForRequired([targets[0].resource], 'staging'));
+  assert.throws(() => validateChangedPathsForRequired([targets[1].resource], 'staging'));
+  assert.throws(() => validateChangedPathsForRequired(
+    [...full, 'environments/staging/mcp/sealed-tls.json'], 'staging'));
+  assert.throws(() => validateChangedPathsForRequired(
+    [...full, 'environments/staging/mcp/sealed-secret.json'], 'staging'));
+  const initial = 'resources:\\n  - deployment.yaml\\n';
+  const next = addRequiredResources(initial, 'staging');
+  for (const t of targets) assert.match(next, new RegExp(t.resource.split('/').at(-1).replaceAll('.', '\\\\.')));
+  assert.equal(addRequiredResources(next, 'staging'), next);
+});
+
+test('staging batch aborts before touching GitOps if ANY sealed output is absent or malformed', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'nession-seal-batch-'));
+  const work = path.join(root, 'work');
+  const overlay = path.join(root, 'environments/staging/mcp');
+  const kustomization = path.join(overlay, 'kustomization.yaml');
+  const names = getRequiredSecrets('staging');
+  const document = name => {
+    const t = getTarget('staging', name);
+    return {
+      apiVersion: 'bitnami.com/v1alpha1',
+      kind: 'SealedSecret',
+      metadata: {name: t.name, namespace: t.namespace},
+      spec: {
+        encryptedData: {token: 'AgValidPlaceholder'},
+        template: {metadata: {name: t.name, namespace: t.namespace}, type: 'Opaque'}
+      }
+    };
+  };
+  try {
+    mkdirSync(path.join(root, '.git'));
+    mkdirSync(overlay, {recursive: true});
+    mkdirSync(work);
+    const before = 'resources:\\n  - deployment.yaml\\n';
+    writeFileSync(kustomization, before);
+    const location = name => path.join(work, name + '.sealed.json');
+    writeFileSync(location(names[0]), JSON.stringify(document(names[0])));
+    assert.throws(() => stageRequired(root, 'staging', work), /missing or malformed/);
+    assert.equal(readFileSync(kustomization, 'utf8'), before);
+    assert.ok(!existsSync(path.join(root, getTarget('staging', names[0]).resource)));
+
+    writeFileSync(location(names[1]), '{"broken"');
+    assert.throws(() => stageRequired(root, 'staging', work), /missing or malformed/);
+    assert.ok(!existsSync(path.join(root, getTarget('staging', names[0]).resource)));
+
+    writeFileSync(location(names[1]), JSON.stringify({...document(names[1]),
+      metadata: {name: 'wrong', namespace: 'nession'}}));
+    assert.throws(() => stageRequired(root, 'staging', work), /Kubernetes identity mismatch/);
+    assert.ok(!existsSync(path.join(root, getTarget('staging', names[0]).resource)));
+
+    writeFileSync(location(names[1]), JSON.stringify(document(names[1])));
+    stageRequired(root, 'staging', work);
+    const enrolled = readFileSync(kustomization, 'utf8');
+    for (const name of names) {
+      const t = getTarget('staging', name);
+      assert.match(enrolled, new RegExp(t.resource.split('/').at(-1).replaceAll('.', '\\\\.')));
+      assert.equal(JSON.parse(readFileSync(path.join(root, t.resource), 'utf8')).metadata.name, t.name);
+    }
+    stageRequired(root, 'staging', work);
+    assert.equal(readFileSync(kustomization, 'utf8'), enrolled);
+  } finally { rmSync(root, {recursive: true, force: true}); }
 });
