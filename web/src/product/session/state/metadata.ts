@@ -53,6 +53,21 @@ const requestSequence = new Map<string, number>();
  * the comparison must catch.
  */
 const incarnations = new Map<string, string>();
+/**
+ * How many same-public-id replacements this client has observed per Session.
+ *
+ * The request sequence orders answers within one incarnation; this counter
+ * marks the boundaries between incarnations. A save captures it when the
+ * request starts and may only publish its answer while the epoch is unchanged
+ * (#3748). A replacement observed in between means the committed answer
+ * describes the previous instance, whose context the replacement already
+ * cleared and whose successor read must stay authoritative.
+ *
+ * Counting replacements rather than comparing raw incarnation values keeps an
+ * absent `instance_id` meaningful: the first report for a Session is the Agent
+ * finally identifying its current instance, not a new incarnation (#3424).
+ */
+const incarnationEpochs = new Map<string, number>();
 
 /** The fields an authoritative Session list contributes to incarnation identity. */
 export interface SessionIncarnationRef {
@@ -72,6 +87,10 @@ function advanceRequestSequence(sessionId: string): number {
   const sequence = (requestSequence.get(sessionId) ?? 0) + 1;
   requestSequence.set(sessionId, sequence);
   return sequence;
+}
+
+function incarnationEpoch(sessionId: string): number {
+  return incarnationEpochs.get(sessionId) ?? 0;
 }
 
 function publishLoaded(sessionId: string, metadata: SessionMetadata): void {
@@ -185,6 +204,10 @@ export function observeSessionIncarnations(
     }
   }
   for (const sessionId of replaced) {
+    incarnationEpochs.set(
+      sessionId,
+      incarnationEpoch(sessionId) + 1,
+    );
     advanceRequestSequence(sessionId);
     publish(sessionId, EMPTY_ENTRY);
     // The new instance's metadata may legitimately be empty at revision 0;
@@ -198,11 +221,22 @@ export function observeSessionIncarnations(
  * Replace the user fields. On success the cache (and every subscribed row)
  * immediately reflects the Agent's answer; on refusal the last loaded
  * metadata stays put and the caller keeps its draft.
+ *
+ * A successful answer is only published while the Session still names the
+ * incarnation the request was sent under (#3748). If an authoritative list
+ * reported a same-name replacement while the write was in flight, the answer
+ * describes the previous incarnation: publishing it would restore that
+ * context into the replacement, and advancing the order would fence the
+ * replacement's own read. The replacement path already published the empty
+ * state and started that read, so it remains the owner of the displayed value.
  */
 export async function saveSessionMetadata(
   sessionId: string,
   input: SessionMetadataInput,
 ): Promise<SessionMetadataResponse> {
+  // Captured before the request leaves: an incarnation replacement observed
+  // after this point invalidates whatever the Agent answers.
+  const requestEpoch = incarnationEpoch(sessionId);
   let response: SessionMetadataResponse;
   try {
     response = await sessionsApi.updateMetadata(sessionId, input);
@@ -215,6 +249,12 @@ export async function saveSessionMetadata(
     };
   }
   if (response.success && response.metadata) {
+    if (incarnationEpoch(sessionId) !== requestEpoch) {
+      // A replacement owns the public id now. Its empty projection and fresh
+      // read are the truthful state; this answer belongs to the previous
+      // incarnation and neither publishes nor fences.
+      return response;
+    }
     // The Agent committed a newer revision. Fence every read that was already
     // in flight: its answer predates this write and must not overwrite it,
     // even if no newer read starts before it settles (#3319).
@@ -232,5 +272,6 @@ export function resetSessionMetadataCache(): void {
   entries.clear();
   requestSequence.clear();
   incarnations.clear();
+  incarnationEpochs.clear();
   listeners.clear();
 }
