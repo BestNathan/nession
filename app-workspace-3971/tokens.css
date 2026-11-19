@@ -84,6 +84,16 @@
   --nession-shell-space-3: 0.75rem;
   --nession-shell-space-4: 1rem;
   --nession-shell-space-5: 1.5rem;
+  /* staging Rhythm source: design/generated/web.css blob 85ea3987ef08c8c713db306046a42e4f3387c757.
+   * Staged roles supplement (not replace) the older main token snapshot. */
+  --nession-rhythm-section-stack: 20px;
+  --nession-rhythm-section-content: 8px;
+  --nession-rhythm-text-stack: 4px;
+  --nession-rhythm-inline: 8px;
+  --nession-rhythm-field-stack: 6px;
+  --nession-rhythm-fact-stack: 2px;
+  --nession-rhythm-error-inset-x: 10px;
+  --nession-rhythm-error-inset-y: 6px;
   --nession-terminal-font-size: 11.5px;
   --nession-terminal-line-height: 1.14;
   --nession-terminal-capsule-capability-label-font-size: 12px;

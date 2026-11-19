@@ -21,6 +21,14 @@
   <main>
     <section class="np-preview" aria-label="Interactive App Workspace preview">
       <div class="np-section-heading"><div><h2>Interactive preview</h2><p>从 Claude 开始；打开 Browse 深入 Transcript，再尝试右滑返回、左滑前进。切换底部 Capability Capsule 观察通用布局。</p></div></div>
+
+      <div class="aw-scenarios" role="group" aria-label="Jump to a Workspace review scenario">
+        <button type="button" data-scenario="claude" aria-pressed="true"><strong>Claude · Reader</strong><span>Current work → Browse → Raw</span></button>
+        <button type="button" data-scenario="git" aria-pressed="false"><strong>Git · Collection</strong><span>Staged/unstaged → Diff</span></button>
+        <button type="button" data-scenario="sandbox" aria-pressed="false"><strong>Sandbox · Config</strong><span>Overview → Policy → parent</span></button>
+        <button type="button" data-scenario="files" aria-pressed="false"><strong>Files · Editor</strong><span>File → Edit → dirty guard</span></button>
+      </div>
+      <p class="aw-scenario-note">评审入口位于产品画布之外；App 内仍通过同一个 Header、Capsule 和 Push/Pop 路径导航。切换场景时若编辑器存在未保存更改，必须先确认。</p>
       <div class="np-preview-toolbar" aria-label="Review viewport tools"><strong>App viewport</strong>
         <button data-np-size="375">375</button><button data-np-size="390" aria-pressed="true">390</button><button data-np-size="430">430</button>
         <span data-np-current-size></span><div class="aw-theme-buttons" aria-label="Product theme"><button type="button" data-aw-theme="light" aria-pressed="true">Light</button><button type="button" data-aw-theme="dark" aria-pressed="false">Dark</button></div><button type="button" data-np-reset>Reset</button>
@@ -47,6 +55,17 @@
         <article class="np-detail"><h3>02 · Semantic surfaces</h3><p>Claude 使用连续 Reader，Git 使用分组 Collection，Sandbox 使用 Configuration 分区，Files 的编辑器是独立工作表面。保留公共 Canvas 与 Capsule。</p></article>
         <article class="np-detail"><h3>03 · Icon-first actions</h3><p>Header / Row 仅显示必要图标，实际菜单与危险操作使用可读文本；44px 触控区域、焦点态和 accessible label 一致。</p></article>
         <article class="np-detail"><h3>04 · Stack Swipe</h3><p>右滑 Pop，左滑仅在真实 Forward History 存在时前进；取消手势回弹。编辑器及弹层保护自身交互，未保存改动需要确认。</p></article>
+      </div>
+
+      <div class="aw-contract">
+        <h3>跨能力的统一关系</h3>
+        <div class="aw-contract-scroll"><table><thead><tr><th scope="col">所有者</th><th scope="col">Reader · Claude</th><th scope="col">Collection · Git</th><th scope="col">Config · Sandbox</th><th scope="col">Editor · Files</th></tr></thead><tbody>
+          <tr><th scope="row">App Host</th><td colspan="4">一个 AppPageHeader · 标题/真实祖先 · Back/More · Capsule · Safe area</td></tr>
+          <tr><th scope="row">内容语义</th><td>连续阅读面</td><td>分组连续行</td><td>表单/事实</td><td>全宽编辑器</td></tr>
+          <tr><th scope="row">空间关系</th><td>Prose ↔ Tool</td><td>Row ↔ Row = 0</td><td>Section ↔ Field</td><td>Editor ↔ Actions</td></tr>
+          <tr><th scope="row">手势优先</th><td>空白可 Pop</td><td>Diff 横滚先消费</td><td>表单先消费</td><td>输入先消费，离开需 Guard</td></tr>
+        </tbody></table></div>
+        <p>对齐 Nession Token 与 staging Rhythm 候选映射；保留 Capability 内部组合，不增加全局工具目录或第二个 Header。</p>
       </div>
       <div class="review-fixtures"><strong>Reviewer fixture · 不属于产品</strong>
         <button type="button" data-fixture="normal" aria-pressed="true">Normal</button>

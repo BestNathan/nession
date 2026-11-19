@@ -9,3 +9,21 @@
 .aw-theme-buttons{display:inline-flex;gap:4px;align-items:center;border-left:1px solid var(--np-line);padding-left:10px}
 .aw-theme-buttons button[aria-pressed="true"]{background:var(--np-ink);color:var(--np-paper);border-color:var(--np-ink)}
 .aw-token-note{font-size:12px;color:var(--np-dim);margin:10px 0}
+
+/* Review controls only. Never styles the simulated Nession product. */
+.aw-scenarios{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0 0 12px}
+.aw-scenarios button{text-align:left;border:1px solid var(--np-line);border-radius:12px;background:var(--np-soft);color:var(--np-ink);padding:12px;cursor:pointer;min-width:0;display:flex;flex-direction:column;gap:6px}
+.aw-scenarios button strong{font-size:13px}
+.aw-scenarios button span{font-size:11px;color:var(--np-dim);line-height:1.45}
+.aw-scenarios button[aria-pressed="true"]{border-color:var(--np-ink);background:var(--np-paper);box-shadow:inset 0 0 0 1px var(--np-ink)}
+.aw-scenarios button:focus-visible{outline:2px solid var(--np-ink);outline-offset:2px}
+.aw-scenario-note{font-size:12px;color:var(--np-dim);line-height:1.55;margin:0 0 14px}
+.aw-contract{margin-top:25px;border-top:1px solid var(--np-line);padding-top:16px}
+.aw-contract h3{font-size:15px}
+.aw-contract p{font-size:12px;color:var(--np-dim);line-height:1.65}
+.aw-contract-scroll{overflow-x:auto}
+.aw-contract table{border-collapse:collapse;width:100%;font-size:12px;min-width:660px}
+.aw-contract th,.aw-contract td{border-bottom:1px solid var(--np-line);padding:10px;text-align:left;vertical-align:top;line-height:1.45}
+.aw-contract th{white-space:nowrap}
+@media(max-width:700px){.aw-scenarios{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:380px){.aw-scenarios{grid-template-columns:1fr}}

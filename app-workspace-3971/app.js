@@ -66,6 +66,13 @@ function commitNav(op){saveScroll();if(op.type==='pop'){if(state.cursor>0){state
   if(op.type==='browse'){state.history=[root(),{kind:op.route,scroll:0}];state.cursor=1;state.dirty=false;render('Browse '+op.route);}
   if(op.type==='terminal'){state.surface='terminal';render('Return to Terminal');}
   if(op.type==='sessions'){state.surface='sessions';render('Open Sessions');}
+  if(op.type==='scenario'&&scenarioPaths[op.scenario]){
+    state.surface='workspace';state.cap=op.scenario;
+    state.history=scenarioPaths[op.scenario].map(kind=>({kind,scroll:0}));
+    state.cursor=state.history.length-1;
+    state.fixture='normal';state.dirty=false;
+    render('Review preset: '+op.scenario);updateReviewFixtures();
+  }
 }
 function navigate(op){if(state.overlay)closeOverlay();if(state.dirty&&active().kind==='edit'){
     state.pending=op;state.overlay='guard';renderOverlay();record('Unsaved changes: guard');return;
@@ -189,6 +196,15 @@ function renderFiles(a){
 function content(){let a=active();if(state.fixture==='empty'&&a.kind!=='edit')return emptyView('empty');
   if(state.fixture==='error'&&a.kind!=='edit')return emptyView('error');
   return ({claude:renderClaude,git:renderGit,sandbox:renderSandbox,files:renderFiles})[state.cap](a);}
+const scenarioPaths={claude:['root'],git:['root'],sandbox:['root','policy'],files:['root','file','edit']};
+function updateScenarioReview(){
+  document.querySelectorAll('[data-scenario]').forEach(b=>{
+    const path=scenarioPaths[b.dataset.scenario];
+    const visible=state.surface==='workspace'&&state.cap===b.dataset.scenario&&
+      state.history.slice(0,state.cursor+1).map(r=>r.kind).join('/')===path?.join('/');
+    b.setAttribute('aria-pressed',String(Boolean(visible)));
+  });
+}
 const resourceMap={claude:[['WORK','bot','Conversations','conversations'],['WORK','list','Transcripts','transcripts'],['RESOURCES','memory','Memory','memory'],['RESOURCES','link','MCP','mcp'],['SETUP','settings','Configuration','config']],
  git:[['REPOSITORY','files','Changes','root'],['REPOSITORY','clock','History','history'],['REPOSITORY','branch','Branches','branches'],['HOSTING','link','GitHub','github']],
  sandbox:[['EXECUTION','shield','Overview','root'],['EXECUTION','folder','Filesystem','filesystem'],['EXECUTION','settings','Policies','policy'],['RESOURCES','files','Mounts','mounts']],
@@ -231,7 +247,7 @@ function render(message='Rendered'){
   renderTerminal();renderOverlay();
   const p=$('#page-frame');p.style.transform='';p.style.transition='';
   $('#workspace-underlay').style.opacity='0';
-  record(message);
+  record(message);updateScenarioReview();
 }
 function openOverlay(which){state.overlay=which;renderOverlay();record('Open '+which+' sheet');}
 function handle(action,id){
@@ -270,6 +286,9 @@ document.querySelectorAll('[data-fixture]').forEach(b=>b.addEventListener('click
  if(v==='terminal'){navigate({type:'terminal'});return;}
  if(v==='session'){state.sessionNo=state.sessionNo===1?2:1;state.history=[root()];state.cursor=0;state.cap='claude';state.dirty=false;state.fixture='normal';state.overlay=null;render('Session context invalidated');updateReviewFixtures();return;}
  state.fixture=v;state.overlay=null;render('Fixture: '+v);updateReviewFixtures();
+}));
+document.querySelectorAll('[data-scenario]').forEach(button=>button.addEventListener('click',()=>{
+  navigate({type:'scenario',scenario:button.dataset.scenario});
 }));
 function updateReviewFixtures(){document.querySelectorAll('[data-fixture]').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.fixture===state.fixture)));}
 document.addEventListener('keydown',ev=>{
