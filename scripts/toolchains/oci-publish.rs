@@ -390,8 +390,9 @@ fn verify_jq(root: &Path, version: &str) -> Result<()> {
 fn verify_kubectl(root: &Path, version: &str) -> Result<()> {
     let bytes = execute(&root.join("bin/kubectl"), &["version", "--client", "--output=json"])?;
     let value: serde_json::Value = serde_json::from_slice(&bytes.stdout)?;
+    let expected = format!("v{version}");
     ensure!(
-        value["clientVersion"]["gitVersion"].as_str() == Some(&format!("v{version}")),
+        value["clientVersion"]["gitVersion"].as_str() == Some(expected.as_str()),
         "kubectl version differs from pinned recipe"
     );
     Ok(())
