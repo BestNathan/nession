@@ -53,6 +53,18 @@ function phase(value) {
   return ['Pending', 'Running', 'Succeeded', 'Failed', 'Unknown'].includes(value)
     ? value : 'Unknown';
 }
+function imageRegistryClass(imageID) {
+  // Registry category only, never publish raw Pod imageID/repository strings.
+  // The #4032 GHCR-only rollout can be Ready while a runtime mirror returns
+  // an ACR/foreign imageID; digest-only diagnostics cannot identify that owner.
+  if (typeof imageID !== 'string') return 'unobservable';
+  const match = /^([a-z0-9][a-z0-9._/:-]*)@sha256:[a-f0-9]{64}$/.exec(imageID);
+  if (!match) return 'unobservable';
+  const repository = match[1];
+  if (repository === 'ghcr.io/bestnathan/nession') return 'ghcr';
+  if (/^[a-z0-9.-]*\.aliyuncs\.com\//.test(repository)) return 'acr';
+  return 'other';
+}
 function containerState(entry) {
   const state = entry?.state ?? {};
   const previous = entry?.lastState?.terminated;
@@ -60,6 +72,7 @@ function containerState(entry) {
     ready: entry?.ready === true,
     restart_count: boundedInt(entry?.restartCount),
     image_digest: digest(entry?.imageID),
+    image_registry_class: imageRegistryClass(entry?.imageID),
     waiting_reason: reason(state.waiting?.reason),
     terminated_reason: reason(state.terminated?.reason),
     terminated_exit_code: boundedInt(state.terminated?.exitCode),
@@ -167,6 +180,13 @@ function selfTest() {
   assert.equal(actual.pod_status.length,1);
   assert.equal(actual.pod_status[0].containers[0].previous_exit_code,137);
   assert.equal(actual.pod_status[0].containers[0].waiting_reason,'CrashLoopBackOff');
+  assert.equal(actual.pod_status[0].containers[0].image_registry_class,'other');
+  const sha = 'a'.repeat(64);
+  assert.equal(imageRegistryClass('ghcr.io/bestnathan/nession@sha256:' + sha), 'ghcr');
+  assert.equal(imageRegistryClass('crpi-foo.cn-beijing.personal.cr.aliyuncs.com/n_public/nession@sha256:' + sha), 'acr');
+  assert.equal(imageRegistryClass('elsewhere.example/nession@sha256:' + sha), 'other');
+  assert.equal(imageRegistryClass('untrusted '+token), 'unobservable');
+  assert.equal(imageRegistryClass(null), 'unobservable');
   assert.equal(actual.pod_events.length,1);
   assert.equal(actual.pod_events[0].reason,'FailedMount');
   assert.ok(!JSON.stringify(actual).includes(token));
