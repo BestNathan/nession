@@ -223,7 +223,8 @@ async function fourRoleACR(sha) {
 }
 async function verify(issue) {
   if(![3953,3964].includes(issue))throw Error('unapproved deployed Case owner');
-  offlineFixtures();
+  // The standalone Gate owns fixture output. A runtime Case verifier must
+  // write exactly ONE machine-readable JSON line on stdout, with no prose.
   const sha=targetSha();
   assert.match(sha,SHA);
   const fix=issue===3953
