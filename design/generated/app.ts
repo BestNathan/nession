@@ -62,6 +62,9 @@ export const rhythm = {
   textStack: 4,
   inline: 8,
   fieldStack: 6,
+  factStack: 2,
+  errorInsetX: 10,
+  errorInsetY: 6,
 } as const;
 export const touchTarget = {
   min: 44,
