@@ -24,6 +24,34 @@ const sealed = {
   }
 };
 
+test('SealedSecret enrollment preserves existing indentless and indented YAML lists', () => {
+  const resource = 'environments/staging/mcp/sealed-inbound.json';
+  const originalIndentless =
+    'resources:\n- sealed-tls.json\n- sealed-secret.json\n- deployment.yaml\n\nimages:\n- name: mcp\n';
+  const rootStyle = addResource(originalIndentless, resource);
+  assert.match(rootStyle, /^resources:\n- sealed-inbound\.json\n- sealed-tls\.json\n/m);
+  assert.equal(addResource(rootStyle, resource), rootStyle);
+  assert.equal(rootStyle.includes('\n  - sealed-inbound.json\n'), false);
+  const twoSpace =
+    'resources:\n  - sealed-tls.json\n  - sealed-secret.json\n  - deployment.yaml\n\nimages:\n- name: mcp\n';
+  const nestedStyle = addResource(twoSpace, resource);
+  assert.match(nestedStyle, /^resources:\n  - sealed-inbound\.json\n  - sealed-tls\.json\n/m);
+  assert.equal(addResource(nestedStyle, resource), nestedStyle);
+  assert.throws(() => addResource('resources:\nimages:\n- name: mcp\n', resource),
+    /empty or malformed/);
+  const batch = addRequiredResources(originalIndentless, 'staging');
+  assert.match(batch, /^resources:\n- sealed-backend-server\.json\n- sealed-inbound\.json\n- sealed-tls\.json\n/m);
+  assert.equal(addRequiredResources(batch, 'staging'), batch);
+  const batchNested = addRequiredResources(twoSpace, 'staging');
+  assert.match(batchNested,
+    /^resources:\n  - sealed-backend-server\.json\n  - sealed-inbound\.json\n  - sealed-tls\.json\n/m);
+  assert.equal(addRequiredResources(batchNested, 'staging'), batchNested);
+  // Every resource item must keep the existing sequence indentation.
+  const rows = value => value.split(/\nimages:/)[0].split('\n').filter(line => /^\s*-\s+/.test(line));
+  assert.ok(rows(batch).every(line => line.startsWith('- ')));
+  assert.ok(rows(batchNested).every(line => line.startsWith('  - ')));
+});
+
 test('GitHub Environment must match GitOps environment directory exactly', () => {
   assert.equal(target.resource, 'environments/staging/mcp/sealed-secret.json');
   assert.equal(target.namespace, 'nession');
