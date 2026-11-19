@@ -7,7 +7,7 @@
 # Build the pinned EROFS helper tools (#3178). Debian bookworm's erofs-utils
 # 1.5 cannot run the V1 packaging argv and packages no erofsfuse; both binaries
 # come from the same pinned upstream build the from-source path uses.
-FROM debian:bookworm-slim AS erofs-utils-builder
+FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS erofs-utils-builder
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         build-essential autoconf automake libtool pkg-config libfuse3-dev \
@@ -28,7 +28,7 @@ RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
 # `mkfs.erofs`/`fsck.erofs` are runtime dependencies of
 # `crates/nession-erofs/src/build.rs`; the probe below fails the image build if
 # any executable is absent.
-FROM debian:bookworm-slim AS runtime-tools
+FROM debian:bookworm-20261104-slim@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc AS runtime-tools
 ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
