@@ -211,7 +211,7 @@ for(const wrong of [
   {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
   {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
 ])assert.throws(()=>assertDispatchAuthority({...turnsRecovery,...wrong}),
-  /authenticated owner\\/main/);
+  /authenticated owner\/main/);
 
 // #3885 second post-model failure: a one-shot Owner Issue comment is
 // independently bound to the actual Run's signed Store Action (never arbitrary).
