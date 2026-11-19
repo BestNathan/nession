@@ -210,6 +210,45 @@ export function selfTestPrCiTriad() {
   assert.equal(requiresPrCiTriad({stage:'staging',criteria:[{
     text:'Quality / E2E / Case Smoke tests pass',
   }]}),false);
+  const web4050 = 'Source-aligned Quality/Gate checks succeed at the exact PR head; existing UI/browser checks remain green';
+  const web4061 = 'Browser design/viewport checks confirm no regression; exact-PR-head CI and Case evidence required';
+  assert.equal(requiresPrVisualEvidenceCriterion({text:web4050}),true);
+  assert.equal(requiresPrVisualEvidenceCriterion({text:web4061}),true);
+  assert.equal(requiresPrVisualEvidenceCriterion({text:'normal prose without CI proof'}),false);
+  assert.equal(requiresPrCiTriad({stage:'pr',criteria:[{criterion:'SC-03',text:web4050}]}),true);
+  assert.equal(requiresPrCiTriad({stage:'pr',criteria:[{criterion:'SC-04',text:web4061}]}),true);
+  const visualObservations=structuredClone(observations);
+  for (const spec of VISUAL_CHECKS) {
+    const run={...observations.quality.runs.workflow_runs[0],
+      id:spec.key === 'web_design' ? 400 : 401,
+      name:spec.name,path:spec.path};
+    visualObservations[spec.key]={runs:{workflow_runs:[run]},
+      jobs:{total_count:1,jobs:[{id:spec.key === 'web_design' ? 500 : 501,
+        run_id:run.id,run_attempt:1,name:spec.job,
+        status:'completed',conclusion:'success',
+        steps:spec.steps.map(name=>({name,status:'completed',conclusion:'success'}))}]}};
+  }
+  const visual=attestPrCiTriad(sha,visualObservations,{visual:true});
+  assert.equal(visual.status,'pass');
+  assert.equal(visual.receipt.variant,'visual');
+  assert.ok(validPrCiTriadReceipt(visual.receipt,sha));
+  const visualContext={stage:'pr',target_ref:sha,
+    criteria:[{criterion:'SC-04',text:web4061}],pr_ci_triad:pass};
+  const visualClaim={criteria:[{criterion:'SC-04',result:'Pass',
+    evidence:[{type:'test',value:'claim'}],summary:'claim'}]};
+  assert.equal(enforcePrCiTriad(visualContext,visualClaim).criteria[0].result,'Pending',
+    'generic triad must not substitute actual browser-design proof');
+  visualContext.pr_ci_triad=visual;
+  assert.equal(enforcePrCiTriad(visualContext,visualClaim).criteria[0].result,'Pass');
+  assert.equal(enforcePrCiTriad(visualContext,visualClaim)
+    .criteria[0].evidence.length,6,'five checked jobs accompany the original claim');
+  const withoutBrowser=structuredClone(visualObservations);
+  withoutBrowser.browser_design.jobs.jobs[0].steps[0].conclusion='skipped';
+  assert.equal(attestPrCiTriad(sha,withoutBrowser,{visual:true}).status,'pending');
+  const wrongHeadBrowser=structuredClone(visualObservations);
+  wrongHeadBrowser.browser_design.runs.workflow_runs[0].head_sha='b'.repeat(40);
+  assert.equal(attestPrCiTriad(sha,wrongHeadBrowser,{visual:true}).status,'pending');
+
   const forged=structuredClone(observations);
   forged.e2e.runs.workflow_runs[0].event='push';
   assert.equal(attestPrCiTriad(sha,forged).status,'pending');
