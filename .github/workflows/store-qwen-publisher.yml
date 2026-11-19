@@ -379,7 +379,7 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/lib/agent/publisher/qwen-trusted-publisher-selftest.mjs
-          node scripts/lib/agent/publisher/qwen-github-publish-selftest.mjs
+          node scripts/lib/agent/publisher/github-publish-selftest.mjs
           ./gates/run run-store-integrity
 
       - name: Fetch immutable original Publisher, Ingest and Worker proof as inert data
