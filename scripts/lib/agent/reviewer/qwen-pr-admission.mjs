@@ -16,9 +16,12 @@ const ADMISSION_FIELDS=['schema_version','kind','status','repository','issue',
   'role','agent_id','task','review_action_id','pr_number','target_sha',
   'base_sha_at_publication','publisher_run_id','publisher_attempt',
   'publisher_intent_sha256','publisher_branch','original_worker_run_id',
-  'native_checkpoint_commit_sha','expected_files','base_files'];
+  'native_checkpoint_commit_sha','expected_files','base_files',
+  'issue_criteria','issue_criteria_sha256'];
 const FILE_FIELDS=['path','blob_sha','mode'];
 const BASE_FILE_FIELDS=['path','content'];
+const CRITERION_FIELDS=['id','text'];
+const MAX_CRITERIA=16,MAX_CRITERIA_BYTES=4096;
 const MAX_BASE_FILE=32*1024;
 const MAX_BASE_TOTAL=128*1024;
 const hash=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
@@ -34,6 +37,38 @@ export function authenticatedQwenPublisherTrigger(run){
   return run?.event==='workflow_run'||
     (run?.event==='workflow_dispatch'&&
       run.actor?.login==='github-actions[bot]');
+}
+// #3885: original Qwen Publisher wrote PR #3919 and failed *after* its
+// GitHub POST. A distinct Owner-authenticated GET-only Publisher recovery
+// verified the same PR/Store Intent and advanced the signed Issue Store.
+// Do not pretend the original Run succeeded. This narrow dual-Run proof
+// preserves both historical outcomes; never authorize an arbitrary failure.
+export function attestedQwenInitialPublisherRecovery({
+  issue,intent,publisherRun,recoveryRun,
+}){
+  return issue===3784&&intent?.issue===3784&&
+    intent.publisher_run_id===44281178406&&
+    intent.target_main_sha==='ec2984381bda57491d764a9ba3e1123a63b89861'&&
+    intent.branch==='agent/3784/qwen-39c01222a8d00fa3'&&
+    publisherRun?.id===44281178406&&publisherRun.run_attempt===1&&
+    publisherRun.name==='Store / Qwen Publisher'&&
+    publisherRun.path==='.github/workflows/store-qwen-publisher.yml'&&
+    publisherRun.event==='workflow_run'&&
+    publisherRun.head_branch==='main'&&
+    publisherRun.head_sha===intent.target_main_sha&&
+    publisherRun.status==='completed'&&publisherRun.conclusion==='failure'&&
+    publisherRun.repository?.full_name===REPO&&
+    publisherRun.head_repository?.full_name===REPO&&
+    recoveryRun?.id===44431297473&&recoveryRun.run_attempt===1&&
+    recoveryRun.name==='Store / Qwen Publisher'&&
+    recoveryRun.path==='.github/workflows/store-qwen-publisher.yml'&&
+    recoveryRun.event==='issue_comment'&&
+    recoveryRun.actor?.login==='BestNathan'&&
+    recoveryRun.head_branch==='main'&&
+    recoveryRun.head_sha==='08f841bf796977a91ff745eb0763559ea67dec51'&&
+    recoveryRun.status==='completed'&&recoveryRun.conclusion==='success'&&
+    recoveryRun.repository?.full_name===REPO&&
+    recoveryRun.head_repository?.full_name===REPO;
 }
 
 export function assertQwenReviewerAdmission(a,identity={agent_id:'review-qwen-01'}){
@@ -66,7 +101,17 @@ export function assertQwenReviewerAdmission(a,identity={agent_id:'review-qwen-01
       (a.base_files.length>0&&
         (a.base_files.length!==a.expected_files.length||
          a.base_files.some(f=>!a.expected_files.some(e=>e.path===f.path))))||
-      a.base_files.reduce((n,f)=>n+Buffer.byteLength(f.content),0)>MAX_BASE_TOTAL)
+      a.base_files.reduce((n,f)=>n+Buffer.byteLength(f.content),0)>MAX_BASE_TOTAL||
+      !Array.isArray(a.issue_criteria)||a.issue_criteria.length<1||
+      a.issue_criteria.length>MAX_CRITERIA||
+      a.issue_criteria.some(c=>!exact(c,CRITERION_FIELDS)||
+        !/^SC-[0-9]{2,}$/.test(c.id??'')||typeof c.text!=='string'||
+        !c.text.trim()||c.text!==c.text.trim()||
+        Buffer.byteLength(c.text)>1200)||
+      new Set(a.issue_criteria.map(c=>c.id)).size!==a.issue_criteria.length||
+      Buffer.byteLength(JSON.stringify(a.issue_criteria))>MAX_CRITERIA_BYTES||
+      !HEX.test(a.issue_criteria_sha256??'')||
+      a.issue_criteria_sha256!==hash({issue:a.issue,criteria:a.issue_criteria}))
     deny('invalid source-bound Reviewer admission');
   // The branch name is produced by a committed Publisher Intent, never a
   // Reviewer-supplied action or a model-supplied PR target.
@@ -98,6 +143,7 @@ function expectedReviewFiles(files,tree){
 export function admitQwenPublishedReview({
   state,intent,publisherRun,pullRequests,pr,ref,commit,files,tree,
   actionId,reviewerAgentId='review-qwen-01',base_files=[],
+  issue_criteria=[],recoveryRun=null,
 }){
   validateDevelopmentState(state);
   const record=validateQwenPublisherIntent(intent);
@@ -124,9 +170,13 @@ export function admitQwenPublishedReview({
       publisherRun.run_attempt!==1||
       publisherRun.name!=='Store / Qwen Publisher'||
       publisherRun.path!=='.github/workflows/store-qwen-publisher.yml'||
-      !authenticatedQwenPublisherTrigger(publisherRun)||publisherRun.head_branch!=='main'||
+      !(authenticatedQwenPublisherTrigger(publisherRun)&&
+          publisherRun.conclusion==='success'||
+        attestedQwenInitialPublisherRecovery({
+          issue:state.issue,intent:record,publisherRun,recoveryRun}))||
+      publisherRun.head_branch!=='main'||
       publisherRun.head_sha!==record.target_main_sha||
-      publisherRun.status!=='completed'||publisherRun.conclusion!=='success'||
+      publisherRun.status!=='completed'||
       publisherRun.repository?.full_name!==REPO||
       publisherRun.head_repository?.full_name!==REPO)
     deny('Publisher Run/Attempt is not independently authenticated');
@@ -160,6 +210,7 @@ export function admitQwenPublishedReview({
     native_checkpoint_commit_sha:record.checkpoint_commit_sha,
     expected_files:expected,
     base_files,
+    issue_criteria,issue_criteria_sha256:hash({issue:record.issue,criteria:issue_criteria}),
   }));
 }
 
@@ -170,6 +221,7 @@ export function admitQwenPublishedReview({
 export function admitQwenRepairPublishedReview({
   state,intent,publisherRun,pullRequests,pr,ref,commit,files,tree,
   actionId,reviewerAgentId='review-qwen-01',base_files=[],
+  issue_criteria=[],
 }){
   validateDevelopmentState(state);
   const record=validateQwenRepairPublisherIntent(intent);
@@ -239,5 +291,6 @@ export function admitQwenRepairPublishedReview({
     native_checkpoint_commit_sha:record.checkpoint_commit_sha,
     expected_files:expected,
     base_files,
+    issue_criteria,issue_criteria_sha256:hash({issue:record.issue,criteria:issue_criteria}),
   }));
 }
