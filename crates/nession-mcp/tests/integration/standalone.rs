@@ -558,20 +558,34 @@ async fn standalone_query_token_authentication_is_opt_in() {
             "capabilities": {},
             "clientInfo": { "name": "query-test", "version": "1" }
         }
-    }).to_string();
+    })
+    .to_string();
 
-    let disabled = send_to(addr, "/mcp?token=mcp-inbound-token", "POST", None, None, &initialize)
-        .await.expect("default HTTP response");
+    let disabled = send_to(
+        addr,
+        "/mcp?token=mcp-inbound-token",
+        "POST",
+        None,
+        None,
+        &initialize,
+    )
+    .await
+    .expect("default HTTP response");
     assert_eq!(disabled.status, 401);
     assert!(!disabled.body.contains(MCP_TOKEN));
-    assert_eq!(send(addr, "POST", Some(MCP_TOKEN), None, &initialize)
-        .await.expect("header authentication").status, 200);
+    assert_eq!(
+        send(addr, "POST", Some(MCP_TOKEN), None, &initialize)
+            .await
+            .expect("header authentication")
+            .status,
+        200
+    );
     terminate_and_wait(&mut child.0).await;
 
     let original = std::fs::read_to_string(&config_path).expect("read standalone config");
     let enabled = original.replacen(
         &format!("auth_token = \"{MCP_TOKEN}\""),
-        &format!("auth_token = \"{MCP_TOKEN}\"\nallow_query_token = true"),
+        &format!("auth_token = \"{MCP_TOKEN}\"\\nallow_query_token = true"),
         1,
     );
     std::fs::write(&config_path, enabled).expect("enable query authentication");
@@ -579,14 +593,30 @@ async fn standalone_query_token_authentication_is_opt_in() {
     let addr = await_listen_addr(&mut child.0).await;
     let query = "/mcp?token=mcp%2Dinbound%2Dtoken";
     let initialized = send_to(addr, query, "POST", None, None, &initialize)
-        .await.expect("query HTTP response");
+        .await
+        .expect("query HTTP response");
     assert_eq!(initialized.status, 200, "{}", initialized.body);
-    let session = initialized.header("Mcp-Session-Id").expect("legacy MCP session");
-    let listed = send_to(addr, query, "POST", None, Some(session),
+    let session = initialized
+        .header("Mcp-Session-Id")
+        .expect("legacy MCP session");
+    let listed = send_to(
+        addr,
+        query,
+        "POST",
+        None,
+        Some(session),
         &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }).to_string(),
-    ).await.expect("query-only tools/list");
+    )
+    .await
+    .expect("query-only tools/list");
     assert_eq!(listed.status, 200, "{}", listed.body);
-    assert_eq!(listed.json()["result"]["tools"].as_array().expect("tools").len(), 11);
+    assert_eq!(
+        listed.json()["result"]["tools"]
+            .as_array()
+            .expect("tools")
+            .len(),
+        11
+    );
 
     for target in [
         "/mcp?token=wrong",
@@ -595,19 +625,43 @@ async fn standalone_query_token_authentication_is_opt_in() {
         "/mcp?token=mcp-inbound-token%",
     ] {
         let denied = send_to(addr, target, "POST", None, None, &initialize)
-            .await.expect("refusal");
+            .await
+            .expect("refusal");
         assert_eq!(denied.status, 401, "{target}");
         assert!(!denied.body.contains(MCP_TOKEN));
     }
     let conflict = send_to(addr, query, "POST", Some("wrong"), None, &initialize)
-        .await.expect("conflicting header");
+        .await
+        .expect("conflicting header");
     assert_eq!(conflict.status, 401);
-    assert_eq!(send_to(addr, query, "POST", Some(MCP_TOKEN), None, &initialize)
-        .await.expect("matching credentials").status, 200);
-    assert_eq!(send_to(addr, "/other?token=mcp-inbound-token", "POST", None, None, &initialize)
-        .await.expect("wrong path").status, 404);
-    assert_eq!(send(addr, "POST", Some(MCP_TOKEN), None, &initialize)
-        .await.expect("legacy bearer").status, 200);
+    assert_eq!(
+        send_to(addr, query, "POST", Some(MCP_TOKEN), None, &initialize)
+            .await
+            .expect("matching credentials")
+            .status,
+        200
+    );
+    assert_eq!(
+        send_to(
+            addr,
+            "/other?token=mcp-inbound-token",
+            "POST",
+            None,
+            None,
+            &initialize
+        )
+        .await
+        .expect("wrong path")
+        .status,
+        404
+    );
+    assert_eq!(
+        send(addr, "POST", Some(MCP_TOKEN), None, &initialize)
+            .await
+            .expect("legacy bearer")
+            .status,
+        200
+    );
 
     terminate_and_wait(&mut child.0).await;
     server_task.abort();
