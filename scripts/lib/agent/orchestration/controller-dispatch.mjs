@@ -16,6 +16,7 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
+  REVIEWER_PREMODEL_FAILURE_3784_C,
   REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
   recoverAttestedReviewerPremodelFailure,recoverAttestedReviewerJsonFailure}
@@ -62,7 +63,10 @@ export const REVIEWER_PREMODEL_3784_RECOVERY_COMMENT=
 const REVIEWER_PREMODEL_RECOVERIES=Object.freeze([
   [REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_RECOVERY_COMMENT],
   [REVIEWER_PREMODEL_FAILURE_3784,REVIEWER_PREMODEL_3784_RECOVERY_COMMENT],
+  [REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT],
 ]);
+export const REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT=
+  '/nession recover-review-preflight issue=3784 run=44500591865';
 export const REVIEWER_JSON_RECOVERY_COMMENT=
   '/nession recover-review-json issue=3433 run=43681851455';
 export const REVIEWER_JSON_3784_RECOVERY_COMMENT=
