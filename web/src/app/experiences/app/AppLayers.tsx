@@ -249,8 +249,8 @@ export function AppLayers({
       data-swipe-destination-label={destinationLabel ?? undefined}
       data-swipe-reason={lastReason ?? undefined}
       data-swipe-guard-px={EDGE_PLATFORM_GUARD_PX}
-      data-workspace-stack-pop={workspaceStack?.pop?.title ?? undefined}
-      data-workspace-stack-forward={workspaceStack?.forward?.title ?? undefined}
+      data-workspace-stack-pop={layer === 'workspace' ? (workspaceStack?.pop?.title ?? undefined) : undefined}
+      data-workspace-stack-forward={layer === 'workspace' ? (workspaceStack?.forward?.title ?? undefined) : undefined}
       className="relative flex min-h-0 flex-1 flex-col overflow-hidden"
     >
       {/* Every layer is inside the App's popup container, so a menu opened from
