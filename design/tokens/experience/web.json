@@ -151,6 +151,18 @@
     "fieldStack": {
       "$description": "The label/control/help/error flow in shared FormField; preserve established 6px compact form rhythm.",
       "value": "6px"
+    },
+    "factStack": {
+      "$description": "Compact vertical fact label to value distance in DetailFact; preserves existing gap-0.5 (2px) without a raw utility.",
+      "value": "2px"
+    },
+    "errorInsetX": {
+      "$description": "Horizontal inset of OperationError; preserves established 10px px-2.5 without inheriting unrelated host geometry.",
+      "value": "10px"
+    },
+    "errorInsetY": {
+      "$description": "Vertical inset of OperationError; preserves established 6px py-1.5 without treating a field sibling gap as padding.",
+      "value": "6px"
     }
   },
   "shell": {
