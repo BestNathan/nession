@@ -82,7 +82,7 @@ async fn the_agent_connection_lists_creates_and_kills_over_the_agent_token() {
 
     let name = unique_name();
     let created = connection
-        .create_session(&name, None)
+        .create_session(&name, None, None)
         .await
         .expect("create");
     assert_eq!(created.name, name);

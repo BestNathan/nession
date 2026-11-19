@@ -182,6 +182,13 @@ pub struct ServerSessionCreatePayload {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ManagedSessionImages>,
+    /// Initial Session work context committed by this create (#4081).
+    ///
+    /// Absent preserves the pre-#4081 create exactly. When present, the Agent
+    /// validates it before any Session side effect and commits it as the new
+    /// incarnation's revision 1 before reporting success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_metadata: Option<SessionInitialMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -219,6 +226,14 @@ pub struct AgentCommandResponsePayload {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
+    /// The durable tmux instance identity of the Session this create made
+    /// (#4081). Present on success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// The initial work context committed with this create (#4081). Present
+    /// only when the request supplied `initial_metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadata>,
 }
 
 // --- Client → Server session command payloads ---
@@ -294,6 +309,10 @@ pub struct ClientSessionCreatePayload {
     /// the Server and Agent remain the executable owners.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ClientManagedCreate>,
+    /// Initial Session work context committed by this create (#4081).
+    /// Absent preserves the pre-#4081 create exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_metadata: Option<SessionInitialMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -329,6 +348,14 @@ pub struct ClientSessionCreateResponsePayload {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
+    /// The durable tmux instance identity of the Session this create made
+    /// (#4081). Present on success; use it as `expected_instance_id`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// The initial work context committed with this create (#4081). Present
+    /// only when the request supplied `initial_metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1002,6 +1029,13 @@ pub struct SessionCreatePayload {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub managed: Option<ManagedSessionImages>,
+    /// Initial Session work context committed by this create (#4081).
+    ///
+    /// Same field on the direct and Server-relayed projections, so every
+    /// hosting route reaches the Agent with one create payload. Absent
+    /// preserves the pre-#4081 create exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_metadata: Option<SessionInitialMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1253,6 +1287,10 @@ pub struct WebSessionCreatePayload {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxPolicy>,
+    /// Initial Session work context committed by this create (#4081).
+    /// Absent preserves the pre-#4081 create exactly.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_metadata: Option<SessionInitialMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1267,6 +1305,14 @@ pub struct WebSessionCreateResponse {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sandbox: Option<SandboxExecutionReport>,
+    /// The durable tmux instance identity of the Session this create made
+    /// (#4081). Present on success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// The initial work context committed with this create (#4081). Present
+    /// only when the request supplied `initial_metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1385,6 +1431,14 @@ pub struct SessionCreateResponse {
     #[cfg_attr(feature = "schema", schemars(skip))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace: Option<String>,
+    /// The durable tmux instance identity of the Session this create made
+    /// (#4081). Present on success.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    /// The initial work context committed with this create (#4081). Present
+    /// only when the request supplied `initial_metadata`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<SessionMetadata>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1783,6 +1837,41 @@ impl SessionMetadata {
             .map(str::trim)
             .filter(|title| !title.is_empty())
             .unwrap_or(session_name)
+    }
+}
+
+/// Initial Session work context supplied at creation (#4081).
+///
+/// Input only. `revision`, timestamps and the tmux instance identity are
+/// owner-written and are **not** fields of this type: supplying one is an
+/// unknown field and is refused. The values pass through the same
+/// [`validate_session_metadata`] normalization and bounds as every update
+/// surface, and are committed by the Agent as the new incarnation's revision 1
+/// before the create reports success.
+#[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SessionInitialMetadata {
+    /// Display alias for the Session. Absent or `null` means unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    /// Longer work-context text. Absent or `null` means unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Ordered tags; an empty list means no tags.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+}
+
+impl SessionInitialMetadata {
+    /// Validate and normalize through the one shared metadata contract.
+    pub fn normalized(&self) -> Result<NormalizedSessionMetadata, SessionMetadataValidationError> {
+        validate_session_metadata(
+            self.title.as_deref(),
+            self.description.as_deref(),
+            &self.tags,
+        )
     }
 }
 

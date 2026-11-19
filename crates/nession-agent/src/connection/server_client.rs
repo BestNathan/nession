@@ -88,7 +88,7 @@ use crate::session::metadata::{
     attach_session_summaries, error_kind_and_detail, SessionMetadataStore,
 };
 use crate::tmux::env::profiles_from_snapshots;
-use crate::tmux::manager::{SessionBindingInput, SessionManager};
+use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use nession_runtime::lane::KeyedLane;
 
 /// Type alias for the WebSocket stream.
@@ -4093,6 +4093,39 @@ core_routes!(agent, msg, responses;
                         };
                     let request_id = payload.request_id.clone();
                     let name = payload.name.clone();
+                    // Initial metadata is validated before any Session side
+                    // effect (#4081), through the one shared contract
+                    // validator the update surfaces also use.
+                    let initial_metadata = match payload.initial_metadata.as_ref() {
+                        Some(metadata) => match metadata.normalized() {
+                            Ok(metadata) => Some(metadata),
+                            Err(error) => {
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": request_id,
+                                        "command": "session.create",
+                                        "success": false,
+                                        "error": format!("invalid: {error}"),
+                                        "session_name": null,
+                                        "warnings": [],
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        },
+                        None => None,
+                    };
+                    let initial =
+                        initial_metadata
+                            .as_ref()
+                            .map(|metadata| InitialSessionMetadata {
+                                store: agent.session_metadata.as_ref(),
+                                metadata,
+                            });
                     // A caller that only knows resolved snapshots still gets
                     // the one binding model: the refs are read from the
                     // snapshots, not invented.
@@ -4170,7 +4203,15 @@ core_routes!(agent, msg, responses;
                     let revision = payload
                         .binding_revision
                         .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
-                    let (success, error, session_name, warnings, sandbox_report) = match agent
+                    let (
+                        success,
+                        error,
+                        session_name,
+                        warnings,
+                        sandbox_report,
+                        instance_id,
+                        metadata,
+                    ) = match agent
                         .tmux
                         .create_session_with_options(
                             &name,
@@ -4183,6 +4224,7 @@ core_routes!(agent, msg, responses;
                                 snapshots: &payload.env_snapshots,
                             }),
                             payload.sandbox.as_ref(),
+                            initial.as_ref(),
                         )
                         .await
                     {
@@ -4206,9 +4248,19 @@ core_routes!(agent, msg, responses;
                                 Some(name.clone()),
                                 outcome.warnings,
                                 outcome.sandbox,
+                                outcome.instance_id,
+                                outcome.metadata,
                             )
                         }
-                        Err(e) => (false, Some(format!("{e:#}")), None, Vec::new(), None),
+                        Err(e) => (
+                            false,
+                            Some(format!("{e:#}")),
+                            None,
+                            Vec::new(),
+                            None,
+                            None,
+                            None,
+                        ),
                     };
 
                     let response = serde_json::json!({
@@ -4223,6 +4275,8 @@ core_routes!(agent, msg, responses;
                             "session_name": session_name,
                             "warnings": warnings,
                             "sandbox": sandbox_report,
+                            "instance_id": instance_id,
+                            "metadata": metadata,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;

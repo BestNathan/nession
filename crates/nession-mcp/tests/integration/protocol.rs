@@ -36,8 +36,9 @@ use nession_protocol::contracts::project::v1::{
 use nession_protocol::contracts::session::v1::{
     ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionKillResponse,
-    SessionMetadataPatchPayload, SessionMetadataResponse, WebSessionsListResponse,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
+    SessionInitialMetadata, SessionKillResponse, SessionMetadataPatchPayload,
+    SessionMetadataResponse, WebSessionsListResponse,
 };
 use rmcp::model::{CallToolRequestParams, ContentBlock, ProtocolVersion};
 use rmcp::transport::streamable_http_client::StreamableHttpClientTransportConfig;
@@ -264,8 +265,13 @@ impl NodeBackend for Recorder {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
-        self.push(format!("node.create:{agent_id}:{name}:{working_dir:?}"));
+        let mut entry = format!("node.create:{agent_id}:{name}:{working_dir:?}");
+        if initial_metadata.is_some() {
+            entry.push_str(":metadata");
+        }
+        self.push(entry);
         typed(json!({ "name": name, "warnings": [] }))
     }
 
@@ -331,10 +337,13 @@ impl NodeBackend for SlowNode {
         _agent_id: &str,
         name: &str,
         _working_dir: Option<&str>,
+        _initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         Ok(SessionCreatedOutput {
             name: name.to_string(),
             warnings: Vec::new(),
+            instance_id: None,
+            metadata: None,
         })
     }
 

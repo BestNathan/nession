@@ -185,6 +185,7 @@ async fn a_real_server_receives_the_typed_project_session_create() {
             sandbox: None,
             project_id: Some("project-123e4567-e89b-42d3-a456-426614174000".to_string()),
             managed: None,
+            initial_metadata: None,
         })
         .await
         .unwrap();

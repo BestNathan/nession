@@ -99,6 +99,8 @@ impl ConnectionHandler {
             warnings: Vec::new(),
             project_id: None,
             sandbox: None,
+            instance_id: None,
+            metadata: None,
         };
 
         if !self.authenticated_client {
@@ -134,6 +136,7 @@ impl ConnectionHandler {
             sandbox,
             project_id,
             managed,
+            initial_metadata,
         }) = serde_json::from_value::<ClientSessionCreatePayload>(msg.payload)
         else {
             return Ok(session_create_reply(
@@ -148,6 +151,22 @@ impl ConnectionHandler {
                 refusal("agent_id and name are required"),
             ));
         }
+        // The one shared metadata contract validates the initial work context
+        // before anything is staged or sent to an Agent (#4081). The Agent
+        // validates again at its own boundary; this refusal is the earlier,
+        // cleaner answer for a Server client.
+        let initial_metadata = match initial_metadata {
+            Some(metadata) => match metadata.normalized() {
+                Ok(_) => Some(metadata),
+                Err(error) => {
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal(&format!("invalid: {error}")),
+                    ));
+                }
+            },
+            None => None,
+        };
         let agent_id = agent_id.as_str();
 
         // A Project is a declaration; the Session owns its realized
@@ -401,6 +420,9 @@ impl ConnectionHandler {
                     },
                     "sandbox": sandbox,
                     "managed": managed_context.as_ref().map(|context| &context.images),
+                    // Initial Session work context (#4081). The Agent owns the
+                    // commit; this is the same field on the direct projection.
+                    "initial_metadata": initial_metadata,
                 }),
             )
             .await;
@@ -551,6 +573,22 @@ impl ConnectionHandler {
                     >(value.clone())
                     .ok()
                 });
+                // The Agent's committed initial work context and the durable
+                // identity it belongs to (#4081). A successful create reports
+                // both; a refusal reports neither.
+                let instance_id = response
+                    .get("instance_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let metadata = response
+                    .get("metadata")
+                    .filter(|value| !value.is_null())
+                    .and_then(|value| {
+                        serde_json::from_value::<
+                            nession_protocol::contracts::session::v1::SessionMetadata,
+                        >(value.clone())
+                        .ok()
+                    });
 
                 Ok(session_create_reply(
                     &msg.id,
@@ -561,6 +599,8 @@ impl ConnectionHandler {
                         warnings,
                         project_id,
                         sandbox: sandbox_report,
+                        instance_id,
+                        metadata,
                     },
                 ))
             }

@@ -23,8 +23,8 @@ use std::time::Duration;
 
 use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_protocol::contracts::session::v1::{
-    AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionKillPayload,
-    SessionKillResponse, SessionListResponse, SessionMetadataGetPayload,
+    AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionInitialMetadata,
+    SessionKillPayload, SessionKillResponse, SessionListResponse, SessionMetadataGetPayload,
     SessionMetadataPatchPayload, SessionMetadataResponse,
 };
 use nession_protocol::Message;
@@ -184,10 +184,15 @@ impl AgentConnection {
     }
 
     /// `agent.session.create` — create a tmux Session on the Agent.
+    ///
+    /// `initial_metadata` is the optional creation-time work context (#4081);
+    /// the Agent validates it before any Session side effect and commits it
+    /// with the create.
     pub async fn create_session(
         &mut self,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<SessionInitialMetadata>,
     ) -> Result<SessionCreateResponse, ClientError> {
         let payload = self
             .request(
@@ -210,6 +215,7 @@ impl AgentConnection {
                         // default (#2681).
                         sandbox: None,
                         managed: None,
+                        initial_metadata,
                     },
                 ),
                 CREATE_TIMEOUT,
