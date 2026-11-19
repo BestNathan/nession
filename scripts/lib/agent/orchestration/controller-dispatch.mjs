@@ -15,7 +15,8 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedQwenToolFailure}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
-  REVIEWER_PREMODEL_FAILURE,REVIEWER_JSON_FAILURE} from './outbox.mjs';
+  REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
+  REVIEWER_JSON_FAILURE} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
   recoverAttestedReviewerPremodelFailure,recoverAttestedReviewerJsonFailure}
   from './dispatch-store.mjs';
@@ -53,6 +54,12 @@ export const CONTROLLED_NATIVE_RECOVERY_COMMENT='/nession recover-native issue=1
 export const CONTROLLED_REVIEW_RECOVERY_COMMENT='/nession recover-review issue=1997 skipped_run=39943178597';
 export const REVIEWER_PREMODEL_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3433 run=43667393107';
+export const REVIEWER_PREMODEL_3784_RECOVERY_COMMENT=
+  '/nession recover-review-preflight issue=3784 run=44431618028';
+const REVIEWER_PREMODEL_RECOVERIES=Object.freeze([
+  [REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_RECOVERY_COMMENT],
+  [REVIEWER_PREMODEL_FAILURE_3784,REVIEWER_PREMODEL_3784_RECOVERY_COMMENT],
+]);
 export const REVIEWER_JSON_RECOVERY_COMMENT=
   '/nession recover-review-json issue=3433 run=43681851455';
 export const QWEN_CLI_RECOVERY_COMMENT=
@@ -135,13 +142,12 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     issue===QWEN_CLI_FAILURE.issue&&
     actionId===QWEN_CLI_FAILURE.action_id;
   const recoveryComment=commanded&&event?.action==='created'&&
-    event?.issue?.number===REVIEWER_PREMODEL_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
     event?.comment?.user?.login==='BestNathan'&&
     positive(event?.comment?.id)&&
-    event.comment.body===REVIEWER_PREMODEL_RECOVERY_COMMENT&&
-    issue===REVIEWER_PREMODEL_FAILURE.issue&&
-    actionId===REVIEWER_PREMODEL_FAILURE.action_id;
+    REVIEWER_PREMODEL_RECOVERIES.some(([source,command])=>
+      event.issue.number===source.issue&&event.comment.body===command&&
+      issue===source.issue&&actionId===source.action_id);
   const ownerRepair=commanded&&event?.action==='created'&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
     event?.issue?.number===issue&&issue!==1997&&
@@ -345,8 +351,10 @@ async function main(){
     REVIEW_DISPATCH_RE.exec(event?.comment?.body??''):null;
   const ownerRepairCommand=commanded?
     REPAIR_DISPATCH_RE.exec(event?.comment?.body??''):null;
-  const reviewerPremodelRecovery=commanded&&
-    event?.comment?.body===REVIEWER_PREMODEL_RECOVERY_COMMENT;
+  const reviewerPremodelSource=commanded
+    ?(REVIEWER_PREMODEL_RECOVERIES.find(([,command])=>
+       event?.comment?.body===command)?.[0]??null):null;
+  const reviewerPremodelRecovery=reviewerPremodelSource!==null;
   const reviewerJsonRecovery=commanded&&
     event?.comment?.body===REVIEWER_JSON_RECOVERY_COMMENT;
   const recoveringQwenCli=commanded&&
@@ -358,7 +366,7 @@ async function main(){
     qwenV2CommentAction?3001:
     ownerReviewCommand?Number(ownerReviewCommand[1]):
     ownerRepairCommand?Number(ownerRepairCommand[1]):
-    reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.issue:
+    reviewerPremodelRecovery?reviewerPremodelSource.issue:
     reviewerJsonRecovery?REVIEWER_JSON_FAILURE.issue:1997):
     Number(event?.inputs?.issue_number);
   const recoveringQwenKey=!commanded&&
@@ -381,7 +389,7 @@ async function main(){
   const actionId=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
     recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
     qwenV2CommentAction??newReviewAction??newRepairAction??
-    (reviewerPremodelRecovery?REVIEWER_PREMODEL_FAILURE.action_id:null)??
+    reviewerPremodelSource?.action_id??
     (reviewerJsonRecovery?REVIEWER_JSON_FAILURE.action_id:null)??
     (recoveringRepair||retryingRepair?
     REPAIR_RETRY_ACTION:bindingRepair||dispatchingRepair?REPAIR_ACTION:
@@ -471,7 +479,7 @@ async function main(){
       // Independently attest the exact completed failed original Reviewer.
       // CAS-fail the original action, create one successor, and only dispatch
       // the authenticated successor. Replays are reconciled, never re-POSTed.
-      const proof=await verifyReviewerPremodelFailureLive(token);
+      const proof=await verifyReviewerPremodelFailureLive(token,reviewerPremodelSource);
       const recovered=recoverAttestedReviewerPremodelFailure({
         remote:storeRemote,source:proof});
       const signer={key,key_id:'main-controller',
