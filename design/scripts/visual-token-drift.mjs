@@ -177,6 +177,10 @@ export function findNonTokenCssMetrics(source) {
 export function findNonTokenInlineMetrics(source) {
   const out = [];
   for (const hit of source.matchAll(JSX_METRIC_PROPERTY)) {
+    const before = source.slice(Math.max(0, (hit.index ?? 0) - 240), hit.index);
+    // These are CSS/JSX style objects, not arbitrary business objects with a
+    // numerical "width" or "height" field.
+    if (!/(?:\bstyle\s*=\s*\{\{|\bstyle\s*:\s*\{|\b(?:style|styles)\s*=\s*\{|\bCSSProperties\s*=\s*\{)[^{}]*$/s.test(before)) continue;
     const value = hit[2].trim();
     if (Number(value) === 0) continue;
     out.push({token: hit[1] + ': ' + value, kind:'raw-inline-metric', literal:hit[0], index:hit.index ?? 0});
