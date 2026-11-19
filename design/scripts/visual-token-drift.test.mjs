@@ -32,8 +32,10 @@ test('global token-only classifier rejects raw spacing/size and preserves struct
 test('CSS and inline styles cannot hide non-token visual metrics', () => {
   assert.equal(findNonTokenCssMetrics('.x { gap: 12px; padding: var(--nession-panel-padding); }').length, 1);
   assert.equal(findNonTokenCssMetrics('.x { gap: 0; width: 100%; }').length, 0);
-  assert.deepEqual(findNonTokenInlineMetrics('style={{ padding: 12, gap: 0 }}')
-    .map(x => x.token), ['padding: 12']);
+  assert.equal(findNonTokenCssMetrics('.x { color: #fff; box-shadow: 0 0 6px #000; }').length, 2);
+  assert.equal(findNonTokenCssMetrics('.x { color: var(--nession-foreground); }').length, 0);
+  assert.deepEqual(findNonTokenInlineMetrics('style={{ padding: 12, gap: 0, width: 44 }}')
+    .map(x => x.token), ['padding: 12', 'width: 44']);
 });
 
 test('immutable original source is grandfathered, edited file with old values is rejected', () => {
