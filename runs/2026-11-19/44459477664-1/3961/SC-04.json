@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "28316637133acf41708f2c146500d70dd8768c1521b3da297e720d403fab09c4",
+  "run_id": 44459477664,
+  "run_attempt": 1,
+  "issue": 3961,
+  "criterion": "SC-04",
+  "criterion_text": ": A new authenticated trusted Staging Release successfully builds all required platform images, verifies source/Digest provenance and ACR readback without manual Registry publication; compare actual cache/layer observations against pre-hardening run.",
+  "stage": "staging",
+  "target_sha": "dd7069542b78372db0e4ceb2d39b2fcdc7d2635f",
+  "contract_sha256": "460943b8eb75654f847dbc9c255b11f938411caa9afb9e89abd29e874591d9f3",
+  "case_revision": "dd7069542b78372db0e4ceb2d39b2fcdc7d2635f",
+  "case_tree_sha": "2cabfda15786fc8a4e58be2836324c3c3f74c12e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T04:40:00.574Z",
+  "finished_at": "2026-11-19T04:40:06.645Z",
+  "duration_ms": 6071,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "public GitHub source readback not available",
+      "evidence": [],
+      "duration_ms": 168,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44459477664,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "dd7069542b78372db0e4ceb2d39b2fcdc7d2635f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44459477664",
+    "record_path": "runs/2026-11-19/44459477664-1/3961/SC-04.json",
+    "source_result_sha256": "42ec1ad820b237536774d97709673a63e73b2d98d4094f7b01a4300fd34ca4fc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44459477664-1",
+    "sha256": "42ec1ad820b237536774d97709673a63e73b2d98d4094f7b01a4300fd34ca4fc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44459477664",
+    "durability": "time-limited; object archival not configured"
+  }
+}
