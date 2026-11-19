@@ -52,7 +52,9 @@ MCP Pod restart after rotation.
    registers exactly `staging/NESSION_MCP_INBOUND_TOKEN` and
    `staging/NESSION_MCP_BACKEND_SERVER_TOKEN`. Confirm a staging MCP image
    built from a SHA containing the env-credential loader (#3950) and standalone
-   Query Token implementation (#3995) exists in ACR (both architectures).
+   Query Token implementation (#3995) is source-pinned and available in GHCR for amd64 and arm64. The
+   historical running ACR tag `mcp-4774f3e` includes both implementations in
+   its corresponding source, but rollout must follow the canonical GHCR writer.
 2. Set two GitHub **Environment Secrets**:
    `staging/NESSION_MCP_INBOUND_TOKEN` to a strong, independently generated raw
    token; `staging/NESSION_MCP_BACKEND_SERVER_TOKEN` to the **exact current**
@@ -76,19 +78,23 @@ MCP Pod restart after rotation.
    `nession-mcp-backend-server-staging/token`. If a concurrent change
    updates Kustomization, reconcile this draft PR against the latest GitOps
    HEAD before merging.
-4. **Before enabling `allow_query_token = true` publicly**, configure
-   Cloudflare/Higress/origin Nginx logs to omit/redact request query strings.
-   Query credentials must not appear in access logs, diagnostics, browser
-   histories or copied tickets. Verify external TLS trust and the HTTPS
-   redirect. No plaintext credentials may appear in GitOps/CI artifacts.
+4. **Do not enable URL credentials during this cutover.** The checked-in
+   `mcp.toml` explicitly sets `allow_query_token = false`. Public Bearer
+   authentication stays mandatory; this phase is not a usable ChatGPT
+   `No authentication` URL. A future separately reviewed change may set the
+   flag to `true` only after Cloudflare/Higress/origin Nginx request logs and
+   security event logs are proven to omit/redact query strings, and external
+   HTTPS redirect and TLS trust are verified. Do not place real tokens into
+   GitOps, command arguments, curl URLs, Issues or artifacts.
 5. Only then merge this desired-state PR to `gitops`. Argo CD mounts the
    generated ConfigMap and injects **both** independently sealed Secrets into
    the MCP Pod. Confirm the
-   published ACR MCP tag is recent enough, the Deployment becomes Ready,
-   and `POST /mcp` initializes with the inbound token both in
-   `Authorization: Bearer` and in URL-encoded `?token=...`; invalid/absent
-   credentials must return 401. Call `tools/list` and a safe read-only Tool
-   through the staging Server. A TCP probe alone is insufficient.
+   published GHCR MCP tag is source-verified, the Deployment becomes Ready,
+   and authenticated `POST /mcp` initializes using `Authorization: Bearer`.
+   Missing/invalid credentials must be rejected, including `?token=...` while
+   URL authentication is disabled. Call `tools/list` and a safe read-only
+   Server Tool. A TCP probe or public unauthenticated GET/401 alone is
+   insufficient. Do not assume live acceptance from a GitOps merge.
 6. After live acceptance, explicitly retire the unused legacy config Secret
    and old GitHub `MCP_CONFIG_TOML` entry; do not remove rollback resources
    before proving the new credential path. Query-token mode is an
@@ -97,7 +103,7 @@ MCP Pod restart after rotation.
 ## Version, rotation and rollback
 
 `scripts/gitops-commit.sh staging <short-sha>` is the source-owned release
-writer for image tag advancement. It verifies all four ACR image indices
+writer for image tag advancement. It verifies all four GHCR image indices
 (server/agent/ui/mcp) for amd64 and arm64 and updates their tags in one
 GitOps commit. Do not patch image tags or build images manually to bypass it.
 
