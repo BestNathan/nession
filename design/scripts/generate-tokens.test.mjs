@@ -117,6 +117,9 @@ test('shared content rhythm roles emit Web/App CSS, App TS and lint vocabulary (
     textStack: 4,
     inline: 8,
     fieldStack: 6,
+    factStack: 2,
+    errorInsetX: 10,
+    errorInsetY: 6,
   };
   const css = generateWebCss(tokens);
   const appTs = generateAppTs(tokens);
@@ -135,8 +138,8 @@ test('shared content rhythm roles emit Web/App CSS, App TS and lint vocabulary (
     assert.ok(meta.legacyCssVariables.includes(`--rhythm-${cssName}`));
     assert.match(appTs, new RegExp(`\\b${role}: ${px},`));
   }
-  assert.equal(Object.keys(tokens.experience.web.rhythm).filter(k => !k.startsWith('$')).length, 5);
-  assert.equal(Object.keys(tokens.experience.app.rhythm).filter(k => !k.startsWith('$')).length, 5);
+  assert.equal(Object.keys(tokens.experience.web.rhythm).filter(k => !k.startsWith('$')).length, 8);
+  assert.equal(Object.keys(tokens.experience.app.rhythm).filter(k => !k.startsWith('$')).length, 8);
 });
 
 test('resolveRef follows primitive color refs to a value object', () => {
