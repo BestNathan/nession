@@ -6,6 +6,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
+  REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_TOOL_RECOVERY_COMMENT,
   assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
@@ -326,6 +327,30 @@ for(const bad of [
   {event:{...jsonRecovery.event,issue:{number:3434,state:'open'}}},
   {environment:{...commentEnvironment,GITHUB_ACTOR:'external'}},
 ])assert.throws(()=>assertDispatchAuthority({...jsonRecovery,...bad}),
+  /authenticated owner\/main/);
+
+// #4016: command selects ONLY the historically authenticated #3784 failed
+// Reviewer. A new Issue number/Action/run cannot widen its authority.
+const json3784Action='3655ed38e7e9247dfd916b6590a5dd3ad540cead5a2cf5c2fa416be7893a28f9';
+const json3784Recovery={...jsonRecovery,issue:3784,actionId:json3784Action,
+  event:{...jsonRecovery.event,issue:{number:3784,state:'open'},
+    comment:{...jsonRecovery.event.comment,body:REVIEWER_JSON_3784_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(json3784Recovery).action_id,json3784Action);
+for(const changed of [
+  {actionId:jsonAction},
+  {issue:3433},
+  {event:{...json3784Recovery.event,action:'edited'}},
+  {event:{...json3784Recovery.event,issue:{number:3784,state:'closed'}}},
+  {event:{...json3784Recovery.event,issue:{number:3784,state:'open',pull_request:{}}}},
+  {event:{...json3784Recovery.event,issue:{number:3433,state:'open'}}},
+  {event:{...json3784Recovery.event,comment:{...json3784Recovery.event.comment,
+    body:REVIEWER_JSON_RECOVERY_COMMENT}}},
+  {event:{...json3784Recovery.event,comment:{...json3784Recovery.event.comment,
+    body:REVIEWER_JSON_3784_RECOVERY_COMMENT+' '}}},
+  {event:{...json3784Recovery.event,comment:{...json3784Recovery.event.comment,
+    user:{login:'attacker'}}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'attacker'}},
+])assert.throws(()=>assertDispatchAuthority({...json3784Recovery,...changed}),
   /authenticated owner\/main/);
 
 const qwenRepairAction='bdba0198ff28b74b8b1acdaaadfb8106d7fcc054a86cfc98c0f9d93b9f70a856';
