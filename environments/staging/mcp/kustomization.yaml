@@ -23,4 +23,4 @@ resources:
 images:
 - name: ghcr.io/bestnathan/nession-mcp
   newName: crpi-ck06yio90i1ttwlz.cn-beijing.personal.cr.aliyuncs.com/n_public/nession
-  newTag: mcp-4aa667c
+  newTag: mcp-5a9fb12
