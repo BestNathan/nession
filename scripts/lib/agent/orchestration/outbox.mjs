@@ -5,6 +5,7 @@ import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2,
   SOURCE_V3 as QWEN_PREFLIGHT_FAILURE_V3 } from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_BASE_FAILURE} from './qwen-review-base-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ROLE_TASK = { developer: ['implement','repair'], reviewer: ['review'], acceptor: ['accept'] };
@@ -895,6 +896,59 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
   return validateDevelopmentState({...state,version:version+1,
     outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),
       successor]});
+}
+
+// #3885: the exact #3784 Reviewer was rejected *before any model tool*
+// because a signed Rust base file exceeded the small Reviewer admission.
+// The original ACK + failed Run is retained and a distinct Action is minted.
+export function qwenBaseReviewSuccessorId(issue,actionId,runId){
+  const f=QWEN_BASE_FAILURE;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized Qwen oversized-base Review source');
+  return hash([issue,actionId,runId,'qwen-review-base-context-recovery-v1']);
+}
+export function recordAttestedQwenBaseReviewFailure(state,version,proof){
+  const f=QWEN_BASE_FAILURE;
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'run_head_sha','source_sha','publisher_run_id','failure_code'],
+    'source-attested Qwen Review base failure');
+  const old=state.outbox.find(x=>x.id===f.action_id);
+  const publisher=state.transitions.filter(x=>x.kind==='publisher'&&
+    x.outcome==='published'&&x.run_id===f.publisher_run_id&&
+    x.target_sha===f.source_sha);
+  if(state.version!==12||version!==12||state.issue!==f.issue||
+      state.phase!=='review'||state.target_sha!==f.source_sha||
+      state.assignments.developer!=='dev-qwen-01'||
+      state.assignments.reviewer!=='review-qwen-01'||
+      publisher.length!==1||state.transitions.length!==1||
+      state.outbox.length!==3||
+      proof.verified!==true||proof.issue!==f.issue||
+      proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+      proof.attempt!==1||proof.run_head_sha!==f.run_head_sha||
+      proof.source_sha!==f.source_sha||
+      proof.publisher_run_id!==f.publisher_run_id||
+      proof.failure_code!==f.failure_code||
+      old?.status!=='dispatched'||old.attempts!==1||
+      old.task.type!=='dispatch'||old.task.role!=='reviewer'||
+      old.task.task!=='review'||old.task.agent_id!=='review-qwen-01'||
+      old.task.sha!==f.source_sha||
+      old.receipt?.status!=='verified'||
+      old.receipt.dispatch_id!==f.action_id||
+      old.receipt.source_run_id!==f.run_id||
+      state.outbox.filter(x=>x.id!==f.action_id)
+        .some(x=>x.status!=='failed'||x.task.role!=='developer'))
+    reject('Qwen original Reviewer failure has no exact Store lineage');
+  const id=qwenBaseReviewSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.some(x=>x.id===id)||state.outbox.length>=MAX_OUTBOX)
+    reject('Qwen Reviewer successor already exists');
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:f.action_id,source_run_id:f.run_id,
+    source_attempt:1,failure_code:f.failure_code}};
+  const successor={id,task:{...old.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),successor]});
 }
 
 // #3601: one exact *post-model* Reviewer output-format failure has no
