@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "babcd79ab5c1c6cd5815b6f528bec6a9536a81cd56a538c4556522ab46060264",
+  "run_id": 44551501268,
+  "run_attempt": 1,
+  "issue": 4080,
+  "criterion": "SC-05",
+  "criterion_text": "A real isolated Agent+tmux Session with an applied `github.env`-like fixture demonstrates Session override and Agent fallback without real personal tokens; after binding update, a subsequent GitHub adapter request uses the newly materialized value. The fixture also proves no cross-Session credential reuse.",
+  "stage": "staging",
+  "target_sha": "367c361623046fa7f840c4404aa00988ce1ff540",
+  "contract_sha256": "1d2fe5019012955803bbcc2467a45e4609d4bd6a077f90b61f7a4a6d79e91c98",
+  "case_revision": "367c361623046fa7f840c4404aa00988ce1ff540",
+  "case_tree_sha": "9d17c0cea802f0d5bc7b9fe537691e07d0a2d42a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-19T15:12:00.028Z",
+  "finished_at": "2026-11-19T15:12:38.944Z",
+  "duration_ms": 38916,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Session-first GitHub credential resolution with Agent fallback",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact staging 367c361623046fa7f840c4404aa00988ce1ff540: a real isolated Agent+tmux Session with an applied github.env binding authenticated a loopback GitHub read with its Session token; a second Session used its own token; a re-applied binding revision was used by the next request without an Agent restart; the unbound Session resolved to the Agent baseline; no real credential was used"
+        }
+      ],
+      "duration_ms": 32985,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44551501268,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "367c361623046fa7f840c4404aa00988ce1ff540",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44551501268",
+    "record_path": "runs/2026-11-19/44551501268-1/4080/SC-05.json",
+    "source_result_sha256": "449921479bd054e6604cca39697ac5139f7a63e52d12ee1e0723ba6b8c9018e7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44551501268-1",
+    "sha256": "449921479bd054e6604cca39697ac5139f7a63e52d12ee1e0723ba6b8c9018e7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44551501268",
+    "durability": "time-limited; object archival not configured"
+  }
+}
