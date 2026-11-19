@@ -9,6 +9,24 @@ import { pathToFileURL } from 'node:url';
 
 const TARGETS = Object.freeze({
   staging: Object.freeze({
+    NESSION_MCP_INBOUND_TOKEN: Object.freeze({
+      namespace: 'nession',
+      name: 'nession-mcp-inbound-staging',
+      key: 'token',
+      type: 'Opaque',
+      resource: 'environments/staging/mcp/sealed-inbound.json',
+      kustomization: 'environments/staging/mcp/kustomization.yaml'
+    }),
+    NESSION_MCP_BACKEND_SERVER_TOKEN: Object.freeze({
+      namespace: 'nession',
+      name: 'nession-mcp-backend-server-staging',
+      key: 'token',
+      type: 'Opaque',
+      resource: 'environments/staging/mcp/sealed-backend-server.json',
+      kustomization: 'environments/staging/mcp/kustomization.yaml'
+    }),
+    // Legacy config SealedSecret remains registered for rollback only; the
+    // protected manual producer no longer publishes plaintext TOML bundles.
     MCP_CONFIG_TOML: Object.freeze({
       namespace: 'nession',
       name: 'nession-mcp-config-staging',
@@ -29,6 +47,32 @@ const TARGETS = Object.freeze({
   })
 });
 
+// The canonical environment release contract. Legacy full-TOML and TLS
+// resources have different owners and must never enter this batch.
+const REQUIRED_SECRETS = Object.freeze({
+  staging: Object.freeze([
+    'NESSION_MCP_INBOUND_TOKEN',
+    'NESSION_MCP_BACKEND_SERVER_TOKEN'
+  ])
+});
+
+export function getRequiredSecrets(environment) {
+  const names = REQUIRED_SECRETS[environment];
+  if (!names?.length || new Set(names).size !== names.length) {
+    throw new Error('unregistered or empty required Secret set for GitOps environment');
+  }
+  const resources = new Set();
+  for (const name of names) {
+    const target = getTarget(environment, name);
+    if (target.type !== 'Opaque' || target.key !== 'token' ||
+        resources.has(target.resource)) {
+      throw new Error('invalid or overlapping required Secret registration');
+    }
+    resources.add(target.resource);
+  }
+  return [...names];
+}
+
 export function getTarget(environment, secretName) {
   const target = TARGETS[environment]?.[secretName];
   if (!target) throw new Error('unregistered GitOps environment and Secret pairing');
@@ -37,6 +81,26 @@ export function getTarget(environment, secretName) {
     throw new Error('target registry GitOps environment mismatch');
   }
   return target;
+}
+
+export function prepareRequiredSecrets(environment, values) {
+  const names = getRequiredSecrets(environment);
+  if (!values || typeof values !== 'object' || Array.isArray(values)) {
+    throw new Error('required Secret values missing');
+  }
+  const documents = names.map(name => {
+    // Validate everything before writing a single temporary or GitOps file.
+    try {
+      return {name, document: createPlainSecret(environment, name, values[name])};
+    } catch {
+      throw new Error('missing or invalid required Secret: ' + name);
+    }
+  });
+  if (names.length > 1 &&
+      new Set(names.map(name => values[name])).size !== names.length) {
+    throw new Error('required MCP credentials must be distinct');
+  }
+  return documents;
 }
 
 export function validateRaw(raw) {
@@ -117,6 +181,12 @@ function expectedEncryptedKeys(target) {
 
 export function createPlainSecret(environment, secretName, raw) {
   const target = getTarget(environment, secretName);
+  // Inbound Bearer credentials must be single-line, visible text; a missing
+  // or whitespace-only Environment Secret never becomes a usable key.
+  if (['NESSION_MCP_INBOUND_TOKEN', 'NESSION_MCP_BACKEND_SERVER_TOKEN'].includes(secretName) &&
+      (typeof raw !== 'string' || !/^[!-~]+$/.test(raw) || raw.length > 4096)) {
+    throw new Error('MCP credential must be a nonempty single-line printable token');
+  }
   const data = target.type === 'kubernetes.io/tls'
     ? (() => {
         const pem = parseTlsPemBundle(raw, target.hostname);
@@ -186,9 +256,15 @@ export function validateSealed(doc, environment, secretName) {
   return doc;
 }
 
+export function addRequiredResources(yaml, environment) {
+  return getRequiredSecrets(environment).reduce(
+    (result, name) => addResource(result, getTarget(environment, name).resource), yaml
+  );
+}
+
 export function addResource(yaml, resource) {
   const filename = path.posix.basename(resource);
-  if (!['sealed-secret.json', 'sealed-tls.json'].includes(filename)) {
+  if (!['sealed-secret.json', 'sealed-inbound.json', 'sealed-backend-server.json', 'sealed-tls.json'].includes(filename)) {
     throw new Error('unsupported resource name');
   }
   if (!/^resources:\s*$/m.test(yaml)) throw new Error('Kustomization resources list absent');
@@ -220,8 +296,56 @@ export function validateChangedPaths(changedPaths, environment, secretName) {
   return changedPaths;
 }
 
+export function validateChangedPathsForRequired(changedPaths, environment) {
+  const targets = getRequiredSecrets(environment).map(name => getTarget(environment, name));
+  const allowed = new Set(targets.flatMap(target => [target.resource, target.kustomization]));
+  if (!Array.isArray(changedPaths) ||
+      changedPaths.some(p => typeof p !== 'string' || !allowed.has(p)) ||
+      targets.some(target => !changedPaths.includes(target.resource))) {
+    throw new Error('expected all required encrypted resources and no unrelated GitOps changes');
+  }
+  return changedPaths;
+}
+
+export function stageRequired(root, environment, work) {
+  const names = getRequiredSecrets(environment);
+  if (!root || !fs.existsSync(path.join(root, '.git'))) {
+    throw new Error('GitOps checkout required');
+  }
+  const targets = names.map(name => getTarget(environment, name));
+  if (new Set(targets.map(target => target.kustomization)).size !== 1) {
+    throw new Error('required Secret targets must share one GitOps overlay');
+  }
+  const overlay = path.join(root, targets[0].kustomization);
+  if (!fs.existsSync(overlay)) throw new Error('target GitOps overlay absent');
+
+  // Read and validate the COMPLETE batch, before changing even one GitOps file.
+  const sealed = names.map((name, i) => {
+    let doc;
+    try {
+      doc = JSON.parse(fs.readFileSync(path.join(work, name + '.sealed.json'), 'utf8'));
+    } catch {
+      throw new Error('missing or malformed required encrypted resource: ' + name);
+    }
+    validateSealed(doc, environment, name);
+    return {resource: targets[i].resource, doc};
+  });
+  const existing = fs.readFileSync(overlay, 'utf8');
+  const next = addRequiredResources(existing, environment);
+  for (const item of sealed) {
+    fs.writeFileSync(path.join(root, item.resource), JSON.stringify(item.doc, null, 2) + '\n');
+  }
+  if (existing !== next) fs.writeFileSync(overlay, next);
+  console.log('Staged complete required encrypted Secret set');
+}
+
 function publish(root, environment, secretName) {
-  const target = getTarget(environment, secretName);
+  return publishTargets(root, environment, [secretName]);
+}
+
+function publishTargets(root, environment, names) {
+  const targets = names.map(name => getTarget(environment, name));
+  const batch = names.length > 1;
   if (!root || !fs.existsSync(path.join(root, '.git'))) {
     throw new Error('GitOps checkout required for bounded desired-state publication');
   }
@@ -240,20 +364,36 @@ function publish(root, environment, secretName) {
     stdio: ['ignore', 'pipe', 'pipe']
   });
   const paths = parseGitStatusPaths(porcelain);
-  validateChangedPaths(paths, environment, secretName);
-  if (!paths.includes(target.resource)) {
-    throw new Error('Expected encrypted SealedSecret resource was not generated');
+  if (batch) {
+    if (names.length !== getRequiredSecrets(environment).length ||
+        names.some((name, index) => getRequiredSecrets(environment)[index] !== name)) {
+      throw new Error('not the complete registered environment Secret batch');
+    }
+    validateChangedPathsForRequired(paths, environment);
+  } else {
+    validateChangedPaths(paths, environment, names[0]);
+    if (!paths.includes(targets[0].resource)) {
+      throw new Error('Expected encrypted SealedSecret resource was not generated');
+    }
   }
-  const sealed = JSON.parse(fs.readFileSync(path.join(root, target.resource), 'utf8'));
-  validateSealed(sealed, environment, secretName);
-  git('add', '--', target.resource, target.kustomization);
+  for (const [index, target] of targets.entries()) {
+    const sealed = JSON.parse(fs.readFileSync(path.join(root, target.resource), 'utf8'));
+    validateSealed(sealed, environment, names[index]);
+    const overlay = fs.readFileSync(path.join(root, target.kustomization), 'utf8');
+    if (!overlay.split(/\r?\n/).some(line => line.trim() === '- ' + path.posix.basename(target.resource))) {
+      throw new Error('required SealedSecret not enrolled in GitOps overlay');
+    }
+  }
+  // One staged index and one reviewed commit for every required encrypted resource.
+  git('add', '--', ...[...new Set(targets.flatMap(target => [target.resource, target.kustomization]))]);
   if (!git('diff', '--cached', '--name-only')) {
     console.log('Encrypted GitOps desired state already up-to-date');
     return;
   }
   git('-c', 'user.name=github-actions[bot]',
       '-c', 'user.email=github-actions[bot]@users.noreply.github.com',
-      'commit', '-m', 'secrets(' + environment + '): seal ' + secretName + ' (#3912)');
+      'commit', '-m', 'secrets(' + environment + '): seal ' +
+      (batch ? 'required MCP credentials' : names[0]) + ' (#3914)');
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       git('pull', '--rebase', 'origin', 'gitops');
@@ -271,9 +411,23 @@ function publish(root, environment, secretName) {
   throw new Error('Failed to publish encrypted desired state after bounded retries');
 }
 
+function publishRequired(root, environment) {
+  return publishTargets(root, environment, getRequiredSecrets(environment));
+}
+
 function execute() {
   const [operation, environment, secretName, root] = process.argv.slice(2);
-  const target = getTarget(environment, secretName);
+  if (operation === 'required') {
+    console.log(getRequiredSecrets(environment).join('\n'));
+    return;
+  }
+  if (operation === 'verify-all') {
+    getRequiredSecrets(environment);
+    console.log('Registered required GitOps Environment Secrets verified');
+    return;
+  }
+  const target = ['prepare-all', 'stage-all', 'publish-all'].includes(operation)
+    ? null : getTarget(environment, secretName);
   if (operation === 'verify') {
     console.log('Exact GitOps environment / Secret registration verified');
     return;
@@ -281,6 +435,28 @@ function execute() {
   const temp = process.env.RUNNER_TEMP;
   if (!temp) throw new Error('RUNNER_TEMP is required');
   const work = path.join(temp, 'nession-seal');
+  if (operation === 'prepare-all') {
+    // Both required values and the X.509 controller cert must validate
+    // before any plaintext temporary file or ciphertext is created.
+    const documents = prepareRequiredSecrets(environment, process.env);
+    const cert = validatePublicCert(process.env.SEALED_SECRETS_CERT_PEM);
+    fs.mkdirSync(work, {mode: 0o700});
+    fs.writeFileSync(path.join(work, 'cert.pem'), cert, {flag: 'wx', mode: 0o600});
+    for (const {name, document} of documents) {
+      fs.writeFileSync(path.join(work, name + '.secret.json'),
+        JSON.stringify(document), {flag: 'wx', mode: 0o600});
+    }
+    console.log('Prepared complete required Secret set without logging credentials');
+    return;
+  }
+  if (operation === 'stage-all') {
+    stageRequired(secretName, environment, work);
+    return;
+  }
+  if (operation === 'publish-all') {
+    publishRequired(secretName, environment);
+    return;
+  }
   if (operation === 'prepare') {
     const value = validateRaw(process.env.SEAL_RAW_VALUE);
     const cert = validatePublicCert(process.env.SEALED_SECRETS_CERT_PEM);
@@ -311,7 +487,7 @@ function execute() {
     console.log('Staged one encrypted SealedSecret in allowlisted GitOps overlay');
     return;
   }
-  throw new Error('Expected verify, prepare, stage or publish');
+  throw new Error('Expected required, verify-all, prepare-all, stage-all, publish-all or legacy single-target operation');
 }
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   try { execute(); } catch (error) {

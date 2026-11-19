@@ -12,7 +12,7 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedRepairRuntimeFailure,
   recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
   recoverAttestedQwenPreflightV3,recoverAttestedQwenCliFailure,
-  recoverAttestedQwenToolFailure}
+  recoverAttestedQwenRepairTurnsFailure,recoverAttestedQwenToolFailure}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
@@ -43,6 +43,9 @@ import {SOURCE as QWEN_KEY_FAILURE,
   from './qwen-preflight-failure.mjs';
 import {SOURCE as QWEN_CLI_FAILURE,verifyQwenCliFailureLive}
   from './qwen-cli-failure.mjs';
+import {SOURCE as QWEN_REPAIR_TURNS_FAILURE,
+  verifyQwenRepairTurnsFailureLive}
+  from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE,verifyQwenToolPolicyFailureLive}
   from './qwen-tool-policy-failure.mjs';
 
@@ -70,6 +73,8 @@ const REVIEWER_JSON_RECOVERIES=Object.freeze([
 ]);
 export const QWEN_CLI_RECOVERY_COMMENT=
   '/nession recover-qwen-cli issue=3784 run=44250586057';
+export const QWEN_REPAIR_TURNS_RECOVERY_COMMENT=
+  '/nession recover-qwen-turns issue=3784 run=44470557905';
 export const QWEN_TOOL_RECOVERY_COMMENT=
   '/nession recover-qwen-tools issue=3784 run=44256663685';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
@@ -137,6 +142,14 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     positive(event?.comment?.id)&&
     event.comment.body===QWEN_TOOL_RECOVERY_COMMENT&&
     issue===QWEN_TOOL_FAILURE.issue&&actionId===QWEN_TOOL_FAILURE.action_id;
+  const repairTurnsComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===QWEN_REPAIR_TURNS_FAILURE.issue&&
+    event?.issue?.state==='open'&&!event?.issue?.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&
+    event.comment.body===QWEN_REPAIR_TURNS_RECOVERY_COMMENT&&
+    issue===QWEN_REPAIR_TURNS_FAILURE.issue&&
+    actionId===QWEN_REPAIR_TURNS_FAILURE.action_id;
   const cliRecoveryComment=commanded&&event?.action==='created'&&
     event?.issue?.number===QWEN_CLI_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
@@ -166,7 +179,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     reviewCommand?.[2]===actionId;
   const permitted=publisherWake||ownerReview||ownerRepair||
     recoveryComment||jsonRecovery||cliRecoveryComment||
-    toolRecoveryComment||(commanded
+    repairTurnsComment||toolRecoveryComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -365,9 +378,12 @@ async function main(){
   const reviewerJsonRecovery=reviewerJsonSource!==null;
   const recoveringQwenCli=commanded&&
     event?.comment?.body===QWEN_CLI_RECOVERY_COMMENT;
+  const recoveringRepairTurns=commanded&&
+    event?.comment?.body===QWEN_REPAIR_TURNS_RECOVERY_COMMENT;
   const recoveringQwenTools=commanded&&
     event?.comment?.body===QWEN_TOOL_RECOVERY_COMMENT;
   const issue=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.issue:
+    recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.issue:
     recoveringQwenCli?QWEN_CLI_FAILURE.issue:
     qwenV2CommentAction?3001:
     ownerReviewCommand?Number(ownerReviewCommand[1]):
@@ -393,6 +409,7 @@ async function main(){
   const newReviewAction=ownerReviewCommand?.[2]??null;
   const newRepairAction=ownerRepairCommand?.[2]??null;
   const actionId=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
+    recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.action_id:
     recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
     qwenV2CommentAction??newReviewAction??newRepairAction??
     reviewerPremodelSource?.action_id??
@@ -435,6 +452,29 @@ async function main(){
       const result=await executeDurableAgentDispatch({
         remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
         registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
+    if(recoveringRepairTurns){
+      // The failed Worker restored native v2, but hit the old 10-turn cap.
+      // Authenticate Run/Jobs/Artifacts/log independently, retire the old
+      // signed Action by Store CAS and POST one NEW ticket. Never retry run.
+      const proof=await verifyQwenRepairTurnsFailureLive(token);
+      const recovered=recoverAttestedQwenRepairTurnsFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,
+        sourceVerifier:(sha,role,task,context)=>{
+          assertOwnerQwenRepairDispatchRole(true,role,task);
+          return sourceStillAllowed(sha,role,task,context);
+        },
       });
       console.log(JSON.stringify({status:result.status,issue:recovered.issue,
         action_id:recovered.action_id,
