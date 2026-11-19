@@ -65,10 +65,10 @@ export function FormSection({
       data-testid={testId}
       aria-labelledby={titleId}
       aria-describedby={descriptionId}
-      className={cn('flex min-w-0 flex-col gap-3', className)}
+      className={cn('flex min-w-0 flex-col gap-[var(--nession-shell-space-3)]', className)}
     >
       {title || action ? (
-        <div className="flex min-w-0 items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center justify-between gap-[var(--nession-rhythm-inline)]">
           {title ? (
             <Heading
               id={titleId}
@@ -132,7 +132,7 @@ export function FormField({
       data-testid={testId}
       className={cn('flex min-w-0 flex-col gap-[var(--nession-rhythm-field-stack)]', className)}
     >
-      <div className="flex min-w-0 items-center justify-between gap-2">
+      <div className="flex min-w-0 items-center justify-between gap-[var(--nession-rhythm-inline)]">
         <Label
           htmlFor={id}
           data-recipe-part="form-label"
@@ -172,7 +172,7 @@ export function FormGrid({ className, ...props }: React.ComponentProps<'div'>) {
   return (
     <div
       data-recipe-part="form-grid"
-      className={cn('grid min-w-0 grid-cols-1 gap-3 lg:grid-cols-2', className)}
+      className={cn('grid min-w-0 grid-cols-1 gap-[var(--nession-shell-space-3)] lg:grid-cols-2', className)}
       {...props}
     />
   );
