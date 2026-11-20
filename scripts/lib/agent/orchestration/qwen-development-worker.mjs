@@ -66,6 +66,8 @@ export function qwenDeveloperPrompt(issue,admission,review=null){
   const guide='You are editing a disposable exact-SHA checkout. '+
     'Use ONLY native Read/Grep/Glob/Edit/Write tools; Grep/Glob are read-only discovery. '+
     'No Bash, shell, MCP, skills, network or Git actions. '+
+    'Keep automatic tasks small: use Issue-named symbols and a few directly related source files; do not perform broad repository exploration. '+
+    'If the change needs extensive discovery or cross-subsystem redesign, stop and report the scope blocker instead of expanding the task. '+
     'Read relevant tracked source files; modify no more than eight existing regular app/source/doc files. '+
     'Do not create/remove/rename files, modify .github, gates, automation, dotfiles, AGENTS.md, VISION.md or PRINCIPLE.md. '+
     'Do not run tests or execute source code. Provide a concise outcome; no PR or publication.';
@@ -185,23 +187,25 @@ export function classifyQwenCliFailure(proc) {
   detail.push('stderr_category=' + category);
   return 'Qwen CLI failed (' + detail.join(', ') + '); raw model output withheld';
 }
-// #3885: a real signed initial Developer (#4116, Run 44677181513)
-// exhausted the former 10-turn limit without producing a patch. Initial
-// implement and signed Repair have the same finite 24-turn cap; tool scope,
-// Store Action one-shot fencing and the CLI 8-minute timeout do not change.
-// Exceeding this cap remains a failed Run, never partial patch publication.
-export function qwenDeveloperTurnBudget(task,resuming){
+// #3885: Developer work is bounded by wall-clock execution time, not model
+// turns. A 30-minute CLI deadline applies to both fresh implementation and
+// authenticated Repair/Resume; the Store Action, tool policy, and source
+// fencing remain unchanged. Exceeding the deadline fails closed.
+export function qwenDeveloperExecutionTimeoutMs(task,resuming){
   if(!['implement','repair'].includes(task)||
       typeof resuming!=='boolean'||(task==='repair'&&!resuming))
-    fail('invalid signed task / native Resume turn policy');
-  return 24;
+    fail('invalid signed task / native Resume execution policy');
+  return 30*60*1000;
 }
-function cliCall({prompt,sessionId,resuming,task,plan,configDir,workspace}){
-  const argv=['-p',prompt,'--output-format','stream-json','--verbose',
-    '--max-turns',String(qwenDeveloperTurnBudget(task,resuming)),
+export function qwenDeveloperCliArgs({prompt,sessionId,resuming,task,plan}){
+  qwenDeveloperExecutionTimeoutMs(task,resuming);
+  return ['-p',prompt,'--output-format','stream-json','--verbose',
     '--model',plan.model,'--strict-mcp-config',
     ...claudeCliToolPolicy(plan.tools,{restricted:true}),
     ...(resuming?['--resume',sessionId]:['--session-id',sessionId])];
+}
+function cliCall({prompt,sessionId,resuming,task,plan,configDir,workspace}){
+  const argv=qwenDeveloperCliArgs({prompt,sessionId,resuming,task,plan});
   const cliEnv={...process.env,CLAUDE_CONFIG_DIR:configDir,
     DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:plan.model,
     ANTHROPIC_DEFAULT_SONNET_MODEL:plan.model};
@@ -209,8 +213,8 @@ function cliCall({prompt,sessionId,resuming,task,plan,configDir,workspace}){
     fail('native Session persistence cannot be disabled');
   const started=Date.now();
   const proc=spawnSync('claude',argv,{cwd:workspace,env:cliEnv,
-    encoding:'utf8',timeout:8*60*1000,maxBuffer:8*1024*1024,
-    stdio:['ignore','pipe','pipe']});
+    encoding:'utf8',timeout:qwenDeveloperExecutionTimeoutMs(task,resuming),
+    maxBuffer:8*1024*1024,stdio:['ignore','pipe','pipe']});
   if(proc.error||proc.status!==0)fail(classifyQwenCliFailure(proc));
   const {events,envelope}=parseNativeEvents(proc.stdout);
   if(envelope.is_error===true||envelope.session_id!==sessionId)
