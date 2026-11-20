@@ -24,9 +24,17 @@ function main(){
   if(!model||!process.env.ANTHROPIC_BASE_URL||
      !(process.env.ANTHROPIC_AUTH_TOKEN||process.env.ANTHROPIC_API_KEY))throw Error('missing configured model gateway');
   fs.mkdirSync(outDir,{recursive:true});
-  const instructions=mode==='source-repair'
-    ? 'For this controlled Add/Add or content conflict proof, make conflict-probe.txt exactly match the SOURCE version. That should allow a later ordinary merge of SOURCE into TARGET after the one-parent repair.'
-    : 'For this controlled Add/Add or content conflict proof, integrate both policies in conflict-probe.txt. The final text must contain both words target and source, have no Git conflict markers, and preserve all clean source-only files.';
+  const production=process.env.CONVERGENCE_PRODUCTION==='true';
+  const productionIssue=Number(process.env.REPAIR_ISSUE_NUMBER??0);
+  if(production&&(!Number.isSafeInteger(productionIssue)||productionIssue<1))
+    throw Error('production conflict repair needs a preexisting Issue identity');
+  const instructions=production
+    ? (mode==='source-repair'
+      ? 'Resolve the original conflict by editing only the listed conflicted text files. Produce a source-repair change based on TARGET that makes a subsequent merge of SOURCE conflict-free and reproduces the resolved Git tree. Preserve behavioral invariants of both sides. If that cannot be done safely, do not invent a merge resolution.'
+      : 'Resolve both versions into the Git three-way integration result. Preserve clean auto-merged paths, semantics of both source histories, and change only the listed conflict paths. Do not invent a passing test.')
+    : (mode==='source-repair'
+      ? 'For this controlled Add/Add or content conflict proof, make conflict-probe.txt exactly match the SOURCE version. That should allow a later ordinary merge of SOURCE into TARGET after the one-parent repair.'
+      : 'For this controlled Add/Add or content conflict proof, integrate both policies in conflict-probe.txt. The final text must contain both words target and source, have no Git conflict markers, and preserve all clean source-only files.');
   const prompt=[
     'You are a Coding Agent resolving a real Git merge conflict in a detached isolated Nession worktree.',
     'The worktree is already in an uncommitted merge conflict. You may edit the conflicted files but MUST NOT run shell commands.',
@@ -34,7 +42,9 @@ function main(){
     'Never create a commit, push, open a PR, edit unrelated files or claim verification success.',
     'Allowed conflict paths: '+JSON.stringify(r.conflict_paths),
     'Exact TARGET SHA: '+r.target_sha+'; exact SOURCE SHA: '+r.source_sha+'.',
-    'For this pilot the conflict file is scripts/fixtures/conflict-probe.txt; no product logic is involved.',
+    production
+      ? 'Production conflict: the listed conflict files contain real product/repository logic. Do not modify workflow, Gate, credentials or repository instructions. If semantics are unclear, explain the uncertainty; never delete a side solely to satisfy Git.'
+      : 'For this pilot the conflict file is scripts/fixtures/conflict-probe.txt; no product logic is involved.',
     instructions,
     'Edit the file directly with Edit/Write. Respond in plain text with a short rationale. The independent Git validator will decide success.'
   ].join('\n');
@@ -50,15 +60,17 @@ function main(){
     console.log('Coding Agent edit attempt completed for '+mode+'; pending independent Git validation');
   } finally {
     const now=new Date().toISOString();
-    const template='merge-conflict-probe-'+mode+'-v1';
+    const template=(production?'staging-convergence-conflict-':'merge-conflict-probe-')+mode+'-v1';
     const record=buildAgentWorkflowTelemetry({
       workflow_id:WORKFLOW_ID,
       github_workflow:process.env.GITHUB_WORKFLOW||'Agent / Staging Convergence Review',
       unique_run_name:providerScopedRunName({workflowId:WORKFLOW_ID,
         runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,
-        taskId:'probe-'+mode,provider:'claude-code'}),
+        taskId:(production?'repair-':'probe-')+mode,provider:'claude-code'}),
       job:'resolve',
-      task:{id:'probe-'+mode,type:'merge-conflict-probe',issue:4124,
+      task:{id:(production?'repair-':'probe-')+mode,
+        type:production?'staging-convergence-repair':'merge-conflict-probe',
+        issue:production?productionIssue:4124,
         target_ref:r.target_sha,fingerprint:r.target_sha+':'+r.source_sha+':'+mode},
       agent:{provider:'claude-code',id:'merge-conflict-probe',role:'developer',
         prompt:promptTelemetry({template_id:template,template_version:'v1',
