@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44791542236,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4091-peer-oci-source-discovery",
+    "target_sha": "7173d5837dbcf5f5839c39acf53463f616e010f4",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44791542236",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ec681aef3583bbc10bb3088ddccd00dbfffa8f2a29f31a748476905c80b286b8"
+  },
+  "record": "runs/2026-11-20/44791542236-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "df2370b9f7857ad7028802c583a8d5e586632fda01c665804cf3cdb0d811d0a5"
+}
