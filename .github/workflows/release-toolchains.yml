@@ -68,7 +68,7 @@ jobs:
           source_sha="$(git -C toolchain-catalog rev-parse HEAD)"
           if [ "$EVENT" = workflow_run ]; then
             test "$source_sha" = "$EXPECTED_SHA"
-            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" all)"
+            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" changed "$source_sha")"
           else
             matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" one "$TOOL" "$VERSION")"
           fi
