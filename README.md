@@ -94,7 +94,7 @@
 
 | Mobile Terminal Keys / Quick Commands (chords, Insert vs Run, mode-aware clearance) | [#2710](https://github.com/BestNathan/nession/issues/2710) / [#3492](https://github.com/BestNathan/nession/issues/3492) | [Interactive HTML](terminal-keys-commands-2710/index.html) · [Scenario & fidelity](terminal-keys-commands-2710/README.md) |
 
-| Mobile App Swipe / edge navigation & gesture ownership | [#2724](https://github.com/BestNathan/nession/issues/2724) | [Interactive HTML](mobile-swipe-2724/index.html) · [Scenario & fidelity](mobile-swipe-2724/README.md) |
+| Mobile App Swipe / edge navigation & gesture ownership · #4185 continuous resistance + interruptible settle | [#2724](https://github.com/BestNathan/nession/issues/2724) · [#4185](https://github.com/BestNathan/nession/issues/4185) | [Interactive HTML](mobile-swipe-2724/index.html) · [Scenario & fidelity](mobile-swipe-2724/README.md) |
 
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
 

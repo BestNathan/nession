@@ -129,7 +129,7 @@ a{color:#9ed6c7}
 <button class="chip" id="simLeft">→ Sessions</button><button class="chip" id="simRight">→ Workspace</button><button class="chip" id="simDetail">Workspace 详情</button><button class="chip" id="simReset">重置</button></div></div>
 <div class="group"><div class="group-title">Live ownership / 状态</div><dl class="state"><dt>Surface</dt><dd id="sPage">Terminal</dd><dt>Phase</dt><dd id="sPhase">idle</dd><dt>Owner</dt><dd id="sOwner">free</dd><dt>Destination</dt><dd id="sTarget">—</dd><dt>Distance</dt><dd id="sDistance">0 px</dd><dt>Commit</dt><dd id="sCommit">—</dd></dl></div>
 <div class="group"><div class="group-title">Event trace / 事件记录</div><div class="trace" id="trace" aria-live="polite"></div></div>
-<p class="note"><b>手势规则（待手机验收）：</b>工作区内只在 App 左右 28px 起始区域尝试接管；移动 12px 后判定主轴；距离达到 max(64px, 宽度的 18%) 提交，或移动至少 40px 且平均速度 ≥0.45px/ms 的快速滑动提交。竖向滑动、反方向、中心选择、长按、Peek、Detail 和多指均不触发 App 导航。</p>
+<p class="note"><b>手势规则（待手机验收）：</b>工作区内只在 App 左右 28px 起始区域尝试接管；移动 12px 后判定主轴；距离达到 max(64px, 宽度的 18%) 提交，或移动至少 40px 且平均速度 ≥0.45px/ms 的快速滑动提交。预览在 80% 宽度内一比一跟随，之后以连续阻尼继续移动至 92% 绝对上限，不会在手指仍移动时出现平台；settle 期间的新触点会先完成上一次动画再成为新候选，而不是被丢弃。竖向滑动、反方向、中心选择、长按、Peek、Detail 和多指均不触发 App 导航。</p>
 <p class="note"><a href="https://github.com/BestNathan/nession/issues/2724">Requirement #2724</a> · <a id="source" href="https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724">View source</a>. 浏览器/OS 是否占用边缘、xterm/PT﻿Y、真实 TUI 和触觉反馈不由此 mock 证明。</p>
 </section>
 </div>
@@ -142,7 +142,15 @@ const state={page:'terminal',selected:true,tui:false,long:true,peek:false,showEd
 const phone=$('phone'), term=$('terminalScroll');
 const screens={sessions:$('sessions'),terminal:$('terminal'),workspace:$('workspace'),detail:$('detail')};
 const log=[];
-let gesture=null,holdTimer=null,activeDemo=0,settling=false,settleSerial=0;
+let gesture=null,holdTimer=null,activeDemo=0,settling=false,settleSerial=0,pendingSettle=null;
+/** #4185: direct until the preferred reveal, then continuous bounded resistance. */
+function resistedTravel(travel,preferred,limit){
+  const forward=Math.max(0,travel);
+  if(forward<=preferred)return forward;
+  const room=Math.max(0,limit-preferred);
+  if(!room)return preferred;
+  return preferred+room*(1-Math.exp(-(forward-preferred)/room));
+}
 function record(v){log.unshift(v);if(log.length>7)log.pop();$('trace').textContent=log.map((x,i)=>String(i+1).padStart(2,'0')+'  '+x).join('\n');}
 function routePage(){return state.detail?'detail':state.page;}
 function notify(){ $('sPage').textContent=routePage()+(state.selected?'':' · no Session');$('sPhase').textContent=state.phase;$('sOwner').textContent=state.owner;$('sTarget').textContent=state.target||'—';$('sDistance').textContent=Math.round(state.dx)+' px';$('sCommit').textContent=state.commit; }
@@ -158,7 +166,7 @@ $('dirtyStatus').textContent=state.dirty?'● 未保存更改：返回需要确�
 notify();
 }
 function resetDrag(){Object.values(screens).forEach(el=>{el.style.transform='';el.style.transition='';el.style.boxShadow='';});$('reveal').classList.remove('visible');$('previewTag').classList.remove('visible');$('direction').classList.remove('on');state.target=null;state.dx=0;}
-function setPage(page){settleSerial++;settling=false;state.detail=false;state.page=page;state.phase='idle';state.owner='free';resetDrag();paint();record('route → '+page);}
+function setPage(page){settleSerial++;settling=false;pendingSettle=null;state.detail=false;state.page=page;state.phase='idle';state.owner='free';resetDrag();paint();record('route → '+page);}
 function openDetail(){if(!state.selected){record('detail unavailable · no Session');return;}state.page='workspace';state.detail=true;state.phase='idle';resetDrag();paint();record('Workspace → Files detail (owns Back)');}
 function back(){if(state.detail){if(state.dirty){$('dialog').classList.add('on');record('dirty draft → confirmation required');}else{state.detail=false;paint();record('detail → Workspace');}}else if(state.page!=='terminal'&&state.selected){setPage('terminal');}}
 function targetFor(x,at){
@@ -171,7 +179,7 @@ return t;
 }
 function showDrag(dx,target){
 const width=phone.getBoundingClientRect().width;
-const adjusted=Math.sign(dx)*Math.min(Math.abs(dx),width*.80);
+const adjusted=Math.sign(dx)*resistedTravel(Math.abs(dx),width*.80,width*.92);
 const current=screens[routePage()];
 $('reveal').classList.add('visible');
 $('revealTitle').textContent=target==='terminal'?'Terminal':target==='sessions'?'Sessions':'Workspace';
@@ -194,10 +202,27 @@ state.dx=dx;state.target=target;notify();
  * Touch-generated pointer events are deliberately ignored to avoid parallel
  * pointercancel/lostpointercapture races with the native touch sequence.
  */
+function completeSettle(pending){
+  pendingSettle=null;settling=false;
+  resetDrag();
+  if(pending.commit)setPage(pending.target);
+  else{state.phase='idle';state.owner='free';paint();}
+}
+/** #4185: a contact that arrives during the settle finishes it instead of being dropped. */
+function finishSettleNow(){
+  const pending=pendingSettle;
+  if(!pending)return false;
+  settleSerial++;
+  completeSettle(pending);
+  record('settle caught up by the next contact');
+  return true;
+}
 function settle(commit,reason='release'){
   const target=state.target;
   if(state.phase==='navigation'&&target){
     settling=true;
+    const pending={commit:!!commit,target};
+    pendingSettle=pending;
     const serial=++settleSerial;
     const current=screens[routePage()];
     current.style.transition=window.matchMedia('(prefers-reduced-motion: reduce)').matches?'none':'transform 175ms ease-out';
@@ -207,11 +232,8 @@ function settle(commit,reason='release'){
     record((commit?'commit':'snapback')+' · '+reason+' · '+target+' · '+Math.round(state.dx)+'px');
     notify();
     setTimeout(()=>{
-      if(serial!==settleSerial)return;
-      settling=false;
-      resetDrag();
-      if(commit)setPage(target);
-      else{state.phase='idle';state.owner='free';paint();}
+      if(serial!==settleSerial||pendingSettle!==pending)return;
+      completeSettle(pending);
     },190);
   }else{
     resetDrag();state.phase='idle';state.owner='free';paint();
@@ -230,7 +252,10 @@ function getStart(e){
   return {eligible:true,side:null,reason:'shell chrome'};
 }
 function down(e,kind='pointer'){
-  if(e.isPrimary===false||gesture||settling||$('dialog').classList.contains('on'))return;
+  if(e.isPrimary===false||gesture||$('dialog').classList.contains('on'))return;
+  // The next contact owns the next decision: finalize whatever the previous
+  // settle was already showing, then let this touch become a candidate.
+  finishSettleNow();
   const claim=getStart(e);if(!claim)return;
   gesture={id:e.pointerId,kind,x:e.clientX,y:e.clientY,start:performance.now(),claim,phase:'candidate',sign:0};
   state.phase='candidate';state.owner='undecided';state.commit='—';state.dx=0;notify();
@@ -325,7 +350,7 @@ phone.addEventListener('touchstart',e=>{
     if(gesture&&gesture.kind==='touch')up(null,true,'multitouch');
     return;
   }
-  if(gesture||settling)return;
+  if(gesture)return;
   const t=e.changedTouches[0];
   if(t)down(touchEventOf(t,e),'touch');
 },{passive:true,capture:true});

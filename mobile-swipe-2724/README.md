@@ -2,6 +2,8 @@
 
 > **Historical / partial supersession (2026-11-19):** Original Terminal/Sessions/Workspace top-level swipe gesture, OS guard and interactive surface exclusions remain authoritative. A pushed Workspace depth now has a proposed **inner stack swipe** under [App Workspace #3971](../app-workspace-3971/index.html), instead of only blocking outer shell paging. The old deep-detail mock is **stale for that new behavior** until revised and independently reverified; prior #2724 acceptance remains historical and is not modified.
 
+> **Motion revision (2026-11-20, #4185):** The outer preview no longer goes flat at 80% of the shell. It follows the finger to 80%, then continues with continuous resistance to an absolute 92% limit, and a contact that arrives during the settle finalizes that settle instead of being ignored. The inner-stack counterpart lives in [App Workspace #3971](../app-workspace-3971/index.html). This is a **mock revision of the motion hypothesis**, not production approval: the production values and browser frames are proven by the #4185 PR Cases, not by this page.
+
 ## Owning Requirement
 [Requirement #2724 — Redesign mobile App swipe navigation and gesture ownership](https://github.com/BestNathan/nession/issues/2724)
 
@@ -31,6 +33,8 @@ The inspector displays current page, gesture phase, owner, destination, travel, 
 - Movement slop before ownership: 12 px; vertical axis wins when `abs(dy) > 0.85 * abs(dx)`.
 - Commit by travel ≥ `max(64px, 0.18 * shell width)`; or quick flick ≥40 px and mean absolute velocity ≥0.45 px/ms toward a valid target.
 - Right swipe from Terminal left edge opens Sessions; left swipe from Terminal right edge opens Workspace (only with Session). Reverse page swipes are constrained to the opposite edge when over interactive content.
+- Reveal follows the finger one-to-one to **80% of the shell**; past it the mock applies continuous resistance (`preferred + room·(1−e^(−excess/room))`) to an absolute **92%** limit, so additional finger travel still moves the preview and never fully commits a layer before release (#4185). The mock uses the same curve as production `resistedTravel`.
+- A new contact during a settle **catches the settle up** — applying its pending commit or snapback — and becomes the next candidate instead of being ignored for the animation (#4185).
 - Swipe animation is ~175ms, reduced-motion preference respected. Real-device acceptance may adjust these values.
 
 ## Fidelity and limitations
@@ -42,7 +46,8 @@ The inspector displays current page, gesture phase, owner, destination, travel, 
 ## Verification
 - HTML is standalone with inline CSS/JS and no remote/CDN assets.
 - Repository readback: JS syntactically compiled in a JS runtime; no duplicate DOM IDs or missing `$('id')` DOM references.
-- **Mock interaction smoke:** **36/36 passed** against the actual inline JS using a minimal fake DOM and deterministic timers (original routes, edge/center/vertical, short snapback, Peek, detail/dirty guard, no-Session, long-press plus native touchstart/move/end tracking, reverse past origin then resume, touch-generated pointercancel/capture-loss immunity, actual touchcancel rollback, multitouch cancellation, native vertical scroll non-interference and exclusive direction hold). Reproduce with `node mobile-swipe-2724/smoke-test.mjs` from the prototype branch root; suite is dependency-free. This is *mock state-machine* proof only.
+- **Mock interaction smoke:** **45/45 passed** against the actual inline JS using a minimal fake DOM and deterministic timers (original routes, edge/center/vertical, short snapback, Peek, detail/dirty guard, no-Session, long-press plus native touchstart/move/end tracking, reverse past origin then resume, touch-generated pointercancel/capture-loss immunity, actual touchcancel rollback, multitouch cancellation, native vertical scroll non-interference and exclusive direction hold, continuous resistance past 80% to the 92% bound, and a new contact catching up an active settle). Reproduce with `node mobile-swipe-2724/smoke-test.mjs` from the prototype branch root; suite is dependency-free. This is *mock state-machine* proof only.
+- **Revised-motion browser check (2026-11-20):** a Chromium walkthrough at 390×844 on the mock's 375px phone measured `300px` at the 80% preferred point and `328.4px` past it (continuous, below the 92% bound), then observed the new contact become `candidate` during the settle and own its next navigation. This is a **mock browser check**, not production UI or iOS proof.
 - Real browser interaction and actual mobile Safari/PWA execution: **not independently verified**. Public Pages/manifest endpoints could not be read via the available external viewer. Production Acceptance, device testing and Pages SHA readback are **Pending**. Browser-managed OS Back swipes at the physical edge can still preempt page JavaScript and require an on-device assessment; this is intentionally not hidden by the fake DOM.
 - Reproduce via direct pointer/touch interactions described above. A completed workflow must additionally inspect the browser console, screenshot 375/390/430 widths and landscape, and verify iOS Safari edge ownership.
 

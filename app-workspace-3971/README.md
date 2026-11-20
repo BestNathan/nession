@@ -5,6 +5,12 @@
 **Branch:** `prototype/app-workspace-3971/` on the single shared orphan `prototype` branch  
 **Design decision:** App-owned one stack header, semantic content regions, icon-first actions, and one gesture arbitration path for nested Workspace navigation.
 
+## Motion revision — 2026-11-20 (#4185)
+
+The inner Pop/Forward preview now follows the finger directly to **125px**, then continues with continuous resistance to an absolute **180px** limit (`preferred + room·(1−e^(−excess/room))`), instead of stopping flat at 125px. A contact that arrives while a return/commit settle is still on screen **catches the settle up** and becomes the next candidate instead of being ignored. The mock now uses the same resistance curve as production `resistedTravel`.
+
+Scope and status: this revision changes only the mock's **motion hypothesis**; it does not change the stack, Header, content or token decisions above. It is **not** production or product approval — the production frame path and rapid-contact behavior are asserted by the #4185 browser Cases, and the prototype's old hard-cap/settle behavior is superseded here rather than silently retained. Browser/Pages evidence for this revision is recorded in the #4185 Issue and PR.
+
 ## Unified App Workspace review — 2026-11-19
 
 This revision **converges the existing #3971 prototype** rather than spawning another product shell. Four reviewer-only scenario buttons now jump to representative states *inside the same App Host*. They are not App navigation tabs, not extension discovery and not a substitute for the contextual Capability Capsule. A dirty Files editor invokes the **same leave guard** when a reviewer chooses another preset.
@@ -79,7 +85,7 @@ The real Terminal remains mounted below spatial layers; pushed capability depth 
 
 - One active contact: gesture candidate → horizontal claimed or yielded to vertical/content → release commit/cancel. At pushed depth, non-interactive content can claim the inner stack swipe. At Workspace root, the outer spatial return remains limited to a 28px shell-owned left band **after** the 18px native platform guard (#2724). Controls, editable fields, code/diff, row actions and Capsule always retain touch ownership.
 - **Rightward** = Pop existing stack depth; from root leave to Terminal. **Leftward** = Forward **only** when a recorded forward item exists. Missing route resists and cancels.
-- The internal work area translates under the finger; the underlying surface indicates the destination; release threshold ~75 CSS px is an **illustrative mock value**, *not* the established production #2724 threshold.
+- The internal work area translates under the finger; the underlying surface indicates the destination; release threshold ~75 CSS px is an **illustrative mock value**, *not* the established production #2724 threshold. The preview follows directly to 125px and then resists continuously to a hard 180px bound (#4185); a rejected or committed return is interruptible by the next contact, which catches it up rather than waiting.
 - Button labels are accessible; header touch targets ~44px; no icon-only destructive final confirmation; long content is scrollable; reduced motion applies.
 - There is one App header and one visible bottom Capability Capsule at every Workspace depth. Sheet/dialog content is a temporary overlay, not another global page header.
 
@@ -92,7 +98,9 @@ The real Terminal remains mounted below spatial layers; pushed capability depth 
 | Gesture behavior | Browser-only exploration; **not** actual iOS/Safari/TUI gesture proof |
 | UI tokens | Canonical App color/type/density snapshot in `tokens.css` (main SHA pinned above), `--aw-*` semantic aliases; role placement is a proposal, not pixel-verified React/shadcn |
 | Navigation | Local mock state, not Nession routing or stored Session history |
-| Local interaction smoke | 11/11 mock state transitions passed in V8 DOM-stub (not Chromium) |\n| Published preview | **Unverified until Pages manifest SHA + HTTPS HTML readback** |
+| Local interaction smoke | 12/12 #3971/#4185 mock assertions pass in V8 DOM-stub (including inner resistance and settle catch-up); the older "Review presets" header-copy assertion also fails at the prior branch tip and is unrelated (not Chromium) |
+| Revised motion browser check (#4185) | Chromium 390×844: inner preview 125px → 168.3px (below the 180px bound); a new contact applied the pending Pop (index 1 → 0) and owned the next edge gesture to Terminal. **Mock-only**, not production UI |
+| Published preview | **Unverified until Pages manifest SHA + HTTPS HTML readback** |
 | Production Acceptance | Not attempted; Issue #3971 SCs remain Pending |
 
 ## Validation commands

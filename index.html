@@ -30,7 +30,7 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <h2>App Workspace · One interaction language <span aria-hidden="true">↗</span></h2>
 <p>Claude、Git、Sandbox、Files 在一个可切换场景的原型中共享 Stack Header、Rhythm 内容层级、图标操作和栈内滑动。支持 Browse / Stack Sheet、Forward、未保存编辑保护与 375/390/430px 预览。</p>
 <span class="tag">Interactive App mock · 375 / 390 / 430 · synthetic data</span>
-<span class="ia-status">#3971 candidate supersedes old App header/surface/inner-stack-swipe mock behavior; Pages SHA and Chromium proof must be verified independently.</span></a>
+<span class="ia-status">#3971 candidate supersedes old App header/surface/inner-stack-swipe mock behavior; #4185 revises the inner reveal to continuous resistance and makes the settle interruptible. Pages SHA and Chromium proof must be verified independently.</span></a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/app-workspace-3971" target="_blank" rel="noopener noreferrer">View App Workspace #3971 source (GitHub)</a>
 
 
@@ -310,9 +310,9 @@ footer{margin-top:32px;font-size:13px;color:light-dark(#767e87,#999faa)}
 <a class="card" href="./mobile-swipe-2724/index.html" aria-label="打开 Mobile App Swipe 手势交互原型">
 <small>Requirement #2724 · Mobile Navigation</small>
 <h2>Mobile App · Swipe Navigation <span aria-hidden="true">↗</span></h2>
-<p>Sessions ← Terminal → Workspace：边缘滑动跟手预览、短距离回弹、快速滑动提交；终端滚动、TUI、长按方向、胶囊展开和 Workspace 深层返回互不抢手势。</p>
+<p>Sessions ← Terminal → Workspace：边缘滑动跟手预览、短距离回弹、快速滑动提交；预览越过 80% 后以连续阻尼继续响应，settle 可被下一触点接续（#4185）。终端滚动、TUI、长按方向、胶囊展开和 Workspace 深层返回互不抢手势。</p>
 <span class="tag">Interactive HTML · Touch &amp; Pointer · Mobile mock</span>
-<span class="ia-status">当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
+<span class="ia-status">#4185 motion revision · 当前 main 信息架构未核验 · 仅交互概念与 CSS 尺寸</span>
 </a>
 <a class="source-link" href="https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724" target="_blank" rel="noopener noreferrer">View Mobile Swipe prototype source (GitHub) ↗</a>
 <a class="card" href="./session-metadata-2789/index.html" aria-label="打开 Session Metadata Workspace 原型">

@@ -7,7 +7,7 @@ import {fileURLToPath} from 'node:url';
 const dir=path.dirname(fileURLToPath(import.meta.url));
 const source=fs.readFileSync(path.join(dir,'app.js'),'utf8');
 
-function harness(){
+function harness({deferTimers=false}={}){
   class Element {
     constructor(id){
       Object.assign(this,{id,innerHTML:'',textContent:'',hidden:false,scrollTop:0,style:{},dataset:{},listeners:{}});
@@ -37,8 +37,13 @@ function harness(){
   };
   let t=100000;
   class Clock extends Date{static now(){return t+=1000;}}
+  const timers=[];
+  const schedule=cb=>{
+    if(deferTimers){timers.push(cb);return timers.length;}
+    cb();return 1;
+  };
   vm.runInNewContext(source,{
-    document,Element,Date:Clock,setTimeout:cb=>{cb();return 1;},clearTimeout(){},
+    document,Element,Date:Clock,setTimeout:schedule,clearTimeout(){},
     navigator:{clipboard:{writeText:async()=>{}}},
   },{timeout:3000,filename:'app-workspace-3971/app.js'});
   function click(action,id=''){
@@ -53,7 +58,18 @@ function harness(){
     nodes['#product'].listeners.pointermove({...base,clientX:startX+dx,clientY:302});
     nodes['#product'].listeners.pointerup({...base,clientX:startX+dx,clientY:302});
   }
-  return {nodes,fixtures,themes,scenarios,click,drag,state:()=>JSON.parse(nodes['#inspector'].textContent)};
+  function press({startX=140}={}){
+    const target=new Element('canvas');
+    target.closest=selector=>selector==='#app-content'?nodes['#app-content']:null;
+    const base={target,pointerId:5,pointerType:'mouse',clientX:startX,clientY:300};
+    nodes['#product'].listeners.pointerdown(base);
+    return {
+      move:dx=>nodes['#product'].listeners.pointermove({...base,clientX:startX+dx,clientY:302}),
+      end:dx=>nodes['#product'].listeners.pointerup({...base,clientX:startX+dx,clientY:302}),
+    };
+  }
+  const flush=()=>{const pending=timers.splice(0);pending.forEach(cb=>cb());};
+  return {nodes,fixtures,themes,scenarios,click,drag,press,flush,state:()=>JSON.parse(nodes['#inspector'].textContent)};
 }
 test('Claude current work is primary with one host Header and four Capsule choices',()=>{
   const x=harness();
@@ -73,6 +89,31 @@ test('Browse, deep Raw, swipe Pop/Forward and ancestor jump share one stack',()=
   x.click('stack');x.click('ancestor','1');assert.equal(x.state().index,1);
   assert.equal(x.state().forward,3);
 });
+test('Inner reveal resists past 125px and the next contact catches the settle up (#4185)',()=>{
+  const x=harness({deferTimers:true});
+  x.click('browse');x.click('resource','transcripts');x.click('push','transcript');
+  assert.equal(x.state().index,2);
+
+  const first=x.press();
+  first.move(125);
+  assert.equal(x.nodes['#page-frame'].style.transform,'translateX(125px)');
+  first.move(200);
+  const amount=Number((x.nodes['#page-frame'].style.transform.match(/translateX\((-?[\d.]+)px/)||[])[1]);
+  assert.ok(amount>125,'reveal must keep moving past the former 125px cap');
+  assert.ok(amount<180,'reveal must stay inside the absolute 180px bound');
+  first.end(200);
+  assert.equal(x.state().index,2,'the pending Pop must not run before the settle finishes');
+
+  // The next contact arrives while the settle is pending and finishes it.
+  const second=x.press();
+  assert.equal(x.state().index,1,'the caught-up settle applies its Pop immediately');
+  second.move(-120);
+  assert.equal(x.nodes['#page-frame'].style.transform,'translateX(-120px)');
+  second.end(-120);
+  x.flush();
+  assert.equal(x.state().index,2,'the caught-up contact forwards to the recorded destination');
+});
+
 test('Files editor owns interactive content and dirty leave protection',()=>{
   const x=harness();x.click('cap','files');x.click('push','file');x.click('push','edit');
   x.drag(120,{excluded:true});assert.equal(x.state().index,2);

@@ -47,7 +47,15 @@ const routeNames={root:null,conversations:'Conversations',transcripts:'Transcrip
 const initial=()=>({surface:'workspace',cap:'claude',history:[{kind:'root',scroll:0}],cursor:0,
   fixture:'normal',sessionNo:1,overlay:null,pending:null,dirty:false,editorValue:'// App workspace header\nexport const title = "Workspace";\n',last:'Opened Claude Code',actionCount:0});
 let state=initial();
-let move=null;let toastTimer=null;let suppressClicksUntil=0;
+let move=null;let toastTimer=null;let suppressClicksUntil=0;let pendingSettle=null;
+/** #4185: direct to the preferred 125px, then bounded continuous resistance to 180px. */
+function resistedTravel(travel,preferred,limit){
+  const forward=Math.max(0,travel);
+  if(forward<=preferred)return forward;
+  const room=Math.max(0,limit-preferred);
+  if(!room)return preferred;
+  return preferred+room*(1-Math.exp(-(forward-preferred)/room));
+}
 const active=()=>state.history[state.cursor];
 const title=r=>r.kind==='root'?capNames[state.cap]:(r.title||routeNames[r.kind]||'Resource');
 const root=()=>({kind:'root',scroll:0});
@@ -303,6 +311,9 @@ function targetAt(ev){const el=ev.target;return el instanceof Element?el:el.pare
 function point(ev){return ev.changedTouches?ev.changedTouches[0]:ev;}
 function begin(ev,kind){
  if(state.surface!=='workspace'||state.overlay||move)return;
+ // A settle that is still on screen is finalized before this contact becomes
+ // the next candidate; it is never a dead window (#4185).
+ finishSettleNow();
  if(kind==='touch'&&ev.touches.length!==1)return;
  if(kind==='pointer'&&ev.pointerType!=='mouse')return;
  const t=targetAt(ev);if(!t||!t.closest('#app-content')||t.closest(gestureExclusion))return;
@@ -331,13 +342,34 @@ function motion(ev,kind){
  if(move.dir&&(dx>0?'right':'left')!==move.dir)return;
  if(kind==='touch'&&ev.cancelable&&move.phase==='navigate')ev.preventDefault();
  move.dx=dx;move.lastX=pt.clientX;move.lastY=pt.clientY;
- const amt=move.phase==='navigate'?Math.max(-125,Math.min(125,dx)):(dx>0?Math.min(18,dx/7):Math.max(-18,dx/7));
+ const amt=move.phase==='navigate'
+   ?Math.sign(dx)*resistedTravel(Math.abs(dx),125,180)
+   :(dx>0?Math.min(18,dx/7):Math.max(-18,dx/7));
  const frame=$('#page-frame');frame.style.transition='none';frame.style.transform='translateX('+amt+'px)';
  const u=$('#workspace-underlay');u.style.opacity=String(Math.min(.95,Math.abs(amt)/110));
  u.innerHTML='<div class="under-icon">'+icon(move.dir==='right'?'back':'forward',25)+'</div>'+
    '<div class="under-label">'+(move.phase==='resist'?'No forward destination':move.dir==='right'?(state.cursor>0?'Previous resource':'Terminal'):'Forward resource')+'</div>'+
    '<div class="under-sub">Release to '+(move.phase==='resist'?'cancel':'navigate')+'</div>';
  record('Swipe '+move.phase+' '+Math.round(dx)+'px');
+}
+function completeSettle(pending){
+ const frame=$('#page-frame');
+ frame.style.transform='';
+ $('#workspace-underlay').style.opacity='0';
+ if(pending.valid){
+   suppressClicksUntil=Date.now()+220;
+   navigate(pending.op);
+ }else{
+   frame.style.transition='';
+ }
+}
+/** #4185: the next contact finishes the settle instead of being ignored. */
+function finishSettleNow(){
+ if(!pendingSettle)return false;
+ const pending=pendingSettle;pendingSettle=null;
+ completeSettle(pending);
+ record('Settle caught up by next contact');
+ return true;
 }
 function settle(ev,kind){
  if(!move||move.kind!==kind)return;
@@ -347,8 +379,11 @@ function settle(ev,kind){
  const frame=$('#page-frame');
  frame.style.transition='transform .18s ease';frame.style.transform='';
  $('#workspace-underlay').style.opacity='0';
- if(valid){suppressClicksUntil=Date.now()+220;const op=m.dir==='right'?{type:'pop'}:{type:'forward'};setTimeout(()=>{navigate(op);},130);}
- else {record('Swipe cancelled / snap back');setTimeout(()=>{frame.style.transition='';},200);}
+ const pending={valid,op:valid?(m.dir==='right'?{type:'pop'}:{type:'forward'}):null};
+ pendingSettle=pending;
+ if(valid){record('Swipe committed · settle');}
+ else {record('Swipe cancelled / snap back');}
+ setTimeout(()=>{if(pendingSettle!==pending)return;finishSettleNow();},valid?130:200);
 }
 function cancelSwipe(){if(move){move=null;$('#page-frame').style.transform='';$('#workspace-underlay').style.opacity='0';record('Swipe yielded to content');}}
 const prod=$('#product');

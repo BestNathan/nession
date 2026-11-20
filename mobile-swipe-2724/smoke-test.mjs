@@ -85,4 +85,27 @@ const claimedDirection=tMove(225,350);
 check('native direction blocks scroll',claimedDirection.prevented&&claimedDirection.stopped);
 tEnd(225,350);
 check('native direction releases',get('sPhase').textContent==='idle');
+
+// #4185: continuous bounded resistance and an interruptible settle.
+const translateX=()=>Number(get('terminal').style.transform.match(/translate3d\((-?[\d.]+)px/)?.[1]);
+tStart(10,330);tMove(10+312,330);
+const atPreferred=translateX();
+check('preview follows one-to-one to 80%',Math.abs(atPreferred-312)<=0.6);
+tMove(10+360,330);
+const pastPreferred=translateX();
+check('preview keeps moving past the old cap',pastPreferred>atPreferred);
+check('additional visual travel is resisted',(pastPreferred-atPreferred)<48);
+tMove(10+900,330);
+const bounded=translateX();
+check('preview stays inside the 92% bound',bounded<358.8&&bounded>pastPreferred);
+tEnd(10+900,330);settled();
+check('bounded drag releases as one commit',route().startsWith('sessions'));
+tStart(380,330);tMove(300,330);tEnd(300,330);
+check('settle is active after release',get('sPhase').textContent==='settling');
+tStart(380,330);
+check('next contact catches the settle up',get('sPhase').textContent==='candidate');
+tMove(260,330);
+check('caught-up contact owns the next navigation',get('sPhase').textContent==='navigation'&&get('sTarget').textContent==='workspace');
+tEnd(260,330);settled();
+check('caught-up contact reaches its destination',route().startsWith('workspace'));
 console.log('PASS '+checks+'/'+checks+' mock checks; browser/iOS/xterm unverified');
