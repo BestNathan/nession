@@ -411,6 +411,126 @@ export function enforcePrRustQuality(context, normalized) {
   };
 }
 
+
+// #4146: a model-approved SC is not a Quality-qualified source. This is the
+// canonical, all-PR gate over the SAME read-only exact-HEAD Quality source
+// already used by the more specific Web/Tooling/Rust execution receipts.
+// Path-scoped skips are recorded as inapplicable, never called executed.
+const REQUIRED_QUALITY_JOBS = Object.freeze([
+  ['instruction-check', 'Verify canonical repository instruction graph'],
+  ['workflow-check', 'Validate workflow taxonomy and references'],
+  ['rust-check', RUST_STEP],
+  ['tooling-check', 'Verify repository tooling Gates'],
+  ['web-tests', GATE_STEP],
+]);
+
+export function validPrRequiredQualityReceipt(receipt, sha) {
+  return Boolean(receipt && SHA.test(String(sha)) &&
+    receipt.kind === 'pr_required_quality_v1' &&
+    receipt.repository === REPO && receipt.workflow === WORKFLOW &&
+    receipt.head_sha === sha && receipt.result === 'success' &&
+    positiveInteger(receipt.run_id) && positiveInteger(receipt.run_attempt) &&
+    positiveInteger(receipt.scope_job_id) &&
+    positiveInteger(receipt.web_check_job_id) &&
+    receipt.scope_step === 'Classify the exact PR or main-push change' &&
+    receipt.web_check_step === CHECK_STEP &&
+    receipt.job_outcomes && typeof receipt.job_outcomes === 'object' &&
+    REQUIRED_QUALITY_JOBS.every(([name]) =>
+      ['success', 'skipped'].includes(receipt.job_outcomes[name])));
+}
+
+export function attestPrRequiredQuality(sha, runsPayload, jobsPayload) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  const run = matchingQualityRuns(runsPayload?.workflow_runs, sha)[0];
+  if (!run) return { status: 'pending', reason: 'no authenticated exact-HEAD PR Quality run' };
+  if (run.status !== 'completed' || run.conclusion !== 'success') {
+    return { status: run.status === 'completed' ? 'fail' : 'pending',
+      reason: 'exact-HEAD Quality run ' + run.id + '/' + run.run_attempt +
+        ' is ' + String(run.status ?? 'unknown') + '/' +
+        String(run.conclusion ?? 'pending') };
+  }
+  if (!Array.isArray(jobsPayload?.jobs) || jobsPayload.jobs.length >= 100 ||
+      jobsPayload.total_count >= 100) {
+    return { status: 'pending', reason: 'exact-attempt Quality job listing incomplete' };
+  }
+  const jobs = jobsPayload.jobs;
+  const scopeStep = 'Classify the exact PR or main-push change';
+  const scope = successfulJob(jobs, 'scope', scopeStep, run, run.run_attempt);
+  const aggregate = successfulJob(jobs, 'web-check', CHECK_STEP, run, run.run_attempt);
+  if (!scope.id || !aggregate.id) {
+    return { status: 'pending',
+      reason: [scope.reason, aggregate.reason].filter(Boolean).join('; ') };
+  }
+  const jobOutcomes = {};
+  for (const [name, step] of REQUIRED_QUALITY_JOBS) {
+    const matches = jobs.filter(job => job?.name === name);
+    if (matches.length !== 1) {
+      return { status: 'pending', reason: name + ' job is missing or ambiguous' };
+    }
+    const job = matches[0];
+    if (!positiveInteger(job.id) || job.run_id !== run.id ||
+        (job.run_attempt != null && job.run_attempt !== run.run_attempt)) {
+      return { status: 'pending', reason: name + ' lacks exact Run/Attempt identity' };
+    }
+    if (job.status !== 'completed') {
+      return { status: 'pending', reason: name + ' is not completed' };
+    }
+    if (job.conclusion === 'skipped') {
+      jobOutcomes[name] = 'skipped'; // not execution evidence
+      continue;
+    }
+    if (job.conclusion !== 'success') {
+      return { status: 'fail', reason: name + ' concluded ' + String(job.conclusion) };
+    }
+    const verified = successfulJob(jobs, name, step, run, run.run_attempt);
+    if (!verified.id) return { status: 'pending', reason: verified.reason };
+    jobOutcomes[name] = 'success';
+  }
+  return { status: 'pass', receipt: {
+    kind: 'pr_required_quality_v1', repository: REPO, workflow: WORKFLOW,
+    head_sha: sha, result: 'success', run_id: run.id,
+    run_attempt: run.run_attempt, scope_job_id: scope.id,
+    web_check_job_id: aggregate.id, scope_step: scopeStep,
+    web_check_step: CHECK_STEP, job_outcomes: jobOutcomes,
+  }};
+}
+
+export function collectPrRequiredQuality(sha, request = githubJson) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  try {
+    const q = new URLSearchParams({head_sha: sha, event: 'pull_request', per_page: '25'});
+    const runs = request('/repos/' + REPO + '/actions/workflows/ci-quality.yml/runs?' + q);
+    const run = matchingQualityRuns(runs?.workflow_runs, sha)[0];
+    const jobs = run ? request('/repos/' + REPO + '/actions/runs/' + run.id +
+      '/attempts/' + run.run_attempt + '/jobs?per_page=100') : null;
+    return attestPrRequiredQuality(sha, runs, jobs);
+  } catch (error) {
+    console.error('Trusted required Quality readback failed:',
+      error instanceof Error ? error.message : String(error));
+    return { status: 'pending', reason: 'authenticated exact-HEAD Quality unavailable' };
+  }
+}
+
+export function enforcePrRequiredQuality(context, normalized) {
+  if (context?.stage !== 'pr') return normalized;
+  const observation = context.pr_required_quality;
+  const receipt = observation?.status === 'pass' &&
+    validPrRequiredQualityReceipt(observation.receipt, context.target_ref)
+    ? observation.receipt : null;
+  return {
+    ...normalized,
+    criteria: (normalized.criteria ?? []).map(item =>
+      item.result !== 'Pass' || receipt ? item : {
+        ...item, result: 'Pending',
+        summary: 'Required exact-HEAD Quality not qualified: ' +
+          String(observation?.reason ?? 'authenticated Quality is missing').slice(0, 240),
+        evidence: [{type: 'quality-gate',
+          value: 'Pending: required Quality run/attempt/steps at ' + context.target_ref}],
+      }),
+    ...(receipt ? {pr_required_quality_receipt: receipt} : {}),
+  };
+}
+
 function selfTest() {
   const sha = 'a'.repeat(40), other = 'b'.repeat(40);
   const run = {
@@ -656,6 +776,53 @@ function selfTest() {
   assert.equal(validWebQualityReceipt(enforcePrWebQuality({ ...context, pr_web_quality: pass }, result).pr_web_quality_receipt, sha), true);
   assert.equal(enforcePrWebQuality({ ...context, pr_web_quality: { status: 'pass', receipt: { ...pass.receipt, head_sha: other } } }, result).criteria[1].result, 'Pending');
   assert.deepEqual(enforcePrWebQuality({ ...context, stage: 'staging' }, result), result);
+  // #4146: the actual #4143 failure cannot qualify despite Reviewer approved.
+  const qHead = 'fa04599e1e9bb3f344d9dc43597f477c4063afc2';
+  const qRun = { id: 44694739296, run_attempt: 1, name: 'CI / Quality Gate',
+    path: WORKFLOW, event: 'pull_request', head_sha: qHead,
+    repository: {full_name: REPO}, head_repository: {full_name: REPO},
+    status: 'completed', conclusion: 'failure', created_at: '2026-11-20T07:25:00Z' };
+  assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[qRun]}, null).status, 'fail');
+  const step = name => ({name, status:'completed', conclusion:'success'});
+  const job = (name, id, nameOfStep, conclusion='success') => ({
+    name, id, run_id: qRun.id, status:'completed', conclusion,
+    steps: conclusion === 'success' ? [step(nameOfStep)] : [],
+  });
+  const requiredJobs = {jobs:[
+    job('scope', 11, 'Classify the exact PR or main-push change'),
+    job('web-check', 12, CHECK_STEP),
+    job('instruction-check', 13, '', 'skipped'),
+    job('workflow-check', 14, '', 'skipped'),
+    job('rust-check', 15, '', 'skipped'),
+    job('tooling-check', 16, 'Verify repository tooling Gates'),
+    job('web-tests', 17, GATE_STEP),
+  ], total_count:7};
+  const green = {...qRun, conclusion:'success'};
+  const good = attestPrRequiredQuality(qHead, {workflow_runs:[green]}, requiredJobs);
+  assert.equal(good.status, 'pass');
+  assert.equal(validPrRequiredQualityReceipt(good.receipt, qHead), true);
+  assert.equal(validPrRequiredQualityReceipt(good.receipt, 'f'.repeat(40)), false);
+  assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[green]}, {
+    ...requiredJobs, jobs:requiredJobs.jobs.filter(j=>j.name!=='web-check')}).status, 'pending');
+  assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[green]}, {
+    ...requiredJobs, jobs:requiredJobs.jobs.map(j=>j.name==='web-tests'
+      ? {...j,conclusion:'failure'} : j)}).status, 'fail');
+  assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[green]}, {
+    ...requiredJobs, jobs:requiredJobs.jobs.map(j=>j.name==='rust-check'
+      ? {...j,run_attempt:2} : j)}).status, 'pending');
+  assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[green]}, {
+    ...requiredJobs, jobs:requiredJobs.jobs.map(j=>j.name==='web-tests'
+      ? {...j,status:'in_progress',conclusion:null} : j)}).status, 'pending');
+  assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[green]}, {
+    ...requiredJobs, jobs:requiredJobs.jobs.map(j=>j.name==='web-tests'
+      ? {...j,conclusion:'skipped',steps:[]} : j)}).status, 'pass',
+    'skipped path-scoped job is explicitly inapplicable, not executed');
+  const fakeApproval = {criteria:[{criterion:'SC-01',result:'Pass',evidence:[],summary:'model approved'}]};
+  assert.equal(enforcePrRequiredQuality({stage:'pr',target_ref:qHead,
+    pr_required_quality:{status:'fail',reason:'web-check failed'}},fakeApproval)
+    .criteria[0].result, 'Pending');
+  assert.equal(enforcePrRequiredQuality({stage:'pr',target_ref:qHead,
+    pr_required_quality:good},fakeApproval).criteria[0].result, 'Pass');
   console.log('PR Web/Rust/tooling Quality receipt self-test: pending/fail/skip/SHA/attempt/jobs/steps and scoped Pass passed');
 }
 
