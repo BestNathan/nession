@@ -178,6 +178,10 @@ assert.equal(verdict.issue,ISSUE);
 assert.equal(verdict.pr_number,541);
 assert.equal(verdict.target_sha,HEAD);
 assert.throws(()=>reviewModelResult(accepted,JSON.stringify({
+  outcome:'approved',summary:'All criteria satisfied',
+  findings:[{path:'src/a.ts',evidence:'Missing required regression proof'}],
+})),/approved verdict must not contain findings/);
+assert.throws(()=>reviewModelResult(accepted,JSON.stringify({
   outcome:'changes_requested',summary:'Untrusted path',
   findings:[{path:'src/unrelated.ts',evidence:'Not part of admitted PR'}],
 })),/outside the authenticated Qwen PR diff/);
