@@ -17,7 +17,7 @@ on:
       tool:
         description: 'Reviewed tool recipe'
         type: choice
-        options: [jq, kubectl, k8s-bundle]
+        options: [jq, kubectl, k8s-bundle, gh]
         default: jq
         required: true
       version:

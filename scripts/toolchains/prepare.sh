@@ -4,7 +4,7 @@
 set -euo pipefail
 [[ $# -eq 5 && "$1" == prepare ]] || { echo "usage: prepare.sh prepare TOOL VERSION linux/amd64 ABSOLUTE_EMPTY_ROOTFS" >&2; exit 2; }
 tool="$2"; version="$3"; platform="$4"; rootfs="$5"
-case "$tool" in jq|kubectl|k8s-bundle) ;; *) echo "unknown tool: $tool" >&2; exit 2 ;; esac
+case "$tool" in jq|kubectl|k8s-bundle|gh) ;; *) echo "unknown tool: $tool" >&2; exit 2 ;; esac
 [[ "$version" =~ ^[0-9][0-9A-Za-z._-]*$ && "$version" != *..* ]] || { echo "invalid version" >&2; exit 2; }
 [[ "$platform" == linux/amd64 ]] || { echo "unsupported platform: $platform" >&2; exit 2; }
 [[ "$rootfs" == /* && "$rootfs" != / && "$rootfs" != *"/../"* && "$rootfs" != */.. && "$rootfs" != *"/./"* && "$rootfs" != */. && ! -L "$rootfs" ]] || { echo "unsafe rootfs path" >&2; exit 2; }
