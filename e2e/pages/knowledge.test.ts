@@ -17,7 +17,7 @@ async function serveLongKnowledgeCatalog(route:Route){
   path:'topics/engineering/catalog-entry-'+String(i+1).padStart(2,'0')+'.md',
   title:'Catalog entry '+String(i+1).padStart(2,'0'),
   description:'Independent scroll fixture '+String(i+1),
-  body:Array.from({length:48},(_,j)=>'## Section '+(j+1)+'\\n\\nLong source-grounded reading content.').join('\\n\\n')
+  body:Array.from({length:48},(_,j)=>'## Section '+(j+1)+'\n\nLong source-grounded reading content.').join('\n\n')
  }));
  await route.fulfill({json:data});
 }
