@@ -784,18 +784,18 @@ function selfTest() {
     status: 'completed', conclusion: 'failure', created_at: '2026-11-20T07:25:00Z' };
   assert.equal(attestPrRequiredQuality(qHead, {workflow_runs:[qRun]}, null).status, 'fail');
   const step = name => ({name, status:'completed', conclusion:'success'});
-  const job = (name, id, nameOfStep, conclusion='success') => ({
+  const qualityJobFixture = (name, id, nameOfStep, conclusion='success') => ({
     name, id, run_id: qRun.id, status:'completed', conclusion,
     steps: conclusion === 'success' ? [step(nameOfStep)] : [],
   });
   const requiredJobs = {jobs:[
-    job('scope', 11, 'Classify the exact PR or main-push change'),
-    job('web-check', 12, CHECK_STEP),
-    job('instruction-check', 13, '', 'skipped'),
-    job('workflow-check', 14, '', 'skipped'),
-    job('rust-check', 15, '', 'skipped'),
-    job('tooling-check', 16, 'Verify repository tooling Gates'),
-    job('web-tests', 17, GATE_STEP),
+    qualityJobFixture('scope', 11, 'Classify the exact PR or main-push change'),
+    qualityJobFixture('web-check', 12, CHECK_STEP),
+    qualityJobFixture('instruction-check', 13, '', 'skipped'),
+    qualityJobFixture('workflow-check', 14, '', 'skipped'),
+    qualityJobFixture('rust-check', 15, '', 'skipped'),
+    qualityJobFixture('tooling-check', 16, 'Verify repository tooling Gates'),
+    qualityJobFixture('web-tests', 17, GATE_STEP),
   ], total_count:7};
   const green = {...qRun, conclusion:'success'};
   const good = attestPrRequiredQuality(qHead, {workflow_runs:[green]}, requiredJobs);
