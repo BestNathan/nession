@@ -16,11 +16,14 @@ export type ViewMode = 'preview' | 'raw';
 
 /**
  * What a guarded save produced. A navigation guard must distinguish a saved
- * document (the switch may proceed), a revision conflict (the viewer's own
- * conflict decision now owns the next step) and any other failure (the draft
- * stays here and the guard offers retry/cancel/discard).
+ * document (the switch may proceed), a successful write of an older snapshot
+ * while newer edits remain (`saved-dirty`: persisted, but not safe to
+ * navigate — the draft stays and the guard keeps its decision, #3959), a
+ * revision conflict (the viewer's own conflict decision now owns the next
+ * step) and any other failure (the draft stays here and the guard offers
+ * retry/cancel/discard).
  */
-export type FileSaveOutcome = 'saved' | 'conflict' | 'failed';
+export type FileSaveOutcome = 'saved' | 'saved-dirty' | 'conflict' | 'failed';
 
 /** A caller may request the mounted viewer's guarded save before navigating. */
 export type FileSaveHandler = () => Promise<FileSaveOutcome>;
@@ -408,7 +411,10 @@ function useFileSave({
       setIsDirty(stillDirty);
       onDirtyChange?.(stillDirty);
       toast.success(`Saved ${filename}`);
-      return 'saved';
+      // Persisted is not the same as safe to navigate: when the editor moved
+      // on during the write, the navigation owner must keep the newer draft
+      // rather than unmount it with the switch (#3959).
+      return stillDirty ? 'saved-dirty' : 'saved';
     } catch (err) {
       if (fileErrorKind(err) === 'conflict') {
         setConflict(true);

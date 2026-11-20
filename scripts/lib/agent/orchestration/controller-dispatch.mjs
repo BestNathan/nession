@@ -13,12 +13,14 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
   recoverAttestedQwenPreflightV3,recoverAttestedQwenCliFailure,
   recoverAttestedQwenRepairTurnsFailure,recoverAttestedQwenToolFailure,
-  recoverAttestedQwenTrackedSourceFailure}
+  recoverAttestedQwenTrackedSourceFailure,
+  recoverAttestedReviewerToolFailure4065}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
   REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_FAILURE_4065,
-  REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784} from './outbox.mjs';
+  REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784,
+  REVIEWER_TOOL_FAILURE_4065} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
   recoverAttestedReviewerPremodelFailure,recoverAttestedReviewerJsonFailure}
   from './dispatch-store.mjs';
@@ -33,6 +35,8 @@ import {verifyReviewerPremodelFailureLive}
   from './reviewer-premodel-failure.mjs';
 import {verifyReviewerJsonFailureLive}
   from './reviewer-json-failure.mjs';
+import {verifyReviewerToolFailure4065Live}
+  from './reviewer-tool-failure-4065.mjs';
 import {authenticatePublisherReviewerWake}
   from './publisher-reviewer-wake.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
@@ -68,20 +72,22 @@ export const REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3784 run=44500591865';
 export const REVIEWER_PREMODEL_4065_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=4065 run=44744956936';
+export const REVIEWER_TOOL_4065_RECOVERY_COMMENT=
+  '/nession recover-review-tools issue=4065 run=44776788638';
 
 const QWEN_RECOVERY_C_SHA='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
 const QWEN_RECOVERY_BRANCH='agent/3784/qwen-39c01222a8d00fa3';
 // Before any Store CAS, reject the current direct/extra PR-head mutation.
 // An independently green CI run for D cannot authorize Review of Store C.
 export function assertReviewerRecoveryPrLease(source,pr,ref){
-  if(source===REVIEWER_PREMODEL_FAILURE_4065){
+  if([REVIEWER_PREMODEL_FAILURE_4065,REVIEWER_TOOL_FAILURE_4065].includes(source)){
     const branch='agent/4065/qwen-74024299b457f8c0';
     if(pr?.number!==4191||pr.state!=='open'||pr.draft!==false||
        pr.merged_at!=null||pr.head?.sha!==source.source_sha||
        pr.head?.ref!==branch||pr.head?.repo?.full_name!==REPO||
        pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
        ref?.ref!=='refs/heads/'+branch||ref.object?.sha!==source.source_sha)
-      fail('Publisher PR #4191 HEAD no longer matches immutable #4065 Store v9');
+      fail('Publisher PR #4191 HEAD no longer matches immutable #4065 Store source');
     return true;
   }
   if(source!==REVIEWER_PREMODEL_FAILURE_3784_C)
@@ -177,6 +183,13 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     REVIEWER_JSON_RECOVERIES.some(([source,command])=>
       event.issue.number===source.issue&&event.comment.body===command&&
       issue===source.issue&&actionId===source.action_id);
+  const reviewerToolRecoveryComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===REVIEWER_TOOL_FAILURE_4065.issue&&
+    event?.issue?.state==='open'&&!event?.issue.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&positive(event?.comment?.id)&&
+    event.comment.body===REVIEWER_TOOL_4065_RECOVERY_COMMENT&&
+    issue===REVIEWER_TOOL_FAILURE_4065.issue&&
+    actionId===REVIEWER_TOOL_FAILURE_4065.action_id;
   const toolRecoveryComment=commanded&&event?.action==='created'&&
     event?.issue?.number===QWEN_TOOL_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue.pull_request&&
@@ -229,7 +242,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     reviewCommand?.[2]===actionId;
   const permitted=publisherWake||ownerReview||ownerRepair||
     recoveryComment||jsonRecovery||cliRecoveryComment||
-    repairTurnsComment||toolRecoveryComment||trackedSourceComment||(commanded
+    repairTurnsComment||toolRecoveryComment||trackedSourceComment||
+     reviewerToolRecoveryComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -426,6 +440,8 @@ async function main(){
     ?(REVIEWER_JSON_RECOVERIES.find(([,command])=>
        event?.comment?.body===command)?.[0]??null):null;
   const reviewerJsonRecovery=reviewerJsonSource!==null;
+  const reviewerToolRecovery=commanded&&
+    event?.comment?.body===REVIEWER_TOOL_4065_RECOVERY_COMMENT;
   const recoveringQwenCli=commanded&&
     event?.comment?.body===QWEN_CLI_RECOVERY_COMMENT;
   const recoveringRepairTurns=commanded&&
@@ -434,7 +450,8 @@ async function main(){
     event?.comment?.body===QWEN_TOOL_RECOVERY_COMMENT;
   const recoveringTrackedSource=commanded&&
     event?.comment?.body===QWEN_TRACKED_SOURCE_RECOVERY_COMMENT;
-  const issue=commanded?(recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.issue:
+  const issue=commanded?(reviewerToolRecovery?REVIEWER_TOOL_FAILURE_4065.issue:
+    recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.issue:
     recoveringQwenTools?QWEN_TOOL_FAILURE.issue:
     recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.issue:
     recoveringQwenCli?QWEN_CLI_FAILURE.issue:
@@ -461,7 +478,8 @@ async function main(){
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=ownerReviewCommand?.[2]??null;
   const newRepairAction=ownerRepairCommand?.[2]??null;
-  const actionId=commanded?(recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.action_id:
+  const actionId=commanded?(reviewerToolRecovery?REVIEWER_TOOL_FAILURE_4065.action_id:
+    recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.action_id:
     recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
     recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.action_id:
     recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
@@ -482,6 +500,15 @@ async function main(){
     await authenticatePublisherReviewerWake({environment:env,event,token}):null;
   assertDispatchAuthority({environment:env,event,run,issue,actionId,
     publisherWakeProof});
+  if(reviewerToolRecovery){
+    const live=await api(token,'/issues/comments/'+event.comment.id);
+    if(live?.id!==event.comment.id||live.body!==REVIEWER_TOOL_4065_RECOVERY_COMMENT||
+       live.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+issue||
+       live.user?.login!=='BestNathan'||live.user?.type!=='User'||
+       live.author_association!=='OWNER'||
+       !live.created_at||live.created_at!==live.updated_at)
+      fail('Reviewer tool recovery requires live unedited Owner command');
+  }
   if(recoveringTrackedSource){
     // Unlike historic one-offs, independently bind the CURRENT unedited
     // owner comment to its canonical Issue URL before any App credential.
@@ -573,6 +600,29 @@ async function main(){
       // generating a new signed Action. No retry of the failed GitHub attempt.
       const proof=await verifyQwenCliFailureLive(token);
       const recovered=recoverAttestedQwenCliFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
+    if(reviewerToolRecovery){
+      // Attest genuine failed Run/Job, exact signed claim/admission and bounded
+      // log before Store CAS. The old consumed signed Action is never replayed.
+      const proof=await verifyReviewerToolFailure4065Live(token);
+      const [pr,ref]=await Promise.all([
+        api(token,'/pulls/4191'),
+        api(token,'/git/ref/heads/agent/4065/qwen-74024299b457f8c0'),
+      ]);
+      assertReviewerRecoveryPrLease(REVIEWER_TOOL_FAILURE_4065,pr,ref);
+      const recovered=recoverAttestedReviewerToolFailure4065({
         remote:storeRemote,source:proof});
       const signer={key,key_id:'main-controller',
         issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
