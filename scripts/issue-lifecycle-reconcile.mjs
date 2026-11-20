@@ -60,9 +60,12 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   if (merged.length === 0) {
     return { action: 'pending', reason: 'no verified merged implementation PR' };
   }
+  // GitOps is Nession's reviewed orphan deployment-source branch (#4110).
+  // A merged GitOps PR is a valid implementation relation, never a deployed
+  // runtime attestation. Arbitrary branch names remain rejected.
   if (associatedPrs.some(pr =>
     (pr.state === 'open' && !pr.merged_at) ||
-    (pr.merged_at && !['staging', 'main'].includes(pr.base?.ref)))) {
+    (pr.merged_at && !['staging', 'main', 'gitops'].includes(pr.base?.ref)))) {
     return { action: 'pending', reason: 'associated active PR or invalid merge target' };
   }
   return { action: 'close', reason: 'accepted SCs and merged implementation PRs' };
@@ -503,6 +506,22 @@ async function selfTest() {
   const pr = { number: 21, title: 'fix (#19)', body: 'Fixes #19', head: { sha },
     base: { ref: 'staging' }, merged_at: '2026-11-11T01:00:00Z', merge_commit_sha: sha };
   assert.equal(decideIssueClosure(issue, [pr]).action, 'close');
+  const gitopsPr = { ...pr, number: 22, state: 'closed',
+    base: { ref: 'gitops' }, merged_at: '2026-11-18T09:49:12Z' };
+  assert.equal(decideIssueClosure(issue, [pr, gitopsPr]).action, 'close',
+    'merged GitOps and main/staging implementations are valid closure targets');
+  assert.equal(decideIssueClosure(issue, [gitopsPr]).action, 'close',
+    'a GitOps-only implementation may close only when all SCs are accepted');
+  assert.equal(decideIssueClosure(issue,
+    [pr, { ...gitopsPr, state: 'open', merged_at: null }]).action, 'pending',
+    'an active unmerged GitOps implementation still blocks closure');
+  assert.equal(decideIssueClosure(issue,
+    [pr, { ...gitopsPr, base: { ref: 'prototype' } }]).action, 'pending',
+    'unapproved merged orphan branches still block closure');
+  assert.equal(decideIssueClosure({
+    ...issue, body: body.replace('| SC-01 | Pass |', '| SC-01 | Pending |'),
+  }, [pr, gitopsPr]).action, 'pending',
+    'GitOps merge never substitutes for required SC Acceptance');
   // Regression #3491: a main merge with unchecked/unevaluated main-stage SC
   // must remain open for the merged-SHA Acceptance selector to discover it.
   const mainPendingBody = body.replace('- [x] SC-01', '- [ ] SC-01')
