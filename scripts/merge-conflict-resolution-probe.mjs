@@ -113,7 +113,7 @@ function finalize(repo,context,mode,outDir) {
       const env={GIT_INDEX_FILE:indexFile};
       git(repo,['read-tree',target],{env});
       for(const p of conflicts) {
-        const entry=git(dir,['ls-files','-s','--',p]).stdout.trim();
+        const entry=git(dir,['ls-files','-s','--',p],{env}).stdout.trim();
         const match=/^(100644|100755) ([a-f0-9]{40}) 0\t/.exec(entry);
         if(!match)throw Error('invalid resolved source blob');
         git(repo,['update-index','--add','--cacheinfo',match[1]+','+match[2]+','+p],{env});
