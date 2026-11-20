@@ -6,11 +6,12 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {allowedConflictPath} from './merge-conflict-file-policy.mjs';
+export {allowedConflictPath} from './merge-conflict-file-policy.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[0-9a-f]{40}$/;
 const MAX_PATCH=256*1024;
-const BLOCKED=/^(?:\.github\/|\.git(?:\/|$)|gates\/|AGENTS\.md$|(?:.*\/)?AGENTS\.md$|(?:.*\/)?\.env(?:\.|$)|(?:.*\/)?(?:id_rsa|id_ed25519)$)/;
 function reject(msg){throw Error('trusted conflict Publisher: '+msg);}
 function check(v,msg){if(!v)reject(msg);}
 function command(bin,args,{cwd,env,stdin,conflict=false}={}){
@@ -28,12 +29,6 @@ function gh(token,method,endpoint,body=null){
   if(body!==null)args.push('--input','-');
   const raw=command('gh',args,{env:{GH_TOKEN:token},stdin:body===null?undefined:JSON.stringify(body)}).stdout;
   try{return JSON.parse(raw)}catch{reject('invalid GitHub '+method+' response for '+endpoint)}
-}
-export function allowedConflictPath(p){
-  return typeof p==='string'&&p.length>0&&p.length<=230&&
-    !p.startsWith('/')&&!p.split('/').some(s=>!s||s==='.'||s==='..')&&
-    !BLOCKED.test(p)&&!p.includes('\0')&&!p.includes('\n')&&!p.includes('\t')&&
-    !p.includes('\\');
 }
 function conflictIndex(target,source){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-verified-repair-'));
