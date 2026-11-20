@@ -8,6 +8,7 @@ import {
   startTouch,
   moveTouch,
   endTouch,
+  cancelTouch,
 } from '../../../e2e/acceptance/shared/swipe-2724-cases.cjs';
 import {
   avoidanceState,
@@ -430,6 +431,196 @@ test('the shell return swipe still respects a pushed detail and its dirty guard 
     to: { x: anchor.rightX, y: anchor.y },
   });
   await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'terminal');
+});
+
+/** The live translateX of an element, in CSS pixels. */
+async function translateX(page: Page, testId: string): Promise<number> {
+  return page.getByTestId(testId).evaluate((element) => {
+    const transform = getComputedStyle(element).transform;
+    if (transform === 'none') {
+      return 0;
+    }
+    const values = transform.match(/^matrix\(([^)]+)\)$/)?.[1]?.split(',').map(Number);
+    return values && values.length === 6 ? values[4] ?? Number.NaN : Number.NaN;
+  });
+}
+
+async function openPushedFileViewer(page: Page): Promise<{ x: number; y: number }> {
+  await page.goto('/#/fixture/app');
+  await page.getByTestId('app-header-workspace').click();
+  await expect(page.getByTestId('files-app-layout')).toBeVisible();
+  await openFixtureFile(page);
+  const viewerPath = await page.getByTestId('file-viewer-path').boundingBox();
+  if (!viewerPath) {
+    throw new Error('the pushed viewer must lay out its path chrome');
+  }
+  return {
+    x: Math.round(viewerPath.x + viewerPath.width / 2),
+    y: Math.round(viewerPath.y + viewerPath.height / 2),
+  };
+}
+
+test('outer swipe resists past the preferred reveal and the next contact is not dropped (#4185)', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/#/fixture/app');
+  const layerRoot = page.getByTestId('app-layer-root');
+  await layerRoot.waitFor();
+  const anchor = await shellAnchor(page);
+  const width = anchor.shell.width;
+  const preferred = Math.round(width * 0.8);
+
+  await startTouch(page, { x: anchor.leftX, y: anchor.y });
+  await moveTouch(page, { x: anchor.leftX + preferred, y: anchor.y });
+  // Sessions is parked at -width; its visible reveal is x + width.
+  const atPreferred = (await translateX(page, 'app-layer-sessions')) + width;
+  expect(Math.abs(atPreferred - preferred)).toBeLessThanOrEqual(2);
+
+  // Past the former 80% cap the preview keeps moving, with less visual travel
+  // than the finger supplies, and never becomes the whole shell.
+  const extraFinger = Math.round(width * 0.08);
+  await moveTouch(page, { x: anchor.leftX + preferred + extraFinger, y: anchor.y });
+  const pastPreferred = (await translateX(page, 'app-layer-sessions')) + width;
+  const extraVisual = pastPreferred - atPreferred;
+  expect(extraVisual).toBeGreaterThan(0);
+  expect(extraVisual).toBeLessThan(extraFinger);
+  expect(pastPreferred).toBeLessThan(width * 0.92 + 1);
+  await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
+
+  // Release as a snapback, then reverse immediately: the return settle must
+  // catch up instead of swallowing the next contact.
+  await moveTouch(page, { x: anchor.leftX + 40, y: anchor.y });
+  await page.waitForTimeout(250);
+  await endTouch(page, { x: anchor.leftX + 40, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'settling');
+
+  await startTouch(page, { x: anchor.rightX, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'candidate');
+  await moveTouch(page, { x: anchor.rightX - 120, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+  await expect(layerRoot).toHaveAttribute('data-swipe-destination', '2');
+
+  await page.waitForTimeout(250);
+  await cancelTouch(page, { x: anchor.rightX - 120, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'idle');
+  await expect(page.getByTestId('app-layer-workspace')).toHaveCount(0);
+});
+
+test('a caught-up Workspace-to-Terminal commit keeps the new contact alive (#4185)', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/#/fixture/app');
+  const layerRoot = page.getByTestId('app-layer-root');
+  await page.getByTestId('app-header-workspace').click();
+  await expect(page.getByTestId('files-app-layout')).toBeVisible();
+  const anchor = await shellAnchor(page);
+  const title = await page.getByTestId('app-page-header').locator('h1').boundingBox();
+  if (!title) {
+    throw new Error('the Workspace header must lay out its title');
+  }
+
+  // Workspace root -> Terminal is an outer page commit from shell chrome.
+  const point = {
+    x: Math.round(title.x + title.width / 2),
+    y: Math.round(title.y + title.height / 2),
+  };
+  await startTouch(page, point);
+  await moveTouch(page, { x: point.x + 200, y: point.y });
+  await page.waitForTimeout(250);
+  await endTouch(page, { x: point.x + 200, y: point.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'settling');
+
+  // Catching it up changes the route and removes the Workspace capability
+  // stack in the same render; that must not stand the new contact down.
+  await startTouch(page, { x: anchor.leftX, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'candidate');
+  await moveTouch(page, { x: anchor.leftX + 120, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+  await expect(layerRoot).toHaveAttribute('data-swipe-destination', '0');
+
+  await page.waitForTimeout(250);
+  await cancelTouch(page, { x: anchor.leftX + 120, y: anchor.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'idle');
+  await expect(layerRoot).toHaveAttribute('data-layer', 'terminal');
+});
+
+test('a rejected inner Pop returns with animated frames in place (#4185)', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const point = await openPushedFileViewer(page);
+  const layerRoot = page.getByTestId('app-layer-root');
+
+  await startTouch(page, point);
+  await page.waitForTimeout(150);
+  await moveTouch(page, { x: point.x + 50, y: point.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-inner', 'pop');
+  expect(await translateX(page, 'workspace-tool-content')).toBeGreaterThan(40);
+  await page.waitForTimeout(250);
+
+  // Release below the threshold and sample the frame path; the return must be
+  // an in-place animation to zero, not an immediate style removal.
+  const frames = await page.evaluate(({ x, y }) => new Promise<number[]>((resolve) => {
+    const key = '__nessionSwipe2724Touch';
+    const stored = (window as unknown as Record<string, { identifier: number; target: EventTarget } | undefined>)[key];
+    if (!stored) {
+      resolve([]);
+      return;
+    }
+    const target = stored.target as Element;
+    const touch = new Touch({ identifier: stored.identifier, target, clientX: x, clientY: y });
+    target.dispatchEvent(new TouchEvent('touchend', {
+      touches: [],
+      targetTouches: [],
+      changedTouches: [touch],
+      bubbles: true,
+      cancelable: true,
+    }));
+    delete (window as unknown as Record<string, unknown>)[key];
+
+    const element = document.querySelector('[data-testid="workspace-tool-content"]');
+    const values: number[] = [];
+    const deadline = performance.now() + 320;
+    const sample = () => {
+      const transform = element ? getComputedStyle(element).transform : 'none';
+      const parsed = transform.match(/^matrix\(([^)]+)\)$/)?.[1]?.split(',').map(Number);
+      values.push(parsed && parsed.length === 6 ? parsed[4] ?? 0 : 0);
+      if (performance.now() < deadline) {
+        requestAnimationFrame(sample);
+      } else {
+        resolve(values);
+      }
+    };
+    requestAnimationFrame(sample);
+  }), point);
+
+  expect(frames.length).toBeGreaterThan(3);
+  expect(frames.some((value) => value > 1 && value < 45)).toBe(true);
+  expect(Math.abs(frames[frames.length - 1] ?? Number.NaN)).toBeLessThanOrEqual(1);
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'idle');
+  await expect.poll(async () => Math.abs(await translateX(page, 'workspace-tool-content'))).toBeLessThanOrEqual(1);
+});
+
+test('a new Workspace contact during the return settle is caught up, not dropped (#4185)', async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const point = await openPushedFileViewer(page);
+  const layerRoot = page.getByTestId('app-layer-root');
+
+  await startTouch(page, point);
+  await page.waitForTimeout(150);
+  await moveTouch(page, { x: point.x + 50, y: point.y });
+  await page.waitForTimeout(250);
+  await endTouch(page, { x: point.x + 50, y: point.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'settling');
+
+  // The next contact lands while the return is visibly running.
+  await startTouch(page, point);
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'candidate');
+  await moveTouch(page, { x: point.x + 30, y: point.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'navigation');
+  await expect(layerRoot).toHaveAttribute('data-swipe-inner', 'pop');
+
+  await page.waitForTimeout(250);
+  await cancelTouch(page, { x: point.x + 30, y: point.y });
+  await expect(layerRoot).toHaveAttribute('data-swipe-phase', 'idle');
+  await expect.poll(async () => Math.abs(await translateX(page, 'workspace-tool-content'))).toBeLessThanOrEqual(1);
 });
 
 /**

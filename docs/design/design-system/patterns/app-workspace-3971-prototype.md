@@ -94,6 +94,13 @@ The live public preview was driven in real headless Chromium (Playwright) on
 The screenshots and JSON transcript from that walkthrough were recorded with
 the prototype verification on Issue #3971. They are mock-evidence only.
 
+> **Motion supersession (#4185, 2026-11-20):** the walkthrough's +125px/−120px
+> inner preview recorded the then-current hard cap and settle behavior. The
+> shared prototype now depicts continuous bounded resistance (125px preferred,
+> 180px absolute) and an interruptible settle; pinned source
+> `2cb721ccedc54a544749980d32a0167904eb5dbb`. The stack/header/content decisions
+> in this record are unchanged.
+
 ## Preserved history and supersession
 
 - The same #3971 artifact keeps its earlier token-only revision and the unified

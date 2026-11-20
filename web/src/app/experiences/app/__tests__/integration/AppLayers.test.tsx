@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AppLayers } from '../../AppLayers';
 import { EDGE_PLATFORM_GUARD_PX } from '../../gesture';
+import { useAppInnerStackMotion } from '@/app/workspace/appInnerStackMotion';
 
 function renderLayers(
   layer: 'sessions' | 'terminal' | 'workspace',
@@ -243,6 +244,71 @@ describe('AppLayers — the Workspace inner stack is one coordinator (#3971)', (
 
     expect(onPop).not.toHaveBeenCalled();
     expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'idle');
+  });
+
+  function InnerMotionProbe() {
+    const motion = useAppInnerStackMotion();
+    return (
+      <div
+        data-testid="inner-motion-probe"
+        data-action={motion.action ?? ''}
+        data-settling={motion.settling ? 'true' : 'false'}
+        style={motion.action === null ? undefined : {
+          transform: `translateX(${motion.offset}px)`,
+          transition: motion.settling ? 'transform 180ms' : undefined,
+        }}
+        onTransitionEnd={(event) => {
+          if (event.target === event.currentTarget && event.propertyName === 'transform') {
+            motion.onSettled?.();
+          }
+        }}
+      />
+    );
+  }
+
+  it('keeps the inner owner through a rejected settle and finishes from its transition', () => {
+    const onPop = vi.fn();
+    render(
+      <AppLayers
+        layer="workspace"
+        onLayerChange={vi.fn()}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={<InnerMotionProbe />}
+        workspaceDetailPushed
+        workspaceStack={{ pop: { title: 'Files', onActivate: onPop }, forward: null }}
+      />,
+    );
+    pinShell(390);
+    const probe = screen.getByTestId('inner-motion-probe');
+
+    fireEvent.touchStart(probe, {
+      touches: [touchAt(100)],
+      changedTouches: [touchAt(100)],
+    });
+    fireEvent.touchMove(probe, {
+      touches: [touchAt(130)],
+      changedTouches: [touchAt(130)],
+    });
+    expect(probe).toHaveAttribute('data-action', 'pop');
+    expect(probe).toHaveAttribute('data-settling', 'false');
+
+    fireEvent.touchEnd(probe, {
+      touches: [],
+      changedTouches: [touchAt(130)],
+    });
+
+    // Rejected below the threshold: still the Workspace frame's return.
+    expect(onPop).not.toHaveBeenCalled();
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'settling');
+    expect(probe).toHaveAttribute('data-action', 'pop');
+    expect(probe).toHaveAttribute('data-settling', 'true');
+
+    // The rendered transition end finalizes the settle; the timer is only the
+    // fallback.
+    fireEvent.transitionEnd(probe, { propertyName: 'transform' });
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'idle');
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-reason', 'below-threshold');
   });
 });
 
@@ -496,6 +562,59 @@ describe('AppLayers — in-flight feedback exists only during a drag (#2724)', (
     expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'settling');
     expect(screen.queryByTestId('app-layer-sessions')).toBeNull();
     expect(screen.getByTestId('app-layer-workspace')).toBeInTheDocument();
+  });
+});
+
+describe('AppLayers — a settle finishes from rendered motion (#4185)', () => {
+  function renderTerminal(onLayerChange = vi.fn()) {
+    render(
+      <AppLayers
+        layer="terminal"
+        onLayerChange={onLayerChange}
+        sessions={<div data-testid="stub-sessions" />}
+        terminal={<div data-testid="stub-terminal" />}
+        workspace={<div data-testid="stub-workspace" />}
+        workspaceDetailPushed={false}
+      />,
+    );
+    return onLayerChange;
+  }
+
+  it('commits the route when the moving slab reports its transform transition', () => {
+    const onLayerChange = renderTerminal();
+    pinShell(390);
+    drag(screen.getByTestId('stub-terminal'), [
+      [40, 300],
+      [160, 300],
+      [300, 300],
+    ]);
+
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'settling');
+    expect(onLayerChange).not.toHaveBeenCalled();
+
+    fireEvent.transitionEnd(screen.getByTestId('app-layer-sessions'), {
+      propertyName: 'transform',
+    });
+
+    expect(onLayerChange).toHaveBeenCalledWith('sessions');
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'idle');
+  });
+
+  it('ignores a nested transition and leaves the settle running', () => {
+    const onLayerChange = renderTerminal();
+    pinShell(390);
+    drag(screen.getByTestId('stub-terminal'), [
+      [40, 300],
+      [160, 300],
+      [300, 300],
+    ]);
+
+    fireEvent.transitionEnd(screen.getByTestId('stub-sessions'), {
+      propertyName: 'transform',
+    });
+
+    expect(onLayerChange).not.toHaveBeenCalled();
+    expect(screen.getByTestId('app-layer-root')).toHaveAttribute('data-swipe-phase', 'settling');
   });
 });
 
