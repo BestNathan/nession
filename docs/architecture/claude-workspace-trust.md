@@ -55,15 +55,29 @@ Claude Code stores the answer per project in its global configuration file:
   `mcpServers`, `enabledMcpjsonServers` and `disabledMcpjsonServers`. The
   writer changes only `hasTrustDialogAccepted`.
 
-**Pinned evidence.** The field and entry shape were verified against the Claude
-Code **2.1.329** binary (the project-entry reader and its writer merge the same
-boolean into the existing entry), and the state-file location against the
-repository's measured **2.1.325** layout. The Agent image pins **2.1.323**.
+**Pinned evidence.** The field and entry shape were verified across Claude Code
+**2.1.323, 2.1.325, 2.1.326 and 2.1.329** in an isolated lab (no user config
+touched): pre-seeding a minimal `{"hasTrustDialogAccepted": true}` entry
+suppressed the first-run dialog in a repository root, a repository
+subdirectory, a linked worktree (main-checkout key), a plain directory and its
+subdirectory, and a symlinked launch path. Accepting the dialog interactively
+wrote the main-checkout root for a linked worktree, and the state-file location
+was `$CLAUDE_CONFIG_DIR/.claude.json` when that variable was set. The same
+checks match the upstream documentation:
+[project allow rules and workspace trust](https://code.claude.com/docs/en/permissions.md#project-allow-rules-and-workspace-trust),
+[additional safeguards](https://code.claude.com/docs/en/security.md#additional-safeguards)
+(home-directory trust is session-only and cannot be persisted),
+[settings](https://code.claude.com/docs/en/settings.md) and the
+[`.claude` directory reference](https://code.claude.com/docs/en/claude-directory.md).
+The Agent image pins **2.1.323**.
+
 There is no runtime version allowlist: instead, a state file whose top-level
 document, `projects` member or project entry is not the expected JSON type is
 refused rather than overwritten. Whether the *running* external CLI still
 renders the dialog is observed by a separate staging smoke; the deterministic
-SCs do not claim it.
+SCs do not claim it. A brand-new state file suppresses trust but can still show
+onboarding screens first; the Agent image pre-seeds
+`hasCompletedOnboarding: true`, and this module does not write onboarding state.
 
 ## Resolution
 
