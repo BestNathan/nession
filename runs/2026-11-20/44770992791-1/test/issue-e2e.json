@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "f5e76edc54ac5c94178d1fa0c067dec193bb5bf2",
+  "run_id": 44770992791,
+  "run_attempt": 1,
+  "plan_digest": "bdd9877a51f2aba463ea7c5b947b45fde5e4f1b6071d0863f180016036cb4484",
+  "artifact_digest": "sha256:1587e4ab61a08565bc7149ed2ec445cf9a02a5be767f59e3877a076b9fe50abe",
+  "results": [
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 257
+    },
+    {
+      "id": "fixture-git",
+      "result": "Pass",
+      "discovered": 13,
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 136
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 110
+    },
+    {
+      "id": "ui-contract-matrix",
+      "result": "Pass",
+      "discovered": 104,
+      "passed": 104,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 836
+    }
+  ]
+}
