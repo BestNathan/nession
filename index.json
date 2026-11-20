@@ -400,7 +400,7 @@
       },
       {
         "title": "Nession native Toolchain OCI release to GHCR",
-        "description": "Verified version-pinned Shell Recipe directory preparation, Nession EROFS-backed OCI packaging, isolated GHCR publishing and independent readback",
+        "description": "Verified single-tool orphan build.sh catalog, SHA256 fingerprint-gated automatic release, native EROFS OCI Index and unified GHCR readback",
         "path": "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md",
         "status": "verified",
         "categories": [
@@ -412,7 +412,7 @@
           "toolchain",
           "workflows"
         ],
-        "updated_at": "2026-11-20T01:08:30Z"
+        "updated_at": "2026-11-20T10:58:49Z"
       },
       {
         "title": "Nession public Pages source publication and orphan-branch signals",

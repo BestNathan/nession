@@ -850,3 +850,10 @@
 - Categories: architecture, ci, erofs, release, security, toolchain, workflows
 - Reason: Capture #4092 native shell Recipe to directory, EROFS OCI GHCR publishing and exact main successful remote executable readback
 - Source: https://github.com/BestNathan/nession/issues/4113
+
+## 2026-11-20T10:58:49Z | update | Nession native Toolchain OCI release to GHCR
+- Path: topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md
+- Topic: workflows
+- Categories: architecture, ci, erofs, release, security, toolchain, workflows
+- Reason: Supersede historical per-tool Bundle/revision GHCR contract with delivered #4160 orphan single-tool source fingerprints, multi-platform OCI Index, authorized GHCR publication and idempotent skip receipts
+- Source: https://github.com/BestNathan/nession/issues/4160
