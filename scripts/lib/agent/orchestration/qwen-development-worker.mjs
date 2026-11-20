@@ -64,7 +64,8 @@ export function qwenDeveloperPrompt(issue,admission,review=null){
       Buffer.byteLength(issue.body)>MAX_CONTEXT)
     fail('Issue context not in bounded authenticated source');
   const guide='You are editing a disposable exact-SHA checkout. '+
-    'Use ONLY native Read/Grep/Glob/Edit/Write tools; Grep/Glob are read-only discovery. '+
+    'Use ONLY native Read/Grep/Glob/Edit tools; Grep/Glob are read-only discovery. '+
+    'Use Edit only after a successful Read of an existing tracked file. The Write tool is disabled to prevent file creation. '+
     'No Bash, shell, MCP, skills, network or Git actions. '+
     'Keep automatic tasks small: use Issue-named symbols and a few directly related source files; do not perform broad repository exploration. '+
     'If the change needs extensive discovery or cross-subsystem redesign, stop and report the scope blocker instead of expanding the task. '+
@@ -201,7 +202,13 @@ export function qwenDeveloperCliArgs({prompt,sessionId,resuming,task,plan}){
   qwenDeveloperExecutionTimeoutMs(task,resuming);
   return ['-p',prompt,'--output-format','stream-json','--verbose',
     '--model',plan.model,'--strict-mcp-config',
-    ...claudeCliToolPolicy(plan.tools,{restricted:true}),
+    // #4174: the Publisher accepts only edits to EXISTING tracked files.
+    // Keep the signed original Harness identity for legacy Session Resume,
+    // but expose a strictly smaller subset of its declared tool privileges:
+    // Write can create files that the immutable Git source gate must reject.
+    // CLI --tools and --allowedTools both receive this effective subset.
+    ...claudeCliToolPolicy(plan.tools.filter(tool=>tool!=='Write'),
+      {restricted:true}),
     ...(resuming?['--resume',sessionId]:['--session-id',sessionId])];
 }
 // Claude Code can also apply an implicit turn cap through its environment.
