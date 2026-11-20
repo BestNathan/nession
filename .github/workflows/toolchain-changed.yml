@@ -1,0 +1,20 @@
+name: Toolchains / Catalog Change
+# Unprivileged branch-local notification only; trusted main owns all release decisions.
+on:
+  push:
+    branches: [toolchains]
+permissions:
+  contents: read
+jobs:
+  notify:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Confirm catalog change source
+        env:
+          SOURCE_REF: ${{ github.ref }}
+          SOURCE_SHA: ${{ github.sha }}
+        run: |
+          test "$SOURCE_REF" = refs/heads/toolchains
+          printf 'Catalog source %s\n' "$SOURCE_SHA"
