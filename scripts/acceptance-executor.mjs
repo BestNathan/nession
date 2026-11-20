@@ -17,6 +17,7 @@ import {
   enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
   requiresPrToolingEvidence, requiresPrRustQualityEvidence,
   requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
+  collectPrRequiredQuality, validPrRequiredQualityReceipt, enforcePrRequiredQuality,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
 import {collectPrCiTriad, requiresPrCiTriad, requiresPrVisualEvidenceCriterion,
@@ -623,6 +624,11 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     skipAcceptedPrCriteria: true,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
+  // Every PR-stage model Pass must be independently Quality-qualified even
+  // when the SC text does not explicitly name test execution (#4146).
+  if (context.stage === 'pr' && context.criteria.length > 0) {
+    context.pr_required_quality = collectPrRequiredQuality(context.target_ref);
+  }
   // The trusted prepare step has read-only Actions credentials. Read the
   // required Web Gate only for executable Web integration SCs, not every PR.
   if (context.stage === 'pr' && context.criteria.some(item =>
@@ -663,9 +669,10 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
     context, normalizeAcceptanceResult(context, raw, source)));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
-  const gated = enforceLiveFullFailure(context,
-    enforcePrRustQuality(context, enforcePrWebQuality(context,
-      enforcePrCiTriad(context, normalized))));
+  const gated = enforcePrRequiredQuality(context,
+    enforceLiveFullFailure(context,
+      enforcePrRustQuality(context, enforcePrWebQuality(context,
+        enforcePrCiTriad(context, normalized)))));
   fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
 }
 
@@ -678,6 +685,25 @@ function applyCommand(issueNumber, resultFile) {
   if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
+  // A downloadable normalized result is not permission to project Pass. The
+  // trusted Issue writer MUST independently re-read the latest exact-run
+  // Quality status and compare its identity with the prepare-time receipt.
+  // A rerun/new attempt invalidates the old normalization (#4146).
+  if (stageOf(normalized.stage) === 'pr' &&
+      (normalized.criteria ?? []).some(item => item.result === 'Pass')) {
+    const actual = collectPrRequiredQuality(normalized.target_ref);
+    const claimed = normalized.pr_required_quality_receipt;
+    if (actual.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(claimed, normalized.target_ref) ||
+        !validPrRequiredQualityReceipt(actual.receipt, normalized.target_ref) ||
+        claimed.run_id !== actual.receipt.run_id ||
+        claimed.run_attempt !== actual.receipt.run_attempt ||
+        claimed.scope_job_id !== actual.receipt.scope_job_id ||
+        claimed.web_check_job_id !== actual.receipt.web_check_job_id ||
+        JSON.stringify(claimed.job_outcomes) !== JSON.stringify(actual.receipt.job_outcomes)) {
+      throw new Error('PR Acceptance Pass lacks current independent exact-HEAD required Quality qualification');
+    }
+  }
   // Concurrent Acceptance runs may finish out of order. Never project older
   // evidence over a newer run, but treat the superseded updater as a no-op.
   // All other contract, provenance and result validation errors still fail.
