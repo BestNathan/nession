@@ -31,6 +31,9 @@ let state: FixtureState | null = null;
 /** Test-only write controls for the guarded Web Files transition Case (#3171). */
 let nextWriteDelayMs = 0;
 let nextWriteError: string | null = null;
+/** Test-only held-write control for the guarded Save & Switch Case (#3959). */
+let nextWriteHold = false;
+let heldWrite: { release: () => void; fail: (message: string) => void } | null = null;
 /** Test-only read controls for the conflict-reload transaction Case (#3743). */
 let nextReadError: string | null = null;
 let nextReadHold = false;
@@ -212,21 +215,16 @@ function readFile(
   });
 }
 
-async function writeFile(
+/**
+ * Commit one write against the fixture's current state. A held write applies
+ * its captured snapshot and options here at release time, so revision CAS is
+ * checked against whatever the fixture holds then (#3959).
+ */
+async function writeNow(
   path: string,
   content: string,
   options?: WriteFileOptions,
 ): Promise<{ path: string; written: number; revision: string }> {
-  const delay = nextWriteDelayMs;
-  const failure = nextWriteError;
-  nextWriteDelayMs = 0;
-  nextWriteError = null;
-  if (delay > 0) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-  if (failure !== null) {
-    return reject(failure);
-  }
   const target = current();
   if (options?.createOnly && target.entries.has(path)) {
     return reject(`already_exists: ${path}`);
@@ -250,6 +248,40 @@ async function writeFile(
   target.contents.set(path, content);
   const revision = nextRevision(target, path);
   return { path, written: byteLength(content), revision };
+}
+
+async function writeFile(
+  path: string,
+  content: string,
+  options?: WriteFileOptions,
+): Promise<{ path: string; written: number; revision: string }> {
+  const delay = nextWriteDelayMs;
+  const failure = nextWriteError;
+  const hold = nextWriteHold;
+  nextWriteDelayMs = 0;
+  nextWriteError = null;
+  nextWriteHold = false;
+  if (delay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  if (failure !== null) {
+    return reject(failure);
+  }
+  if (hold) {
+    return new Promise((resolveWrite, rejectWrite) => {
+      heldWrite = {
+        release: () => {
+          heldWrite = null;
+          resolveWrite(writeNow(path, content, options));
+        },
+        fail: (message) => {
+          heldWrite = null;
+          rejectWrite(new Error(message));
+        },
+      };
+    });
+  }
+  return writeNow(path, content, options);
 }
 
 async function deleteFile(
@@ -379,6 +411,12 @@ export interface FixtureFilesControl {
   delayNextWrite: (milliseconds: number) => void;
   /** Reject exactly the next write with a non-conflict failure. */
   failNextWrite: (message?: string) => void;
+  /** Hold exactly the next write until released or failed (#3959). */
+  holdNextWrite: () => void;
+  /** Release a held write, applying its captured snapshot and options. */
+  releaseHeldWrite: () => void;
+  /** Reject a held write. */
+  failHeldWrite: (message?: string) => void;
   /** Reject exactly the next whole-file read (a viewer's replacement read). */
   failNextRead: (message?: string) => void;
   /** Hold exactly the next whole-file read until released or failed. */
@@ -395,6 +433,8 @@ export function fixtureFilesControl(): FixtureFilesControl {
       state = null;
       nextWriteDelayMs = 0;
       nextWriteError = null;
+      nextWriteHold = false;
+      heldWrite = null;
       nextReadError = null;
       nextReadHold = false;
       heldRead = null;
@@ -406,6 +446,21 @@ export function fixtureFilesControl(): FixtureFilesControl {
     },
     failNextWrite: (message = 'fixture: the next write failed') => {
       nextWriteError = message;
+    },
+    holdNextWrite: () => {
+      nextWriteHold = true;
+    },
+    releaseHeldWrite: () => {
+      if (heldWrite === null) {
+        throw new Error('fixture: no write is held');
+      }
+      heldWrite.release();
+    },
+    failHeldWrite: (message = 'fixture: the held write failed') => {
+      if (heldWrite === null) {
+        throw new Error('fixture: no write is held');
+      }
+      heldWrite.fail(message);
     },
     failNextRead: (message = 'fixture: the next read failed') => {
       nextReadError = message;

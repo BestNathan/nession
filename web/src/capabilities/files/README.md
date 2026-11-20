@@ -70,9 +70,13 @@ the pending target and the one decision:
 - a dirty file opens one unsaved-changes dialog naming A and B;
 - Cancel keeps A, its exact draft and the tree selection;
 - Discard opens B and does not persist A's draft;
-- Save and switch calls the viewer's guarded save and opens B only on success;
-  a conflict hands the next step to the viewer's existing conflict dialog
-  without opening B; any other failure keeps A and shows a retryable error;
+- Save and switch calls the viewer's guarded save and opens B only when that
+  save committed the current draft (`saved`); a successful write of an older
+  snapshot while newer edits remain (`saved-dirty`) keeps A and the one open
+  decision — only a save of the current draft or an explicit discard opens B
+  (#3959); a conflict hands the next step to the viewer's existing conflict
+  dialog without opening B; any other failure keeps A and shows a retryable
+  error;
 - a switch requested while the toolbar's own save is in flight waits for that
   save, then opens B only if it committed, otherwise keeps A;
 - repeated B/C requests while the decision is pending are ignored, so the
@@ -92,6 +96,14 @@ stays visible and dirty and a second guarded save persists it. Dirty clears only
 when the current content equals the snapshot its save committed. A rejected or
 conflicting write keeps the draft dirty, so the Web switch guard and the App
 Back guard still ask before leaving.
+
+The guarded save's outcome says which of these happened (#3959): `saved` only
+when the committed snapshot is still the editor's current content, and
+`saved-dirty` when the write persisted an older snapshot while newer edits
+remain. Persisted is not the same as safe to navigate — the Web switch guard
+commits the pending switch on `saved` alone, and the viewer's own completion
+report is consumed by the guard rather than re-deciding the transition, so a
+late report cannot discard the newer draft or mislabel the settled save.
 
 ## DocumentStore / EditorStore — boundary, not yet entities
 
