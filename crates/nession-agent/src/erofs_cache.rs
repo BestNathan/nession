@@ -8,8 +8,8 @@
 
 pub use nession_erofs::cache::eviction::{evict_all_unpinned, evict_unpinned, EvictionReport};
 pub use nession_erofs::cache::fetch::{
-    fetch_composite_image, fetch_manifest_image, FetchedComposite, FetchedImage, ImageObjectGrant,
-    MAX_METADATA_BYTES,
+    fetch_composite_image, fetch_manifest_image, fetch_manifest_image_v2, FetchedComposite,
+    FetchedImage, ImageObjectGrant, MAX_METADATA_BYTES,
 };
 pub use nession_erofs::cache::{
     identity_root, CacheDiagnostics, CacheObservation, CachePhase, CacheProgress, CachedImage,
@@ -132,6 +132,14 @@ pub async fn resolve_grant_image(
 ) -> anyhow::Result<ResolvedGrantImage> {
     use anyhow::Context;
 
+    // #4090 cutover target: a standard OCI `/v2/{repo}/manifests/{digest}` grant
+    // is fetched through the unified SDK/cache with no proprietary download URL.
+    // The proprietary compatibility path below is left untouched during the
+    // window, so existing Session prepare/resume semantics cannot regress.
+    if let Some(repository) = v2_manifest_repository(&grant.path, &grant.digest) {
+        return resolve_grant_image_v2(cache, grant, origin, server_auth_token, &repository).await;
+    }
+
     if !grant.path.starts_with(IMAGE_BLOB_PATH_PREFIX) {
         anyhow::bail!(
             "authorization route '{}' is not an image blob path",
@@ -243,6 +251,98 @@ pub async fn resolve_grant_image(
     )
     .await
     .with_context(|| format!("cannot prepare Manifest image {}", grant.digest))?;
+    let usage = nession_erofs::oci::usage::ImageRuntimeUsage::from_manifest_and_config(
+        &fetched.manifest,
+        &fetched.config,
+    )
+    .with_context(|| format!("cannot read the runtime usage of Manifest {}", grant.digest))?;
+    Ok(ResolvedGrantImage {
+        manifest_digest: Some(fetched.manifest_digest.clone()),
+        layer_digest: fetched.layer.digest.clone(),
+        layer_path: fetched.layer_path,
+        usage: Some(usage),
+        composite: None,
+    })
+}
+
+/// Parse the authorized repository from a standard `/v2/{repo}/manifests/{digest}`
+/// grant route (#4090). Returns `None` for the proprietary blob route or any
+/// shape that is not a validated repository-scoped Manifest route.
+fn v2_manifest_repository(path: &str, digest: &str) -> Option<String> {
+    let rest = path.strip_prefix("/v2/")?;
+    let suffix = format!("/manifests/{digest}");
+    let repository = rest.strip_suffix(&suffix)?;
+    if repository.is_empty() || repository.contains("/manifests/") || repository.contains("/blobs/")
+    {
+        return None;
+    }
+    nession_erofs::contracts::validate_repository_name(repository).ok()?;
+    Some(repository.to_string())
+}
+
+/// Resolve a standard `/v2/` Registry grant through the unified SDK/cache (#4090).
+///
+/// The reachability fence is the Server's: the Agent fetches only the authorized
+/// repository closure by immutable digest. Composite `/v2/` cutover is pending —
+/// the Server delivers Composite grants over the compatibility route during the
+/// window, so this fails closed rather than guessing a partial closure.
+async fn resolve_grant_image_v2(
+    cache: &ErofsCache,
+    grant: &ManagedImageGrant,
+    origin: &str,
+    server_auth_token: &str,
+    repository: &str,
+) -> anyhow::Result<ResolvedGrantImage> {
+    use anyhow::Context;
+
+    if grant.objects.is_empty() {
+        anyhow::bail!("a /v2/ Registry grant must name its authorized object closure");
+    }
+    let manifest = grant
+        .objects
+        .iter()
+        .find(|object| object.digest == grant.digest)
+        .ok_or_else(|| {
+            anyhow::anyhow!(
+                "authorized object set does not contain the manifest identity {}",
+                grant.digest
+            )
+        })?;
+    if manifest.media_type != nession_erofs::oci::MEDIA_TYPE_MANIFEST {
+        anyhow::bail!(
+            "authorized image identity {} is {:?}, not a Manifest",
+            grant.digest,
+            manifest.media_type
+        );
+    }
+    if manifest.path != grant.path {
+        anyhow::bail!(
+            "manifest route {:?} is not the image grant route {:?}",
+            manifest.path,
+            grant.path
+        );
+    }
+    let objects = grant
+        .objects
+        .iter()
+        .map(|object| ImageObjectGrant {
+            digest: object.digest.clone(),
+            media_type: object.media_type.clone(),
+            size_bytes: object.size_bytes,
+            path: object.path.clone(),
+        })
+        .collect::<Vec<_>>();
+    if objects
+        .iter()
+        .any(|object| object.media_type == nession_erofs::oci::MEDIA_TYPE_COMPOSITE)
+    {
+        anyhow::bail!(
+            "Composite /v2/ cutover is pending; the Server delivers Composite grants over the compatibility route"
+        );
+    }
+    let fetched = fetch_manifest_image_v2(cache, &objects, origin, server_auth_token, repository)
+        .await
+        .with_context(|| format!("cannot prepare Manifest image {} via /v2/", grant.digest))?;
     let usage = nession_erofs::oci::usage::ImageRuntimeUsage::from_manifest_and_config(
         &fetched.manifest,
         &fetched.config,
@@ -619,6 +719,43 @@ mod tests {
         assert_eq!(
             status(&cache, "sha256:not-a-digest").await.state,
             ImageCacheState::Failed
+        );
+    }
+
+    #[test]
+    fn v2_manifest_repository_detects_only_validated_registry_routes() {
+        let digest = format!("sha256:{}", "b".repeat(64));
+        // A standard repository-scoped Manifest route yields the repository.
+        assert_eq!(
+            v2_manifest_repository(&format!("/v2/team/app/manifests/{digest}"), &digest),
+            Some("team/app".to_string())
+        );
+        assert_eq!(
+            v2_manifest_repository(&format!("/v2/app/manifests/{digest}"), &digest),
+            Some("app".to_string())
+        );
+        // The proprietary compatibility route is not a /v2/ grant.
+        assert_eq!(
+            v2_manifest_repository(&format!("/images/blobs/{digest}"), &digest),
+            None
+        );
+        // A blobs route is not the Manifest grant route.
+        assert_eq!(
+            v2_manifest_repository(&format!("/v2/team/app/blobs/{digest}"), &digest),
+            None
+        );
+        // A digest mismatch, an empty repository and an invalid name fail closed.
+        assert_eq!(
+            v2_manifest_repository(&format!("/v2/team/app/manifests/{digest}"), "sha256:other"),
+            None
+        );
+        assert_eq!(
+            v2_manifest_repository(&format!("/v2//manifests/{digest}"), &digest),
+            None
+        );
+        assert_eq!(
+            v2_manifest_repository(&format!("/v2/Team/App/manifests/{digest}"), &digest),
+            None
         );
     }
 }

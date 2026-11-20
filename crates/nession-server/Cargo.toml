@@ -53,6 +53,9 @@ url.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 tempfile = "3.8"
 nession-agent = { path = "../nession-agent" }
+# #4090: drive the mounted `/v2/` Registry router in source-aligned adapter tests.
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 
 [lints]
 workspace = true

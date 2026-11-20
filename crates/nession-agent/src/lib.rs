@@ -25,6 +25,7 @@ pub mod netdetect;
 pub mod netwatch;
 pub mod p2p_auth;
 pub mod protocol;
+pub mod registry;
 pub mod runtime;
 pub mod sandbox_images;
 pub mod sandbox_runtime;

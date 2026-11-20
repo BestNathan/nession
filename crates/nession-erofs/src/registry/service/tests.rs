@@ -251,6 +251,7 @@ struct AgentHost {
     router: Router,
     blobs: CacheBlobStore,
     repos: Arc<CacheRepositoryStore>,
+    cache: Arc<ErofsCache>,
     _dir: TempDir,
 }
 
@@ -272,7 +273,7 @@ async fn agent_host() -> AgentHost {
             .unwrap(),
     );
     let blobs = CacheBlobStore::new(Arc::clone(&cache));
-    let repos = Arc::new(CacheRepositoryStore::new(cache));
+    let repos = Arc::new(CacheRepositoryStore::new(Arc::clone(&cache)));
     let service = RegistryService::read_only(
         Arc::new(blobs.clone()),
         Arc::clone(&repos),
@@ -284,6 +285,7 @@ async fn agent_host() -> AgentHost {
         router,
         blobs,
         repos,
+        cache,
         _dir: dir,
     }
 }
@@ -1614,4 +1616,123 @@ async fn sc03_loopback_readonly_and_repository_scope() {
     );
     server.abort();
     agent_server.abort();
+}
+
+/// #4090 SC-02 (SCN-03): a Session-authorized Agent obtains the correct immutable
+/// Image from a Server-hosted standard OCI `/v2/` Registry through the unified
+/// SDK/cache fetch — with no proprietary download URL — locally caches and
+/// consumes it; an unauthorized repository is denied; and an active Session pin
+/// survives a Server tag move.
+#[cfg(feature = "cache")]
+#[tokio::test]
+async fn sc02_agent_fetches_via_server_v2_and_pin_survives_tag_move() {
+    use crate::cache::fetch::{fetch_manifest_image_v2, ImageObjectGrant};
+    use crate::catalog::tag::TagExpectation;
+    use crate::contracts::BlobStore;
+    use crate::oci::annotation::{MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST};
+
+    let host = server_host(RegistryMode::ReadWrite).await;
+    let (base, server) = serve_loopback(host.router.clone()).await;
+    let fixture = seed_image(&host, "team/app", "v1", b"agent v2 fetch layer").await;
+    let agent = agent_host().await;
+
+    // Repository-scoped `/v2/` grants: the Manifest by immutable digest through
+    // the manifests route, Config/EROFS through the blobs route. No proprietary
+    // `/images/blobs/` URL appears anywhere in the authorized closure.
+    let grants = vec![
+        ImageObjectGrant {
+            digest: fixture.manifest.digest().to_string(),
+            media_type: MEDIA_TYPE_MANIFEST.to_string(),
+            size_bytes: fixture.manifest.size().unwrap(),
+            path: format!("/v2/team/app/manifests/{}", fixture.manifest.digest()),
+        },
+        ImageObjectGrant {
+            digest: fixture.config.digest().to_string(),
+            media_type: MEDIA_TYPE_CONFIG.to_string(),
+            size_bytes: fixture.config.size().unwrap(),
+            path: format!("/v2/team/app/blobs/{}", fixture.config.digest()),
+        },
+        ImageObjectGrant {
+            digest: fixture.layer.digest().to_string(),
+            media_type: MEDIA_TYPE_EROFS.to_string(),
+            size_bytes: fixture.layer.size().unwrap(),
+            path: format!("/v2/team/app/blobs/{}", fixture.layer.digest()),
+        },
+    ];
+    assert!(grants.iter().all(|g| g.path.starts_with("/v2/team/app/")));
+    assert!(!grants.iter().any(|g| g.path.contains("/images/blobs/")));
+
+    // An unauthorized repository is denied while the cache is still cold, so the
+    // fetch must contact the Server: the same digests under a foreign repository
+    // are not exposed by the Server reachability fence, and no object is cached.
+    let foreign: Vec<ImageObjectGrant> = grants
+        .iter()
+        .map(|g| ImageObjectGrant {
+            path: g.path.replace("/v2/team/app/", "/v2/other/app/"),
+            ..g.clone()
+        })
+        .collect();
+    let error = fetch_manifest_image_v2(&agent.cache, &foreign, &base, "good-token", "other/app")
+        .await
+        .expect_err("foreign repository must be denied");
+    assert!(
+        !agent.blobs.contains(fixture.layer.digest()).unwrap(),
+        "a denied foreign fetch must cache no object: {error:#}"
+    );
+
+    // The Server fixture authorizer accepts the good token; the Agent presents
+    // it as the bearer credential for the standard OCI fetch.
+    let fetched = fetch_manifest_image_v2(&agent.cache, &grants, &base, "good-token", "team/app")
+        .await
+        .expect("authorized /v2/ fetch");
+    assert_eq!(fetched.manifest_digest, fixture.manifest.digest());
+    assert_eq!(fetched.config_digest, fixture.config.digest());
+    assert_eq!(fetched.layer.digest, fixture.layer.digest());
+    assert_eq!(
+        tokio::fs::read(&fetched.layer_path).await.unwrap(),
+        fixture.layer.bytes()
+    );
+    assert!(agent.blobs.contains(fixture.layer.digest()).unwrap());
+
+    // An active Session pin holds the verified layer for the Session lifetime.
+    let pin = agent.cache.pin(fixture.layer.digest()).unwrap();
+
+    // The Server moves the mutable tag to a different immutable Image.
+    let moved = seed_image(&host, "team/app", "v2", b"a moved tag layer").await;
+    set_tag(
+        &host.conn,
+        "team/app",
+        "v1",
+        moved.manifest.digest(),
+        &TagExpectation::Exact(fixture.manifest.digest().to_string()),
+        2,
+    )
+    .await
+    .unwrap();
+    assert_ne!(moved.manifest.digest(), fixture.manifest.digest());
+
+    // The pinned local identity is unchanged and still consumable despite the
+    // tag move: the Session consumes its pinned digest, not the moving tag.
+    assert_eq!(
+        tokio::fs::read(&fetched.layer_path).await.unwrap(),
+        fixture.layer.bytes()
+    );
+    assert!(agent.blobs.contains(fixture.layer.digest()).unwrap());
+    assert_eq!(
+        agent.blobs.read(fixture.layer.digest()).unwrap(),
+        fixture.layer.bytes()
+    );
+    drop(pin);
+
+    server.abort();
+    println!(
+        "#4090 SC-02 measured: Agent fetch_manifest_image_v2 against loopback Server {} resolved \
+         manifest/config/layer digests equal originals ({}) via /v2/team/app routes only (no \
+         /images/blobs URL); foreign repository other/app denied; pinned layer {} survives Server \
+         tag v1 move to {} and stays byte-identical",
+        base,
+        fixture.manifest.digest(),
+        fixture.layer.digest(),
+        moved.manifest.digest(),
+    );
 }

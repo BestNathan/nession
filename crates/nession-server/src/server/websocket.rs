@@ -55,6 +55,10 @@ pub struct WebSocketServer {
     image_manager: Arc<ImageManager>,
     /// Authorized blob HTTP route mounted on this listener.
     image_http: Arc<ImageHttpService>,
+    /// The standard OCI `/v2/` Registry service mounted on this listener (#4090),
+    /// backed by the same CAS/Catalog/Token authority as the image manager. The
+    /// proprietary `image_http` route coexists during the compatibility window.
+    image_registry: Arc<crate::image::registry::ServerRegistry>,
     listener: Option<TcpListener>,
 }
 
@@ -159,6 +163,15 @@ impl WebSocketServer {
             Arc::clone(&image_manager),
             nession_protocol::TokenVerifier::new(config.auth_token.clone()),
         ));
+        // The standard `/v2/` Registry service shares the image manager's CAS,
+        // Catalog connection and Server Token identity (#4090). It is mounted on
+        // the same ingress below; the proprietary blob route stays for the
+        // compatibility window.
+        let image_registry = crate::image::registry::build_registry(
+            &image_manager,
+            nession_protocol::TokenVerifier::new(config.auth_token.clone()),
+        )
+        .context("failed to mount the Server OCI Registry service")?;
         // Build transitions are pushed with the authoritative descriptor read
         // from the durable build directory. A client that missed a push asks
         // `server.image.build.get|list` after reconnecting.
@@ -214,6 +227,7 @@ impl WebSocketServer {
             extension_tools,
             image_manager,
             image_http,
+            image_registry,
             listener: Some(listener),
         })
     }
@@ -447,6 +461,7 @@ impl WebSocketServer {
                         mcp_path: self.config.mcp.path.clone(),
                         image_manager: Arc::clone(&self.image_manager),
                         image_http: Arc::clone(&self.image_http),
+                        image_registry: Arc::clone(&self.image_registry),
                         allowed_origins: Arc::clone(&allowed_origins),
                         server_auth: server_auth.clone(),
                         heartbeat_interval_secs,
@@ -549,6 +564,8 @@ struct ServerContext {
     /// Global EROFS image manager and its authorized HTTP route (#3022).
     image_manager: Arc<ImageManager>,
     image_http: Arc<ImageHttpService>,
+    /// The standard OCI `/v2/` Registry service mounted on this ingress (#4090).
+    image_registry: Arc<crate::image::registry::ServerRegistry>,
     /// Browser origins allowed to open the protocol WebSocket (#4066).
     ///
     /// Empty refuses every upgrade that presents an `Origin`; requests without
@@ -641,6 +658,10 @@ fn http_router(
     pending_auth: Arc<tokio::sync::Semaphore>,
 ) -> Router {
     let mcp_path = ctx.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    // The standard `/v2/` Registry router (#4090) is stateless once built; it is
+    // merged below so its requests share the same admission-slot backstop as the
+    // WebSocket and proprietary blob routes.
+    let registry_router = ctx.image_registry.router();
     let state = HttpState {
         ctx,
         slot: slot.clone(),
@@ -654,11 +675,12 @@ fn http_router(
     }
     router
         .fallback(websocket_or_not_found)
+        .with_state(state)
+        .merge(registry_router)
         .layer(axum::middleware::from_fn_with_state(
             slot,
             ingress::release_after_response,
         ))
-        .with_state(state)
 }
 
 /// The `/ws` route: a valid upgrade is accepted, anything else is the
@@ -794,6 +816,7 @@ async fn handle_ws_stream(
         mcp_enabled,
         mcp_path,
         image_http: _,
+        image_registry: _,
         allowed_origins: _,
         server_auth,
     } = ctx;
