@@ -453,6 +453,32 @@ export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality) {
   return {qualified:true, sources:[...heads]};
 }
 
+// Native GitHub PR closing keywords can close an Issue outside our trusted
+// reconcileIssue path. The issues:closed guard must consume the SAME merged
+// implementation+exact-HEAD Quality policy rather than checked rows alone.
+export async function assessNativeCompletedIssueSource(repository, number, token, {
+  request = githubRequest, qualityReader = null,
+} = {}) {
+  const {prefix} = repoParts(repository);
+  if (!Number.isSafeInteger(number) || number <= 0)
+    throw Error('invalid native Issue number');
+  const issue = await request(prefix + '/issues/' + number, {token});
+  if (!issue || issue.number !== number) throw Error('native Issue identity mismatch');
+  if (issue.state !== 'closed' || issue.state_reason === 'not_planned' ||
+      !isAcceptanceIssue(issue) || issue.pull_request)
+    return {qualified:true, reason:'not a completed native Acceptance Issue'};
+  const prs = await relatedPulls(repository, number, token, null, request);
+  const decision = decideIssueClosure({...issue,state:'open'},prs);
+  if (decision.action !== 'close')
+    return {qualified:false,reason:'canonical Issue lifecycle: '+decision.reason};
+  const qualified = await qualifyIssuePrSourceForClosure(issue,prs,
+    qualityReader ?? (sha => collectPrRequiredQualityAsync(sha,
+      path => request(path, {token}))));
+  return qualified.qualified
+    ? {qualified:true,reason:'merged source and Quality verified'}
+    : {qualified:false,reason:'PR source Quality: '+qualified.reason};
+}
+
 async function reconcileIssue(repository, number, token, { includePr = null,
   request = githubRequest, qualityReader = null } = {}) {
   const { prefix } = repoParts(repository);
@@ -1050,6 +1076,19 @@ async function selfTest() {
     }
     throw Error('unexpected fixture API path ' + path);
   };
+  // GitHub-native completion must not bypass exact-source qualification.
+  const nativeCloseFixtureRead=async(path,opts={}) =>
+    path.endsWith('/issues/19') && opts.method!=='PATCH'
+      ? {...live,state:'closed',state_reason:'completed'} : mock(path,opts);
+  assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
+    request:nativeCloseFixtureRead,qualityReader:fixtureQuality})).qualified,true);
+  assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
+    request:nativeCloseFixtureRead,qualityReader:async()=>({status:'fail'})})).qualified,false);
+  assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
+    request:async(path,opts)=>{
+      if(path.endsWith('/pulls/21'))return {...effectivePr,merged_at:null};
+      return nativeCloseFixtureRead(path,opts);
+    },qualityReader:fixtureQuality})).qualified,false);
   const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock, qualityReader: fixtureQuality });
   assert.equal(once.action, 'closed');
   assert.equal(writes, 1);
