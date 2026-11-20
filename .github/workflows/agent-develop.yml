@@ -367,7 +367,9 @@ jobs:
       (inputs.resume_from == '' || needs.qwen-restore.result == 'success')
     runs-on: ubuntu-24.04
     environment: dev-claude-qwen
-    timeout-minutes: 25
+    # The model itself has an exact 30-minute Node CLI deadline (#3885).
+    # Keep 5 minutes for signed Store ACK, pinned CLI install and artifact cleanup.
+    timeout-minutes: 35
     steps:
       - name: Checkout main-owned Qwen model-runner code only
         uses: actions/checkout@v4
