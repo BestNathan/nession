@@ -1,5 +1,5 @@
 name: Agent / Staging Convergence Review
-run-name: ${{ github.event_name == 'push' && 'Agent / Staging Convergence Review' || format('Convergence conflict {0} {1} {2}', inputs.branch, inputs.main_sha, inputs.lane_sha) }}
+run-name: ${{ github.event_name == 'push' && 'Agent / Staging Convergence Review' || format('{0} {1} {2} {3}', inputs.repair_issue_number != '' && 'Convergence repair' || 'Convergence conflict', inputs.branch, inputs.main_sha, inputs.lane_sha) }}
 
 # #2926: model-backed but read-only, exact-ref conflict analysis. The scheduler
 # may dispatch this without giving the model any GitHub writer/merge authority.
@@ -53,6 +53,7 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
+      inputs.repair_issue_number == '' &&
       (github.actor == 'BestNathan' || github.actor == 'github-actions[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
