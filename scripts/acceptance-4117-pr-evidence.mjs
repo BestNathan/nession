@@ -353,8 +353,8 @@ function selfTest() {
     const set={total_count:jobs.length,jobs};
     assert.equal(verifiedJobs(run,set,meta.jobs).length,meta.jobs.length);
     assert.throws(()=>verifiedJobs(run,{...set,total_count:set.total_count+1},meta.jobs));
-    assert.throws(()=>verifiedJobs(run,{...set,jobs:[...jobs.slice(1),jobs[0]]},
-      meta.jobs.filter((_,i)=>i>0).concat([meta.jobs[0],meta.jobs[0]])));
+    assert.throws(()=>verifiedJobs(run,{total_count:jobs.length+1,
+      jobs:[...jobs,jobs[0]]},meta.jobs));
     assert.throws(()=>verifiedJobs(run,{...set,jobs:jobs.map((j,i)=>
       i===0?{...j,conclusion:'skipped'}:j)},meta.jobs));
     assert.throws(()=>verifiedJobs(run,{...set,jobs:jobs.map((j,i)=>
