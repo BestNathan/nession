@@ -110,15 +110,18 @@ function finalize(repo,context,mode,outDir) {
   if(mode==='source-repair') {
     const indexFile=path.join(os.tmpdir(),'nession-conflict-index-'+process.pid+'-'+Date.now());
     try {
-      const env={GIT_INDEX_FILE:indexFile};
-      git(repo,['read-tree',target],{env});
+      const candidateEnv={GIT_INDEX_FILE:indexFile};
+      git(repo,['read-tree',target],{env:candidateEnv});
       for(const p of conflicts) {
+        // Worktree's resolved stage-0 blob is in the FIRST scratch index.
+        // The candidate index starts as untouched TARGET and must never be
+        // mistaken for the resolved source blob.
         const entry=git(dir,['ls-files','-s','--',p],{env}).stdout.trim();
         const match=/^(100644|100755) ([a-f0-9]{40}) 0\t/.exec(entry);
         if(!match)throw Error('invalid resolved source blob');
-        git(repo,['update-index','--add','--cacheinfo',match[1]+','+match[2]+','+p],{env});
+        git(repo,['update-index','--add','--cacheinfo',match[1]+','+match[2]+','+p],{env:candidateEnv});
       }
-      candidateTree=validSha(git(repo,['write-tree'],{env}).stdout.trim());
+      candidateTree=validSha(git(repo,['write-tree'],{env:candidateEnv}).stdout.trim());
     } finally {fs.rmSync(indexFile,{force:true});}
     if(candidateTree===git(repo,['rev-parse',target+'^{tree}']).stdout.trim())
       throw Error('source repair is empty');
