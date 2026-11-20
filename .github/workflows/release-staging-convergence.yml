@@ -233,6 +233,9 @@ jobs:
           else
             echo 'actionable=false' >> "$GITHUB_OUTPUT"
           fi
+          # Trusted source-pinned planner, not event-provided path labels.
+          required="$(jq -r '[.branches[] | select(.workflow_write_required == true)] | length > 0' "$RUNNER_TEMP/convergence-plan.json")"
+          echo "workflow_write_required=$required" >> "$GITHUB_OUTPUT"
           {
             echo '## Staging branch convergence (#2926)'
             echo
@@ -255,10 +258,28 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
+      # #4059: a separate, owner-approved workflow writer is never inherited
+      # by ordinary PR Publisher credentials. Missing config stays BLOCKED.
+      - name: Mint approved workflow-file integration writer
+        id: workflow_writer
+        if: >-
+          steps.plan.outputs.actionable == 'true' &&
+          steps.plan.outputs.workflow_write_required == 'true' &&
+          inputs.dry_run != true &&
+          vars.CONVERGENCE_WORKFLOW_WRITER_APP_ID != ''
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.CONVERGENCE_WORKFLOW_WRITER_APP_ID }}
+          private-key: ${{ secrets.CONVERGENCE_WORKFLOW_WRITER_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+          permission-workflows: write
+
       - name: Idempotently prepare and arm protected GitHub Auto-merge
         if: steps.plan.outputs.actionable == 'true' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          CONVERGENCE_WORKFLOW_PUSH_TOKEN: ${{ steps.workflow_writer.outputs.token }}
           READ_GITHUB_TOKEN: ${{ github.token }}
           DISPATCH_GITHUB_TOKEN: ${{ github.token }}
           ISSUE_GITHUB_TOKEN: ${{ github.token }}
