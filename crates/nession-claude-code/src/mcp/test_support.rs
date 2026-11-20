@@ -263,6 +263,33 @@ pub fn claude_fixture(directory: &std::path::Path) -> std::path::PathBuf {
     path
 }
 
+#[cfg(unix)]
+#[test]
+fn fake_claude_preflight_executes_after_parallel_fixture_installation() {
+    let runs = (0..12)
+        .map(|_| {
+            std::thread::spawn(|| {
+                for _ in 0..3 {
+                    let temp = tempfile::tempdir().unwrap();
+                    let claude = claude_fixture(temp.path());
+                    let output = std::process::Command::new(claude)
+                        .arg("--version")
+                        .output()
+                        .unwrap();
+                    assert!(output.status.success());
+                    assert_eq!(
+                        String::from_utf8_lossy(&output.stdout).trim(),
+                        "2.1.325 (Claude Code)"
+                    );
+                }
+            })
+        })
+        .collect::<Vec<_>>();
+    for run in runs {
+        run.join().unwrap();
+    }
+}
+
 /// The header map a Connect test uses for the fake endpoint.
 pub fn bearer(token: &str) -> BTreeMap<String, String> {
     BTreeMap::from([("Authorization".to_string(), format!("Bearer {token}"))])
