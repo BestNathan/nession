@@ -15,6 +15,30 @@ import {promptTelemetry} from './lib/agent/telemetry/prompt.mjs';
 import {normalizeNativeTrace,writeExecutionTrace} from './lib/agent/telemetry/execution-trace.mjs';
 
 const WORKFLOW_ID='agent-staging-convergence-review';
+
+const MAX_PRODUCTION_TURNS=32;
+// The #4124 fixture stays at eight turns. Real source conflicts need bounded
+// exploration, and the owner may tune the budget without editing source code.
+export function allowedModelTurns(production,requested){
+  if(!production)return '8';
+  const count=String(requested??'24').trim();
+  if(!/^(?:[89]|1[0-9]|2[0-9]|3[0-2])$/.test(count))
+    throw Error('invalid production model turn budget (8-32 only)');
+  return count;
+}
+// Only safe scalar fields from the CLI outcome go into GitHub job logs.
+// Never echo model stdout, stderr, raw result, credentials or prompt text.
+export function sanitizedModelOutcome(proc,parsed){
+  const kind=typeof parsed?.subtype==='string'&&
+    /^[a-z][a-z0-9_]{0,63}$/.test(parsed.subtype)
+    ?parsed.subtype:null;
+  const turns=Number.isSafeInteger(parsed?.num_turns)&&
+    parsed.num_turns>=0&&parsed.num_turns<1000?parsed.num_turns:null;
+  return {exit_code:Number.isInteger(proc?.status)?proc.status:null,
+    subtype:kind,is_error:parsed?.is_error===true,turns,
+    has_envelope:parsed!==null&&typeof parsed==='object'};
+}
+
 const STAGES=Object.freeze({1:'base',2:'ours_target',3:'theirs_source'});
 const MAX_SOURCE_BLOB_BYTES=256*1024;
 const MAX_CONTEXT_BYTES=65536;
@@ -126,12 +150,17 @@ function main(){
   ].join('\n');
   let envelope=null,status='error';
   try {
-    const {proc,parsed}=runClaudeCli({prompt,model,maxTurns:'8',
+    const {proc,parsed}=runClaudeCli({prompt,model,
+      maxTurns:allowedModelTurns(production,process.env.CONVERGENCE_AGENT_MAX_TURNS),
       allowedTools:'Read,Edit,Write,Glob,Grep',
       disallowedTools:'Bash,NotebookEdit,WebFetch,WebSearch,mcp__*',
       tools:'Read,Edit,Write,Glob,Grep',cwd:r.worktree});
     envelope=parsed;
-    if(proc.status!==0||!parsed)throw Error('Coding Agent failed to edit the conflict worktree');
+    if(proc.status!==0||!parsed||parsed.is_error===true){
+      console.error('Coding Agent non-success receipt: '+
+        JSON.stringify(sanitizedModelOutcome(proc,parsed)));
+      throw Error('Coding Agent failed to edit the conflict worktree');
+    }
     status='finished';
     console.log('Coding Agent edit attempt completed for '+mode+'; pending independent Git validation');
   } finally {
@@ -167,6 +196,17 @@ function main(){
   }
 }
 function selfTest(){
+  assert.equal(allowedModelTurns(false,'32'),'8');
+  assert.equal(allowedModelTurns(true,undefined),'24');
+  assert.equal(allowedModelTurns(true,'24'),'24');
+  for(const invalid of ['0','7','33','999','inf','20.5','20;echo bad']){
+    assert.throws(()=>allowedModelTurns(true,invalid),/turn budget/);
+  }
+  assert.deepEqual(sanitizedModelOutcome({status:1},{
+    subtype:'error_max_turns',num_turns:9,is_error:true,prompt:'SECRET',
+    result:'DO_NOT_LOG',auth_token:'TOP_SECRET',
+  }),{exit_code:1,subtype:'error_max_turns',is_error:true,
+    turns:9,has_envelope:true});
   const raw=Buffer.from('BEGIN\n'+'x'.repeat(50000)+'\nEND\n','utf8');
   const preview=boundedStagePreview(raw,8192);
   assert.equal(preview.truncated,true);
