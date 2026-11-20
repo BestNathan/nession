@@ -5,7 +5,7 @@ description: Use for the single-tool orphan catalog, version-pinned build.sh pre
 
 # Nession Toolchain Release
 
-**Read current executable owners first:** [scripts/toolchains/README.md](../../../scripts/toolchains/README.md), [Release / Toolchains](../../../.github/workflows/release-toolchains.yml), [Reusable single-tool release](../../../.github/workflows/release-toolchain-one.yml), `scripts/toolchains/catalog-plan.mjs` and the existing `crates/nession-erofs`. [Issue #4160](https://github.com/BestNathan/nession/issues/4160) is the canonical migration contract; [#4092](https://github.com/BestNathan/nession/issues/4092) and [#4147](https://github.com/BestNathan/nession/issues/4147) preserve legacy proof.
+**Read current executable owners first:** [scripts/toolchains/README.md](../../../scripts/toolchains/README.md), [Release / Toolchains](../../../.github/workflows/release-toolchains.yml), the future `release-toolchain-one.yml` reusable workflow, `scripts/toolchains/catalog-plan.mjs` and the existing `crates/nession-erofs`. [Issue #4160](https://github.com/BestNathan/nession/issues/4160) is the canonical migration contract; [#4092](https://github.com/BestNathan/nession/issues/4092) and [#4147](https://github.com/BestNathan/nession/issues/4147) preserve legacy proof.
 
 Load `nession-development` for Issue-first worktrees/PRs, `nession-workflows` and `nession-cicd` for GitHub Actions ownership and Registry permission boundary, `nession-gates` for tests, and `nession-knowledge` for the protected Knowledge update. Follow scoped `.github/AGENTS.md` and `scripts/AGENTS.md`.
 
