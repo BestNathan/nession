@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, Search, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
@@ -284,7 +284,7 @@ export function BindingDraftView({
       data-testid="env-binding-draft"
       className={cn(
         'flex h-full min-h-0 flex-col overflow-y-auto p-4',
-        workspaceScrollClearanceClass,
+        workspaceBoundedScrollClearanceClass,
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">

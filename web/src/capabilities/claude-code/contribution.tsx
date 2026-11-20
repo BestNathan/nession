@@ -86,6 +86,10 @@ export const claudeCodeView: WorkspaceViewBinding = {
     web: ({ ctx }) => <ClaudeCodeWorkspace ctx={ctx} />,
     app: ({ ctx, depth }) => <ClaudeCodeAppWorkspace ctx={ctx} depth={depth} />,
   },
+  // #4115: the App stack keeps one internal scroll owner per route (the reader
+  // and collection surfaces), so the host renders the bounded adapter instead
+  // of wrapping the stack in a page scroller.
+  appScroll: 'bounded',
 };
 
 /**

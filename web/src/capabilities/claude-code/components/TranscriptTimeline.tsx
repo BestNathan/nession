@@ -10,7 +10,7 @@ import {
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { parseTranscriptRecord, type ParsedTranscriptRecord } from '../model/transcriptRecord';
 import { formatSize } from '../format';
 import { TranscriptRecordDetail } from './TranscriptRecordDetail';
@@ -183,7 +183,7 @@ export function TranscriptTimeline({
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-timeline">
       <div
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
         data-testid="transcript-timeline-scroll"
       >
         {records.length === 0 ? (

@@ -520,6 +520,45 @@ including where the capability switcher may appear — is in
 
 See [workspace.md](../workspace.md).
 
+### Host-owned scrolling and bottom actions (#4115)
+
+The App Workspace host owns the page's vertical scroll and the space at its
+end. A capability contributes content; it does not make itself a page scroller,
+calculate the Capsule's height, or add trailing padding so its last row can be
+seen.
+
+- **One default scroll owner per depth.** The host renders a bounded scrollport
+  around an ordinary capability view. The view's content is in natural flow,
+  and the scrollport's trailing extent is measured from the scrollport's own
+  bottom to the floating bar's top. At rest content may pass behind the
+  translucent Capsule Zone; at the end of scrolling the last row or control is
+  fully visible and tappable above it.
+- **Declared bounded surfaces are the exception.** A collection, reader, diff
+  or editor that genuinely scrolls internally declares itself `bounded` on its
+  view binding and keeps exactly one internal scroll owner. The host gives it
+  the full region and the measured trailing inset; the capability still does
+  not measure the Capsule.
+- **Bottom actions are hosted.** A capability's bottom actions (Files'
+  Copy/Delete while selecting) are contributed as content and mounted by the
+  host below the scrollport and above the Capsule. The host owns the band's
+  safe-area/Capsule inset, so actions stay reachable at every overlay height
+  and no capability computes a capability-specific footer offset.
+- **No permanently reserved footer.** An actions slot with nothing in it is
+  hidden; the scroll end reserves nothing for space that is already outside
+  the scrolling viewport.
+- **The overlay is dynamic.** Opening/collapsing the Capsule, switching
+  capabilities or depths, wrapping items, orientation/safe-area changes and a
+  keyboard/focus change recompute the same measurement. The App viewport
+  environment remains the single keyboard/safe-area reader (#3523); this
+  contract consumes its snapshot rather than adding another viewport owner.
+
+Browser proof is Chromium + Playwright against the production fixture. The
+Case reads the actual viewport, the designated scroll owner, the last
+actionable element and the Capsule rect at `scrollTop = scrollHeight -
+clientHeight`, and asserts the element's bottom is no lower than the Capsule's
+top (1px rounding tolerance). Source-level ownership is enforced by the
+existing layout-ownership Gate, not by a second Gate.
+
 ## Current capability-state mapping
 
 The generic capability lifecycle is:

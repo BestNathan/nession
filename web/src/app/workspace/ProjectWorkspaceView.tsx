@@ -42,16 +42,25 @@ export function ProjectWorkspace({ ctx }: WorkspaceViewProps) {
       </div>
     );
   }
-  return (
+  const content = (
+    <ProjectDetailContent
+      project={focused.project}
+      agents={ctx.agents}
+      onCreateSession={projectContext.onCreateProjectSession}
+      onSettings={projectContext.onProjectSettings}
+      sessions={projectContext.relatedSessions}
+      onOpenSession={projectContext.onOpenSession}
+    />
+  );
+
+  // #4115: the App host owns the page scrollport and the Capsule clearance, so
+  // the App half contributes content only. Web keeps its own region because
+  // there is no App host around it.
+  return ctx.experience === 'app' ? (
+    <div data-testid="workspace-project-view">{content}</div>
+  ) : (
     <WorkspaceScrollRegion data-testid="workspace-project-view">
-      <ProjectDetailContent
-        project={focused.project}
-        agents={ctx.agents}
-        onCreateSession={projectContext.onCreateProjectSession}
-        onSettings={projectContext.onProjectSettings}
-        sessions={projectContext.relatedSessions}
-        onOpenSession={projectContext.onOpenSession}
-      />
+      {content}
     </WorkspaceScrollRegion>
   );
 }

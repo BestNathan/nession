@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { GitBranch, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { WorkspaceSurface } from '@/components/ui/workspace-content';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
@@ -407,7 +407,7 @@ function GitBody({
             onCommit={mutations.commit}
           />
         ) : null}
-        <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}>
+        <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}>
           <GitChangeList
             rows={rows}
             selectedKey={selection.selectedKey}
@@ -494,7 +494,7 @@ function GitAppCollection({
           onCommit={mutations.commit}
         />
       ) : null}
-      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}>
+      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}>
         <GitChangeList
           rows={rows}
           selectedKey={selection.selectedKey}

@@ -4,7 +4,7 @@ import { jsonPreviewSurfaceClass } from '@/components/json/jsonTreeSyntax';
 import { parseJsonDocument } from '../model/jsonParse';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 interface JsonPreviewProps {
   content: string;
@@ -30,7 +30,7 @@ export function JsonPreview({ content }: JsonPreviewProps) {
   }
 
   return (
-    <div className={cn('overflow-y-auto h-full p-[var(--nession-workspace-editor-pad-y)] px-[var(--nession-workspace-editor-head-pad-x)] min-w-0', workspaceScrollClearanceClass)}>
+    <div className={cn('overflow-y-auto h-full p-[var(--nession-workspace-editor-pad-y)] px-[var(--nession-workspace-editor-head-pad-x)] min-w-0', workspaceBoundedScrollClearanceClass)}>
       <div className={jsonPreviewSurfaceClass('py-[var(--nession-shell-space-2)]')}>
         <JsonTree value={parsed.value} mode="inspector" pinRootOpen />
       </div>

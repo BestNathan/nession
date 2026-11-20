@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -222,7 +222,7 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
 
       <div
         ref={listRef}
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
         data-testid="env-navigator-list"
         onScroll={() => {
           const node = listRef.current;
