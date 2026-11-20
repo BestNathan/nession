@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Agent / SC Acceptance",
+    "github_run_id": 44778325082,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "44778325082-1-issue-3959-pr"
+  },
+  "task": {
+    "id": "issue-3959-pr",
+    "type": "acceptance",
+    "issue": 3959,
+    "stage": "pr",
+    "target_ref": "6e9fef05df68a2de169ba87d819cfe84546b28e3",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "a98e59a2-acd2-4a04-8a33-744735937d04",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v4",
+      "sha256": "09498d24b940bca834ccfcb04ce32f6e8f5a77649d848618afc5d744db790d06"
+    }
+  },
+  "execution": {
+    "turns": 9,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 36,
+    "output": 8238,
+    "cache_read": 211460,
+    "cache_write": 41514,
+    "reasoning": null,
+    "total": 261248
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-20T17:00:15.355Z",
+    "finished_at": "2026-11-20T17:02:49.470Z",
+    "agent_duration_ms": 153682,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 2,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "invalid-result",
+      "error": "SC-02 Pass requires concrete evidence",
+      "started_at": "2026-11-20T16:57:04.513Z",
+      "finished_at": "2026-11-20T17:00:15.355Z",
+      "turns": 1,
+      "tokens": {
+        "input": 6,
+        "output": 464,
+        "cache_read": 47916,
+        "cache_write": 7500,
+        "reasoning": null,
+        "total": null
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "valid",
+      "error": null,
+      "started_at": "2026-11-20T17:00:15.355Z",
+      "finished_at": "2026-11-20T17:02:49.470Z",
+      "turns": 9,
+      "tokens": {
+        "input": 30,
+        "output": 7774,
+        "cache_read": 163544,
+        "cache_write": 34014,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
