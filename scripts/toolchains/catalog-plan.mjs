@@ -42,7 +42,9 @@ function changed(root,sourceSha){
   if(!COMMIT.test(sourceSha)||git(root,'rev-parse','HEAD')!==sourceSha)
     throw Error('stale or forged orphan source SHA');
   const parents=git(root,'rev-list','--parents','-n','1',sourceSha).split(/\s+/).slice(1);
-  if(parents.length>1)throw Error('merge commits forbidden in orphan change scanner');
+  if(parents.length>2)throw Error('unexpected orphan commit parent count');
+  // A reviewed orphan PR is merged using a two-parent Merge Commit. Compare
+  // HEAD to its first parent (previous catalog tip), not to the PR branch.
   if(parents.length===0)return catalog(root);
   if(!COMMIT.test(parents[0]))throw Error('invalid parent');
   const output=git(root,'diff-tree','--no-commit-id','--name-only','-r',parents[0],sourceSha);
@@ -119,6 +121,23 @@ function selfTest() {
     writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\nprintf "linux/amd64\\n"\n');
     const restored=commit('restore jq');
     assert.deepEqual(changed(work,restored),[{tool:'jq',version:'1.8.1'}]);
+    // Two-parent merge is the normal catalog PR completion mode. First parent
+    // is the protected orphan base and second is the reviewed feature head.
+    git(work,'switch','-qc','feature-merge');
+    writeFileSync(join(work,'gh','2.105.0','build.sh'),'#!/bin/bash\nprintf "linux/arm64\\n"\n');
+    commit('change gh on branch');
+    git(work,'switch','-q','-');
+    git(work,'-c','user.name=fixture','-c','user.email=fixture@example.invalid',
+      'merge','--no-ff','-qm','merge reviewed gh change','feature-merge');
+    const merged=git(work,'rev-parse','HEAD');
+    assert.equal(git(work,'rev-list','--parents','-n','1',merged).split(/\s+/).length,3);
+    assert.deepEqual(changed(work,merged),[{tool:'gh',version:'2.105.0'}],
+      'a reviewed two-parent orphan PR merge must trigger only the changed tool');
+    writeFileSync(join(work,'README.md'),'README after merge\n');
+    const postMergeReadme=commit('README only');
+    assert.deepEqual(changed(work,postMergeReadme),[],
+      'unrelated direct push after merge must remain no-op');
+
   } finally {rmSync(root,{recursive:true,force:true});}
   process.stdout.write('catalog-plan deterministic selectors and targets: PASS\n');
 }
