@@ -35,6 +35,13 @@ schemars = { workspace = true, features = ["derive"] }
 [features]
 codegen = ["dep:ts-rs", "nession-protocol/codegen"]
 
+# Workspace Trust serialises read-merge-write across Agents sharing one Claude
+# home with an advisory `flock`, the same primitive the CLI lifecycle lock uses.
+# Sessions are a Unix/tmux product; non-Unix builds keep the atomic write and
+# skip only the cross-process serialisation.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [dev-dependencies]
 tempfile = "3"
 

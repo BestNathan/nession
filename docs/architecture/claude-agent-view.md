@@ -56,6 +56,11 @@ requested/resolved version in `runtime.json`.
 
 `nession_claude_enter` selects a conversation explicitly:
 
+* Before it launches, it prepares Claude's own Workspace Trust from the
+  Session's live working directory and observed Claude environment; a failure is
+  a truthful refusal, never a launch into an unseen blocking dialog. The
+  resolution, authorization boundary and write semantics are owned by
+  [Claude Workspace Trust](claude-workspace-trust.md) (`#4073`).
 * `mode: new` chooses a fresh UUID **before** launch (shell path:
   `claude --session-id <uuid>`) or uses in-process `/clear` only when Claude is
   verifiably idle. A preexisting Claude is never overwritten.

@@ -67,6 +67,7 @@ pub(crate) fn build(
     mutations: Arc<KeyedLane<ResourceKey>>,
     session_metadata: Arc<SessionMetadataStore>,
     tool_providers: Vec<Arc<dyn McpToolProvider>>,
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 ) -> anyhow::Result<Option<Arc<McpService>>> {
     let McpHost {
         config,
@@ -101,6 +102,7 @@ pub(crate) fn build(
         terminal_cols,
         mutations,
         session_metadata,
+        session_created,
     });
 
     let allowed_hosts =
@@ -134,6 +136,9 @@ struct AgentNodeBackend {
     /// this Session domain's own surface, so it reads and patches the store
     /// directly rather than routing through a wire it also serves.
     session_metadata: Arc<SessionMetadataStore>,
+    /// Capability preparation for a Session that now exists (#4073). Composed
+    /// only by the runtime; `None` in direct constructions.
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 impl AgentNodeBackend {
@@ -233,6 +238,8 @@ impl NodeBackend for AgentNodeBackend {
         let terminal_cols = self.terminal_cols;
         let session_name = name.to_string();
         let queued_name = session_name.clone();
+        let agent_id = self.agent_id.clone();
+        let session_created = self.session_created.clone();
         let response = self
             .run_keyed(&session_name, async move {
                 let initial = normalized.as_ref().map(|metadata| InitialSessionMetadata {
@@ -255,9 +262,19 @@ impl NodeBackend for AgentNodeBackend {
                     )
                     .await
                     .map_err(|error| ToolError::backend(format!("{error:#}")))?;
+                let mut warnings = outcome.warnings;
+                // #4073: the Session and its environment binding now exist, so
+                // the composed capability hook can resolve the authoritative
+                // directory and prepare its own state. Failure is a warning;
+                // the capability's enter-time check remains fail-closed.
+                if let Some(hook) = &session_created {
+                    if let Some(warning) = hook.session_created(&agent_id, &queued_name).await {
+                        warnings.push(warning);
+                    }
+                }
                 Ok(SessionCreatedOutput {
                     name: queued_name,
-                    warnings: outcome.warnings,
+                    warnings,
                     instance_id: outcome.instance_id,
                     metadata: outcome.metadata,
                 })

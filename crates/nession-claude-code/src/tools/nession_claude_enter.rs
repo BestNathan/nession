@@ -19,6 +19,7 @@ use crate::control::{
     ClaudeActivityState, ClaudeControl, ClaudeObservation, ClaudeProcessState, EnterMode,
     EnterOutcome, EnterRequest, EnterStatus,
 };
+use crate::workspace_trust::WorkspaceTrust;
 
 /// The exact MCP Tool name.
 pub const NAME: &str = "nession_claude_enter";
@@ -65,14 +66,23 @@ pub struct ClaudeEnterOutput {
 pub struct NessionClaudeEnter {
     local_agent_id: String,
     control: Arc<dyn ClaudeControl>,
+    /// Workspace Trust preparation, re-resolved from the Session's live
+    /// working directory on every enter (#4073). A Session is never launched
+    /// into a trust dialog this capability cannot see.
+    trust: Arc<WorkspaceTrust>,
 }
 
 impl NessionClaudeEnter {
     /// Bind the handler to one Agent's control backend.
-    pub fn new(local_agent_id: impl Into<String>, control: Arc<dyn ClaudeControl>) -> Self {
+    pub fn new(
+        local_agent_id: impl Into<String>,
+        control: Arc<dyn ClaudeControl>,
+        trust: Arc<WorkspaceTrust>,
+    ) -> Self {
         Self {
             local_agent_id: local_agent_id.into(),
             control,
+            trust,
         }
     }
 }
@@ -125,6 +135,16 @@ impl ToolHandler for NessionClaudeEnter {
                 Some(conversation_id)
             }
         };
+        // Fail-closed preflight (#4073). The directory and the Claude
+        // environment are re-resolved from the Session as it is *now*; nothing
+        // cached from creation is trusted. A failure is a truthful refusal,
+        // never a launch into an unseen blocking dialog.
+        if let Err(error) = self.trust.prepare(&target.session_id).await {
+            return reply_value(&refused(
+                target,
+                format!("Claude Workspace Trust could not be prepared before launch: {error}"),
+            ));
+        }
         let outcome = self
             .control
             .enter(EnterRequest {
@@ -134,6 +154,20 @@ impl ToolHandler for NessionClaudeEnter {
             })
             .await;
         reply_value(&output(target.agent_id, target.session_id, outcome))
+    }
+}
+
+fn refused(target: crate::control::ClaudeSessionTarget, detail: String) -> ClaudeEnterOutput {
+    ClaudeEnterOutput {
+        agent_id: target.agent_id,
+        session_id: target.session_id,
+        conversation_id: None,
+        status: EnterStatus::Refused,
+        process: ClaudeProcessState::Unknown,
+        activity: ClaudeActivityState::Unknown,
+        observation: ClaudeObservation::Unknown,
+        detail: Some(detail),
+        observed_at: chrono::Utc::now().to_rfc3339(),
     }
 }
 
@@ -157,14 +191,63 @@ mod tests {
     use crate::control::{
         ClaudeStatusObservation, EnterRequest, SubmitOutcome, SubmitRequest, SubmitStatus,
     };
+    use crate::session_context::{SessionClaudeConfig, SessionContext};
     use nession_mcp::backend::{
         ClusterBackend, NodeBackend, UnavailableClusterBackend, UnavailableNodeBackend,
     };
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-    struct FixtureControl;
+    struct FixedContext {
+        cwd: Option<String>,
+        config: Option<SessionClaudeConfig>,
+    }
 
     #[async_trait]
-    impl ClaudeControl for FixtureControl {
+    impl SessionContext for FixedContext {
+        async fn session_cwd(&self, _session_id: &str) -> Option<String> {
+            self.cwd.clone()
+        }
+
+        async fn session_claude_config(&self, _session_id: &str) -> Option<SessionClaudeConfig> {
+            self.config.clone()
+        }
+
+        async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
+            Some(false)
+        }
+
+        async fn session_claude_binding(
+            &self,
+            _session_id: &str,
+        ) -> Option<crate::binding::Binding> {
+            None
+        }
+    }
+
+    /// Records whether an enter was requested, and — when a state file is
+    /// supplied — whether the trust acceptance was already on disk *at that
+    /// moment*.
+    struct RecordingControl {
+        enters: AtomicUsize,
+        saw_trust: AtomicBool,
+        state_file: Option<PathBuf>,
+        key: String,
+    }
+
+    impl RecordingControl {
+        fn new(state_file: Option<PathBuf>, key: String) -> Self {
+            Self {
+                enters: AtomicUsize::new(0),
+                saw_trust: AtomicBool::new(false),
+                state_file,
+                key,
+            }
+        }
+    }
+
+    #[async_trait]
+    impl ClaudeControl for RecordingControl {
         async fn status(
             &self,
             _target: &crate::control::ClaudeSessionTarget,
@@ -173,6 +256,18 @@ mod tests {
         }
 
         async fn enter(&self, request: EnterRequest) -> EnterOutcome {
+            self.enters.fetch_add(1, Ordering::SeqCst);
+            if let Some(path) = &self.state_file {
+                if let Ok(bytes) = std::fs::read(path) {
+                    if let Ok(document) = serde_json::from_slice::<Value>(&bytes) {
+                        if document["projects"][&self.key]["hasTrustDialogAccepted"]
+                            == Value::Bool(true)
+                        {
+                            self.saw_trust.store(true, Ordering::SeqCst);
+                        }
+                    }
+                }
+            }
             let conversation_id = request
                 .conversation_id
                 .unwrap_or_else(|| "11111111-1111-4111-8111-111111111111".to_string());
@@ -205,8 +300,40 @@ mod tests {
         ToolContext::new(cluster, node)
     }
 
+    /// A real Session-approved project with an observed Claude home.
+    fn fixture() -> (tempfile::TempDir, Arc<RecordingControl>, NessionClaudeEnter) {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(&home).expect("home");
+        let project = temp.path().join("project");
+        std::fs::create_dir_all(project.join(".git")).expect("git");
+        let context = FixedContext {
+            cwd: Some(project.to_string_lossy().into_owned()),
+            config: Some(SessionClaudeConfig {
+                home: Some(home.to_string_lossy().into_owned()),
+                ..SessionClaudeConfig::default()
+            }),
+        };
+        let trust = Arc::new(WorkspaceTrust::new(Arc::new(context)));
+        let key = std::fs::canonicalize(&project)
+            .expect("canonical")
+            .to_string_lossy()
+            .into_owned();
+        let control = Arc::new(RecordingControl::new(Some(home.join(".claude.json")), key));
+        let tool = NessionClaudeEnter::new("agent-a", control.clone(), trust);
+        (temp, control, tool)
+    }
+
+    /// A handler whose trust dependency is never exercised (schema checks).
     fn tool() -> NessionClaudeEnter {
-        NessionClaudeEnter::new("agent-a", Arc::new(FixtureControl))
+        NessionClaudeEnter::new(
+            "agent-a",
+            Arc::new(RecordingControl::new(None, String::new())),
+            Arc::new(WorkspaceTrust::new(Arc::new(FixedContext {
+                cwd: None,
+                config: None,
+            }))),
+        )
     }
 
     fn args(value: Value) -> Map<String, Value> {
@@ -215,7 +342,8 @@ mod tests {
 
     #[tokio::test]
     async fn resume_returns_the_selected_conversation() {
-        let reply = tool()
+        let (_temp, control, tool) = fixture();
+        let reply = tool
             .call(
                 &context(),
                 args(serde_json::json!({
@@ -232,11 +360,51 @@ mod tests {
             "550e8400-e29b-41d4-a716-446655440000"
         );
         assert_eq!(reply["status"], "entered");
+        assert_eq!(control.enters.load(Ordering::SeqCst), 1);
+        assert!(
+            control.saw_trust.load(Ordering::SeqCst),
+            "the acceptance must exist before the control launches Claude"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failed_preparation_refuses_without_launching() {
+        let control = Arc::new(RecordingControl::new(None, String::new()));
+        let trust = Arc::new(WorkspaceTrust::new(Arc::new(FixedContext {
+            cwd: None,
+            config: Some(SessionClaudeConfig::default()),
+        })));
+        let tool = NessionClaudeEnter::new("agent-a", control.clone(), trust);
+        let reply = tool
+            .call(
+                &context(),
+                args(serde_json::json!({
+                    "agent_id": "agent-a",
+                    "session_id": "agent-a:dev",
+                    "mode": "new"
+                })),
+            )
+            .await
+            .expect("a refusal is an answer, not a tool error");
+        assert_eq!(reply["status"], "refused");
+        assert!(
+            reply["detail"]
+                .as_str()
+                .expect("detail")
+                .contains("Workspace Trust"),
+            "{reply}"
+        );
+        assert_eq!(
+            control.enters.load(Ordering::SeqCst),
+            0,
+            "a failed preparation must never be followed by a launch"
+        );
     }
 
     #[tokio::test]
     async fn new_lets_the_agent_choose_the_identity() {
-        let reply = tool()
+        let (_temp, _control, tool) = fixture();
+        let reply = tool
             .call(
                 &context(),
                 args(serde_json::json!({
@@ -252,7 +420,8 @@ mod tests {
 
     #[tokio::test]
     async fn new_refuses_a_caller_supplied_identity() {
-        let error = tool()
+        let (_temp, _control, tool) = fixture();
+        let error = tool
             .call(
                 &context(),
                 args(serde_json::json!({
@@ -269,11 +438,12 @@ mod tests {
 
     #[tokio::test]
     async fn resume_requires_an_explicit_conversation() {
+        let (_temp, _control, tool) = fixture();
         for value in [
             serde_json::json!({"agent_id":"agent-a","session_id":"agent-a:dev","mode":"resume"}),
             serde_json::json!({"agent_id":"agent-a","session_id":"agent-a:dev","mode":"resume","conversation_id":"  "}),
         ] {
-            let error = tool()
+            let error = tool
                 .call(&context(), args(value))
                 .await
                 .expect_err("resume id");
@@ -283,7 +453,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_foreign_target_is_refused() {
-        let error = tool()
+        let (_temp, _control, tool) = fixture();
+        let error = tool
             .call(
                 &context(),
                 args(serde_json::json!({

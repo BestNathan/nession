@@ -31,6 +31,7 @@ use nession_claude_code::control::{
     SubmitRequest, SubmitStatus,
 };
 use nession_claude_code::process::is_claude_cli_process;
+use nession_protocol::contracts::sandbox::v1::SandboxContextStatus;
 
 use crate::tmux::manager::SessionManager;
 
@@ -226,6 +227,28 @@ impl ClaudeControl for AgentClaudeControl {
         let before = self.observe(session_name).await;
         match before.process {
             ClaudeProcessState::NotRunning => {
+                // A managed Sandbox execution gives Claude a different
+                // filesystem and user-config identity than the host observes.
+                // Workspace Trust cannot be prepared against the right root
+                // from here (#4073), so the launch is refused instead of
+                // writing trust for a directory Claude will not read.
+                match self.tmux.sandbox_context(session_name).await {
+                    Ok(context) if context.status == SandboxContextStatus::Inside => {
+                        return refused(
+                            "Claude runs inside a Nession Sandbox execution in this Session; \
+                             its in-sandbox working directory and Claude configuration cannot be \
+                             verified from the Agent, so Workspace Trust is not prepared"
+                                .to_string(),
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        return refused(format!(
+                            "the Session's Sandbox context could not be verified before launch: \
+                             {error:#}"
+                        ));
+                    }
+                }
                 let (command, expected) = match request.mode {
                     EnterMode::New => {
                         let conversation = uuid::Uuid::new_v4().to_string();

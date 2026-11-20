@@ -19,3 +19,4 @@ pub mod server;
 pub mod session_context;
 pub mod tools;
 pub mod transcript;
+pub mod workspace_trust;
