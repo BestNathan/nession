@@ -528,6 +528,18 @@ async fn a_created_session_reaches_the_composed_preparation_hook() {
         "the hook's warning belongs to the create reply: {}",
         text_of(&created)
     );
+    // This test shares the run's private tmux socket with every other test
+    // binary. Leaving the Session behind would make an unrelated test that
+    // asserts a fresh Agent sees no tmux Sessions fail intermittently under
+    // the parallel coverage run, so clean up through the same Tool.
+    let killed = call_tool(
+        addr,
+        &session,
+        "nession_agent_kill_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
     let _ = handle.shutdown().await;
 }
 
