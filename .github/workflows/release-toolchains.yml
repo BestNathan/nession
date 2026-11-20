@@ -24,6 +24,7 @@ on:
   workflow_run:
     workflows: ['Toolchains / Catalog Change']
     types: [completed]
+    branches: [toolchains]
 permissions:
   contents: read
 jobs:
