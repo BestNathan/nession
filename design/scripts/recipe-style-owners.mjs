@@ -10,6 +10,7 @@ export const LAYOUT_RECIPE_OWNER = 'web/src/app/workspace/layout/workspaceLayout
 export const TOKEN_OWNED_RECIPE_FILES = Object.freeze([
   LAYOUT_RECIPE_OWNER,
   'web/src/components/ui/resource-detail.tsx',
+  'web/src/components/ui/workspace-content.tsx',
   'web/src/components/ui/configuration-form.tsx',
   'web/src/components/ui/configuration-formStyles.ts',
   'web/src/components/ui/operation-surface.tsx',
