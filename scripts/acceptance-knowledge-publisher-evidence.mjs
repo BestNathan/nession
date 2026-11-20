@@ -77,8 +77,12 @@ export function mainAncestry(compare,base,tip){
     ['ahead','identical'].includes(compare.status)&&
     compare.base_commit?.sha===base);
 }
+// #4118's own post-merge verification consumes the *same* independently
+// authenticated #4113 publication, not a new Issue/Run-selected witness.
+// The historical #3156 witness and strict source identities remain unchanged.
+function usesToolchainWitness(issue){return ['4113','4118'].includes(String(issue));}
 export function shouldCollectKnowledgePublication(stage,issue){
-  return stage==='post-merge'&&['2358','3156','3224','4113'].includes(String(issue));
+  return stage==='post-merge'&&['2358','3156','3224','4113','4118'].includes(String(issue));
 }
 export function attestKnowledgePublication({
   targetSha,comment,publisher,signal,pages,proposalCommit,
@@ -86,7 +90,7 @@ export function attestKnowledgePublication({
   implementedToTarget,implementedToPublisher,targetToPublisher,publisherToTarget,
   issue=3156,knowledgeReadback=null,
 }){
-  const pins=String(issue)==='4113'?TOOLCHAIN_KNOWLEDGE_WITNESS:KNOWLEDGE_WITNESS;
+  const pins=usesToolchainWitness(issue)?TOOLCHAIN_KNOWLEDGE_WITNESS:KNOWLEDGE_WITNESS;
   const implemented=pins.implemented??IMPLEMENTED;
   deny(SHA.test(targetSha)&&mainAncestry(implementedToTarget,implemented,targetSha),
     'Acceptance target does not include implementing fix');
@@ -104,7 +108,7 @@ export function attestKnowledgePublication({
   const ref=lines[1].slice('proposal_ref='.length);
   const source=lines[2].slice('proposal_sha='.length);
   const previous=lines[3].slice('expected_head='.length);
-  if(String(issue)==='4113')deny(source===pins.published&&previous===pins.previous,
+  if(usesToolchainWitness(issue))deny(source===pins.published&&previous===pins.previous,
     'unrecognized #4113 proposal and previous Knowledge SHA');
   deny(source!==previous&&proposalCommit?.sha===source&&
     proposalCommit.parents?.length===1&&proposalCommit.parents[0].sha===previous,
@@ -157,7 +161,7 @@ export function attestKnowledgePublication({
   const publish=oneJob(pagesJobs,pages,'Publish independent Pages',[
     'Deploy GitHub Pages','Verify public site URL and exact deployed main SHA']);
   const publicSource=parsePages(pagesLog,source);
-  const contentProof=String(issue)==='4113'
+  const contentProof=usesToolchainWitness(issue)
     ?attestToolchainKnowledgeReadback({
       ...knowledgeReadback,commit:proposalCommit,publishedSha:source,
       previousSha:previous,publicDigest:publicSource.digest,
@@ -188,7 +192,7 @@ export function attestKnowledgePublication({
 export async function collectKnowledgePublication({repo,targetSha,stage,issue,get,getLog}){
   if(!shouldCollectKnowledgePublication(stage,issue))return [];
   deny(repo===REPO&&SHA.test(targetSha),'invalid evidence collection scope');
-  const p=String(issue)==='4113'?TOOLCHAIN_KNOWLEDGE_WITNESS:KNOWLEDGE_WITNESS;
+  const p=usesToolchainWitness(issue)?TOOLCHAIN_KNOWLEDGE_WITNESS:KNOWLEDGE_WITNESS;
   const implemented=p.implemented??IMPLEMENTED;
   const path='/repos/'+REPO;
   const [comment,publisher,signal,pages]=await Promise.all([
@@ -218,7 +222,7 @@ export async function collectKnowledgePublication({repo,targetSha,stage,issue,ge
   const publisherToTarget=targetSha===main?null:
     await get(path+'/compare/'+main+'...'+targetSha);
   let knowledgeReadback=null;
-  if(String(issue)==='4113'){
+  if(usesToolchainWitness(issue)){
     // GitHub returns immutable committed-content blobs by exact Knowledge SHA.
     // The live protected ref is an additional CAS witness, not an arbitrary
     // mutable Issue/PR URL supplied to the collector.
@@ -311,7 +315,9 @@ export function selfTestKnowledgePublication(){
   assert.equal(shouldCollectKnowledgePublication('post-merge',3224),true);
   assert.equal(shouldCollectKnowledgePublication('post-merge',2358),true);
   assert.equal(shouldCollectKnowledgePublication('post-merge',4113),true);
+  assert.equal(shouldCollectKnowledgePublication('post-merge',4118),true);
   assert.equal(shouldCollectKnowledgePublication('pr',4113),false);
+  assert.equal(shouldCollectKnowledgePublication('pr',4118),false);
   selfTestToolchainKnowledgeReadback();
   const bad=[
     {comment:{...original.comment,author_association:'MEMBER'}},
