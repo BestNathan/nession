@@ -24,6 +24,7 @@ pub mod memory;
 pub mod netdetect;
 pub mod netwatch;
 pub mod p2p_auth;
+pub mod peer_registry;
 pub mod protocol;
 pub mod registry;
 pub mod runtime;

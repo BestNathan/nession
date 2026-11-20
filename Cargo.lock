@@ -2043,6 +2043,7 @@ dependencies = [
  "rustls 0.22.4",
  "rustls-pemfile",
  "schemars",
+ "sea-orm",
  "serde",
  "serde_json",
  "sha2 0.10.9",
