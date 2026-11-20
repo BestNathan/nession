@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44681377420,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4073-claude-workspace-trust",
+    "target_sha": "e41f478c7afa35b74ca8b64d0abaf4d575fc2819",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44681377420",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "3d38c797a2f79eb00d04d673e19d90329e9d9214a2d449d909f473451a2bc91e"
+  },
+  "record": "runs/2026-11-20/44681377420-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "b6683a680ae39f535f8b3a1f69da7064de2cf95f5e0c60bd3f057952adbac446"
+}
