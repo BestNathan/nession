@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@codemirror/view';
 import { FileViewer } from '@/capabilities/files/components/FileViewer';
-import { FILE_CHANGED_DURING_READ_MESSAGE, type FileData, type FileOps } from '@/capabilities/files';
+import { FILE_CHANGED_DURING_READ_MESSAGE, type FileData, type FileOps, type FileSaveOutcome } from '@/capabilities/files';
 
 function mockFileOps(overrides: Partial<FileOps> = {}): FileOps {
   return {
@@ -294,7 +294,7 @@ Run the deploy script.
       writeFile,
     });
     const onSavingChange = vi.fn();
-    let handler: (() => Promise<'saved' | 'conflict' | 'failed'>) | null = null;
+    let handler: (() => Promise<FileSaveOutcome>) | null = null;
     render(
       <FileViewer
         fileOps={ops}
@@ -317,7 +317,7 @@ Run the deploy script.
     );
     expect(handler).not.toBeNull();
 
-    let savePromise: Promise<'saved' | 'conflict' | 'failed'> | undefined;
+    let savePromise: Promise<FileSaveOutcome> | undefined;
     await act(async () => {
       savePromise = handler!();
     });
@@ -332,6 +332,77 @@ Run the deploy script.
       { expectedRevision: 'rev-1' },
     );
     expect(onSavingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('reports saved-dirty from the guarded save when newer edits remain (#3959)', async () => {
+    let finishFirstWrite: ((value: { path: string; written: number; revision: string }) => void) | null = null;
+    const writeFile = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          finishFirstWrite = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ path: '/test/notes.txt', written: 7, revision: 'rev-3' });
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      }),
+      writeFile,
+    });
+    let handler: (() => Promise<FileSaveOutcome>) | null = null;
+    render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer
+          fileOps={ops}
+          path="/test/notes.txt"
+          filename="notes.txt"
+          onClose={vi.fn()}
+          onSaveHandlerChange={(next) => {
+            handler = next;
+          }}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    expect(view).not.toBeNull();
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'B' } });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Save/ })).toBeEnabled(),
+    );
+
+    // The guarded save submits B; the editor moves on to C while it is held.
+    let firstSave: Promise<FileSaveOutcome> | undefined;
+    await act(async () => {
+      firstSave = handler!();
+    });
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'C' } });
+    });
+    await act(async () => {
+      finishFirstWrite?.({ path: '/test/notes.txt', written: 6, revision: 'rev-2' });
+    });
+    // Persisted, but not safe to navigate: the outcome must say so.
+    expect(await firstSave).toBe('saved-dirty');
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+
+    // A second guarded save commits the current draft and reports saved.
+    let secondSave: Promise<FileSaveOutcome> | undefined;
+    await act(async () => {
+      secondSave = handler!();
+    });
+    expect(await secondSave).toBe('saved');
+    expect(writeFile.mock.calls[1]?.[1]).toBe('helloBC');
+    expect(writeFile.mock.calls[1]?.[2]).toEqual({ expectedRevision: 'rev-2' });
+    await waitFor(() => expect(screen.queryByTitle('Unsaved changes')).not.toBeInTheDocument());
   });
 
   it('keeps edits made during a pending save dirty after that save completes (#3322)', async () => {
