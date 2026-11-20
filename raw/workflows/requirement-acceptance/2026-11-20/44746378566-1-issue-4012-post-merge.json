@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 44746378566,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "44746378566-1-issue-4012-post-merge"
+  },
+  "task": {
+    "id": "issue-4012-post-merge",
+    "type": "acceptance",
+    "issue": 4012,
+    "stage": "post-merge",
+    "target_ref": "473ac4ffbdc3944488b0d91cb6c2ca6b10c314d9",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "86d37579-6d13-4539-860d-f0379b23ffb2",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v4",
+      "sha256": "09498d24b940bca834ccfcb04ce32f6e8f5a77649d848618afc5d744db790d06"
+    }
+  },
+  "execution": {
+    "turns": 22,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 24309,
+    "output": 13602,
+    "cache_read": 1878471,
+    "cache_write": 72733,
+    "reasoning": null,
+    "total": 1989115
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-20T13:45:40.604Z",
+    "finished_at": "2026-11-20T13:48:21.669Z",
+    "agent_duration_ms": 160672,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 2,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "invalid-result",
+      "error": "acceptance result is missing criteria: SC-02, SC-04",
+      "started_at": "2026-11-20T13:41:40.327Z",
+      "finished_at": "2026-11-20T13:45:40.604Z",
+      "turns": 24,
+      "tokens": {
+        "input": 24177,
+        "output": 6448,
+        "cache_read": 1073229,
+        "cache_write": 43577,
+        "reasoning": null,
+        "total": null
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "valid",
+      "error": null,
+      "started_at": "2026-11-20T13:45:40.604Z",
+      "finished_at": "2026-11-20T13:48:21.670Z",
+      "turns": 22,
+      "tokens": {
+        "input": 132,
+        "output": 7154,
+        "cache_read": 805242,
+        "cache_write": 29156,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
