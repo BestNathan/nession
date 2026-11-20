@@ -500,6 +500,15 @@ async function main(){
     await authenticatePublisherReviewerWake({environment:env,event,token}):null;
   assertDispatchAuthority({environment:env,event,run,issue,actionId,
     publisherWakeProof});
+  if(reviewerToolRecovery){
+    const live=await api(token,'/issues/comments/'+event.comment.id);
+    if(live?.id!==event.comment.id||live.body!==REVIEWER_TOOL_4065_RECOVERY_COMMENT||
+       live.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+issue||
+       live.user?.login!=='BestNathan'||live.user?.type!=='User'||
+       live.author_association!=='OWNER'||
+       !live.created_at||live.created_at!==live.updated_at)
+      fail('Reviewer tool recovery requires live unedited Owner command');
+  }
   if(recoveringTrackedSource){
     // Unlike historic one-offs, independently bind the CURRENT unedited
     // owner comment to its canonical Issue URL before any App credential.
@@ -591,6 +600,29 @@ async function main(){
       // generating a new signed Action. No retry of the failed GitHub attempt.
       const proof=await verifyQwenCliFailureLive(token);
       const recovered=recoverAttestedQwenCliFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
+    if(reviewerToolRecovery){
+      // Attest genuine failed Run/Job, exact signed claim/admission and bounded
+      // log before Store CAS. The old consumed signed Action is never replayed.
+      const proof=await verifyReviewerToolFailure4065Live(token);
+      const [pr,ref]=await Promise.all([
+        api(token,'/pulls/4191'),
+        api(token,'/git/ref/heads/agent/4065/qwen-74024299b457f8c0'),
+      ]);
+      assertReviewerRecoveryPrLease(REVIEWER_TOOL_FAILURE_4065,pr,ref);
+      const recovered=recoverAttestedReviewerToolFailure4065({
         remote:storeRemote,source:proof});
       const signer={key,key_id:'main-controller',
         issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
