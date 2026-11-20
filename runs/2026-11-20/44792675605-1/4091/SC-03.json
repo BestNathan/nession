@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c6fdfb2678129bb0dca2ca467065da93fdbb0a342126d9cb5c4edf48e6aad5ba",
+  "run_id": 44792675605,
+  "run_attempt": 1,
+  "issue": 4091,
+  "criterion": "SC-03",
+  "criterion_text": "If peer is unavailable, unauthorized, loses a Blob, or disconnects mid-transfer, Agent B falls back only to another authorized Server/GHCR OCI source for the same pinned digest; complete verified CAS state is maintained and no session consumes partial bytes.",
+  "stage": "staging",
+  "target_sha": "a19633cf1fd50456b88e9d969446b19c1712ad8e",
+  "contract_sha256": "daffc49b8477f22a640f9adab4213c1b6d9a97c4c9a9d199e22063fffd8079e2",
+  "case_revision": "a19633cf1fd50456b88e9d969446b19c1712ad8e",
+  "case_tree_sha": "5889818de5cdad778aa8ab5345e04f5a3a017330",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T18:29:36.032Z",
+  "finished_at": "2026-11-20T18:29:42.254Z",
+  "duration_ms": 6222,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-03: a revoked/unavailable peer falls back only to an authorized Server OCI source for the same pinned digest; complete verified CAS state is maintained (EROFS Ready, exact bytes) and no session consumes partial bytes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a19633cf1fd50456b88e9d969446b19c1712ad8e: #4091 SC-03 measured: revoked peer Agent A http://127.0.0.1:36607 fell back to authorized Server http://127.0.0.1:43445 for the SAME pinned Manifest sha256:6dee97470142fbd2f8c4062f52774e9b528972973989fab988ea2773491275b5; complete verified CAS (EROFS sha256:b0f9d834298806f052ec3a0b9480400f783dbd7172981cac8d7d813b80d24699 Ready, exact bytes); provenance=server; no partial bytes consumed; Server blob GETs=2"
+        }
+      ],
+      "duration_ms": 369,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44792675605,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a19633cf1fd50456b88e9d969446b19c1712ad8e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44792675605",
+    "record_path": "runs/2026-11-20/44792675605-1/4091/SC-03.json",
+    "source_result_sha256": "5b1b4cf3f3062065efca11d442853c5008b49ffd3ee45bb99964273120ce0b32"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44792675605-1",
+    "sha256": "5b1b4cf3f3062065efca11d442853c5008b49ffd3ee45bb99964273120ce0b32",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44792675605",
+    "durability": "time-limited; object archival not configured"
+  }
+}

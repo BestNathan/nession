@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "60e2c359a98197fb27a97172fa0db5f7dc72cc6203eb5117efd71fcb3fe17887",
+  "run_id": 44792675605,
+  "run_attempt": 1,
+  "issue": 4091,
+  "criterion": "SC-01",
+  "criterion_text": "With two reachable authorized Agents, Agent B can fetch a complete immutable EROFS Image from Agent A's read-only OCI Registry and run the normal local-cache/Sandbox preparation path; the Server is involved only in policy/discovery, not Blob bytes.",
+  "stage": "staging",
+  "target_sha": "a19633cf1fd50456b88e9d969446b19c1712ad8e",
+  "contract_sha256": "daffc49b8477f22a640f9adab4213c1b6d9a97c4c9a9d199e22063fffd8079e2",
+  "case_revision": "a19633cf1fd50456b88e9d969446b19c1712ad8e",
+  "case_tree_sha": "de75a5a9ef5c506e0097e56685851fca5b8c4f3b",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T18:28:45.388Z",
+  "finished_at": "2026-11-20T18:29:29.815Z",
+  "duration_ms": 44427,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-01: with two reachable authorized Agents, Agent B fetches a complete immutable EROFS Image from Agent A read-only Registry into its normal local-cache mount identity (Server policy/discovery only, zero Blob bytes) and propagates the same pinned digest onward",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA a19633cf1fd50456b88e9d969446b19c1712ad8e: #4091 SC-01 measured: Agent B fetched complete immutable EROFS Image (Manifest sha256:b5b30883030a0326b175fca04f4a7873f5760372d18ccf00a8d9bdd668a5fb17 / EROFS sha256:966a2ef92e2c1e8e4e95728e932d02c1ffb8917f8d651193f75fc6093eb8f344) from Agent A's read-only Registry http://127.0.0.1:35279 into its local cache mount identity; provenance=peer; Server blob GET count=0 (policy/discovery only, not Blob bytes); Agent B then mounted its own read-only Registry http://127.0.0.1:45451 and served the same pinned digest to a further authorized Agent (A2A propagation)"
+        }
+      ],
+      "duration_ms": 38531,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44792675605,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a19633cf1fd50456b88e9d969446b19c1712ad8e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44792675605",
+    "record_path": "runs/2026-11-20/44792675605-1/4091/SC-01.json",
+    "source_result_sha256": "a90b7b6a33e84b401b237ddc7e5db51552971865da18a692244eae64918258a8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44792675605-1",
+    "sha256": "a90b7b6a33e84b401b237ddc7e5db51552971865da18a692244eae64918258a8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44792675605",
+    "durability": "time-limited; object archival not configured"
+  }
+}
