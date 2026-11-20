@@ -6,6 +6,7 @@ import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2,
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
 import {SOURCE as QWEN_REPAIR_TURNS_FAILURE} from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_TRACKED_SOURCE_FAILURE} from './qwen-tracked-source-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ROLE_TASK = { developer: ['implement','repair'], reviewer: ['review'], acceptor: ['accept'] };
@@ -292,6 +293,7 @@ export function validateDevelopmentState(state) {
             QWEN_CLI_FAILURE.failure_code,
             QWEN_REPAIR_TURNS_FAILURE.failure_code,
             QWEN_TOOL_FAILURE.failure_code,
+            QWEN_TRACKED_SOURCE_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
@@ -341,6 +343,15 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784_C.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784_C.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===QWEN_TRACKED_SOURCE_FAILURE.failure_code&&(
+            state.issue!==QWEN_TRACKED_SOURCE_FAILURE.issue||
+            item.id!==QWEN_TRACKED_SOURCE_FAILURE.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.role!=='developer'||
+            item.task.task!=='implement'||
+            item.task.sha!==QWEN_TRACKED_SOURCE_FAILURE.source_sha||
+            r.source_run_id!==QWEN_TRACKED_SOURCE_FAILURE.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_TOOL_FAILURE.failure_code&&(
             state.issue!==QWEN_TOOL_FAILURE.issue||
@@ -1553,6 +1564,53 @@ export function recordAttestedQwenToolFailure(state,version,proof){
   const nextId=qwenToolSuccessorId(f.issue,f.action_id,f.run_id);
   if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===nextId))
     reject('Qwen readonly-tool successor already scheduled');
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
+    source_attempt:1,failure_code:f.failure_code}};
+  const successor={id:nextId,task:{...old.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===old.id?failed:x),successor]});
+}
+
+// #4174: original signed Developer proposal failed the immutable tracked-file
+// gate. Preserve the failed Run and grant only one NEW Qwen Action after
+// separate GitHub Run/Job/Artifact/log verification. The original model's
+// untracked bytes never become an accepted Store Result.
+export function qwenTrackedSourceSuccessorId(issue,actionId,runId){
+  const f=QWEN_TRACKED_SOURCE_FAILURE;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized Qwen tracked-source failure source');
+  return hash([issue,actionId,runId,'qwen-tracked-existing-source-recovery-v1']);
+}
+export function recordAttestedQwenTrackedSourceFailure(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','run_head_sha','failure_code'],
+    'independently attested Qwen tracked-source failure');
+  const f=QWEN_TRACKED_SOURCE_FAILURE;
+  const old=state.outbox.find(x=>x.id===f.action_id);
+  if(state.version!==version||version!==3||
+     state.issue!==f.issue||state.phase!=='ready'||state.target_sha!==null||
+     state.transitions.length!==0||state.outbox.length!==1||
+     state.assignments.developer!=='dev-qwen-01'||
+     state.assignments.reviewer!=='review-qwen-01'||
+     proof.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.run_head_sha!==f.run_head_sha||
+     proof.failure_code!==f.failure_code||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='developer'||
+     old.task.task!=='implement'||old.task.agent_id!=='dev-qwen-01'||
+     old.task.sha!==f.source_sha||old.task.resume!=null||
+     old.receipt?.status!=='verified'||
+     old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id)
+    reject('Qwen tracked-source failure lacks original signed Store/Run lineage');
+  const nextId=qwenTrackedSourceSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===nextId))
+    reject('Qwen tracked-source failure already has a successor');
   const failed={...old,status:'failed',receipt:{
     status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
     source_attempt:1,failure_code:f.failure_code}};
