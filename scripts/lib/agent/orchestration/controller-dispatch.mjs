@@ -17,7 +17,7 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
-  REVIEWER_PREMODEL_FAILURE_3784_C,
+  REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_FAILURE_4065,
   REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
   recoverAttestedReviewerPremodelFailure,recoverAttestedReviewerJsonFailure}
@@ -66,12 +66,24 @@ export const REVIEWER_PREMODEL_3784_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3784 run=44431618028';
 export const REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3784 run=44500591865';
+export const REVIEWER_PREMODEL_4065_RECOVERY_COMMENT=
+  '/nession recover-review-preflight issue=4065 run=44744956936';
 
 const QWEN_RECOVERY_C_SHA='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
 const QWEN_RECOVERY_BRANCH='agent/3784/qwen-39c01222a8d00fa3';
 // Before any Store CAS, reject the current direct/extra PR-head mutation.
 // An independently green CI run for D cannot authorize Review of Store C.
 export function assertReviewerRecoveryPrLease(source,pr,ref){
+  if(source===REVIEWER_PREMODEL_FAILURE_4065){
+    const branch='agent/4065/qwen-74024299b457f8c0';
+    if(pr?.number!==4191||pr.state!=='open'||pr.draft!==false||
+       pr.merged_at!=null||pr.head?.sha!==source.source_sha||
+       pr.head?.ref!==branch||pr.head?.repo?.full_name!==REPO||
+       pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
+       ref?.ref!=='refs/heads/'+branch||ref.object?.sha!==source.source_sha)
+      fail('Publisher PR #4191 HEAD no longer matches immutable #4065 Store v9');
+    return true;
+  }
   if(source!==REVIEWER_PREMODEL_FAILURE_3784_C)
     fail('unexpected Reviewer C PR lease source');
   if(pr?.number!==3919||pr.state!=='open'||pr.draft!==false||
@@ -89,6 +101,7 @@ const REVIEWER_PREMODEL_RECOVERIES=Object.freeze([
   [REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_RECOVERY_COMMENT],
   [REVIEWER_PREMODEL_FAILURE_3784,REVIEWER_PREMODEL_3784_RECOVERY_COMMENT],
   [REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT],
+  [REVIEWER_PREMODEL_FAILURE_4065,REVIEWER_PREMODEL_4065_RECOVERY_COMMENT],
 ]);
 export const REVIEWER_JSON_RECOVERY_COMMENT=
   '/nession recover-review-json issue=3433 run=43681851455';
@@ -598,11 +611,15 @@ async function main(){
       // CAS-fail the original action, create one successor, and only dispatch
       // the authenticated successor. Replays are reconciled, never re-POSTed.
       const proof=await verifyReviewerPremodelFailureLive(token,reviewerPremodelSource);
-      if(reviewerPremodelSource===REVIEWER_PREMODEL_FAILURE_3784_C){
+      if([REVIEWER_PREMODEL_FAILURE_3784_C,
+          REVIEWER_PREMODEL_FAILURE_4065].includes(reviewerPremodelSource)){
         // This is a source-bound pre-CAS read, not permission to trust PR D.
         const [pr,ref]=await Promise.all([
-          api(token,'/pulls/3919'),
-          api(token,'/git/ref/heads/'+QWEN_RECOVERY_BRANCH),
+          api(token,'/pulls/'+(reviewerPremodelSource===
+            REVIEWER_PREMODEL_FAILURE_4065?4191:3919)),
+          api(token,'/git/ref/heads/'+(reviewerPremodelSource===
+            REVIEWER_PREMODEL_FAILURE_4065
+              ?'agent/4065/qwen-74024299b457f8c0':QWEN_RECOVERY_BRANCH)),
         ]);
         assertReviewerRecoveryPrLease(reviewerPremodelSource,pr,ref);
       }
