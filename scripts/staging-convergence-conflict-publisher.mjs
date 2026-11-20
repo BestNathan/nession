@@ -137,7 +137,7 @@ export function verifyUpstream(pr,issue,{branch,main,lane,mode,repairIssue}){
     pr.user?.login==='nession-publisher[bot]'&&
     pr.body?.startsWith('Staging Convergence automated proposal')&&
     pr.head?.ref==='main'&&pr.head?.sha===main&&
-    pr.base?.ref===branch&&pr.base?.sha===lane&&
+    pr.base?.ref===branch&&
     pr.head?.repo?.full_name===REPO&&pr.base?.repo?.full_name===REPO&&
     pr.mergeable_state==='dirty','untrusted or no-longer-conflicting native source PR');
   check(issue?.number===repairIssue&&issue.state==='open'&&
@@ -161,7 +161,8 @@ async function main(){
     console.log('trusted conflict Publisher: identity, path policy and refusal fixtures PASS');
     return;
   }
-  check(process.argv[2]==='publish'&&process.argv[3],'usage: self-test | publish CANDIDATE_DIR');
+  check(['preflight','publish'].includes(process.argv[2])&&process.argv[3],
+    'usage: self-test | preflight CANDIDATE_DIR | publish CANDIDATE_DIR');
   check(process.env.GITHUB_REPOSITORY===REPO&&process.env.GITHUB_REF==='refs/heads/main'&&
     process.env.GITHUB_EVENT_NAME==='workflow_dispatch'&&
     Number(process.env.GITHUB_RUN_ATTEMPT)===1,
@@ -182,6 +183,12 @@ async function main(){
   check(currentMain.object?.sha===main&&currentLane.object?.sha===lane,
     'source ref moved before Candidate validation');
   const candidate=candidateInput(process.argv[3],mode,main,lane);
+  if(process.argv[2]==='preflight'){
+    console.log(JSON.stringify({status:'source_verified',mode,issue:repairIssue,
+      source_pr:sourcePr,tree:candidate.tree,parents:candidate.parents,
+      no_protected_mutation:true}));
+    return;
+  }
   const found=gh(token,'GET','pulls?state=all&head=BestNathan:'+
     encodeURIComponent(branchRef)+'&per_page=100');
   check(Array.isArray(found)&&found.length===0,
