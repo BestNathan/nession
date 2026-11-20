@@ -3220,6 +3220,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                     .await
                 {
                     Ok(outcome) => {
+                        // #4073: this Agent-local create entrypoint offers the
+                        // same preparation point. Its response contract has no
+                        // `warnings` member, so a failed preparation is logged
+                        // here; `claude.enter` re-resolves and refuses before
+                        // launch when it still cannot prepare.
+                        if let Some(hook) = ctx.session_created {
+                            if let Some(warning) =
+                                hook.session_created(ctx.agent_id, &payload.name).await
+                            {
+                                warn!("{warning}");
+                            }
+                        }
                         let session_id = format!("{}:{}", ctx.agent_id, payload.name);
                         let resp = WebSessionCreateResponse {
                             success: true,

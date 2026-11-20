@@ -126,11 +126,14 @@ writers, which is what the multiple-Sessions-per-home case needs.
 - Creation-time preparation runs after the Session exists with its environment
   binding, through the Agent's `SessionCreatedHook` seam. The runtime composes
   the Claude hook once and shares it by the P2P listener (direct
-  `agent.session.create`, the MCP `nession_agent_create_session` tool) and the
-  central-server connection (Server-relayed and Project-created creates), so
-  every entrypoint prepares identically. A directly constructed `AgentServer`
-  (tests) has no hook and writes nothing external. Failure becomes a non-fatal
-  create warning; non-Claude consumers see the same Session either way.
+  `agent.session.create`, `client.session.create` and the MCP
+  `nession_agent_create_session` tool) and the central-server connection
+  (Server-relayed and Project-created creates), so every entrypoint prepares
+  identically. A create reply that carries `warnings` reports a failure there;
+  the `client.session.create` contract has no such member, so its failure is
+  logged. A directly constructed `AgentServer` (tests) has no hook and writes
+  nothing external. Failure never fails or rolls back the create; non-Claude
+  consumers see the same Session either way.
 - Enter-time preparation runs before any `claude.enter` launch. Failure is a
   `refused` outcome with the reason — never a launch followed by a claimed
   `entered`.
