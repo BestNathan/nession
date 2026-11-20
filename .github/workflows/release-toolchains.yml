@@ -55,6 +55,7 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'toolchains' }}
           path: toolchain-catalog
+          fetch-depth: 2 # source HEAD and first parent; merge commits included
           persist-credentials: false
       - id: catalog
         name: Resolve pinned orphan source and catalog candidates
