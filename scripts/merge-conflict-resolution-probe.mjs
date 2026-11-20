@@ -159,6 +159,28 @@ function selfTest(){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-conflict-probe-'));
   try {
     const f=testFixture(root);
+    // A blocked workflow path produces no eligible report or leaked worktree.
+    const blockedRepo=path.join(root,'blocked');
+    fs.mkdirSync(blockedRepo);
+    git(blockedRepo,['init','-q','-b','main']);
+    git(blockedRepo,['config','user.name','Nession Test']);
+    git(blockedRepo,['config','user.email','test@example.com']);
+    fs.mkdirSync(path.join(blockedRepo,'.github','workflows'),{recursive:true});
+    const wf=path.join(blockedRepo,'.github','workflows','ci.yml');
+    fs.writeFileSync(wf,'name: base\n');
+    git(blockedRepo,['add','.']);git(blockedRepo,['commit','-qm','base']);
+    const blockedBase=git(blockedRepo,['rev-parse','HEAD']).stdout.trim();
+    fs.writeFileSync(wf,'name: source\n');
+    git(blockedRepo,['commit','-qam','source']);
+    const blockedSource=git(blockedRepo,['rev-parse','HEAD']).stdout.trim();
+    git(blockedRepo,['checkout','-q','-b','lane',blockedBase]);
+    fs.writeFileSync(wf,'name: target\n');
+    git(blockedRepo,['commit','-qam','target']);
+    const blockedTarget=git(blockedRepo,['rev-parse','HEAD']).stdout.trim();
+    assert.throws(()=>inspectConflictPaths(blockedRepo,blockedTarget,blockedSource),
+      /unsupported security-sensitive Git conflict path/);
+    assert.doesNotMatch(git(blockedRepo,['worktree','list','--porcelain']).stdout,
+      /nession-conflict-inspect-/);
     assert.equal(mergeTree(f.repo,f.target,f.source).conflict,true);
     assert.deepEqual(inspectConflictPaths(f.repo,f.target,f.source),{
       schema_version:1,target_sha:f.target,source_sha:f.source,
