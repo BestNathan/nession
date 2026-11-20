@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44752769637,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4088-oci-registry-service",
+    "target_sha": "50cb7f3142c93c79f3a52c4c837ff025023d42f5",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44752769637",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "f0dd60774d681be3ab8efa5729acea09152066fe244909885f8453ff14d949d0"
+  },
+  "record": "runs/2026-11-20/44752769637-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ecc179a61280e1981e3032c19fe1f526d562a6513d2691482867f4b26d619078"
+}
