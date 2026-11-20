@@ -51,7 +51,7 @@ pub mod cache;
 #[cfg(feature = "distribution")]
 pub mod distribution;
 
-#[cfg(feature = "registry")]
+#[cfg(any(feature = "registry", feature = "registry-service"))]
 pub mod registry;
 
 #[cfg(all(feature = "mount", target_os = "linux"))]
@@ -111,6 +111,8 @@ pub use cache::repository::CacheRepositoryStore;
 pub use cache::store::CacheBlobStore;
 #[cfg(feature = "cache")]
 pub use cache::{CachedImage, DownloadGrant, ErofsCache, PinGuard};
+#[cfg(all(feature = "catalog", feature = "registry-service"))]
+pub use catalog::CatalogRepositoryPublisher;
 #[cfg(feature = "catalog")]
 pub use catalog::CatalogRepositoryStore;
 #[cfg(feature = "store")]

@@ -2171,6 +2171,7 @@ dependencies = [
  "base64 0.21.7",
  "flate2",
  "futures-util",
+ "http-body-util",
  "httptest",
  "libc",
  "reqwest 0.12.28",
@@ -2182,6 +2183,8 @@ dependencies = [
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
+ "tokio-util",
+ "tower",
  "uuid",
 ]
 

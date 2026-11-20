@@ -375,8 +375,8 @@ Three reusable contracts in `nession-erofs`, consumed by both hosts:
 Delivery status: `BlobStore`/`RepositoryStore` and the shared repository/tag
 grammars are delivered by #4087 in `nession-erofs::contracts`, with the Server
 adapters `FsBlobStore`/`CatalogRepositoryStore` and the Agent adapters
-`CacheBlobStore`/`CacheRepositoryStore`. `RegistryAuthorizer` arrives with the
-Registry service (#4088). Contract reads are raw streaming access gated by
+`CacheBlobStore`/`CacheRepositoryStore`. `RegistryAuthorizer` is delivered with
+the Registry service (#4088). Contract reads are raw streaming access gated by
 explicit verification before consumption; the Agent adapter is stricter and
 verifies on read. Removal/eviction is deliberately absent from `BlobStore`:
 retention belongs to the owning host's policy, so a shared Registry reader can
@@ -421,6 +421,18 @@ host's `BlobStore`, `RepositoryStore` and `RegistryAuthorizer`.
 - Agent mode is **read-only by explicit opt-in**: all mutation verbs are
   denied even with a read credential, and access is scoped to verified
   complete artifacts and authenticated peers.
+
+Delivery status: the service is delivered by #4088 in
+`nession-erofs::registry::service` (feature `registry-service`), generic over
+the supplied `BlobStore`/`RepositoryStore`/`RegistryAuthorizer` plus a
+`RepositoryPublisher` for write mode (`RegistryMode::ReadOnly`/`ReadWrite`).
+The Server publication adapter `CatalogRepositoryPublisher` (feature `catalog`)
+records objects, descriptor edges and the Tag in one catalog transaction.
+Exposure follows the #4087 tag-rooted reachability fence: a Manifest pushed by
+Tag is readable by Tag and digest; moving a Tag moves the exposed root
+atomically. The service compiles and mounts without the external client or the
+catalog (the Agent boundary); wiring it into the Server/Agent ingresses and the
+proprietary-endpoint migration belong to #4090.
 
 ### Registry Client SDK (#4089)
 
