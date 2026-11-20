@@ -5,7 +5,7 @@ topic: workflows
 categories: ["architecture","ci","security","workflows"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-08T13:51:42Z
+updated_at: 2026-11-20T01:08:30Z
 sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
 ---
 
@@ -45,6 +45,7 @@ Owner `/approve-staging-convergence ...` comments and authenticated bot Audit re
 
 ## Related knowledge
 
+- [Nession native Toolchain OCI release to GHCR](nession-native-toolchain-oci-release-to-ghcr.md) — version-pinned Shell Recipe directory packaging with native EROFS OCI GHCR publication and independent readback.
 - [Nession CI, E2E and acceptance qualification timing](nession-ci-e2e-and-acceptance-qualification-timing.md) — which proofs apply at PR, staging, main and deployed boundaries.
 - [Nession public Pages source publication and orphan-branch signals](nession-public-pages-source-publication-and-orphan-branch-signals.md) — a concrete safe cross-branch event bridge.
 - [Nession instruction architecture and knowledge ownership](../engineering/nession-instruction-architecture-and-knowledge-ownership.md) — executable owners outrank the derived wiki.

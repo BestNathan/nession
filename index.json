@@ -396,7 +396,23 @@
           "security",
           "workflows"
         ],
-        "updated_at": "2026-11-08T13:51:42Z"
+        "updated_at": "2026-11-20T01:08:30Z"
+      },
+      {
+        "title": "Nession native Toolchain OCI release to GHCR",
+        "description": "Verified version-pinned Shell Recipe directory preparation, Nession EROFS-backed OCI packaging, isolated GHCR publishing and independent readback",
+        "path": "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "ci",
+          "erofs",
+          "release",
+          "security",
+          "toolchain",
+          "workflows"
+        ],
+        "updated_at": "2026-11-20T01:08:30Z"
       },
       {
         "title": "Nession public Pages source publication and orphan-branch signals",
@@ -454,14 +470,16 @@
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
-      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
     "capsule": [
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
     ],
     "ci": [
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
-      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
     "cli": [
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
@@ -483,7 +501,8 @@
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
     ],
     "erofs": [
-      "topics/engineering/global-erofs-image-manager.md"
+      "topics/engineering/global-erofs-image-manager.md",
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
     "files": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
@@ -597,7 +616,8 @@
     ],
     "release": [
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
-      "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md"
+      "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
     "research": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
@@ -622,6 +642,7 @@
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "server": [
@@ -653,6 +674,9 @@
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
     ],
+    "toolchain": [
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
+    ],
     "touch": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md"
     ],
@@ -676,7 +700,8 @@
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
     "workflows": [
-      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
+      "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
     "workspace": [
       "topics/engineering/global-erofs-image-manager.md",

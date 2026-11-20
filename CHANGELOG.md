@@ -836,3 +836,17 @@
 - Categories: agent, architecture, protocol, session, web
 - Reason: Record the delivered capability-reported Session Activity domain, semantic Pane ownership and generation fencing, the Shell and Claude providers, and the Server/Web/App projection from #3800/#3801/#3802/#3804 at merged staging 7e82d7d21
 - Source: https://github.com/BestNathan/nession/issues/3800
+
+## 2026-11-20T01:08:30Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, ci, security, workflows
+- Reason: Add an incoming cross-link to the delivered source-verified Toolchain OCI GHCR release workflow and privilege boundary
+- Source: https://github.com/BestNathan/nession/issues/4113
+
+## 2026-11-20T01:08:30Z | create | Nession native Toolchain OCI release to GHCR
+- Path: topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md
+- Topic: workflows
+- Categories: architecture, ci, erofs, release, security, toolchain, workflows
+- Reason: Capture #4092 native shell Recipe to directory, EROFS OCI GHCR publishing and exact main successful remote executable readback
+- Source: https://github.com/BestNathan/nession/issues/4113
