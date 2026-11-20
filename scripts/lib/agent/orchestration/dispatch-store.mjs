@@ -23,7 +23,9 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   REVIEWER_PREMODEL_FAILURE_SOURCES,
   reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
   REVIEWER_JSON_FAILURE_SOURCES,reviewerJsonSuccessorId,
-  recordAttestedReviewerJsonFailure}
+  recordAttestedReviewerJsonFailure,
+  REVIEWER_TOOL_FAILURE_4065,reviewerToolSuccessorId,
+  recordAttestedReviewerToolFailure}
   from './outbox.mjs';
 import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
@@ -171,6 +173,37 @@ export function recoverAttestedReviewerPremodelFailure({remote,source}){
     if(pushed.replayed)fail('ambiguous new Reviewer recovery Store CAS');
     return {status:'recovered',issue:f.issue,action_id:id,
       state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// #4211: preserve original failed read-only Model Run; all Writer access
+// remains in this trusted Store owner after independently verified source.
+export function recoverAttestedReviewerToolFailure4065({remote,source}){
+  const f=REVIEWER_TOOL_FAILURE_4065;
+  if(source?.verified!==true||source.issue!==f.issue||
+     source.action_id!==f.action_id||source.run_id!==f.run_id||
+     source.attempt!==1||source.source_sha!==f.source_sha||
+     source.failure_code!==f.failure_code)
+    fail('Reviewer policy denial is not independently authenticated');
+  const id=reviewerToolSuccessorId(f.issue,f.action_id,f.run_id);
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,f.issue),state=prior.state;
+    if(!state)fail('missing immutable source Reviewer Store');
+    const old=state.outbox.find(o=>o.id===f.action_id);
+    if(state.outbox.some(o=>o.id===id)){
+      const next=state.outbox.find(o=>o.id===id);
+      if(old?.status!=='failed'||old.receipt?.failure_code!==f.failure_code||
+         old.receipt?.source_run_id!==f.run_id||
+         JSON.stringify(next.task)!==JSON.stringify(old.task))
+        fail('conflicting Reviewer policy successor replay');
+      return {status:'replayed',issue:f.issue,action_id:id,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const next=recordAttestedReviewerToolFailure(state,prior.version,source);
+    const published=persist(dir,next,prior.version,f.issue);
+    if(published.replayed)fail('ambiguous Reviewer policy recovery Store CAS');
+    return {status:'recovered',issue:f.issue,action_id:id,
+      state_version:next.version,store_commit_sha:published.commit_sha};
   });
 }
 
