@@ -33,7 +33,7 @@ const issueBody=[
 ].join('\n');
 const source={repository:REPO,
   issue:{number:3784,state:'open',body:issueBody},
-  pr:{number:3919,state:'closed',merged_at:'2026-11-19T19:35:15Z',
+  pr:{number:3919,state:'closed',merged:true,merged_at:'2026-11-19T19:35:15Z',
     merge_commit_sha:c,head:{sha:a,repo:{full_name:REPO}},
     base:{ref:'main',repo:{full_name:REPO}}},
   merge:{sha:c,parents:[b,a]},
@@ -60,6 +60,8 @@ for(const [mutation,needle] of [
   [{store:{...source.store,review_action_id:'bad'}},'signed Store source identity'],
   [{pr:{...source.pr,head:{...source.pr.head,sha:b}}},'differs from signed Publisher'],
   [{merge:{...source.merge,parents:[b,b]}},'merge commit'],
+  [{merge:{...source.merge,parents:[a,b]}},'merge commit'],
+  [{pr:{...source.pr,merged:false}},'PR not merged'],
   [{pr:{...source.pr,merge_commit_sha:b}},'merge commit'],
   [{reviewer:null},'approved Reviewer'],
   [{reviewer:{...source.reviewer,verdict:'changes_requested'}},'approved Reviewer'],
