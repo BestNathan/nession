@@ -233,6 +233,11 @@ export const LOCAL_CSS_VARIABLE_OWNERS = Object.freeze({
     'web/src/app/fixture/FixtureTerminal.tsx',
   ],
   '--nession-local-workspace-content-bottom-inset': ['web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts'],
+  // #4115: the honest trailing extent of the element that actually scrolls,
+  // and the band the Host-owned bottom actions slot spends. Both are published
+  // by the same Workspace occlusion owner.
+  '--nession-local-workspace-scroll-bottom-inset': ['web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts'],
+  '--nession-local-workspace-actions-bottom-inset': ['web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts'],
 });
 
 /**
@@ -256,6 +261,14 @@ export const LOCAL_CSS_VARIABLE_SURFACES = Object.freeze({
   '--nession-local-workspace-content-bottom-inset': [
     'web/src/shared/lib/workspaceScrollClearance.ts',
     'web/src/app/workspace/', 'web/src/app/experiences/', 'web/src/capabilities/',
+  ],
+  '--nession-local-workspace-scroll-bottom-inset': [
+    'web/src/shared/lib/workspaceScrollClearance.ts',
+    'web/src/app/workspace/', 'web/src/app/experiences/', 'web/src/capabilities/',
+    'web/src/platform/',
+  ],
+  '--nession-local-workspace-actions-bottom-inset': [
+    'web/src/app/workspace/', 'web/src/shared/lib/workspaceScrollClearance.ts',
   ],
 });
 

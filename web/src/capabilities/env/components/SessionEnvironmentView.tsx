@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, CircleAlert, RefreshCw } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Agent, EnvFileInfo } from '@/types';
@@ -219,7 +219,7 @@ export function SessionEnvironmentView({
     return (
       <div
         data-testid="env-session-environment"
-        className={cn('flex h-full min-h-0 flex-col gap-3 p-4', workspaceScrollClearanceClass)}
+        className={cn('flex h-full min-h-0 flex-col gap-3 p-4', workspaceBoundedScrollClearanceClass)}
       >
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-16 w-full" />
@@ -234,7 +234,7 @@ export function SessionEnvironmentView({
       data-status={status.status}
       className={cn(
         'flex h-full min-h-0 flex-col overflow-y-auto p-4',
-        workspaceScrollClearanceClass,
+        workspaceBoundedScrollClearanceClass,
       )}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">

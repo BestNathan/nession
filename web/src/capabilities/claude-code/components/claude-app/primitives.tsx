@@ -9,7 +9,7 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { AppRoute } from './model';
 
 /** A scroll owner inside the Workspace, spending the capsule's clearance. */
@@ -24,7 +24,7 @@ export function ScrollBody({
     <div
       className={cn(
         'min-h-0 flex-1 overflow-y-auto',
-        workspaceScrollClearanceClass,
+        workspaceBoundedScrollClearanceClass,
         className,
       )}
     >

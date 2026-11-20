@@ -260,4 +260,17 @@ export interface WorkspaceViewBinding {
     web: ComponentType<WorkspaceViewProps>;
     app: ComponentType<WorkspaceAppViewProps>;
   };
+  /**
+   * Which App scroll surface this view needs (#4115).
+   *
+   * Omitted means `document`: the App host wraps the view in its own page
+   * scrollport and the capability contributes ordinary content. `bounded` is a
+   * declaration that the view is a fill surface with its own internal scroll
+   * owner — a collection, reader, diff or editor — for which the host provides
+   * the effective height and the measured trailing clearance. A capability
+   * that declares `bounded` is responsible for spending
+   * `workspaceBoundedScrollClearanceClass` inside that internal scroller; it
+   * still never measures the Capsule itself.
+   */
+  appScroll?: 'document' | 'bounded';
 }

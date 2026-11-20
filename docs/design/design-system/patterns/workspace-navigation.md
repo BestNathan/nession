@@ -170,12 +170,13 @@ leaving, and the capsule is a bottom-zone control, not a bar for the depth.
 
 Two consequences, replacing the old pair:
 
-- The bottom clearance the capsule needs is **every depth's** clearance. A pushed
-  detail's scrollers reserve the same trailing padding the root's do — the workspace
-  publishes one measured inset (`--nession-workspace-content-bottom-inset`, from the bar's own
-  geometry) and every Workspace scroller spends it, so the last line of a file, the
-  last turn of a transcript and the last search hit can all be scrolled above the
-  capsule.
+- The bottom clearance the capsule needs is **every depth's** clearance, and from
+  #4115 it is owned by the host rather than opted into per scroller. The App
+  Workspace host publishes the measured scroll inset from the element that
+  actually scrolls (the page scrollport, or a declared bounded adapter) and
+  spends it there; the last line of a file, the last turn of a transcript and
+  the last search hit can all be scrolled above the capsule. Capability content
+  does not compute or add the Capsule band itself.
 - The Workspace capsule has **no `+`** (#1347): its targets are the capability list
   itself, and they are built from capability snapshots, so the row cannot become a
   resource-creation affordance. (The Conversation capsule on Terminal keeps its `+`

@@ -1,0 +1,11 @@
+schema_version: 1
+issue: 4115
+criterion: SC-04
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify-bounded-viewers.spec.js
+  - type: browser
+    entry: verify-keyboard-navigation.spec.js
+result_policy: all-pass

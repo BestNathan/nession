@@ -296,11 +296,37 @@ Rules:
 - Local mechanisms remain legal when they stay inside the component's content.
   `cn('flex min-w-0 flex-col', condition && 'min-h-0 flex-1')` is a valid local
   composition, not a violation.
-- A scroll region that can reach the pane bottom uses `WorkspaceScrollRegion`
-  (or the shared `workspaceScrollClearanceClass` opt-in for a genuinely local
-  inner scroll). It must not create a second page-level scroll owner.
+- A Web scroll region that reaches the pane bottom uses
+  `WorkspaceScrollRegion`. It must not create a second page-level scroll owner.
 - Web vs App is an Experience decision, not a media-width guess: constrained
   Web stays Web, forced App stays App.
+
+### App page scroll ownership (#4115)
+
+The App Workspace host owns the default page scroll. A capability contributes
+content; it does not choose the page's scroll container, calculate the Capsule
+geometry, or add trailing padding to compensate for the floating overlay.
+
+| Role | Owner | Contract |
+|---|---|---|
+| Default App page scroll | `AppWorkspaceScrollRegion` (host) | one bounded `overflow-y-auto` scrollport per depth, in natural document flow; trailing extent measured from the scrollport's own bottom to the floating bar's top |
+| Bounded surface | host adapter `AppWorkspaceBoundedRegion` + a binding declaration `appScroll: 'bounded'` | the capability keeps one internal scroll owner (collection, reader, diff, editor) and spends `workspaceBoundedScrollClearanceClass` there; it never measures the Capsule |
+| Bottom actions | host `workspace-bottom-actions` slot | capability owns the action semantics; the host positions the band below the scrollport, above the Capsule, and applies the measured safe-area/Capsule inset |
+| Capsule clearance | `useWorkspaceCapsuleClearance` | publishes the whole band, the actual scrolling viewport's inset, and the actions-slot inset; safe area is counted once |
+
+Consequences that are part of the contract:
+
+- At rest content may continue behind the translucent Capsule Zone. At the end
+  of scrolling, the final row or control is fully visible and tappable above the
+  Capsule; the scroll end does not reserve a permanent fake footer or shrink the
+  whole canvas.
+- A Host-owned actions row reduces the scrollport's trailing extent to what is
+  actually left below it. Actions are not a capability's floating footer and do
+  not move by capability-specific magic numbers.
+- A capability does not get correct scrolling by opting in: a newly added view
+  with ordinary block/section/row content uses the host scrollport with no
+  clearance class at all. `appScroll: 'bounded'` is the explicit exception for
+  surfaces that genuinely scroll internally.
 
 ### Representative inventory
 
@@ -312,10 +338,11 @@ Rules:
 | App inner-stack gesture | `AppLayers` → `useSwipePager` → capability Pop/Forward | Experience host | one coordinator; no second touch owner |
 | Files master/detail (Web) | `FilesWebLayout` | `WorkspaceMasterDetail` | migrated (#3194) |
 | Environment master/detail (Web) | `EnvWebLayout` | `WorkspaceMasterDetail` | migrated |
-| Agent / Session detail | experience workspace maps | `WorkspaceScrollRegion` | migrated; the view no longer owns scroll ancestry |
-| Project Workspace view | `ProjectWorkspaceView` | `WorkspaceScrollRegion` | migrated |
-| Sandbox (App) | `SandboxAppLayout` | `WorkspaceScrollRegion` | migrated |
-| Claude Code / Env / Git inner lists | capability components | local scroll mechanism + shared clearance | keep; not a host geometry claim |
+| Agent / Session detail (App) | `workspaceViews.tsx` | host `AppWorkspaceScrollRegion` | migrated (#4115); the view contributes content only |
+| Project Workspace view (App) | `ProjectWorkspaceView` | host `AppWorkspaceScrollRegion` | migrated (#4115); Web keeps `WorkspaceScrollRegion` |
+| Sandbox (App) | `SandboxAppLayout` | host `AppWorkspaceScrollRegion` | migrated (#4115) |
+| Files / Env / Git / Claude (App) | capability views | bounded adapter + one internal scroller | declared `appScroll: 'bounded'`; spend the host scroll inset at that scroller |
+| Files bulk actions (App) | `AppFilesSelectionBottomBar` content in the host actions slot | host Bottom Actions role | host owns placement and the Capsule/safe-area inset |
 
 ### Enforcement
 
@@ -324,14 +351,19 @@ rejects capability/product page geometry (including `dvh`/`svh`/`lvh`/`dvw`
 utilities and fixed inset variants), capability-local App headers/Back/actions
 /markers, host chrome, a second App gesture owner (pager imports or published
 swipe/stack markers), duplicated master/detail or scroll-owner markers, and raw
-numeric spacing in the shared recipe owner. It accepts local flex/grid
-composition, `data-swipe-owner` surfaces, and the Issue's control sample. It
-also owns the keyboard-avoidance binding from §15: only the App Experience
-scrollport may publish the keyboard scroll owner, and only the App viewport
-environment may read `window.visualViewport`. `layout-ownership.test.mjs` holds
-the negative and positive fixtures. Browser evidence for the single scroll
-owner, alignment, overflow, the one App header and the inner-stack gesture lives
-in `ui-contract-web` / `ui-contract-matrix` and the staging Cases for `#3971`.
+numeric spacing in the shared recipe owner. From #4115 it also rejects a
+capability-owned App page scroll, a capability claiming the host App surface
+marker, and a reintroduction of the retired per-scroller Capsule padding; it
+accepts the declared bounded-surface class and a local list/editor scroller. It
+accepts local flex/grid composition, `data-swipe-owner` surfaces, and the
+Issue's control sample. It also owns the keyboard-avoidance binding from §15:
+only the App Experience scrollport may publish the keyboard scroll owner, and
+only the App viewport environment may read `window.visualViewport`.
+`layout-ownership.test.mjs` holds the negative and positive fixtures. Browser
+evidence for the single scroll owner, alignment, overflow, the one App header
+and the inner-stack gesture lives in `ui-contract-web` / `ui-contract-matrix`
+and the staging Cases for `#3971`; the `#4115` Cases additionally measure the
+last actionable element against the actual Capsule top.
 
 ## 15. App viewport environment and keyboard avoidance (#3523)
 

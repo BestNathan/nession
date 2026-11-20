@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
   capsuleExchangeStyle,
   useCapsuleExchange,
@@ -13,11 +13,17 @@ import { resolveWorkspaceCapabilities } from '@/app/workspace/capabilities';
 import { buildWorkspacePresentationModel } from '@/app/workspace/presentation';
 import { WORKSPACE_VIEW_BINDINGS } from '@/app/workspace/viewBindings';
 import type {
+  WorkspaceAppViewProps,
   WorkspaceContext,
   WorkspaceDepthControl,
   WorkspaceViewBinding,
 } from '@/app/workspace/workspaceContext';
 import { CapabilityCapsule } from '@/app/workspace/CapabilityCapsule';
+import {
+  AppWorkspaceBoundedRegion,
+  AppWorkspaceScrollRegion,
+} from '@/app/workspace/layout/workspaceLayout';
+import { WorkspaceActionsSlotProvider } from '@/components/ui/workspace-actions-slot';
 import { capsuleZoneAppClass, capsuleZoneClass } from '@/product/terminal/capsule/CapsuleZone';
 
 const workspaceViewBindings = new Map<string, WorkspaceViewBinding>(
@@ -103,6 +109,43 @@ function UnavailableCapability({ title }: { title: string }) {
         </p>
       </div>
     </div>
+  );
+}
+
+/**
+ * The App half's content surface (#4115).
+ *
+ * The host owns *what scrolls*: a view that contributes ordinary content is
+ * wrapped in the one page scrollport, while a view declared `bounded` gets the
+ * fill adapter and keeps its own internal scroller. Neither branch is chosen
+ * by the capability at render time — the binding declares it once.
+ */
+function AppWorkspaceSurface({
+  ctx,
+  depth,
+  layout,
+  scrollMode,
+  unavailableTitle,
+}: {
+  ctx: WorkspaceContext;
+  depth: WorkspaceDepthControl;
+  layout: React.ComponentType<WorkspaceAppViewProps> | null;
+  scrollMode: 'document' | 'bounded';
+  unavailableTitle: string;
+}) {
+  if (!layout) {
+    return (
+      <AppWorkspaceScrollRegion>
+        <UnavailableCapability title={unavailableTitle} />
+      </AppWorkspaceScrollRegion>
+    );
+  }
+  const Layout = layout;
+  const content = <Layout ctx={ctx} depth={depth} />;
+  return scrollMode === 'bounded' ? (
+    <AppWorkspaceBoundedRegion>{content}</AppWorkspaceBoundedRegion>
+  ) : (
+    <AppWorkspaceScrollRegion>{content}</AppWorkspaceScrollRegion>
   );
 }
 
@@ -207,16 +250,28 @@ export function WorkspaceShell({
   // in `AppLayers` / `useSwipePager`). Leaving is one owner per depth; being
   // able to switch capabilities is not leaving.
   //
-  // The dock's clearance follows from this: the pushed depth's scrollers must
-  // clear it exactly as the root's do (`--nession-local-workspace-content-bottom-inset`,
-  // published from this bar's own geometry — see `useWorkspaceCapsuleClearance`).
+  // The dock's clearance follows from this: the pushed depth's scroll surface
+  // must clear it exactly as the root's does. #4115 moved that ownership to the
+  // host — the measured scroll inset is published from this bar's geometry (see
+  // `useWorkspaceCapsuleClearance`) and spent by the host scrollport or a
+  // declared bounded adapter, never by capability-level padding.
   const showDock = hasNavigation;
   // `#1204`: the surface-leave action never becomes a dock entry, and it stays
   // beside the dock at every depth. Web only; the App's leave is its page
   // header's Back.
   const showSurfaceAction = ctx.experience === 'web' && surfaceAction !== undefined;
 
+  // #4115: which scroll surface the App host renders for the open view. The
+  // binding owns the declaration because it owns the view: `document` is the
+  // default and needs nothing, `bounded` says the view is a fill surface whose
+  // internal scroller must spend the host's measured clearance.
+  const appScrollMode = activeBinding?.appScroll ?? 'document';
+  // The Host-owned Bottom Actions node. Capability content portals into it; an
+  // empty slot is hidden, so it never reserves a fake footer.
+  const [actionsSlot, setActionsSlot] = useState<HTMLElement | null>(null);
+
   return (
+    <WorkspaceActionsSlotProvider slot={actionsSlot}>
     <div
       ref={shellRef}
       data-testid="workspace-shell"
@@ -244,17 +299,33 @@ export function WorkspaceShell({
         style={contentMotionStyle}
       >
         {ctx.experience === 'app' ? (
-          ActiveAppLayout ? (
-            <ActiveAppLayout ctx={ctx} depth={depth} />
-          ) : (
-            <UnavailableCapability title={activeTitle} />
-          )
+          <AppWorkspaceSurface
+            ctx={ctx}
+            depth={depth}
+            layout={ActiveAppLayout}
+            scrollMode={appScrollMode}
+            unavailableTitle={activeTitle}
+          />
         ) : ActiveWebLayout ? (
           <ActiveWebLayout ctx={ctx} />
         ) : (
           <UnavailableCapability title={activeTitle} />
         )}
       </div>
+
+      {/* #4115: the Host-owned Bottom Actions role. It sits below the App
+          scrollport and above the floating Capsule; the host's measured band is
+          its bottom padding, so a capability's actions clear the overlay at
+          every height. `empty:hidden` means no reserved footer when nothing is
+          contributed. Web contributes none — its capability views keep their
+          own action layout. */}
+      {ctx.experience === 'app' ? (
+        <div
+          ref={setActionsSlot}
+          data-testid="workspace-bottom-actions"
+          className="shrink-0 border-t bg-background pb-[var(--nession-local-workspace-actions-bottom-inset,0px)] empty:hidden"
+        />
+      ) : null}
 
       {showDock || showSurfaceAction ? (
         /* Capsule V2 (#1347): Reciprocal layout — circle left, capsule right.
@@ -287,5 +358,6 @@ export function WorkspaceShell({
         </div>
       ) : null}
     </div>
+    </WorkspaceActionsSlotProvider>
   );
 }
