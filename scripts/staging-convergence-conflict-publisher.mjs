@@ -144,7 +144,7 @@ export function verifyUpstream(pr,issue,{branch,main,lane,mode,repairIssue}){
     !issue.pull_request&&issue.body?.includes(marker)&&
     issue.labels?.some(x=>x.name==='status:in-progress')&&
     (issue.labels??[]).some(x=>x.name==='bug')&&
-    mode==='source-repair'||false,
+    ['source-repair','direct-integration'].includes(mode),
     'Issue-first verified repair identity absent or unsupported mode');
 }
 async function main(){
