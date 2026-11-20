@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { formatSize, transcriptLabel } from '../format';
 import { parseTranscriptRecord } from '../model/transcriptRecord';
 import { useTranscriptViewState } from '../hooks/useTranscriptViewState';
@@ -67,7 +67,7 @@ export function TranscriptList({
         </p>
       ) : null}
       <ul
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
         data-testid="transcript-list-scroll"
       >
         {list.transcripts.map((transcript: ClaudeCodeTranscriptItem) => (
@@ -147,7 +147,7 @@ function PushedRecord({
         Transcript
       </button>
       <div
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
         data-testid="transcript-record-push-scroll"
       >
         <div className="flex items-center gap-2 border-b px-3 py-2">

@@ -115,7 +115,20 @@ async fn start_agent_with_providers(
     tool_timeout_secs: u64,
     tool_providers: Vec<Arc<dyn McpToolProvider>>,
 ) -> (SocketAddr, nession_agent::server::ServerHandle) {
-    start_agent_with_provider_factory(mutations, tool_timeout_secs, |_| tool_providers).await
+    start_agent_with_provider_factory(mutations, tool_timeout_secs, |_| tool_providers, None).await
+}
+
+/// Start the real Agent listener with a post-create preparation hook (`#4073`).
+async fn start_agent_with_session_created_hook(
+    hook: nession_agent::session_created::SharedSessionCreatedHook,
+) -> (SocketAddr, nession_agent::server::ServerHandle) {
+    start_agent_with_provider_factory(
+        nession_agent::execution::mutation_scheduler(),
+        60,
+        |_| Vec::new(),
+        Some(hook),
+    )
+    .await
 }
 
 /// Start the real Agent listener with a provider composition that receives the
@@ -128,6 +141,7 @@ async fn start_agent_with_provider_factory<F>(
     mutations: Arc<KeyedLane<ResourceKey>>,
     tool_timeout_secs: u64,
     tool_providers: F,
+    session_created: Option<nession_agent::session_created::SharedSessionCreatedHook>,
 ) -> (SocketAddr, nession_agent::server::ServerHandle)
 where
     F: FnOnce(Arc<SessionManager>) -> Vec<Arc<dyn McpToolProvider>>,
@@ -158,6 +172,9 @@ where
         },
     )
     .expect("agent server");
+    if let Some(hook) = session_created {
+        server = server.with_session_created_hook(hook);
+    }
 
     let config = AgentConfig {
         // Empty: this fixture is a standalone Agent. Cluster tools must
@@ -468,6 +485,64 @@ async fn agent_p2p_mcp_tool_call_executes_its_own_contribution() {
     let _ = handle.shutdown().await;
 }
 
+/// Records post-create preparation calls and contributes a warning (`#4073`).
+struct RecordingSessionCreatedHook {
+    calls: AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl nession_agent::session_created::SessionCreatedHook for RecordingSessionCreatedHook {
+    async fn session_created(&self, _agent_id: &str, _session_name: &str) -> Option<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        Some("fixture create warning".to_string())
+    }
+}
+
+#[tokio::test]
+async fn a_created_session_reaches_the_composed_preparation_hook() {
+    let hook = Arc::new(RecordingSessionCreatedHook {
+        calls: AtomicUsize::new(0),
+    });
+    let (addr, handle) = start_agent_with_session_created_hook(hook.clone()).await;
+    let session = initialize(addr).await;
+    let name = unique_session_name("hook");
+    let created = call_tool(
+        addr,
+        &session,
+        "nession_agent_create_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    assert_eq!(
+        hook.calls.load(Ordering::SeqCst),
+        1,
+        "the create must reach the composed hook exactly once"
+    );
+    assert!(
+        text_of(&created)["warnings"]
+            .as_array()
+            .expect("warnings")
+            .iter()
+            .any(|warning| warning == "fixture create warning"),
+        "the hook's warning belongs to the create reply: {}",
+        text_of(&created)
+    );
+    // This test shares the run's private tmux socket with every other test
+    // binary. Leaving the Session behind would make an unrelated test that
+    // asserts a fresh Agent sees no tmux Sessions fail intermittently under
+    // the parallel coverage run, so clean up through the same Tool.
+    let killed = call_tool(
+        addr,
+        &session,
+        "nession_agent_kill_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
+    let _ = handle.shutdown().await;
+}
+
 #[tokio::test]
 async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
     let (addr, handle) = start_agent_with_mcp().await;
@@ -590,6 +665,7 @@ async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
         nession_agent::execution::mutation_scheduler(),
         60,
         |tmux| nession_agent::runtime::compose_mcp_tool_providers(TEST_AGENT_ID, tmux),
+        None,
     )
     .await;
     let session = initialize(addr).await;

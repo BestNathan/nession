@@ -21,6 +21,7 @@ use nession_mcp::{ToolError, ToolHandler};
 
 use crate::control::{ClaudeControl, ClaudeSessionTarget};
 use crate::conversation_reader::ClaudeConversationReader;
+use crate::workspace_trust::WorkspaceTrust;
 
 /// Validate the Agent/Session target every Claude Tool names.
 ///
@@ -56,6 +57,7 @@ pub struct ClaudeCodeToolProvider {
     local_agent_id: String,
     control: Arc<dyn ClaudeControl>,
     reader: Arc<dyn ClaudeConversationReader>,
+    trust: Arc<WorkspaceTrust>,
 }
 
 impl ClaudeCodeToolProvider {
@@ -64,11 +66,13 @@ impl ClaudeCodeToolProvider {
         local_agent_id: impl Into<String>,
         control: Arc<dyn ClaudeControl>,
         reader: Arc<dyn ClaudeConversationReader>,
+        trust: Arc<WorkspaceTrust>,
     ) -> Self {
         Self {
             local_agent_id: local_agent_id.into(),
             control,
             reader,
+            trust,
         }
     }
 }
@@ -87,6 +91,7 @@ impl McpToolProvider for ClaudeCodeToolProvider {
             Arc::new(nession_claude_enter::NessionClaudeEnter::new(
                 self.local_agent_id.clone(),
                 Arc::clone(&self.control),
+                Arc::clone(&self.trust),
             )),
             Arc::new(nession_claude_submit::NessionClaudeSubmit::new(
                 self.local_agent_id.clone(),

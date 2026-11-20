@@ -2065,6 +2065,7 @@ dependencies = [
  "async-trait",
  "chrono",
  "dirs",
+ "libc",
  "nession-common",
  "nession-mcp",
  "nession-protocol",

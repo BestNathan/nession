@@ -33,7 +33,7 @@ use crate::erofs_cache::{
 fn reject_referenced_composite(resolved: &ResolvedGrantImage) -> Result<()> {
     if resolved.composite.is_some() {
         anyhow::bail!(
-            "referenced Composite image {} is not yet selectable by the Sandbox composition;              the EROFS mount manager owns its verified composite lease (#3697)",
+            "referenced Composite image {} is not yet selectable by the Sandbox composition; the EROFS mount manager owns its verified composite lease (#3697)",
             resolved.layer_digest
         );
     }
@@ -230,6 +230,49 @@ pub async fn prepare(
     }
     let needs_scratch = workspace_override.is_none() && (base.is_some() || !workspaces.is_empty());
 
+    // Resolve every authorized grant and reject unsupported Composite closures
+    // before creating any execution-owned workspace or mount resources (#3784).
+    // Cache fetches are permitted; scratch workspace allocation is not.
+    let base_resolved = match base {
+        Some(grant) => {
+            let resolved = resolve_grant_image(
+                cache.context("a Base grant requires the Agent EROFS cache")?,
+                grant,
+                &origin,
+                server_auth_token,
+            )
+            .await?;
+            reject_referenced_composite(&resolved)?;
+            Some(resolved)
+        }
+        None => None,
+    };
+    let mut workspace_resolved = Vec::with_capacity(workspaces.len());
+    for grant in workspaces {
+        let resolved = resolve_grant_image(
+            cache.context("a grant set requires the Agent EROFS cache")?,
+            grant,
+            &origin,
+            server_auth_token,
+        )
+        .await?;
+        reject_referenced_composite(&resolved)?;
+        workspace_resolved.push(resolved);
+    }
+    let mut toolchain_resolved = Vec::with_capacity(toolchains.len());
+    for grant in toolchains {
+        let resolved = resolve_grant_image(
+            cache.context("a grant set requires the Agent EROFS cache")?,
+            grant,
+            &origin,
+            server_auth_token,
+        )
+        .await?;
+        reject_referenced_composite(&resolved)?;
+        let target = toolchain_target(grant.target.as_deref(), &resolved)?;
+        toolchain_resolved.push((resolved, target));
+    }
+
     let workspace_root = state_dir.join("sandbox-workspaces");
     let workspace_dir = if needs_scratch {
         std::fs::create_dir_all(&workspace_root).with_context(|| {
@@ -284,55 +327,24 @@ pub async fn prepare(
         }
         ((role, resolved.layer_digest, resolved.layer_path), binding)
     };
-    let (base_ref, base_env) = match base {
-        Some(base) => match resolve_grant_image(
-            cache.context("a Base grant requires the Agent EROFS cache")?,
-            base,
-            &origin,
-            server_auth_token,
-        )
-        .await
-        {
-            Ok(resolved) => {
-                let base_env = image_env_defaults(&resolved);
-                let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
-                manifests.extend(binding);
-                images.push((role, digest.clone(), path.clone()));
-                (
-                    Some(SandboxImageRef {
-                        digest,
-                        source: path.display().to_string(),
-                    }),
-                    base_env,
-                )
-            }
-            Err(error) => {
-                guard.discard();
-                return Err(error);
-            }
-        },
+    let (base_ref, base_env) = match base_resolved {
+        Some(resolved) => {
+            let base_env = image_env_defaults(&resolved);
+            let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
+            manifests.extend(binding);
+            images.push((role, digest.clone(), path.clone()));
+            (
+                Some(SandboxImageRef {
+                    digest,
+                    source: path.display().to_string(),
+                }),
+                base_env,
+            )
+        }
         None => (None, Vec::new()),
     };
-    let mut workspace_refs = Vec::with_capacity(workspaces.len());
-    for grant in workspaces {
-        let resolved = match resolve_grant_image(
-            cache.context("a grant set requires the Agent EROFS cache")?,
-            grant,
-            &origin,
-            server_auth_token,
-        )
-        .await
-        {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                guard.discard();
-                return Err(error);
-            }
-        };
-        if let Err(error) = reject_referenced_composite(&resolved) {
-            guard.discard();
-            return Err(error);
-        }
+    let mut workspace_refs = Vec::with_capacity(workspace_resolved.len());
+    for resolved in workspace_resolved {
         let ((role, digest, path), binding) = record(ManagedImageRole::Workspace, resolved);
         manifests.extend(binding);
         images.push((role, digest.clone(), path.clone()));
@@ -341,33 +353,8 @@ pub async fn prepare(
             source: path.display().to_string(),
         });
     }
-    let mut toolchain_refs = Vec::with_capacity(toolchains.len());
-    for grant in toolchains {
-        let resolved = match resolve_grant_image(
-            cache.context("a grant set requires the Agent EROFS cache")?,
-            grant,
-            &origin,
-            server_auth_token,
-        )
-        .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                guard.discard();
-                return Err(error);
-            }
-        };
-        if let Err(error) = reject_referenced_composite(&resolved) {
-            guard.discard();
-            return Err(error);
-        }
-        let target = match toolchain_target(grant.target.as_deref(), &resolved) {
-            Ok(target) => target,
-            Err(error) => {
-                guard.discard();
-                return Err(error);
-            }
-        };
+    let mut toolchain_refs = Vec::with_capacity(toolchain_resolved.len());
+    for (resolved, target) in toolchain_resolved {
         let env = image_env_defaults(&resolved);
         let path_prepend = image_path_prepend(&resolved);
         let ((role, digest, path), binding) = record(ManagedImageRole::Toolchain, resolved);
@@ -764,7 +751,7 @@ mod tests {
 #[cfg(test)]
 mod workspace_override_tests {
     use super::*;
-    use crate::erofs_cache::StorageProbe;
+    use crate::erofs_cache::{ResolvedCompositeGrant, StorageProbe};
     use httptest::http::Response;
     use httptest::{matchers::*, Expectation, Server};
     use nession_protocol::contracts::session::v1::ManagedImageRole;
@@ -988,5 +975,344 @@ mod workspace_override_tests {
             Err(error) => error,
         };
         assert!(format!("{error:#}").contains("Project EROFS lower"));
+    }
+    /// Verify that reject_referenced_composite produces the expected error
+    /// for a ResolvedGrantImage with composite metadata (#3784).
+    #[test]
+    fn reject_referenced_composite_produces_actionable_error() {
+        let resolved = ResolvedGrantImage {
+            manifest_digest: Some("sha256:manifest".to_string()),
+            layer_digest: "sha256:metadata".to_string(),
+            layer_path: PathBuf::from("/cache/metadata"),
+            usage: None,
+            composite: Some(ResolvedCompositeGrant {
+                descriptor_digest: "sha256:descriptor".to_string(),
+                metadata_digest: "sha256:metadata".to_string(),
+                device_digests: vec!["sha256:device1".to_string()],
+                metadata_path: PathBuf::from("/cache/metadata"),
+                device_paths: vec![PathBuf::from("/cache/device1")],
+            }),
+        };
+        let error = reject_referenced_composite(&resolved).unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("not yet selectable by the Sandbox composition"),
+            "error message should explain the composite is not selectable: {message}"
+        );
+        assert!(
+            message.contains("sha256:metadata"),
+            "error message should include the layer digest: {message}"
+        );
+        assert!(
+            message.contains("#3697"),
+            "error message should reference the related issue: {message}"
+        );
+    }
+
+    /// Verify that a non-composite ResolvedGrantImage passes the check (#3784).
+    #[test]
+    fn reject_referenced_composite_accepts_plain_image() {
+        let resolved = ResolvedGrantImage {
+            manifest_digest: Some("sha256:manifest".to_string()),
+            layer_digest: "sha256:layer".to_string(),
+            layer_path: PathBuf::from("/cache/layer"),
+            usage: None,
+            composite: None,
+        };
+        reject_referenced_composite(&resolved).expect("plain image should be accepted");
+    }
+
+    fn ws_url(server: &Server) -> String {
+        server.url("/").to_string().replacen("http://", "ws://", 1)
+    }
+
+    /// Build one valid referenced multi-blob Composite image (#3697) and serve
+    /// every closure object on the Agent's image-blob route (#3784).
+    ///
+    /// The fixture is the same shape the native cache resolver requires: one
+    /// Manifest whose single layer is the Composite descriptor, a Config whose
+    /// rootfs is `erofs-composite`, and the ordered metadata/backing devices.
+    /// `resolve_grant_image` therefore returns `composite: Some(..)`, which is
+    /// exactly the input the Sandbox preparation boundary must reject.
+    fn composite_image(
+        server: &Server,
+        role: ManagedImageRole,
+        target: Option<&str>,
+    ) -> ManagedImageGrant {
+        use nession_erofs::oci::{
+            to_bytes, CompositeDescriptor, Descriptor, ImageConfig, Manifest, Platform, RootFs,
+            RuntimeConfig, COMPOSITE_ROOTFS_TYPE, MEDIA_TYPE_COMPOSITE, MEDIA_TYPE_CONFIG,
+            MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+        };
+        use nession_protocol::contracts::session::v1::ManagedImageObjectGrant;
+
+        let describe = |bytes: &[u8], media_type: &str| Descriptor {
+            media_type: media_type.to_string(),
+            digest: digest_for(bytes),
+            size: bytes.len() as u64,
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: serde_json::Map::new(),
+        };
+
+        let device_bytes: Vec<Vec<u8>> = vec![
+            b"metadata erofs bytes".to_vec(),
+            b"node backing bytes".to_vec(),
+            b"dsh backing bytes".to_vec(),
+        ];
+        let devices: Vec<Descriptor> = device_bytes
+            .iter()
+            .map(|bytes| describe(bytes, MEDIA_TYPE_EROFS))
+            .collect();
+        let composite = CompositeDescriptor::new(
+            &Platform::for_consumer("linux", "amd64", None),
+            &devices[0],
+            &[devices[1].clone(), devices[2].clone()],
+        )
+        .unwrap();
+        let composite_bytes = to_bytes(&composite).unwrap();
+
+        let config = ImageConfig {
+            created: None,
+            author: None,
+            architecture: "amd64".to_string(),
+            os: "linux".to_string(),
+            os_version: None,
+            os_features: Some(vec!["erofs".to_string()]),
+            variant: None,
+            config: RuntimeConfig::default(),
+            rootfs: RootFs {
+                fs_type: COMPOSITE_ROOTFS_TYPE.to_string(),
+                diff_ids: composite
+                    .closure()
+                    .unwrap()
+                    .into_iter()
+                    .map(|descriptor| descriptor.digest)
+                    .collect(),
+                extra: serde_json::Map::new(),
+            },
+            history: Vec::new(),
+            extra: serde_json::Map::new(),
+        };
+        let config_bytes = to_bytes(&config).unwrap();
+
+        let manifest = Manifest {
+            schema_version: 2,
+            media_type: Some(MEDIA_TYPE_MANIFEST.to_string()),
+            config: describe(&config_bytes, MEDIA_TYPE_CONFIG),
+            layers: vec![describe(&composite_bytes, MEDIA_TYPE_COMPOSITE)],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+            extra: serde_json::Map::new(),
+        };
+        let manifest_bytes = to_bytes(&manifest).unwrap();
+        let manifest_digest = digest_for(&manifest_bytes);
+
+        let mut objects = vec![
+            (MEDIA_TYPE_MANIFEST, manifest_bytes),
+            (MEDIA_TYPE_CONFIG, config_bytes),
+            (MEDIA_TYPE_COMPOSITE, composite_bytes),
+        ];
+        objects.extend(
+            device_bytes
+                .into_iter()
+                .map(|bytes| (MEDIA_TYPE_EROFS, bytes)),
+        );
+        for (_, bytes) in &objects {
+            let digest = digest_for(bytes);
+            server.expect(
+                Expectation::matching(request::method_path(
+                    "GET",
+                    format!("/images/blobs/{digest}"),
+                ))
+                // A rejected preparation may stop before every authorized
+                // object is downloaded; that is the failure under test.
+                .times(0..=1)
+                .respond_with(Response::builder().status(200).body(bytes.clone()).unwrap()),
+            );
+        }
+        ManagedImageGrant {
+            role,
+            digest: manifest_digest.clone(),
+            path: format!("/images/blobs/{manifest_digest}"),
+            target: target.map(str::to_string),
+            objects: objects
+                .into_iter()
+                .map(|(media_type, bytes)| ManagedImageObjectGrant {
+                    digest: digest_for(&bytes),
+                    media_type: media_type.to_string(),
+                    size_bytes: bytes.len() as u64,
+                    path: format!("/images/blobs/{}", digest_for(&bytes)),
+                })
+                .collect(),
+        }
+    }
+
+    fn assert_composite_rejection(error: &anyhow::Error) {
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("not yet selectable by the Sandbox composition"),
+            "the role must be rejected at the composite boundary, not earlier: {message}"
+        );
+        assert!(
+            message.contains("#3697"),
+            "the rejection should name the owning contract: {message}"
+        );
+    }
+
+    fn assert_no_execution_workspace(state_dir: &Path) {
+        let workspace_root = state_dir.join("sandbox-workspaces");
+        assert!(
+            !workspace_root.exists(),
+            "a rejected preparation must not create the execution-owned workspace root"
+        );
+    }
+
+    /// A referenced Composite Base resolves, then is rejected at the same
+    /// compatibility boundary as Workspace/Toolchain before any mount, leaving
+    /// no execution-owned workspace (#3784 SC-01).
+    #[tokio::test]
+    async fn prepare_rejects_a_referenced_composite_base_before_mounting() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let server = Server::run();
+        let composite = composite_image(&server, ManagedImageRole::Base, None);
+
+        let result = prepare(
+            Some(&cache),
+            &[composite],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        let error = match result {
+            Ok(_) => panic!("a referenced Composite Base must be rejected"),
+            Err(error) => error,
+        };
+        assert_composite_rejection(&error);
+        assert_no_execution_workspace(state_dir.path());
+    }
+
+    /// A referenced Composite Workspace lower is rejected before any mount,
+    /// leaving no execution-owned workspace (#3784 SC-01).
+    #[tokio::test]
+    async fn prepare_rejects_a_referenced_composite_workspace_before_mounting() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let base = digest_for(&base_bytes);
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/images/blobs/{base}")))
+                .respond_with(Response::builder().status(200).body(base_bytes).unwrap()),
+        );
+        let composite = composite_image(&server, ManagedImageRole::Workspace, None);
+
+        let result = prepare(
+            Some(&cache),
+            &[grant(ManagedImageRole::Base, &base, None), composite],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        let error = match result {
+            Ok(_) => panic!("a referenced Composite Workspace must be rejected"),
+            Err(error) => error,
+        };
+        assert_composite_rejection(&error);
+        assert_no_execution_workspace(state_dir.path());
+    }
+
+    /// A referenced Composite Toolchain is rejected before any mount, leaving
+    /// no execution-owned workspace (#3784 SC-01).
+    #[tokio::test]
+    async fn prepare_rejects_a_referenced_composite_toolchain_before_mounting() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let base = digest_for(&base_bytes);
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/images/blobs/{base}")))
+                .respond_with(Response::builder().status(200).body(base_bytes).unwrap()),
+        );
+        let composite = composite_image(&server, ManagedImageRole::Toolchain, Some("/opt/rust"));
+
+        let result = prepare(
+            Some(&cache),
+            &[grant(ManagedImageRole::Base, &base, None), composite],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        let error = match result {
+            Ok(_) => panic!("a referenced Composite Toolchain must be rejected"),
+            Err(error) => error,
+        };
+        assert_composite_rejection(&error);
+        assert_no_execution_workspace(state_dir.path());
+    }
+
+    /// A composite grant whose authorized object set omits a closure device
+    /// still fails closed during cache resolution (#3784 SC-02).
+    #[tokio::test]
+    async fn prepare_fails_closed_when_a_composite_grant_omits_a_device() {
+        let cache_dir = tempfile::tempdir().unwrap();
+        let state_dir = tempfile::tempdir().unwrap();
+        let cache = cache(cache_dir.path()).await;
+        let base_bytes = b"base image".to_vec();
+        let base = digest_for(&base_bytes);
+        let server = Server::run();
+        server.expect(
+            Expectation::matching(request::method_path("GET", format!("/images/blobs/{base}")))
+                .respond_with(Response::builder().status(200).body(base_bytes).unwrap()),
+        );
+        let mut composite = composite_image(&server, ManagedImageRole::Workspace, None);
+        // Keep the object count valid but replace one closure device with an
+        // unrelated digest: the grant is complete in shape but wrong.
+        let unrelated = digest_for(b"unrelated device");
+        let device = composite
+            .objects
+            .last_mut()
+            .expect("the fixture always grants at least one device");
+        device.digest.clone_from(&unrelated);
+        device.path = format!("/images/blobs/{unrelated}");
+
+        let result = prepare(
+            Some(&cache),
+            &[grant(ManagedImageRole::Base, &base, None), composite],
+            &ws_url(&server),
+            SERVER_AUTH_TOKEN,
+            state_dir.path(),
+            None,
+        )
+        .await;
+
+        let error = match result {
+            Ok(_) => panic!("a composite with a missing device must fail closed"),
+            Err(error) => error,
+        };
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("the authorized object set has no Composite device"),
+            "cache resolution must reject the incomplete closure: {message}"
+        );
+        assert_no_execution_workspace(state_dir.path());
     }
 }

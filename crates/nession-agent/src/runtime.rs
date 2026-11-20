@@ -23,6 +23,7 @@ use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_claude_code::session_context::{McpHostContext, McpHostEndpoint};
 use nession_claude_code::tools::ClaudeCodeToolProvider;
+use nession_claude_code::workspace_trust::WorkspaceTrust;
 use nession_common::extension::AgentExtension;
 use nession_common::readiness::Readiness;
 use nession_common::session_activity::SessionActivityProvider;
@@ -291,6 +292,16 @@ pub async fn run(
         },
     )
     .context("failed to create agent server")?;
+    // #4073: one post-create preparation hook, shared by the P2P listener and
+    // the central connection so a direct and a relayed create prepare the
+    // Session identically. It reads the Session's own live environment; the
+    // Agent daemon's environment is never used.
+    let session_created: crate::session_created::SharedSessionCreatedHook = Arc::new(
+        crate::claude_workspace_trust::ClaudeWorkspaceTrustHook::new(Arc::new(
+            TmuxSessionContext::new(Arc::clone(&tmux_for_client)),
+        )),
+    );
+    agent_server = agent_server.with_session_created_hook(Arc::clone(&session_created));
     // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
     // fail-closed configuration error stops the start here, before `ready`.
     agent_server
@@ -408,7 +419,8 @@ pub async fn run(
             agent_token.clone(),
             Arc::clone(&mutation_lane),
         )
-        .with_session_metadata(session_metadata);
+        .with_session_metadata(session_metadata)
+        .with_session_created_hook(session_created);
         let server_client = match mcp_tools {
             Some((catalog, context)) => server_client.with_mcp_tools(catalog, context),
             None => server_client,
@@ -671,13 +683,16 @@ pub fn compose_mcp_tool_providers(
     // Protocol Units through the same stateless extension the protocol routes
     // use, over the same tmux Session truth (`#3779` P3). There is no second
     // discovery or transcript parser behind the MCP surface.
-    let reader = Arc::new(ClaudeCodeAgentExtension::new(Arc::new(
-        TmuxSessionContext::new(Arc::clone(&tmux)),
-    )));
+    let context = Arc::new(TmuxSessionContext::new(Arc::clone(&tmux)));
+    let reader = Arc::new(ClaudeCodeAgentExtension::new(context.clone()));
+    // #4073: `claude.enter` prepares Claude's own Workspace Trust immediately
+    // before launch, resolved from this same live Session view.
+    let trust = Arc::new(WorkspaceTrust::new(context));
     vec![Arc::new(ClaudeCodeToolProvider::new(
         agent_id,
         Arc::new(AgentClaudeControl::new(agent_id, tmux)),
         reader,
+        trust,
     ))]
 }
 

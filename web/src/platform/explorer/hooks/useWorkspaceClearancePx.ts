@@ -1,15 +1,18 @@
 import { useEffect, useState, type RefObject } from 'react';
 
-import { WORKSPACE_CONTENT_BOTTOM_INSET } from '@/shared/lib/workspaceScrollClearance';
+import { WORKSPACE_SCROLL_BOTTOM_INSET } from '@/shared/lib/workspaceScrollClearance';
 
 /**
  * The Workspace's published Capsule Zone clearance, in pixels (#1347 SC-12).
  *
- * `workspaceScrollClearanceClass` spends that variable as CSS trailing padding,
- * which a virtualized list cannot: react-arborist positions rows from numbers,
- * so the Explorer reads the same published value and hands it to the Tree's
- * `paddingBottom` — the virtualizer's own form of trailing scroll clearance.
- * Same owner, same measurement, same guarantee; only the unit differs.
+ * `workspaceBoundedScrollClearanceClass` spends that variable as CSS trailing
+ * padding, which a virtualized list cannot: react-arborist positions rows from
+ * numbers, so the Explorer reads the same published value and hands it to the
+ * Tree's `paddingBottom` — the virtualizer's own form of trailing scroll
+ * clearance. Same owner, same measurement, same guarantee; only the unit
+ * differs. (#4115 took the value from the element that actually scrolls rather
+ * than from the shell's whole band, so a Host-owned actions row no longer
+ * leaves the tree reserving space that is already outside its viewport.)
  *
  * The Workspace Files navigator was the one scroll container the CSS class
  * could not reach when SC-12 landed, because its scroller belongs to the tree
@@ -31,7 +34,7 @@ export function useWorkspaceClearancePx(ref: RefObject<HTMLElement | null>): num
     }
 
     const read = () => {
-      const raw = getComputedStyle(el).getPropertyValue(WORKSPACE_CONTENT_BOTTOM_INSET);
+      const raw = getComputedStyle(el).getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET);
       const px = Number.parseFloat(raw) || 0;
       setClearance((current) => (current === px ? current : px));
     };

@@ -1030,6 +1030,10 @@ pub struct AgentServer {
     handshake_policy: P2pHandshakePolicy,
     /// The MCP endpoint (`#565`) mounted on this listener, when enabled.
     mcp: Option<Arc<McpService>>,
+    /// The post-create preparation hook composed by `runtime.rs` (`#4073`).
+    /// `None` for a directly constructed server (tests), which must not write
+    /// external capability state.
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 /// Translate a legacy attach-time `env_snapshots` list into the binding model.
@@ -1219,6 +1223,9 @@ struct AgentIngress {
     /// refuses with a truthful unavailable answer.
     mcp_catalog: Option<Arc<nession_mcp::McpCatalog>>,
     mcp_tool_context: Option<Arc<nession_mcp::ToolContext>>,
+    /// Capability preparation after a Session is created (`#4073`). `None`
+    /// when the runtime did not compose one (direct test constructions).
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 /// Router state for one accepted P2P connection.
@@ -1478,6 +1485,8 @@ pub(crate) struct P2pRequest<'a> {
     /// The composed contribution catalog and its Tool context (`#3778`).
     mcp_catalog: Option<&'a Arc<nession_mcp::McpCatalog>>,
     mcp_tool_context: Option<&'a Arc<nession_mcp::ToolContext>>,
+    /// Capability preparation after a Session is created (`#4073`).
+    session_created: Option<&'a crate::session_created::SharedSessionCreatedHook>,
 }
 
 impl P2pRequest<'_> {
@@ -1533,6 +1542,8 @@ struct Connection {
     /// The composed contribution catalog and its context (`#3778`).
     mcp_catalog: Option<Arc<nession_mcp::McpCatalog>>,
     mcp_tool_context: Option<Arc<nession_mcp::ToolContext>>,
+    /// Capability preparation after a Session is created (`#4073`).
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 impl Connection {
@@ -1797,6 +1808,7 @@ impl Frame {
             resize: &connection.resize,
             mcp_catalog: connection.mcp_catalog.as_ref(),
             mcp_tool_context: connection.mcp_tool_context.as_ref(),
+            session_created: connection.session_created.as_ref(),
         };
 
         let reply = dispatch_p2p(ctx, &msg_type, payload).await;
@@ -2156,9 +2168,21 @@ p2p_routes! { ctx, msg_type, payload_value;
                 };
                 match outcome {
                     Ok(outcome) => {
+                        // #4073: the Session and its environment binding now
+                        // exist. The capability prepares its own state here and
+                        // contributes only a warning on failure; the Session
+                        // stays created for every consumer.
+                        let mut warnings = outcome.warnings;
+                        if let Some(hook) = ctx.session_created {
+                            if let Some(warning) =
+                                hook.session_created(ctx.agent_id, &payload.name).await
+                            {
+                                warnings.push(warning);
+                            }
+                        }
                         let resp = SessionCreateResponse {
                             name: payload.name,
-                            warnings: outcome.warnings,
+                            warnings,
                             sandbox: outcome.sandbox,
                             workspace: managed
                                 .as_ref()
@@ -3196,6 +3220,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                     .await
                 {
                     Ok(outcome) => {
+                        // #4073: this Agent-local create entrypoint offers the
+                        // same preparation point. Its response contract has no
+                        // `warnings` member, so a failed preparation is logged
+                        // here; `claude.enter` re-resolves and refuses before
+                        // launch when it still cannot prepare.
+                        if let Some(hook) = ctx.session_created {
+                            if let Some(warning) =
+                                hook.session_created(ctx.agent_id, &payload.name).await
+                            {
+                                warn!("{warning}");
+                            }
+                        }
                         let session_id = format!("{}:{}", ctx.agent_id, payload.name);
                         let resp = WebSessionCreateResponse {
                             success: true,
@@ -3566,7 +3602,21 @@ impl AgentServer {
             auth: context.auth,
             handshake_policy: context.handshake_policy,
             mcp: None,
+            session_created: None,
         })
+    }
+
+    /// Attach the post-create preparation hook (`#4073`).
+    ///
+    /// Composed only by `runtime.rs`: the hook performs capability-owned side
+    /// effects, so a test harness must opt in explicitly rather than inherit
+    /// them from the production graph.
+    pub fn with_session_created_hook(
+        mut self,
+        hook: crate::session_created::SharedSessionCreatedHook,
+    ) -> Self {
+        self.session_created = Some(hook);
+        self
     }
 
     /// Mount the MCP endpoint on this listener (`#565`).
@@ -3599,6 +3649,7 @@ impl AgentServer {
             Arc::clone(&self.mutations),
             Arc::clone(&self.session_metadata),
             tool_providers,
+            self.session_created.clone(),
         )?;
         Ok(())
     }
@@ -3676,6 +3727,7 @@ impl AgentServer {
             resize: self.resize.clone(),
             mcp_catalog: self.mcp.as_ref().map(|mcp| mcp.catalog()),
             mcp_tool_context: self.mcp.as_ref().map(|mcp| mcp.tool_context()),
+            session_created: self.session_created.clone(),
         };
         let tls_acceptor = self.tls_acceptor;
         let auth = Arc::clone(&self.auth);
@@ -3873,6 +3925,7 @@ impl AgentServer {
             resize,
             mcp_catalog,
             mcp_tool_context,
+            session_created,
         } = context;
 
         // Everything a frame of this connection needs, owned once and shared by
@@ -3898,6 +3951,7 @@ impl AgentServer {
             authority: Arc::new(StdMutex::new(None)),
             mcp_catalog,
             mcp_tool_context,
+            session_created,
         });
 
         // The loop owns the connection; keep the outbound handle so the writer
@@ -7614,6 +7668,7 @@ mod tests {
                 resize: &resize,
                 mcp_catalog: None,
                 mcp_tool_context: None,
+                session_created: None,
             };
             dispatch_p2p(ctx, msg_types::TERMINAL_RESIZE, payload).await
         });

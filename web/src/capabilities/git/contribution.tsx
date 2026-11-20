@@ -52,4 +52,8 @@ export const gitView: WorkspaceViewBinding = {
   id: GIT_ID,
   icon: GitBranch,
   layout: { web: GitWorkspace, app: GitWorkspace },
+  // #4115: the App view is a Collection/Reader with its own scroll owner, so
+  // the host renders the bounded adapter and this view spends the measured
+  // clearance inside it.
+  appScroll: 'bounded',
 };

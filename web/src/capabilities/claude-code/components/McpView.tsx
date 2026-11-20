@@ -50,7 +50,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { formatSchema } from '../format';
 import { serverApi } from '@/platform/server';
 import type {
@@ -403,7 +403,7 @@ function ServerList({
           </Button>
         </div>
       </div>
-      <div className={cn('min-h-0 flex-1 overflow-y-auto p-1', workspaceScrollClearanceClass)}>
+      <div className={cn('min-h-0 flex-1 overflow-y-auto p-1', workspaceBoundedScrollClearanceClass)}>
         {servers.length === 0 ? (
           <div className="p-3">
             <DetailEmpty>
@@ -555,7 +555,7 @@ function ServerDetail({
   return (
     <div
       data-testid="claude-code-mcp-detail"
-      className={cn('min-h-0 flex-1 overflow-y-auto p-4', workspaceScrollClearanceClass)}
+      className={cn('min-h-0 flex-1 overflow-y-auto p-4', workspaceBoundedScrollClearanceClass)}
     >
       {isApp && showBack ? (
         <Button

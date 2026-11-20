@@ -245,6 +245,10 @@ pub struct ServerClient {
     /// Set for the lifetime of [`Self::supervise`] so session mutations can
     /// push a snapshot without waiting for [`SessionWatcher`]'s poll interval.
     session_publish: Arc<Mutex<Option<ServerClientHandle>>>,
+    /// The post-create preparation hook composed by `runtime.rs` (`#4073`).
+    /// Shared with the P2P listener so a direct and a relayed create prepare
+    /// identically; `None` in direct constructions (tests).
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -614,7 +618,20 @@ impl ServerClient {
             mutations,
             env_store: EnvStore::new(env_root),
             session_publish: Arc::new(Mutex::new(None)),
+            session_created: None,
         }
+    }
+
+    /// Attach the post-create preparation hook (`#4073`).
+    ///
+    /// The runtime composes one hook and hands the same value to the P2P
+    /// listener, so a Server-relayed create and a direct create cannot diverge.
+    pub fn with_session_created_hook(
+        mut self,
+        hook: crate::session_created::SharedSessionCreatedHook,
+    ) -> Self {
+        self.session_created = Some(hook);
+        self
     }
 
     /// Use the process-wide metadata store instead of the local construction.
@@ -4590,7 +4607,7 @@ core_routes!(agent, msg, responses;
                         success,
                         error,
                         session_name,
-                        warnings,
+                        mut warnings,
                         sandbox_report,
                         instance_id,
                         metadata,
@@ -4645,6 +4662,23 @@ core_routes!(agent, msg, responses;
                             None,
                         ),
                     };
+
+                    // #4073: creation-time preparation for the Session that now
+                    // exists, including Project-created ones whose environment
+                    // binding was just applied. Failure is a warning; the
+                    // capability's enter-time check re-resolves and refuses
+                    // before it would launch into an unverified trust dialog.
+                    if success {
+                        if let (Some(hook), Some(name)) =
+                            (agent.session_created.as_ref(), session_name.as_deref())
+                        {
+                            if let Some(warning) =
+                                hook.session_created(&agent.agent_id, name).await
+                            {
+                                warnings.push(warning);
+                            }
+                        }
+                    }
 
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
