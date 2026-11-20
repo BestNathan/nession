@@ -128,6 +128,22 @@ function fetchForComparison(ref) {
     '+refs/heads/' + ref + ':refs/remotes/origin/' + ref]);
 }
 
+// #4059: workflow-bearing integration requires a separately approved writer.
+export function workflowFileWriteRequired(paths) {
+  if (!Array.isArray(paths) || paths.some(p =>
+    typeof p !== 'string' || !p.length || p.includes('\0')))
+    reject('invalid workflow source path inventory');
+  return paths.some(p => p.startsWith('.github/workflows/'));
+}
+
+function workflowSourceDiff(laneSha, mainSha) {
+  if (!SHA.test(laneSha) || !SHA.test(mainSha))
+    reject('invalid workflow-diff source SHA');
+  const output = shell('git', ['diff', '--name-only', laneSha, mainSha,
+    '--', '.github/workflows/']);
+  return output ? output.split('\n').filter(Boolean) : [];
+}
+
 export function deriveActions(ahead, behind) {
   if (!Number.isSafeInteger(ahead) || ahead < 0 || !Number.isSafeInteger(behind) || behind < 0) {
     reject('invalid ahead/behind counters');
@@ -153,7 +169,10 @@ function calculatePlan() {
     if (!SHA.test(sha)) reject('invalid lane SHA');
     const ahead = Number(shell('git', ['rev-list', '--count', 'origin/main..origin/' + branch]));
     const behind = Number(shell('git', ['rev-list', '--count', 'origin/' + branch + '..origin/main']));
-    return { branch, sha, ahead, behind, actions: deriveActions(ahead, behind), deployment_workflows };
+    const actions = deriveActions(ahead, behind);
+    const workflow_write_required = actions.includes('sync-main-to-lane') &&
+      workflowFileWriteRequired(workflowSourceDiff(sha, mainSha));
+    return { branch, sha, ahead, behind, actions, workflow_write_required, deployment_workflows };
   });
   return { schema_version: 1, main_sha: mainSha, branches: states };
 }
@@ -199,6 +218,10 @@ function validatePlan(plan) {
       JSON.stringify(lane.actions) !== JSON.stringify(deriveActions(lane.ahead, lane.behind))) {
       reject('plan branch state/actions invalid: ' + lane.branch);
     }
+    const expectedWriter = lane.actions.includes('sync-main-to-lane') &&
+      workflowFileWriteRequired(workflowSourceDiff(lane.sha, plan.main_sha));
+    if (lane.workflow_write_required !== expectedWriter)
+      reject('plan workflow writer requirement changed: ' + lane.branch);
   }
 }
 
@@ -249,6 +272,14 @@ function ensureIntegrationBranch(repo, plan, lane) {
        actualTree!==tree)reject('integration branch already exists with wrong parents/tree');
     return {branch,sha:existing,created:false};
   }
+  // Re-read actual pinned source diff; do not trust webhook or plan claims.
+  const workflowChanges = workflowSourceDiff(lane.sha, plan.main_sha);
+  const workflowWriterNeeded = workflowFileWriteRequired(workflowChanges);
+  const workflowToken = process.env.CONVERGENCE_WORKFLOW_PUSH_TOKEN;
+  if (workflowWriterNeeded && !workflowToken) {
+    return {blocked_workflow_writer:true,branch,
+      workflow_files:workflowChanges};
+  }
   // The App token is used only by this main-owned deterministic controller,
   // never in an Agent's context. GitHub CLI's credential helper avoids placing
   // a token in command arguments or persisting checkout credentials.
@@ -261,9 +292,14 @@ function ensureIntegrationBranch(repo, plan, lane) {
     '-m','chore(release): integrate '+plan.main_sha+' into '+lane.sha],
     {env:ident});
   if(!SHA.test(commit))reject('invalid integration commit SHA');
+  // The separate workflow App token is valid only for this pinned git push.
+  // All PR/qualification calls retain the ordinary Publisher identity.
+  const pushEnv=workflowWriterNeeded
+    ? {...ident,GH_TOKEN:workflowToken}
+    : ident;
   try {
     shell('git',['-c','credential.helper=!gh auth git-credential',
-      'push','origin',commit+':refs/heads/'+branch],{env:ident});
+      'push','origin',commit+':refs/heads/'+branch],{env:pushEnv});
   } catch(error) {
     // Concurrent controllers must not force-push or overwrite a winner. If an
     // identical immutable branch won the race, validate it below.
@@ -526,6 +562,13 @@ function reconcile(plan) {
       const syncMainSha=pinned?.main_sha||plan.main_sha;
       const integration=sync?(pinned||ensureIntegrationBranch(repo,
         {...plan,main_sha:syncMainSha},lane)):null;
+      if(sync&&integration.blocked_workflow_writer) {
+        results.push({branch:lane.branch,direction:action,
+          outcome:'BLOCKED',reason:'WORKFLOW_FILE_WRITER_NOT_CONFIGURED',
+          main_sha:syncMainSha,lane_sha:lane.sha,
+          workflow_files:integration.workflow_files});
+        continue;
+      }
       // On an actual merge-tree conflict, the direct-source PR exists only as
       // an authenticated, SHA-bound read-only Agent analysis surface; it is not
       // qualified for merge under the protected staging rules.
@@ -835,6 +878,17 @@ function selfTest() {
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['!main']")), /unsupported/);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['main']")), /unsupported/);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "${{ vars.STAGING_BRANCHES }}")), /unsupported/);
+  // #4059: independent positive/negative workflow-authority fixtures.
+  assert.equal(workflowFileWriteRequired([]), false);
+  assert.equal(workflowFileWriteRequired(['scripts/ci/quality-scope.mjs']), false);
+  assert.equal(workflowFileWriteRequired(['.github/workflows-extra.yml']), false);
+  assert.equal(workflowFileWriteRequired(['.github/workflows/release-staging.yml']), true);
+  assert.equal(workflowFileWriteRequired(['docs/README.md',
+    '.github/workflows/acceptance-cases.yaml']), true);
+  assert.throws(()=>workflowFileWriteRequired(['valid', '\0']),
+    /invalid workflow source path inventory/);
+  assert.throws(()=>workflowFileWriteRequired('not-an-array'),
+    /invalid workflow source path inventory/);
   assert.deepEqual(deriveActions(0, 0), []);
   assert.deepEqual(deriveActions(4, 0), ['promote-lane-to-main']);
   assert.deepEqual(deriveActions(0, 5), ['sync-main-to-lane']);
