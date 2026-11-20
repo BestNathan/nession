@@ -9,6 +9,8 @@
 pub mod gc;
 pub mod legacy;
 pub mod pin;
+#[cfg(feature = "registry-service")]
+pub mod publisher;
 pub mod reference;
 pub mod repository;
 pub mod repository_store;
@@ -21,6 +23,8 @@ pub use legacy::{
     LegacyMigrationReport, LegacyPlatform, LegacyRollbackReport, LEGACY_REPOSITORY,
 };
 pub use pin::{CatalogPin, ConsumerKind};
+#[cfg(feature = "registry-service")]
+pub use publisher::CatalogRepositoryPublisher;
 pub use reference::{ObjectKind, StoredObject};
 pub use repository::{ensure_repository, validate_repository_name};
 pub use repository_store::CatalogRepositoryStore;
