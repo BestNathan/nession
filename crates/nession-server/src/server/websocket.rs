@@ -1059,6 +1059,28 @@ async fn handle_ws_stream(
                             // above and in the connection-end log for correlation.
                             break;
                         }
+                        Ok(RelayEnd::AgentHalfOpen) => {
+                            // The Relay→Agent leg went half-open: the Server sent
+                            // probe pings and observed neither a pong nor any
+                            // other frame within the bounded idle deadline, while
+                            // the browser leg stayed healthy (#4065). This is the
+                            // silent-partition case — no FIN/RST reached the
+                            // Server, so without the probe the relay would have
+                            // waited on `agent_read.next()` forever. Same
+                            // recovery as `AgentEnded`: close the connection so
+                            // the browser re-attaches via its existing reconnect
+                            // path with a fresh relay.
+                            warn!(
+                                session = %session_name,
+                                close_reason = "relay-agent-half-open",
+                                "Relay for session '{}' ended: the Agent leg is half-open \
+                                 (no frame within the idle deadline); closing the connection \
+                                 so it re-attaches",
+                                session_name
+                            );
+                            close_reason = "relay-agent-half-open";
+                            break;
+                        }
                         Ok(RelayEnd::ClientStalled) => {
                             // The client stopped draining its terminal (#961). Every
                             // remaining answer for it is one it is not reading, and
@@ -1259,6 +1281,15 @@ enum RelayEnd {
     /// connection is what turns it into the client's reconnect path
     /// (`noteStreamTruncated` + re-begin with a fresh history bootstrap).
     AgentEnded,
+    /// The Relay→Agent leg went half-open: the Server sent a probe ping and
+    /// observed neither a pong nor any other frame within the bounded idle
+    /// deadline, while the browser leg remained healthy (#4065). This is the
+    /// silent-partition case — no FIN/RST reached the Server, so without the
+    /// probe the relay would have waited on `agent_read.next()` forever. Like
+    /// `AgentEnded`, the client's own socket is fine but its terminal is
+    /// frozen; closing the connection is what hands the browser back to its
+    /// own reconnect path with a fresh relay.
+    AgentHalfOpen,
 }
 
 /// What a relay was asked for: the addresses to try, and everything the attach
@@ -1983,9 +2014,35 @@ where
     // `outbound::WsMessageSender::send_terminal`.
     let mut stalled = false;
     let mut agent_ended = false;
+    // The Relay→Agent leg has no liveness of its own: the browser-leg ping
+    // ticker (in the enclosing WS handler) is a different socket, and the one
+    // 10s handshake timeout above covers only `client.auth`, not the long-lived
+    // stream that follows. A silent partition between the Server and the Agent
+    // — TCP half-open, no FIN/RST — would leave `agent_read.next()` parked
+    // forever. The idle deadline below is what turns that into a verdict
+    // (`AgentHalfOpen`); the matching probe pings that keep a healthy but idle
+    // Agent from tripping it are sent by `forward_client_to_agent`, which owns
+    // the Agent-leg writer (#4065).
+    let mut agent_half_open = false;
     let agent_to_client = async {
         loop {
-            let msg = match agent_read.next().await {
+            // Bounded wait: if no frame — terminal payload, pong, close, or
+            // error — arrives within the idle deadline, the leg is half-open.
+            // Any frame resets the clock, so a slow but responsive Agent that
+            // answers the probe inside the window is never spuriously torn
+            // down.
+            let next = match tokio::time::timeout(AGENT_LEG_IDLE_TIMEOUT, agent_read.next()).await
+            {
+                Ok(next) => next,
+                Err(_) => {
+                    // No frame within the deadline, including no pong for the
+                    // probe pings `forward_client_to_agent` has been sending.
+                    // The Agent leg is silent; the relay cannot make progress.
+                    agent_half_open = true;
+                    break;
+                }
+            };
+            let msg = match next {
                 Some(Ok(msg)) => msg,
                 Some(Err(e)) => {
                     error!("Error reading from agent: {}", e);
@@ -2122,6 +2179,8 @@ where
     info!("Relay mode ended for session '{}'", session_name);
     Ok(if stalled {
         RelayEnd::ClientStalled
+    } else if agent_half_open {
+        RelayEnd::AgentHalfOpen
     } else if agent_ended {
         RelayEnd::AgentEnded
     } else {
@@ -2133,6 +2192,27 @@ where
 /// collapsed to its newest frame. 16 ms ≈ 60 fps — faster than a mouse-tracking
 /// flood, slower than anything a person types.
 const INPUT_THROTTLE: std::time::Duration = std::time::Duration::from_millis(16);
+
+/// How often `forward_client_to_agent` writes a WebSocket ping on the Relay→
+/// Agent leg when the client has not sent anything to forward (#4065). The
+/// Agent's tungstenite stack auto-answers pings with pongs at the wire level;
+/// that pong surfaces as a frame on `agent_read` and is what resets the idle
+/// deadline in `agent_to_client`. Kept deliberately longer than the browser-leg
+/// ping period (which tracks the registry heartbeat): the Agent leg is a
+/// separate socket and does not need to match the browser cadence, but it does
+/// need to be shorter than [`AGENT_LEG_IDLE_TIMEOUT`] so a healthy idle Agent
+/// always answers inside the deadline.
+const AGENT_LEG_PROBE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Bounded wait for *any* frame on the Relay→Agent leg before declaring it
+/// half-open (#4065). The matching probe pings are sent by
+/// `forward_client_to_agent` every [`AGENT_LEG_PROBE_INTERVAL`]; a healthy
+/// Agent's pong (or any terminal/control frame) resets the clock. Chosen as
+/// 3× the probe interval, matching the ratio the registry uses between its
+/// own heartbeat interval and heartbeat timeout — long enough that a slow but
+/// responsive Agent is never spuriously torn down, short enough that a
+/// partitioned leg is retired in a documented finite bound.
+const AGENT_LEG_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(45);
 
 /// The wire a browser sends keystrokes and mouse reports on. The **Agent**
 /// answers it, so the name carries the Agent's prefix even though the Server is
@@ -2563,7 +2643,42 @@ where
         .checked_sub(std::time::Duration::from_secs(60))
         .unwrap_or_else(std::time::Instant::now);
 
-    'forward: while let Some(msg) = client_read.next().await {
+    // Relay→Agent leg probe (#4065). While the client is idle — no terminal
+    // input, no control frame — this ticker fires and we write a WebSocket
+    // ping on the Agent leg. The Agent's tungstenite auto-answers with a pong,
+    // which surfaces as a frame on `agent_read` and is what keeps the idle
+    // deadline in `agent_to_client` from declaring the leg half-open. The
+    // interval is [`AGENT_LEG_PROBE_INTERVAL`]; any client frame resets it so
+    // we never send a probe right after forwarding real traffic.
+    let mut probe_ticker = tokio::time::interval(AGENT_LEG_PROBE_INTERVAL);
+    probe_ticker.tick().await; // consume the immediate first tick
+
+    'forward: loop {
+        let msg = tokio::select! {
+            next = client_read.next() => {
+                // Client activity is itself proof of a live browser leg, and
+                // anything we forward is about to land on the Agent socket as
+                // traffic — so the next probe can wait a full interval from
+                // now rather than firing on top of it.
+                probe_ticker.reset();
+                match next {
+                    Some(m) => m,
+                    // The client stream ended.
+                    None => break,
+                }
+            }
+            _ = probe_ticker.tick() => {
+                // Idle: send a probe ping so the Agent's auto-pong gives the
+                // `agent_to_client` side a frame to reset its idle deadline.
+                // A failure here is the same terminal condition as any other
+                // `agent_write` failure — the writer is gone.
+                if let Err(e) = agent_write.send(WsFrame::Ping(Vec::new())).await {
+                    error!("Failed to send agent-leg probe ping: {}", e);
+                    break;
+                }
+                continue;
+            }
+        };
         let msg = match msg {
             Ok(m) => m,
             Err(e) => {
