@@ -43,6 +43,8 @@ concurrency:
 jobs:
   # #3885: one owner-only command is admitted; the trusted Node verifier
   # re-reads real failed Run/Artifacts/log and committed Store CAS before POST.
+  # #4174: exact Owner command is only a request; trusted main independently
+  # authenticates immutable Run/Artifact/Store before a new signed dispatch.
   trusted-dispatch:
     if: >-
       github.repository == 'BestNathan/nession' &&
@@ -70,9 +72,6 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body, '/nession dispatch-review issue=')) ||
-        # #4174: explicit one-off Owner command is a request only. Trusted
-        # main Controller independently re-reads the original unedited GitHub
-        # comment and failed Run/Job/Artifact/log, then commits Store CAS.
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
          github.event.issue.number == 4065 &&
