@@ -484,6 +484,41 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   return { action: 'closed', reason: decision.reason, prs: prs.map(pr => pr.number) };
 }
 
+// Owner /accept may request a *new* PR Acceptance only when every locked,
+// already-Pass PR-stage source at the previous SHA had actually failed exact
+// Quality and current HEAD is a verified descendant in the SAME merged PR.
+// verifyManualAcceptedPrAnchors authenticates same-PR ancestry separately;
+// this selector never fabricates a Result or touches accepted Issue rows.
+export async function qualifyManualFailedQualityRecovery(issue, targetSha,
+  acceptedPrAnchors, readQuality) {
+  if (!SHA.test(String(targetSha || '')) ||
+      !Array.isArray(acceptedPrAnchors) ||
+      typeof readQuality !== 'function') return false;
+  const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
+  const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
+  const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
+  if (report.errors.length || criteria.errors.length || plan.errors.length ||
+      !plan.plan) return false;
+  const accepted = [];
+  for (const [id, entry] of plan.plan) {
+    if (planStage(entry) !== 'pr' || entry.method !== 'agent') continue;
+    const row = report.rows.get(id);
+    if (!criteria.criteria.get(id)?.checked || row?.result !== 'Pass') continue;
+    const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source agent(?:-[a-z0-9-]+)?;/i
+      .exec(String(row.evidence ?? ''));
+    if (!match) return false;
+    accepted.push(match[1].toLowerCase());
+  }
+  const previous = [...new Set(accepted)];
+  if (previous.length !== 1 || previous[0] === targetSha ||
+      !acceptedPrAnchors.includes(previous[0])) return false;
+  const oldQuality = await readQuality(previous[0]);
+  if (oldQuality?.status !== 'fail') return false;
+  const currentQuality = await readQuality(targetSha);
+  return currentQuality?.status === 'pass' &&
+    validPrRequiredQualityReceipt(currentQuality.receipt, targetSha);
+}
+
 async function handleManual(event, repository, actor, token, request = githubRequest) {
   const command = resolveAcceptComment(event, repository, actor);
   if (!command) return { action: 'skip', reason: 'untrusted or non-/accept comment' };
@@ -527,6 +562,16 @@ async function handleManual(event, repository, actor, token, request = githubReq
     diagnostics.push('reference-only or unverified PR: no source-aligned implementation');
   const directlySelected = selectManualAgentRuns(issue, sourcePrs,
     { verifiedMainSha, verifiedPrSha, verifiedPrAnchors, diagnostics });
+  // A historical model Pass from a FAILED exact-HEAD Quality run must not
+  // permanently lock the same merged implementing PR after a green repair.
+  // The trusted evaluator independently selects and re-attests the stale
+  // criteria; no old Reviewer/SC record is promoted by this dispatch.
+  if (verifiedPrSha && !directlySelected.some(x => x.stage === 'pr') &&
+      await qualifyManualFailedQualityRecovery(issue, verifiedPrSha,
+        verifiedPrAnchors, sha => collectPrRequiredQualityAsync(sha,
+          path => request(path, {token})))) {
+    directlySelected.push({stage:'pr',target_ref:verifiedPrSha});
+  }
   // Never invent a staging association. When the source PR was correctly
   // merged to main (e.g. scripts-only), authenticate its actual ancestry in
   // staging before scheduling the pending merged/staging Agent criterion.
@@ -684,6 +729,33 @@ async function selfTest() {
     { ...issue, body: body.replace('| Pass |', '| Pending |') }, [pr]),
     [{ stage: 'pr', target_ref: sha }]);
   assert.deepEqual(selectManualAgentRuns(issue, [pr]), []);
+  // #4146: owner recovery is not a text override. It requires the existing
+  // independently authenticated same-PR anchor and exact current Quality.
+  const qualityFixture={status:'pass',receipt:{
+    kind:'pr_required_quality_v1',repository:'BestNathan/nession',
+    workflow:'.github/workflows/ci-quality.yml',
+    head_sha:'b'.repeat(40),result:'success',run_id:100,run_attempt:1,
+    scope_job_id:101,web_check_job_id:102,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  }};
+  const qualityReader=async ref=>ref===sha
+    ? {status:'fail',reason:'real failed Quality source'}
+    : qualityFixture;
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[sha],qualityReader),true);
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[],qualityReader),false);
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[sha],async()=>qualityFixture),false,
+    'a formerly green old accepted source remains immutable');
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[sha],async()=>({status:'pending'})),false);
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'c'.repeat(40),[sha],qualityReader),false,
+    'wrong target SHA cannot borrow another PR Quality run');
   // #3545: PR #3529 implements the Issue, while later #3540 only mentions it.
   const actual = {...pr,number:3529,title:'fix Hosting test (#3528)',
     body:'Refs #3528',head:{...pr.head,sha:'7c7d36f9456d901d252abcfbbe5d2a991f202ba7'}};
