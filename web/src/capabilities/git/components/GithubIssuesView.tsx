@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Markdown } from '@/shared/markdown';
@@ -154,7 +155,13 @@ function IssuesListBody({
   onLoadMore: () => void;
 }) {
   return (
-    <div data-testid="github-issue-list-scroll" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+    <div
+      data-testid="github-issue-list-scroll"
+      className={cn(
+        'min-h-0 flex-1 overflow-y-auto overscroll-contain p-2',
+        workspaceBoundedScrollClearanceClass,
+      )}
+    >
       {error ? (
         <GithubNotice error={error} testId="github-issues-error" onRetry={onRefresh} />
       ) : loading ? (
@@ -338,7 +345,9 @@ export function GithubIssueDetailBody({
   repository: GithubRepositoryRef;
 }) {
   return (
-    <article data-testid={`github-issue-detail-${issue.number}`} className="flex flex-col gap-3 p-4 pb-16">
+    // #4188: the reader scroller owns the measured Capsule clearance; a fixed
+    // `pb-16` here could not track a dynamically sized Capsule or viewport.
+    <article data-testid={`github-issue-detail-${issue.number}`} className="flex flex-col gap-3 p-4">
       <header className="flex flex-col gap-1">
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>#{issue.number}</p>
         <h2 className={chromeSansRole('title')}>{issue.title}</h2>

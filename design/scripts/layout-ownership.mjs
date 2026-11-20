@@ -66,6 +66,20 @@ const CONTENT_ROOTS = ['web/src/capabilities/', 'web/src/product/'];
 const RETIRED_CLEARANCE_RE =
   /\bworkspaceScrollClearanceClass\b|pb-\[var\(--nession-local-workspace-content-bottom-inset/g;
 /**
+ * A capability scroll owner hardcoding a fixed Capsule-sized bottom band
+ * (#4188).
+ *
+ * `pb-16` on a nested list/reader was the concrete regression: a number chosen
+ * for the overlay cannot track a dynamic Capsule or viewport, and it competes
+ * with the host's measured inset. The check is deliberately narrow — it only
+ * looks at one element that is itself a vertical scroll owner and only rejects
+ * a band large enough to stand in for overlay clearance; small paddings remain
+ * ordinary content spacing.
+ */
+const JSX_TAG_RE = /<[A-Za-z][^<>]*>/g;
+const VERTICAL_SCROLL_OVERFLOW_RE = /\boverflow-(?:y-)?(?:auto|scroll)\b/;
+const FIXED_BOTTOM_BAND_RE = /\bpb-(?:1[0-9]|[2-9]\d|\d{3,})\b/g;
+/**
  * A capability-owned App page scroll (#4115).
  *
  * The App host owns the default page scroll owner. An element whose testid
@@ -184,6 +198,14 @@ const RULES = {
     repair:
       'remove the capability-level clearance padding; contribute content to the App host scrollport, or declare appScroll: "bounded" and use the bounded surface class at your own internal scroller',
   },
+  'no-capability-fixed-scroll-clearance': {
+    expected:
+      'a capability scroll owner spends the host-measured bounded inset; it does not hardcode a Capsule-sized bottom band',
+    owner:
+      'web/src/shared/lib/workspaceScrollClearance.ts + web/src/app/workspace/layout/workspaceLayout.tsx',
+    repair:
+      'remove the fixed pb-* band; use workspaceBoundedScrollClearanceClass on the declared bounded scroll owner',
+  },
   'no-capability-app-page-scroll': {
     expected:
       'one App primary vertical scroll owner, rendered by the host (AppWorkspaceScrollRegion) or by a declared bounded adapter',
@@ -280,6 +302,21 @@ export function scanLayoutSource(source, file = '<fixture>') {
       file,
       rule: 'no-capability-capsule-clearance-opt-in',
     });
+    // #4188: a scroll owner that hardcodes a Capsule-sized band is a second
+    // clearance owner. Checked per element so a small padding elsewhere or on
+    // a non-scrolling box stays legal.
+    for (const tag of masked.matchAll(JSX_TAG_RE)) {
+      if (!VERTICAL_SCROLL_OVERFLOW_RE.test(tag[0])) continue;
+      const band = tag[0].match(FIXED_BOTTOM_BAND_RE);
+      if (!band) continue;
+      violations.push({
+        file,
+        line: lineNumber(masked, tag.index),
+        kind: 'no-capability-fixed-scroll-clearance',
+        actual: band[0],
+        ...RULES['no-capability-fixed-scroll-clearance'],
+      });
+    }
     pushOccurrences(violations, masked, APP_PAGE_SCROLL_RE, {
       file,
       rule: 'no-capability-app-page-scroll',
