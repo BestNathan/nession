@@ -293,6 +293,7 @@ export function validateDevelopmentState(state) {
             QWEN_CLI_FAILURE.failure_code,
             QWEN_REPAIR_TURNS_FAILURE.failure_code,
             QWEN_TOOL_FAILURE.failure_code,
+            QWEN_TRACKED_SOURCE_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
@@ -342,6 +343,15 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784_C.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784_C.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===QWEN_TRACKED_SOURCE_FAILURE.failure_code&&(
+            state.issue!==QWEN_TRACKED_SOURCE_FAILURE.issue||
+            item.id!==QWEN_TRACKED_SOURCE_FAILURE.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.role!=='developer'||
+            item.task.task!=='implement'||
+            item.task.sha!==QWEN_TRACKED_SOURCE_FAILURE.source_sha||
+            r.source_run_id!==QWEN_TRACKED_SOURCE_FAILURE.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_TOOL_FAILURE.failure_code&&(
             state.issue!==QWEN_TOOL_FAILURE.issue||
