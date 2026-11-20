@@ -266,7 +266,7 @@ sleep 30
     )
 }
 
-/// A fake \`claude\` CLI for Connect preflight tests: it supports \`--version\`
+/// A fake `claude` CLI for Connect preflight tests: it supports `--version`
 /// and refuses nothing, because the preflight under test never writes.
 pub fn claude_fixture(directory: &std::path::Path) -> std::path::PathBuf {
     install_executable_fixture(
