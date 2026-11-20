@@ -9,3 +9,7 @@ Each script accepts `targets` (one canonical `os/arch` per line), `prepare --pla
 The trusted `main` Release / Toolchains workflow handles manual and automatic discovery, builds EROFS, constructs OCI Manifest / Index, and publishes to `ghcr.io/bestnathan/nession-toolchain:<tool>-<version>`. Scripts never see package-write credentials. Consumers bind immutable OCI digests.
 
 See [Requirement #4160](https://github.com/BestNathan/nession/issues/4160) and the main branch's `nession-toolchain-release` Skill.
+
+## First managed main-only auto-release validation
+
+The first successful catalog push after #4164 activation triggers the trusted main release pipeline to inspect all catalog tool/version fingerprints and publish only missing or changed immutable OCI content. This update does not modify any build.sh or its fingerprint. The workflow Run, not this prose, proves any actual GHCR publication.
