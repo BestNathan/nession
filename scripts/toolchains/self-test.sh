@@ -44,4 +44,15 @@ for fixture in "jq:1.7.1:$tmp/jq-old" "jq:1.8.1:$tmp/jq-new" "k8s-bundle:2026.11
   IFS=: read -r tool version directory <<< "$fixture"
   TOOLCHAIN_TOOL="$tool" TOOLCHAIN_VERSION="$version" TOOLCHAIN_PLATFORM=linux/amd64 TOOLCHAIN_REVISION=1 TOOLCHAIN_ROOTFS="$directory" bash "$root/cargo.sh" local
 done
+
+# #4160: validate generic single-tool selector and native OCI Index adapter without GHCR credentials.
+bash "$root/catalog-selftest.sh"
+mkdir -p "$tmp/generic/linux-amd64"
+cp -a "$tmp/jq-new/." "$tmp/generic/linux-amd64/"
+TOOLCHAIN_TOOL=jq TOOLCHAIN_VERSION=1.8.1 TOOLCHAIN_TARGETS=linux/amd64 \
+TOOLCHAIN_FINGERPRINT="sha256:$(printf sample | sha256sum | cut -d ' ' -f1)" \
+TOOLCHAIN_CATALOG_SHA="$(printf 'a%.0s' {1..40})" TOOLCHAIN_ROOTFS="$tmp/generic" \
+  bash "$root/cargo-v2.sh" local
+echo "Generic catalog + OCI Index fixture: PASS"
+
 echo "Toolchain script protocol, versions, bundle, OCI and failure cases: PASS"

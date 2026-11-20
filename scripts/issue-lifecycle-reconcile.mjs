@@ -12,7 +12,9 @@ import {
   parsePreMergeIssueNumbers,
   parseSuccessCriteria,
 } from './requirement-acceptance.mjs';
-import { planStage, validateAcceptancePlan } from './acceptance-plan.mjs';
+import { planStage, validateAcceptancePlan, canonicalAcceptanceStage } from './acceptance-plan.mjs';
+import {collectPrRequiredQualityAsync, validPrRequiredQualityReceipt}
+  from './acceptance-pr-web-quality-receipt.mjs';
 import { parseCommand } from './github-comment-command.mjs';
 
 const SHA = /^[0-9a-f]{40}$/i;
@@ -402,8 +404,57 @@ async function humanReopened(repository, issueNumber, token, request = githubReq
   return hasUnrecoveredHumanReopen(events, comments);
 }
 
+// #4146: canonical Issue closure consumes the SAME required-Quality source
+// attestor as PR SC normalization. Historical text Pass and an unrelated
+// merged PR cannot together grant completion of a different source HEAD.
+export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality) {
+  const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
+  const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
+  const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
+  if (criteria.errors.length || report.errors.length || plan.errors.length) {
+    return {qualified:false, reason:'invalid Issue SC/Acceptance contract'};
+  }
+  const heads = new Set();
+  for (const [id, sc] of criteria.criteria) {
+    const row = report.rows.get(id);
+    const stage = plan.plan ? planStage(plan.plan.get(id)) :
+      canonicalAcceptanceStage(row?.stage);
+    if (stage !== 'pr' || row?.result === 'N/A') continue;
+    // decideIssueClosure has already checked all SC states; this method
+    // requires the independent exact-HEAD proof for each PR-stage Pass.
+    if (!sc.checked || row?.result !== 'Pass') {
+      return {qualified:false, reason:id+' is not a qualified PR-stage Pass'};
+    }
+    const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source (?:agent(?:-[a-z0-9-]+)?|case-runner);/i
+      .exec(String(row.evidence ?? ''));
+    if (!match) {
+      return {qualified:false, reason:id+' lacks a canonical exact-source PR receipt'};
+    }
+    const head = match[1].toLowerCase();
+    const authorizedPr = Array.isArray(prs) && prs.some(pr =>
+      Boolean(pr.merged_at) && pr.head?.sha === head &&
+      ['main','staging','gitops'].includes(pr.base?.ref));
+    if (!authorizedPr) {
+      return {qualified:false,
+        reason:id+' accepted source HEAD is not the merged Issue implementation HEAD'};
+    }
+    heads.add(head);
+  }
+  if (heads.size > 16) return {qualified:false, reason:'too many PR Quality sources'};
+  for (const head of heads) {
+    // readQuality is always a trusted GitHub Run/Job/Step reader in production.
+    const evidence = await readQuality(head);
+    if (evidence?.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(evidence.receipt, head)) {
+      return {qualified:false,
+        reason:'accepted PR source '+head+' lacks independently verified required Quality'};
+    }
+  }
+  return {qualified:true, sources:[...heads]};
+}
+
 async function reconcileIssue(repository, number, token, { includePr = null,
-  request = githubRequest } = {}) {
+  request = githubRequest, qualityReader = null } = {}) {
   const { prefix } = repoParts(repository);
   const issue = await request(prefix + '/issues/' + number, { token });
   if (!issue || issue.number !== number) throw Error('Issue number mismatch');
@@ -414,6 +465,13 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   const manualReopened = await humanReopened(repository, number, token, request);
   const decision = decideIssueClosure(issue, prs, { manualReopened });
   if (decision.action !== 'close') return { ...decision, prs: prs.map(pr => pr.number) };
+  const qualified = await qualifyIssuePrSourceForClosure(issue, prs,
+    qualityReader ?? (head => collectPrRequiredQualityAsync(head,
+      path => request(path, {token}))));
+  if (!qualified.qualified) {
+    return {action:'pending', reason:'PR source Quality: '+qualified.reason,
+      prs:prs.map(pr => pr.number)};
+  }
   // Re-read before mutation: a later Issue edit or reopen must not be raced by
   // a stale evaluation. GitHub's Issues API has no compare-and-set PATCH.
   const fresh = await request(prefix + '/issues/' + number, { token });
@@ -505,6 +563,46 @@ async function selfTest() {
   const issue = { number: 19, state: 'open', labels: [{ name: 'bug' }], body };
   const pr = { number: 21, title: 'fix (#19)', body: 'Fixes #19', head: { sha },
     base: { ref: 'staging' }, merged_at: '2026-11-11T01:00:00Z', merge_commit_sha: sha };
+  // #4146: signed SC Pass alone cannot close an Issue when the exact
+  // implementing PR head failed Quality or no longer matches the merged PR.
+  const qualityReceipt = {
+    kind:'pr_required_quality_v1', repository:'BestNathan/nession',
+    workflow:'.github/workflows/ci-quality.yml', head_sha:sha,
+    result:'success', run_id:101, run_attempt:1, scope_job_id:102,
+    web_check_job_id:103,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  };
+  const fixtureQuality = async head => ({status:'pass',
+    receipt:{...qualityReceipt,head_sha:head}});
+  assert.equal((await qualifyIssuePrSourceForClosure(issue,[pr],fixtureQuality)).qualified,
+    true,'source-aligned qualified PR is eligible for eventual closure');
+  for (const blocked of [
+    {prs:[{...pr,head:{sha:'b'.repeat(40)}}],reader:fixtureQuality},
+    {prs:[pr],reader:async()=>({status:'fail',reason:'#4143 web-check failure'})},
+    {prs:[pr],reader:async()=>({status:'pending',reason:'CI in progress'})},
+    {prs:[pr],reader:async()=>({status:'pass',receipt:{
+      ...qualityReceipt,head_sha:'b'.repeat(40)}})},
+    {prs:[pr],reader:async()=>({status:'pass',receipt:{
+      ...qualityReceipt,run_attempt:0}})},
+    {prs:[{...pr,merged_at:null}],reader:fixtureQuality},
+  ]) assert.equal((await qualifyIssuePrSourceForClosure(issue,blocked.prs,
+    blocked.reader)).qualified,false,
+    'failed/pending/stale Quality or amended/nonmerged head cannot close');
+  const liveNegativeHead='fa04599e1e9bb3f344d9dc43597f477c4063afc2';
+  const originalIssue={...issue,body:body.replaceAll(sha,liveNegativeHead)};
+  const failedPr={...pr,head:{sha:liveNegativeHead}};
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,[failedPr],
+    async()=>({status:'fail',reason:'Quality run 44694739296'}))).qualified,false,
+    'real #4143 source was not Quality qualified despite approved Reviewer');
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,
+    [{...pr,head:{sha:'b'.repeat(40)}}],fixtureQuality)).qualified,false,
+    'Owner #4145 merged patch cannot retroactively qualify source #4143');
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,
+    [{...failedPr,head:{sha:'c'.repeat(40)}}],fixtureQuality)).qualified,false,
+    'amended PR head invalidates previously accepted source');
   assert.equal(decideIssueClosure(issue, [pr]).action, 'close');
   const gitopsPr = { ...pr, number: 22, state: 'closed',
     base: { ref: 'gitops' }, merged_at: '2026-11-18T09:49:12Z' };
@@ -880,37 +978,37 @@ async function selfTest() {
     }
     throw Error('unexpected fixture API path ' + path);
   };
-  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock });
+  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock, qualityReader: fixtureQuality });
   assert.equal(once.action, 'closed');
   assert.equal(writes, 1);
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'skip');
+    { request: mock, qualityReader: fixtureQuality })).action, 'skip');
   assert.equal(writes, 1, 'repeat delivery must never write another closure');
   // Acceptance-first: a trusted Pass arriving before merge cannot close;
   // the subsequent merge event converges using the already projected proof.
   live = { ...issue, updated_at: '2026-11-11T01:00:01Z' };
   effectivePr = { ...effectivePr, merged_at: null };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'pending');
+    { request: mock, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 1);
   effectivePr = {...pr, head:{...pr.head,repo:{full_name:'X/y'}},
     base:{...pr.base,repo:{full_name:'X/y'}}};
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'closed');
+    { request: mock, qualityReader: fixtureQuality })).action, 'closed');
   assert.equal(writes, 2);
   // Merge-first: missing SC proof keeps Issue Open until the later
   // authorized Acceptance projection causes another reconciliation.
   live = { ...issue, updated_at: '2026-11-11T01:00:02Z',
     body: body.replace('| Pass |', '| Pending |') };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'pending');
+    { request: mock, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 2);
   live = { ...issue, updated_at: '2026-11-11T01:00:03Z' };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'closed');
+    { request: mock, qualityReader: fixtureQuality })).action, 'closed');
   assert.equal(writes, 3);
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'skip');
+    { request: mock, qualityReader: fixtureQuality })).action, 'skip');
   assert.equal(writes, 3, 'both event orders must converge exactly once');
   // Restore an open pending Issue to exercise explicitly requested recovery.
   live = { ...issue, updated_at: '2026-11-11T01:01:00Z',
@@ -960,7 +1058,7 @@ async function selfTest() {
     return mock(path, options);
   };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: race })).action, 'pending');
+    { request: race, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 3, 'racing edits must not close the Issue');
   await assert.rejects(reconcileIssue('X/y', 19, 'fixture-token', {
     request: async (path, options) => path.endsWith('/events?per_page=100')
