@@ -1607,6 +1607,9 @@ function selfTest() {
   execFileSync(process.execPath,
     [fileURLToPath(new URL('./acceptance-staging-batch-pr-evidence.mjs',import.meta.url)),'self-test'],
     {stdio:'inherit'});
+  execFileSync(process.execPath,
+    [fileURLToPath(new URL('./acceptance-pr-quality-waker.mjs',import.meta.url)),'self-test'],
+    {stdio:'inherit'});
   console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }
 
