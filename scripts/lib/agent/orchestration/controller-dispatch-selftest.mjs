@@ -1,13 +1,17 @@
 #!/usr/bin/env node
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
-import {REVIEWER_PREMODEL_FAILURE_3784_C} from './outbox.mjs';
+import {REVIEWER_PREMODEL_FAILURE_3784_C,
+  REVIEWER_PREMODEL_FAILURE_4065,
+  REVIEWER_TOOL_FAILURE_4065} from './outbox.mjs';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
   REPAIR_DISPATCH_RE,assertOwnerQwenRepairDispatchRole,
   REVIEWER_PREMODEL_RECOVERY_COMMENT,
-  REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT,
+  REVIEWER_PREMODEL_4065_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
+  REVIEWER_TOOL_4065_RECOVERY_COMMENT,
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
   QWEN_TOOL_RECOVERY_COMMENT,
@@ -412,6 +416,69 @@ for(const [pr,ref] of [
 assert.throws(()=>assertReviewerRecoveryPrLease(
   null,cLeasePr,cLeaseRef),/unexpected Reviewer C PR lease source/);
 
+// #4192: exact failed #4065 pre-model Reviewer, no generic owner retry.
+const reviewer4065=REVIEWER_PREMODEL_FAILURE_4065;
+const recovery4065={...premodelRecovery,issue:4065,
+  actionId:reviewer4065.action_id,
+  event:{...premodelRecovery.event,issue:{number:4065,state:'open'},
+    comment:{...premodelRecovery.event.comment,
+      body:REVIEWER_PREMODEL_4065_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(recovery4065).issue,4065);
+for(const bad of [
+  {actionId:'e'.repeat(64)},
+  {event:{...recovery4065.event,action:'edited'}},
+  {event:{...recovery4065.event,issue:{number:4066,state:'open'}}},
+  {event:{...recovery4065.event,issue:{number:4065,state:'closed'}}},
+  {event:{...recovery4065.event,comment:{...recovery4065.event.comment,
+    body:REVIEWER_PREMODEL_4065_RECOVERY_COMMENT+' '}}},
+  {event:{...recovery4065.event,comment:{...recovery4065.event.comment,
+    user:{login:'external'}}}},
+])assert.throws(()=>assertDispatchAuthority({...recovery4065,...bad}),
+  /authenticated owner\/main/);
+const reviewer4065Branch='agent/4065/qwen-74024299b457f8c0';
+const pr4065={number:4191,state:'open',draft:false,merged_at:null,
+  head:{sha:reviewer4065.source_sha,ref:reviewer4065Branch,
+    repo:{full_name:'BestNathan/nession'}},
+  base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
+const ref4065={ref:'refs/heads/'+reviewer4065Branch,
+  object:{sha:reviewer4065.source_sha}};
+assert.equal(assertReviewerRecoveryPrLease(reviewer4065,pr4065,ref4065),true);
+for(const [p,r] of [
+  [{...pr4065,state:'closed'},ref4065],
+  [{...pr4065,head:{...pr4065.head,sha:'f'.repeat(40)}},ref4065],
+  [{...pr4065,number:4192},ref4065],
+  [pr4065,{...ref4065,object:{sha:'f'.repeat(40)}}],
+  [{...pr4065,base:{...pr4065.base,ref:'staging'}},ref4065],
+])assert.throws(()=>assertReviewerRecoveryPrLease(reviewer4065,p,r),
+  /immutable #4065 Store source/);
+
+// #4211: actual second Review was refused by a native forbidden tool-use.
+// The owner-only command and current PR lease cannot select any other source.
+const tool4065=REVIEWER_TOOL_FAILURE_4065;
+const recoveryTools4065={...recovery4065,actionId:tool4065.action_id,
+  event:{...recovery4065.event,comment:{...recovery4065.event.comment,
+    body:REVIEWER_TOOL_4065_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(recoveryTools4065).action_id,tool4065.action_id);
+for(const bad of [
+  {issue:4066},{actionId:'e'.repeat(64)},
+  {event:{...recoveryTools4065.event,action:'edited'}},
+  {event:{...recoveryTools4065.event,issue:{number:4065,state:'closed'}}},
+  {event:{...recoveryTools4065.event,comment:{...recoveryTools4065.event.comment,
+    body:REVIEWER_TOOL_4065_RECOVERY_COMMENT+' '}}},
+  {event:{...recoveryTools4065.event,comment:{...recoveryTools4065.event.comment,
+    user:{login:'attacker'}}}},
+])assert.throws(()=>assertDispatchAuthority({...recoveryTools4065,...bad}),
+  /authenticated owner\/main/);
+const toolPr={...pr4065,head:{...pr4065.head,sha:tool4065.source_sha}};
+const toolRef={...ref4065,object:{sha:tool4065.source_sha}};
+assert.equal(assertReviewerRecoveryPrLease(tool4065,toolPr,toolRef),true);
+for(const [p,r] of [
+  [{...toolPr,number:4192},toolRef],
+  [{...toolPr,head:{...toolPr.head,sha:reviewer4065.source_sha}},toolRef],
+  [toolPr,{...toolRef,object:{sha:'f'.repeat(40)}}],
+])assert.throws(()=>assertReviewerRecoveryPrLease(tool4065,p,r),
+  /immutable #4065 Store source/);
+
 const jsonAction='8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7';
 const jsonRecovery={...ownerReview,actionId:jsonAction,
   event:{...ownerReviewEvent,comment:{...ownerReviewEvent.comment,
@@ -594,6 +661,7 @@ other.fill(0);
 // #4174: the same canonical Controller Gate must execute genuine failed
 // source Run/Artifact negative fixtures and unique Store CAS/replay proof.
 await import('./qwen-tracked-source-failure-selftest.mjs');
+await import('./reviewer-tool-failure-4065-selftest.mjs');
 console.log('Controller dispatch: trusted run binding, fork/retry/role denial, HMAC domain separation passed');
 
 // New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
