@@ -1,55 +1,36 @@
 ---
 name: nession-toolchain-release
-description: Use when adding or changing version-pinned toolchain/bundle shell recipes, packaging their prepared directories as native EROFS-backed OCI images, publishing them to GHCR or diagnosing Release / Toolchains and its readback.
+description: Use for the single-tool orphan catalog, version-pinned build.sh preparation and fingerprinted EROFS OCI Index release/readback to the unified GHCR repository.
 ---
 
 # Nession Toolchain Release
 
-This Skill is a **task playbook**, not another Recipe schema, Registry implementation or packaging owner. The released contract was delivered by [#4092](https://github.com/BestNathan/nession/issues/4092), [PR #4094](https://github.com/BestNathan/nession/pull/4094) and a successful [native GHCR publish/readback run](https://github.com/BestNathan/nession/actions/runs/44586296125). Read the [toolchain script README](../../../scripts/toolchains/README.md) and the [real Release workflow](../../../.github/workflows/release-toolchains.yml) first; their current executable contracts outrank this summary.
+**Read current executable owners first:** [scripts/toolchains/README.md](../../../scripts/toolchains/README.md), [Release / Toolchains](../../../.github/workflows/release-toolchains.yml), [Reusable single-tool release](../../../.github/workflows/release-toolchain-one.yml), `scripts/toolchains/catalog-plan.mjs` and the existing `crates/nession-erofs`. [Issue #4160](https://github.com/BestNathan/nession/issues/4160) is the canonical migration contract; [#4092](https://github.com/BestNathan/nession/issues/4092) and [#4147](https://github.com/BestNathan/nession/issues/4147) preserve legacy proof.
 
-Load [nession-cicd](../nession-cicd/SKILL.md) for release permissions/PR policy, [nession-workflows](../nession-workflows/SKILL.md) for Actions taxonomy, [nession-development](../nession-development/SKILL.md) for Issue-first worktrees/PRs, and [nession-knowledge](../nession-knowledge/SKILL.md) when recording a changed durable decision. Follow `scripts/AGENTS.md` and `.github/AGENTS.md` for files in those trees. The curated [Toolchain OCI release knowledge](https://github.com/BestNathan/nession/blob/knowledge/topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md) explains the rationale, evidence and scope; it is not an executable source.
+Load `nession-development` for Issue-first worktrees/PRs, `nession-workflows` and `nession-cicd` for GitHub Actions ownership and Registry permission boundary, `nession-gates` for tests, and `nession-knowledge` for the protected Knowledge update. Follow scoped `.github/AGENTS.md` and `scripts/AGENTS.md`.
 
-## Ownership and invariants
+## One owner per responsibility
 
-1. **Reviewed Shell Recipes own input acquisition and directory preparation only.** The sole recipe contract is `bash scripts/toolchains/recipes/<tool>.sh prepare VERSION PLATFORM ROOTFS`, called through the allowlisted `scripts/toolchains/prepare.sh`. The rootfs is a *private absolute empty directory*; all payload files live inside it (e.g. `bin/`, `lib/`, `share/`). Recipes pin supported versions, approved source URLs and SHA256, safely install and verify executables, and reject unsupported platform/version or unsafe filesystem content. A bundle pins component versions and places all tools in **one** rootfs.
-2. **The Workflow is the coordinator.** `Release / Toolchains` selects a reviewed tool/version/revision, runs uncredentialed prepare and transfers a checksum-verified artifact to the publisher. The transport-only tar preserves Unix modes between Actions jobs; **it is not** an OCI Archive, layer encoding or user-visible image artifact.
-3. **`nession-erofs` alone owns image and transport.** The thin `scripts/toolchains/cargo.sh` / `oci-publish.rs` adapter invokes the existing `ErofsBuilder::build_local(rootfs)`, creates EROFS layer + OCI Config/Manifest in CAS and publishes via the existing `registry::push_image()` OCI Distribution client. Do not duplicate the OCI model, implement a second Registry Push, introduce Docker Build/tar layers, or require OCI Layout export.
-4. **Registry authority is isolated.** PR tests and preparation run with `contents: read`, without `packages: write`; only trusted-main `publish` has `packages: write`. `readback` is an independent `packages: read` job pinned to the pushed Manifest digest. Never execute untrusted `pull_request_target` shell input with release credentials or inject kubeconfig, Docker socket, cloud secrets or developer HOME into images.
-5. **Immutable identity is the Manifest digest**, not the tag or layer digest. Exact release refs follow `ghcr.io/bestnathan/nession-toolchain-<tool>:<version>-r<revision>`. Identical-digest retries are allowed; a different digest under an existing exact-version/revision tag is rejected and requires a packaging revision bump. Avoid mutable `latest` aliases. Consumers pin the digest and own mount/PATH mapping in Images/Sandbox.
+1. **Catalog:** the **independent `toolchains` orphan branch** owns `<tool>/<version>/build.sh`. Each script implements `targets`, `prepare --platform OS --arch ARCH --rootfs ABSOLUTE_EMPTY_DIR` and `verify --platform OS --arch ARCH --rootfs DIR`. The script pins the upstream exact version and source SHA256. One tool distribution may ship many binaries, but there are no `bundle` recipes, no cross-tool `dependencies` and no Recipe schema.
+2. **Release selector:** trusted main-owned `catalog-plan.mjs` discovers tool/version paths. Versioned script SHA256 is the **only V1 build fingerprint**; tool/version/target are keys. Invalid selectors, duplicate/unsupported targets, special files, symlink escapes, missing files and unsupported environments fail closed.
+3. **Trigger:** `workflow_dispatch` for manual exact tool/version/optional platform+arch, or unprivileged `Toolchains / Catalog Change` push signal from orphan branch consumed by the **main** `workflow_run` gate. All auto candidates are probed by fingerprint against actual GHCR OCI contents. The toolchain script never selects GitHub ref or executable Registry path.
+4. **Prepare/probe boundary:** recipe scripts run only without GHCR write credentials. The approved target matrix is checked on native runners; staged rootfs transport is checksum verified and bound to source SHA/fingerprint. A partial/manual single-platform build cannot replace a complete public multi-platform tag.
+5. **OCI and Registry:** `nession-erofs` owns Build → raw EROFS Layer → OCI Config/Manifest/Index → CAS → `registry::push_image`. Only trusted main publisher receives `packages:write` and **never runs catalog scripts**. The readback job uses `packages:read` and verifies Index/Manifest/Config/EROFS; a separate uncredentialed native job runs each extracted version probe.
+6. **Release identity:** one package, `ghcr.io/bestnathan/nession-toolchain:<tool>-<version>`. No `-rN` or `latest`. A reviewed update may move a version tag to a new digest; existing consumer bindings must remain on immutable OCI digests. Fail stale source, unauthorized push, mismatched target closure or incomplete remote object rather than silently publishing partial or mislabeled platforms.
 
-## Add a tool or version
+## Add or update a tool version
 
-- **First** inspect the live scope-matching Requirement and `main`; make a separate Issue-first branch/worktree. Check existing recipes, versions, the target architecture/ABI and whether the intended file-tree is a single tool or a bundle.
-- Add/update `scripts/toolchains/recipes/<tool>.sh`. Keep source SHA256 per pinned version in the reviewed script; validate the downloaded executable with its real version command. A new tool must also be allowlisted by `scripts/toolchains/prepare.sh`, supported in `scripts/toolchains/oci-publish.rs`'s version probe, and included in the workflow's bounded choice options. Adding **another version of an existing tool** should not clone the Workflow.
-- For a bundle, reuse the checked-in component recipes to populate the **same** rootfs, detect filename conflicts and verify every component's exact version. Never include ambient runtime credentials, caches or files from the host outside the prepared tree.
-- Preserve the `linux/amd64` V1 boundary until native arm64 builds and OCI Index handling are separately proven. Do not silently label an amd64 binary for another platform or assume Docker Engine supports raw EROFS OCI layers.
+- Inspect current `toolchains` branch and live #4160/child Issue; create a reviewed PR to **the orphan branch**, not to `main`. Copy only the shell protocol, pin source URLs and SHA256, make script self-contained. Version comes from its path. For example, Rust `rust/1.96.0/build.sh` may contain rustc/cargo/clippy/rustfmt as the one upstream distribution; jq+kubectl is never a recipe.
+- Test `targets`, native `prepare`, `verify`, invalid path/platform/version, source digest mismatch, missing runtime closure and source SHA fingerprint; verify that no host credentials/config enter ROOTFS.
+- Merge after review. The branch-local push signal requests a trusted main release; do not grant package-write permission to its job. For a manual recovery use `Release / Toolchains` dispatch with exact tool/version and the default complete target matrix.
+- Check remote GHCR tag, immutable Index digest, every platform-specific child Manifest/Config/raw EROFS layer and independent extracted version probes. Record catalog SHA, script fingerprint, build Run/Attempt, pre/post tag digest and upload/reuse outcomes. No mere CI green or model assertion is evidence of a real GHCR publish.
 
-## Verification and release
+## Troubleshooting
 
-On a compatible Linux runner with `mkfs.erofs` and `fsck.erofs`:
+- Wrong source/version/SHA256: fix the version's reviewed script and re-run, never disable digest check.
+- Source SHA superseded: restart using latest approved orphan commit, never allow delayed publisher to overwrite a newer Tag.
+- Index incomplete or architecture mislabeled: fail; prove native binary on actual target runner, never claim multi-platform from host arch alone.
+- Registry failure, media-type refusal, remote digest mismatch: repair `nession-erofs`/Registry owner or permissions; don't add Docker tar layers or another OCI client.
+- Tool composition/mount/PATH: defer to Images/Sandbox consumer, not Toolchain Release.
 
-```sh
-bash scripts/toolchains/self-test.sh
-```
-
-This tests rejected selectors/paths, multiple pinned versions, same-rootfs bundle preparation, native EROFS/OCI build, extraction and executable/version validation. For an individual locally prepared directory:
-
-```sh
-ROOTFS="$(mktemp -d)"
-bash scripts/toolchains/prepare.sh prepare jq 1.8.1 linux/amd64 "$ROOTFS"
-TOOLCHAIN_TOOL=jq TOOLCHAIN_VERSION=1.8.1 TOOLCHAIN_PLATFORM=linux/amd64 \
-TOOLCHAIN_REVISION=1 TOOLCHAIN_ROOTFS="$ROOTFS" \
-  bash scripts/toolchains/cargo.sh local
-```
-
-Before an authorized publish, check the exact recipe source, supported version and `-rN` packaging revision. Use the single existing [Release / Toolchains](../../../.github/workflows/release-toolchains.yml) workflow on trusted `main`; do not manually push Nession Docker images. Verify its **prepare → publish → readback** job results and read the GHCR tag's remote Manifest, Config and EROFS layer by digest; the readback job must extract and execute the expected version(s). Record run ID/attempt, exact Git SHA, tag, Manifest/Layer digests and any upload/reuse counters. A green PR test is not proof of GHCR publication.
-
-## Troubleshooting and escalation
-
-- **Source SHA/version mismatch:** correct the reviewed script's exact source/version pair, never disable checksum verification.
-- **EROFS/OCI build, extraction or file-mode mismatch:** inspect the `nession-erofs` call and prepared rootfs; do not add a second packer.
-- **GHCR 401/403, rejected media type or digest mismatch:** diagnose the isolated Registry permission/transport boundary; do not downgrade the EROFS layer to pretend to be Docker tar.
-- **Tag collision with another digest:** increase packaging revision and retain the old immutable release.
-- **Images/Sandbox mount/PATH/runtime selection:** that belongs to consumers, not to Release Recipes. See [OCI/EROFS image infrastructure](../../../docs/architecture/oci-erofs-image-infrastructure.md).
-
-The checked-in scripts/Workflow and authenticated GitHub Run observations always decide what actually shipped. Update the [Knowledge article](https://github.com/BestNathan/nession/blob/knowledge/topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md) through the protected Knowledge Publisher only when the underlying durable contract changes.
+The [curated Knowledge article](https://github.com/BestNathan/nession/blob/knowledge/topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md) is historical until protected publication updates it from verified #4160 main/Run evidence. Do not push to the protected `knowledge` branch directly.
