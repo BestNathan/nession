@@ -33,6 +33,73 @@ test('capability content cannot take page geometry or the App header', () => {
   assert.ok(violations.every((violation) => violation.owner && violation.repair));
 });
 
+test('the App host owns page scrolling and Capsule clearance (#4115)', () => {
+  // Negative: a capability reintroducing the retired per-scroller clearance is
+  // compensating for the host overlay itself.
+  for (const source of [
+    "<div className={cn('overflow-y-auto', workspaceScrollClearanceClass)} />",
+    '<div className="pb-[var(--nession-local-workspace-content-bottom-inset,0px)]" />',
+  ]) {
+    assert.deepEqual(
+      rules(scanLayoutSource(source, 'web/src/capabilities/bad/components/Bad.tsx')),
+      ['no-capability-capsule-clearance-opt-in'],
+      source,
+    );
+  }
+
+  // Negative: a capability layout root carrying its own page scroll.
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div data-testid="bad-app-layout" className="h-full min-h-0 overflow-y-auto" />',
+      'web/src/capabilities/bad/components/Bad.tsx',
+    )),
+    ['no-capability-app-page-scroll'],
+  );
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div className="flex-1 overflow-auto" data-testid="bad-app-workspace" />',
+      'web/src/product/bad/Bad.tsx',
+    )),
+    ['no-capability-app-page-scroll'],
+  );
+
+  // Negative: a capability claiming the host's surface marker.
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div data-workspace-app-surface="document" />',
+      'web/src/capabilities/bad/components/Bad.tsx',
+    )),
+    ['no-capability-app-surface-owner'],
+  );
+
+  // Positive: a declared bounded adapter spends the host's scroll value and a
+  // local list/editor remains a legal inner scroll.
+  assert.deepEqual(
+    scanLayoutSource(
+      "<div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)} />",
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div data-testid="files-app-list" className="h-full min-h-0 overflow-y-auto" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+    'an inner list scroller is not an App layout root',
+  );
+
+  // The host recipe is the one owner of the surface marker and document scroll.
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div data-workspace-scroll-owner="true" data-workspace-app-surface="document" className="overflow-y-auto" />',
+      LAYOUT_RECIPE_OWNER,
+    ),
+    [],
+  );
+});
+
 test('capability content cannot publish host Workspace chrome', () => {
   const violations = scanLayoutSource(
     '<div data-testid="workspace-tool-bar" />',

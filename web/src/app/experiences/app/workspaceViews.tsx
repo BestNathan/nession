@@ -1,7 +1,6 @@
 import type { ComponentType } from 'react';
 import { AgentDetail } from '@/product/agent/patterns/AgentDetail';
 import { SessionDetails } from '@/product/session/components/SessionDetails';
-import { WorkspaceScrollRegion } from '@/app/workspace/layout/workspaceLayout';
 import { EnvAppLayout } from './EnvAppLayout';
 import { FilesAppLayout } from './FilesAppLayout';
 import { SandboxAppLayout } from './SandboxAppLayout';
@@ -10,18 +9,18 @@ import type { WorkspaceAppViewProps, WorkspaceViewId } from '@/app/workspace/wor
 /**
  * How the App experience draws each Workspace capability.
  *
- * This file is where the Web/App difference for these views actually lives. The
- * Web half renders the same contents bare; the App half wraps the two detail
- * views in their own scroll chrome, because the App workspace floats a
- * capability dock over the bottom of the pane and the view has to clear it.
- * Expressing that here — once, as composition — is what keeps it from becoming
- * a flag threaded through shared components.
+ * This file is where the Web/App difference for these views actually lives.
+ * The Web half renders the same contents bare; the App half contributes
+ * content only (#4115). The *App host* owns the page scrollport and the
+ * Capsule clearance (`AppWorkspaceScrollRegion` in `WorkspaceShell`), so the
+ * Agent and Session details are no longer wrapped in scroll chrome here: a
+ * capability that adds ordinary block/section/row content gets correct
+ * end-of-scroll geometry without opting in.
  *
  * Every entry is handed the shell's `depth` control (#1051), whether or not it
  * pushes today: the App's navigation bar belongs to whichever depth the view is
  * at, so a view that grows an internal push declares it here rather than
- * rendering a bar of its own. The two scroll-chrome views never push, and say
- * so by never calling it.
+ * rendering a bar of its own.
  *
  * The ready-check is written out again rather than reused from the Web map: the
  * wrapper must not exist when the content does not. `WorkspaceScrollRegion`
@@ -38,7 +37,7 @@ import type { WorkspaceAppViewProps, WorkspaceViewId } from '@/app/workspace/wor
 export const APP_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<WorkspaceAppViewProps>> = {
   agent: ({ ctx }) =>
     ctx.agent && ctx.domain ? (
-      <WorkspaceScrollRegion data-testid="agent-detail-app">
+      <div data-testid="agent-detail-app">
         <AgentDetail
           agent={ctx.agent}
           state={ctx.domain}
@@ -46,13 +45,13 @@ export const APP_WORKSPACE_VIEWS: Record<WorkspaceViewId, ComponentType<Workspac
             ctx.session?.agent_id === ctx.agent.agent_id ? ctx.session.session_id : null
           }
         />
-      </WorkspaceScrollRegion>
+      </div>
     ) : null,
   session: ({ ctx }) =>
     ctx.session && ctx.domain ? (
-      <WorkspaceScrollRegion data-testid="session-details-app">
+      <div data-testid="session-details-app">
         <SessionDetails session={ctx.session} state={ctx.domain} />
-      </WorkspaceScrollRegion>
+      </div>
     ) : null,
   env: EnvAppLayout,
   files: FilesAppLayout,

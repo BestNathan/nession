@@ -640,7 +640,10 @@ test.describe('App 390', () => {
     }
     await expect(page.getByTestId('sandbox-resource-row-7')).toBeVisible();
 
-    const scroller = page.getByTestId('sandbox-app-scroll');
+    // #4115: the App host owns the page scrollport; `sandbox-app-scroll` is
+    // the capability's content wrapper, not a second scroll owner. The sticky
+    // tab strip is pinned to the element that actually scrolls.
+    const scroller = page.getByTestId('app-workspace-scrollport');
     await scroller.evaluate((element) => {
       element.scrollTop = 400;
     });

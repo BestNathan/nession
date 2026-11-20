@@ -294,6 +294,8 @@ function mutateFixtureRepository(
  *
  *   /#/fixture/workspace?capability=git              → a repository with changes
  *   /#/fixture/workspace?capability=git&git=clean    → a clean working tree
+ *   /#/fixture/workspace?capability=git&git=many     → a long change list, for
+ *     end-of-scroll geometry (#4115)
  *   /#/fixture/workspace?capability=git&git=diff-states → one file of each diff
  *     state the renderer owns: ordinary, binary, mode-only, empty, truncated,
  *     malformed/raw-fallback, and one longer than the pane
@@ -320,11 +322,13 @@ export function fixtureGitSurface(search: string): PluginSurface {
   const status =
     scenario === 'clean'
       ? CLEAN_STATUS
-      : scenario === 'diff-states'
-        ? DIFF_STATE_STATUS
-        : scenario === 'preview-states'
-          ? PREVIEW_STATE_STATUS
-          : CHANGED_STATUS;
+      : scenario === 'many'
+        ? MANY_CHANGES_STATUS
+        : scenario === 'diff-states'
+          ? DIFF_STATE_STATUS
+          : scenario === 'preview-states'
+            ? PREVIEW_STATE_STATUS
+            : CHANGED_STATUS;
   // The write path is a small state machine: the fixture must be able to show
   // a stale review and an authoritative post-state, not a stub that always
   // answers ok. The state lives in one object so the request handler stays a
@@ -1145,6 +1149,37 @@ const CHANGED_STATUS: GitStatusResponse = {
       { path: 'assets/logo.png', kind: 'modified', staged: false, unstaged: true },
     ],
     untracked: ['web/src/capabilities/git/index.ts', 'notes.md'],
+    unmerged: [],
+  },
+};
+
+/**
+ * A long, deterministic change list (#4115).
+ *
+ * The App Workspace endpoint Case must scroll a real Collection to its end;
+ * three rows fit under the Capsule on a phone, so the fixture needs a working
+ * tree whose list genuinely overflows. Every path is ordinary and every diff
+ * resolves through `changedDiff`, so no new renderer state is introduced.
+ */
+const MANY_CHANGES_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-many-0', 'fixture-head-many'),
+  truncated: false,
+  truncated_bytes: 0,
+  status: {
+    branch: 'feat/many-changes',
+    detached: false,
+    upstream: 'origin/feat/many-changes',
+    ahead: 0,
+    behind: 0,
+    modified: Array.from({ length: 36 }, (_, index) => ({
+      path: `src/many/change-${String(index).padStart(2, '0')}.ts`,
+      kind: 'modified',
+      staged: false,
+      unstaged: true,
+    })),
+    untracked: [],
     unmerged: [],
   },
 };

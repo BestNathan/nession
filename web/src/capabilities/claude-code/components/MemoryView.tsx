@@ -8,7 +8,7 @@ import {
   chromeMonoRole,
   chromeSansRole,
 } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { MemoryState } from '../hooks/useMemory';
 import { resolveMemoryLink, type MemoryLinkResolution } from '../model/memoryLink';
 import { useMemoryFragmentScroll } from '../hooks/useMemoryFragmentScroll';
@@ -236,7 +236,7 @@ function MemoryReady({
           <>
             <MemorySource response={response} />
             <div
-              className={cn('min-h-0 flex-1 overflow-y-auto p-2', workspaceScrollClearanceClass)}
+              className={cn('min-h-0 flex-1 overflow-y-auto p-2', workspaceBoundedScrollClearanceClass)}
               data-testid="claude-code-memory-list"
             >
               <MemoryFileRows
@@ -259,7 +259,7 @@ function MemoryReady({
         <aside
           className={cn(
             'max-h-48 shrink-0 overflow-y-auto border-b p-2 md:max-h-none md:min-h-0 md:border-b-0 md:border-r',
-            workspaceScrollClearanceClass,
+            workspaceBoundedScrollClearanceClass,
           )}
           data-testid="claude-code-memory-list"
         >
@@ -504,7 +504,7 @@ function MemoryDocument({
     <div
       ref={contentRef}
       data-testid="claude-code-memory-content"
-      className={cn('min-h-0 flex-1 overflow-y-auto py-4', workspaceScrollClearanceClass)}
+      className={cn('min-h-0 flex-1 overflow-y-auto py-4', workspaceBoundedScrollClearanceClass)}
     >
       {notice ? (
         <p

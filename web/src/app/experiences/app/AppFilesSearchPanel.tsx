@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { FileEntry } from '@/capabilities/files';
 import type { AppFilesSearchStatus } from './useAppFilesSearch';
 import { cn } from '@/shared/lib/utils';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { bodyAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
 import { chromeLabelRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
 
@@ -46,11 +47,16 @@ export function AppFilesSearchPanel({
           aria-label="Search files"
         />
       </div>
-      {/* Bottom padding is the larger of the panel's own spacing and the
-          capsule clearance: the search depth is a Workspace depth like any
-          other, and its last hit must be able to scroll above the capsule
-          (owner decision 2026-10-03). */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-[var(--nession-shell-space-3)] pb-[max(var(--nession-shell-space-3),var(--nession-local-workspace-content-bottom-inset,0px))]">
+      {/* The search depth is a bounded surface inside Files (#4115): its hit
+          list is the internal scroll owner and spends the host's measured
+          trailing inset, so the last hit can scroll above the Capsule without
+          the panel computing that geometry itself. */}
+      <div
+        className={cn(
+          'min-h-0 flex-1 overflow-y-auto px-[var(--nession-shell-space-3)]',
+          workspaceBoundedScrollClearanceClass,
+        )}
+      >
         <p className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', chromeLabelRole())}>
           Files
         </p>

@@ -48,6 +48,8 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *
  *   /#/fixture/workspace?capability=env                  → Session overview, in sync
  *   /#/fixture/workspace?capability=env&env=empty        → no profiles, no binding
+ *   /#/fixture/workspace?capability=env&env=many         → a long profile list,
+ *                                                          for end-of-scroll geometry
  *   /#/fixture/workspace?capability=env&env=pending      → waiting for the next prompt
  *   /#/fixture/workspace?capability=env&env=outdated     → source changed; Reapply
  *   /#/fixture/workspace?capability=env&env=unsupported  → tmux applied, shell unsupported
@@ -120,6 +122,37 @@ const FILES: EnvFileInfo[] = [
   },
 ];
 
+/** The deterministic long list behind `env=many` (#4115's endpoint Case). */
+const MANY_PROFILE_COUNT = 24;
+
+function manyProfileName(index: number): string {
+  return `many-${String(index).padStart(2, '0')}.env`;
+}
+
+function manyProfileContent(index: number): string {
+  return [
+    `NODE_ENV=many-${index}`,
+    `API_BASE=https://many-${index}.internal`,
+    'LOG_LEVEL=info',
+    'FEATURE_FLAGS=workspace',
+  ].join('\n');
+}
+
+function isManyProfile(name: unknown): boolean {
+  return typeof name === 'string' && /^many-\d{2}\.env$/.test(name);
+}
+
+/** The `env=many` inventory: a long list of ordinary server profiles. */
+function manyProfiles(): EnvFileInfo[] {
+  return Array.from({ length: MANY_PROFILE_COUNT }, (_, index) => ({
+    name: manyProfileName(index),
+    source: 'server',
+    size: manyProfileContent(index).length,
+    modified: 1756400000 + index,
+    var_count: 4,
+  }));
+}
+
 function contentFor(payload: Record<string, unknown>): EnvGetResponse {
   const key = `${String(payload.source)}:${String(payload.agent_id ?? '')}:${String(payload.name)}`;
   if (key === 'server::staging.env') {
@@ -133,6 +166,10 @@ function contentFor(payload: Record<string, unknown>): EnvGetResponse {
   }
   if (key === 'server::shared.env') {
     return { success: true, content: SHARED_CONTENT, in_use_by: [] };
+  }
+  if (key.startsWith('server::') && isManyProfile(payload.name)) {
+    const index = Number.parseInt(String(payload.name).slice(5, 7), 10);
+    return { success: true, content: manyProfileContent(index), in_use_by: [] };
   }
   return { success: false, error: `env file not found: ${String(payload.name)}` };
 }
@@ -429,6 +466,9 @@ export function fixtureEnvSurface(search: string): PluginSurface {
   const race = scenario === 'race';
   const deferredBinding = scenario === 'deferred-binding';
   const files: EnvFileInfo[] = scenario === 'empty' ? [] : [...FILES];
+  if (scenario === 'many') {
+    files.push(...manyProfiles());
+  }
   if (scenario === 'project-env') {
     files.push({
       name: 'shared.env',

@@ -1,5 +1,6 @@
 import type { RefObject } from 'react';
 import { FileList, type FileEntry, type FileOps } from '@/capabilities/files';
+import { WorkspaceBottomActions } from '@/components/ui/workspace-actions-slot';
 import { cn } from '@/shared/lib/utils';
 import { bodyAppClass } from '@/app/experiences/app/appTypography';
 import { AppFilesBreadcrumb } from './AppFilesBreadcrumb';
@@ -86,13 +87,17 @@ export function AppFilesDirectoryPane({
           onToggleSelect={(entry) => selection.toggle(entry)}
         />
       </div>
-      {selection.active ? (
-        <AppFilesSelectionBottomBar
-          disabled={selection.count === 0}
-          onCopy={() => bulk.handleCopySelected()}
-          onDelete={() => bulk.setDeleteOpen(true)}
-        />
-      ) : null}
+      {/* #4115: Files contributes the actions; the App host owns the band's
+          position (below the page scrollport, above the floating Capsule). */}
+      <WorkspaceBottomActions>
+        {selection.active ? (
+          <AppFilesSelectionBottomBar
+            disabled={selection.count === 0}
+            onCopy={() => bulk.handleCopySelected()}
+            onDelete={() => bulk.setDeleteOpen(true)}
+          />
+        ) : null}
+      </WorkspaceBottomActions>
       <AppFilesFolderSheet
         open={moreOpen}
         onOpenChange={setMoreOpen}

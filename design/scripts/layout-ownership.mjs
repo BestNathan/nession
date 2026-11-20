@@ -55,6 +55,32 @@ export const APP_VIEWPORT_OWNER_ROOT = 'web/src/platform/viewport/';
 export const VISUAL_VIEWPORT_READ_RE = /\bwindow\.visualViewport\b|\bvisualViewport\b/g;
 
 const CONTENT_ROOTS = ['web/src/capabilities/', 'web/src/product/'];
+/**
+ * The retired capability-level Capsule clearance (#4115).
+ *
+ * Before the App host owned the page scroll, every capability that could reach
+ * the pane bottom opted in with this trailing padding. The host now spends its
+ * own measured inset; a capability reintroducing either the class or the raw
+ * variable is restoring a second owner.
+ */
+const RETIRED_CLEARANCE_RE =
+  /\bworkspaceScrollClearanceClass\b|pb-\[var\(--nession-local-workspace-content-bottom-inset/g;
+/**
+ * A capability-owned App page scroll (#4115).
+ *
+ * The App host owns the default page scroll owner. An element whose testid
+ * names an App layout/workspace root and that carries a vertical scroll is the
+ * pattern the host contract removes — a declared bounded view uses the shared
+ * bounded class and a non-root marker instead.
+ */
+const APP_PAGE_SCROLL_RE =
+  /data-testid=(?:"[^"]*-(?:app-layout|app-workspace|app-workspace-scroll)"|\{`[^`]*-(?:app-layout|app-workspace)`\})[^>]*overflow-(?:y-)?auto|overflow-(?:y-)?auto[^>]*data-testid=(?:"[^"]*-(?:app-layout|app-workspace|app-workspace-scroll)"|\{`[^`]*-(?:app-layout|app-workspace)`\})/g;
+/**
+ * The host's App surface marker is published by the layout recipe alone. A
+ * capability that writes it is claiming to be the App scroll surface rather
+ * than contributing content to it.
+ */
+const APP_SURFACE_MARKER = 'data-workspace-app-surface';
 const FRAME_UTILITY_RE =
   /\b(?:h-screen|min-h-screen|w-screen|h-dvh|min-h-dvh|h-svh|min-h-svh|h-lvh|min-h-lvh|w-dvw|h-\[100dvh\]|min-h-\[100dvh\]|h-\[100svh\]|min-h-\[100svh\]|h-\[100lvh\]|min-h-\[100lvh\]|w-\[100dvw\]|fixed\s+inset-0|fixed\s+inset-x-0|fixed\s+inset-y-0)(?![\w-])/g;
 const HEADER_MARKER_RE =
@@ -151,6 +177,26 @@ const RULES = {
     repair:
       'remove the keyboard scroll-owner marker from capability/product code; let AppLayout/ShellMain host the one Experience scrollport',
   },
+  'no-capability-capsule-clearance-opt-in': {
+    expected:
+      'the App host owns the page scrollport and spends its measured Capsule clearance; a bounded capability surface spends workspaceBoundedScrollClearanceClass inside a declared adapter',
+    owner: 'web/src/app/workspace/layout/workspaceLayout.tsx + web/src/shared/lib/workspaceScrollClearance.ts',
+    repair:
+      'remove the capability-level clearance padding; contribute content to the App host scrollport, or declare appScroll: "bounded" and use the bounded surface class at your own internal scroller',
+  },
+  'no-capability-app-page-scroll': {
+    expected:
+      'one App primary vertical scroll owner, rendered by the host (AppWorkspaceScrollRegion) or by a declared bounded adapter',
+    owner: LAYOUT_RECIPE_OWNER + ' + docs/design/composition.md §14',
+    repair:
+      'remove the page-level scroll from the App layout root; let the host scroll the page, or declare the view appScroll: "bounded" and put a marked internal scroller inside it',
+  },
+  'no-capability-app-surface-owner': {
+    expected: 'the App Workspace surface marker is published by the host layout recipe',
+    owner: LAYOUT_RECIPE_OWNER,
+    repair:
+      'remove the host surface marker from capability content; the host decides whether this view scrolls as a document or a bounded surface',
+  },
   'no-foreign-visual-viewport': {
     expected:
       'only the App viewport environment reads window.visualViewport and publishes layout/visible/occlusion snapshots',
@@ -227,6 +273,24 @@ export function scanLayoutSource(source, file = '<fixture>') {
         kind: 'no-capability-host-chrome',
         actual: marker,
         ...RULES['no-capability-host-chrome'],
+      });
+    }
+    // #4115: the host owns the App page scroll and its Capsule clearance.
+    pushOccurrences(violations, masked, RETIRED_CLEARANCE_RE, {
+      file,
+      rule: 'no-capability-capsule-clearance-opt-in',
+    });
+    pushOccurrences(violations, masked, APP_PAGE_SCROLL_RE, {
+      file,
+      rule: 'no-capability-app-page-scroll',
+    });
+    if (masked.includes(APP_SURFACE_MARKER)) {
+      violations.push({
+        file,
+        line: lineNumber(masked, masked.indexOf(APP_SURFACE_MARKER)),
+        kind: 'no-capability-app-surface-owner',
+        actual: APP_SURFACE_MARKER,
+        ...RULES['no-capability-app-surface-owner'],
       });
     }
     if (!file.startsWith(APP_GESTURE_OWNER_ROOT)) {

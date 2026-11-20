@@ -3,7 +3,7 @@ import { EditorSelection, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { EDITOR_METRICS, EDITOR_THEME } from '../model/editorTheme';
 import {
   ensureLangsModule,
@@ -133,7 +133,7 @@ export function CodeMirrorEditor({
       // boundary measures the scroller's own font and line height).
       className={cn(
         'h-full w-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto',
-        workspaceScrollClearanceClass,
+        workspaceBoundedScrollClearanceClass,
       )}
       data-testid="codemirror-editor"
     >

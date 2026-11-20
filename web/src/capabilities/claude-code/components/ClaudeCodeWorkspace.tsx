@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { ConversationView } from '@/shared/ai-conversation';
 import { claudeCodeConversationAdapter } from '../conversation/adapter';
@@ -136,7 +136,7 @@ export function ScopePanel({
   }
   return (
     <div
-      className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+      className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
       data-testid={`claude-code-scope-${scope}`}
       data-scope={scope}
     >
@@ -184,7 +184,7 @@ export function ContentPanel({
       </div>
       {state.readLoading && <p className={cn('py-3 text-muted-foreground', chromeSansRole('secondary'))}>Loading content...</p>}
       {state.readError && <p className={cn('py-3 text-destructive', chromeSansRole('body'))} role="alert">{state.readError}</p>}
-      <pre data-testid="claude-code-content" className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4', chromeMonoRole('code'), workspaceScrollClearanceClass)}>
+      <pre data-testid="claude-code-content" className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4', chromeMonoRole('code'), workspaceBoundedScrollClearanceClass)}>
         {state.content || (state.readLoading ? '' : '(empty)')}
       </pre>
     </div>
