@@ -291,6 +291,9 @@ jobs:
           # The legacy qualified merge remains the default until both
           # protected targets enforce strict required qualification.
           NESSION_CONVERGENCE_NATIVE_AUTO_MERGE: ${{ vars.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE }}
+          # #4140: rollout independently; disabled until protected main CI/real
+          # App and source-pair end-to-end proof are verified.
+          NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED: ${{ vars.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED || 'false' }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
