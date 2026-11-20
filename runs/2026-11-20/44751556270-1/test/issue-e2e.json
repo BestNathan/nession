@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "557c2fe48f04f86f2886dcb4247f8d1389f26ed3",
+  "run_id": 44751556270,
+  "run_attempt": 1,
+  "plan_digest": "1546efd61133232d05e1d3293f62047098c87770c7df5dbea84d1da4679fe186",
+  "artifact_digest": "sha256:59ba512b419748b9f4ea8355e07925d8781f9b5975cf57888dd815be3f31e8bb",
+  "results": [
+    {
+      "id": "conversation-disclosure-app",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 59
+    },
+    {
+      "id": "fixture-app",
+      "result": "Pass",
+      "discovered": 20,
+      "passed": 20,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 258
+    },
+    {
+      "id": "fixture-visual-app",
+      "result": "Pass",
+      "discovered": 23,
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 156
+    },
+    {
+      "id": "fixture-workspace",
+      "result": "Pass",
+      "discovered": 10,
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 110
+    }
+  ]
+}
