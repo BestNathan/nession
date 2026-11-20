@@ -14,6 +14,13 @@
 > catalog, distribution/cache and physical mount manager are delivered; Image
 > Compose and Sandbox runtime mount composition are delivered by the children
 > in [Composition and mount delivery](#composition-and-mount-delivery-3693).
+> [#4086](https://github.com/BestNathan/nession/issues/4086) extends this
+> architecture with peer-capable Store/Registry nodes: every Server and Agent
+> may own a local verified CAS, mount the same standard OCI Distribution
+> Registry service and use the same Registry Client SDK. That extension is
+> specified in [Peer-capable Store and Registry topology](#peer-capable-store-and-registry-topology-4086)
+> and delivered by children #4087–#4091; it does not reopen the accepted
+> #3494/#3495/#3496/#3498/#3499 evidence.
 > Where this document and an un-migrated deployment differ, this document is
 > the contract, not evidence that a particular runner installed it.
 
@@ -22,15 +29,17 @@
 | Responsibility | Owner |
 |---|---|
 | OCI Descriptor/Manifest/Config/Index model, validation and exact-byte import/export | `nession-erofs` (`src/oci`) |
-| Content-addressed storage for Index/Manifest/Config/EROFS objects | `nession-erofs` (`src/blob`) |
-| Repository/tag/reference graph, SQLite metadata schema/migration, GC | `nession-erofs` (`src/catalog`, `src/image/*`) executed inside the Server's SQLite transaction authority |
+| Content-addressed storage for Index/Manifest/Config/EROFS objects; reusable `BlobStore` read/write/exists/verify contract (#4087) | `nession-erofs` (`src/blob`) |
+| Repository/tag/reference graph, `RepositoryStore` reachability contract, SQLite metadata schema/migration, GC | `nession-erofs` (`src/catalog`, `src/image/*`); the SQLite catalog executes inside the Server's SQLite transaction authority, the Agent projects the same contract from its verified local references (#4087) |
 | Source adapters and EROFS conversion/publication | `nession-erofs` (`src/build`) driven by the existing #3334 async build lifecycle |
-| OCI Distribution client (external registry pull/push) | `nession-erofs` (`src/registry`) |
+| Host-independent OCI Distribution Client SDK: pull/push, tag→digest resolution, verified multi-source CAS ingest (#4089) | `nession-erofs` (`src/registry`) |
+| Mountable standard OCI Distribution Registry service (`/v2/`, read-only or push-enabled) over a supplied Store/Repository/authorizer (#4088) | `nession-erofs` (`src/registry` service module) |
 | Server→Agent transfer engine and Agent verified cache | `nession-erofs` (`src/distribution`, `src/cache`) |
 | FUSE mount primitive, physical mount leases | `nession-erofs` (`src/mount`) |
 | Identity/authorization, Project/Session/tenant access policy, HTTP/WS/MCP entrypoints, ordering of Server operations | `nession-server` |
+| Server Registry mount, official catalog policy, authorized external import, endpoint advertising (#4090) | `nession-server` adapter over the crate contracts |
 | Versioned wire DTOs (`ImageSource`, image descriptors, grants, selections) | `nession-protocol`; it does not duplicate the OCI object model |
-| Agent identity, Session runtime, grant consumption and cache adapter | `nession-agent` |
+| Agent identity, Session runtime, grant consumption, cache adapter, optional opt-in read-only Registry adapter and peer source selection (#4090/#4091) | `nession-agent` |
 | Sandbox policy, composition, environment application, execution records | `nession-sandbox` |
 | Web/App Filesystem UX and target policy | existing #3405 owner; not redefined here |
 
@@ -273,8 +282,9 @@ verify-before-ready rule; a warm hit is re-hashed before reuse. Manifest/Config
 metadata is cached separately from the EROFS payload, so two Manifests sharing
 one payload perform one payload download and produce one physical cache file.
 Mount leases are keyed by the EROFS layer digest, not the Manifest digest, so
-two Configs can share one physical mount. Registry credentials never reach the
-Agent.
+two Configs can share one physical mount. The Server's global registry
+credentials never reach the Agent; approved peer/external fetches under #4086
+use only Agent-scoped credentials or short-lived grants.
 
 ## Publication and source conversion
 
@@ -323,13 +333,147 @@ interrupted transfer, duplicate request or process restart yields only fully
 verified ready files; unverified bytes are never mounted or evicted while
 active leases/pins exist.
 
-An external OCI Distribution client (pull/push) lives in `nession-erofs`. It
+The OCI Distribution Client SDK (pull/push) lives in `nession-erofs`. It
 supports registry challenge/token authentication, bounded redirects and hosts,
-scoped credentials from a Server-owned secret source, and explicit errors for
+scoped credentials from a caller-owned secret source, and explicit errors for
 401/403, 404, digest mismatch, unsupported platform and malformed Manifest. It
-does not implement a `/v2/` Registry server, does not unpack tar layers and
-does not hand registry credentials to the Agent. OCI→EROFS source conversion
-belongs to the publication phase, not to the registry transport.
+does not unpack tar layers. OCI→EROFS source conversion belongs to the
+publication phase, not to the registry transport.
+
+Under #4086 the client is host-independent: the Server uses it to import
+authorized external sources into its own CAS/Catalog, and an Agent may use the
+same SDK against approved Server/peer/external Registries with its own scoped
+credentials. The reusable `/v2/` Registry **service** is a separate crate
+module (#4088), not part of the client. The accepted #3498 rule that the
+Server's global registry credentials never reach an Agent still holds: an
+Agent receives only repository-scoped credentials or short-lived grants for
+explicitly approved sources, never the Server's secret source itself. The
+proprietary `/images/blobs/{digest}` transfer path remains during the #4090
+migration window; the steady-state data path is standard OCI Distribution.
+See [Peer-capable Store and Registry topology](#peer-capable-store-and-registry-topology-4086).
+
+## Peer-capable Store and Registry topology (#4086)
+
+[#4086](https://github.com/BestNathan/nession/issues/4086) changes the topology
+from Server-authoritative transfer to reusable Registry nodes over a shared
+CAS contract. Every Nession Server/Agent may independently (a) own a local
+verified CAS, (b) mount the same standard OCI Distribution Registry service,
+and (c) use the same OCI Registry Client SDK to pull/push as authorized. The
+Server is not a mandatory image data hop. This is new scope layered on the
+accepted #3494–#3500 delivery, not a regression reopening it.
+
+### Shared Store contracts (#4087)
+
+Three reusable contracts in `nession-erofs`, consumed by both hosts:
+
+| Contract | Responsibility |
+|---|---|
+| `BlobStore` | Content/sha256-addressed bytes: read, write, exists, verify-stream. Atomic private-temp publication, dedupe of identical digests without rewriting bytes, re-verification of preexisting objects. Reuses `blob::store`; no parallel CAS implementation. |
+| `RepositoryStore` | Determines accessible Manifests/Tags and the **complete reachable blob closure** of a repository. The Server implements it over the SQLite catalog; the Agent implements it as a projection of its verified local references (grants and cached Manifest closures). |
+| `RegistryAuthorizer` | Gates pull/push/list actions per principal, repository and scope. Injected by the host; never a bypassing global token. |
+
+Rules:
+
+- A local Store is either **authoritative/persistent** (Server CAS + catalog)
+  or a **re-fetchable Cache** (Agent verified cache). A Cache is a Store plus
+  fetch/retention policy — not a second incompatible byte-store protocol.
+  Object format, digest identity and verify-before-ready rules are identical.
+- Pin, lease and eviction policies are independent per host. Cache eviction
+  may reclaim unpinned re-fetchable objects but never pinned, actively mounted
+  or transferring objects; GC never crosses ownership namespaces (Server
+  catalog roots vs the Agent per-identity namespace).
+- Repository reachability and verified complete closure gate blob reads. A
+  raw CAS directory must never be published as a globally accessible
+  Registry, and the adapter must not invent repository aliases for unrelated
+  cached blobs. Possessing a digest is never authorization.
+- A cache miss is distinct from an authorized-but-nonexistent repository
+  object; the Registry boundary maps them to distinct OCI error semantics.
+- Agent identity namespaces and single-flight partial-write ownership stay
+  safe on shared volumes. Composite closure is explicitly represented or
+  treated unsupported — never silently truncated.
+
+### Mountable Registry service (#4088)
+
+A reusable Axum/Tower-mounted OCI Distribution `/v2/` service, independent of
+host identity, mounted on the host's existing HTTP ingress — no extra accept
+loop and no second authorization state machine (#3439). It is supplied the
+host's `BlobStore`, `RepositoryStore` and `RegistryAuthorizer`.
+
+- Pull surface: `GET /v2/`, `GET/HEAD /v2/{name}/manifests/{ref}`,
+  `GET/HEAD /v2/{name}/blobs/{digest}`, `GET /v2/{name}/tags/list`, with
+  correct digest, media-type/Accept negotiation, Range/ETag, repository scope
+  and OCI error semantics.
+- Push surface (only behind explicit push policy): the standard
+  `POST/PATCH/PUT /v2/{name}/blobs/uploads/` sequence and
+  `PUT /v2/{name}/manifests/{ref}`. Uploads stage privately with digest/size
+  validation; Catalog publication is atomic and only after the complete
+  verified referenced closure exists; tags keep durable CAS semantics.
+- Agent mode is **read-only by explicit opt-in**: all mutation verbs are
+  denied even with a read credential, and access is scoped to verified
+  complete artifacts and authenticated peers.
+
+### Registry Client SDK (#4089)
+
+The #3498 client becomes a host-independent SDK:
+
+- `ImageReference` (registry, repository, tag or digest); canonical tag→digest
+  resolution; Index→platform-specific Manifest selection; Config/Blob closure
+  download; immutable digest pinning **before** any alternate-source fetch.
+- Network fetch, verification, CAS ingest and optional local Catalog tag
+  publication are separate steps. Server import may publish a local tag after
+  verification; an Agent fetch may simply retain pinned OCI objects.
+- The caller supplies the local CAS/Cache, a scoped credential provider,
+  progress/cancellation and source policy. Existing auth/challenge, bounded
+  redirect/SSRF defenses and resumable single-flight transfer are reused;
+  Range support is negotiated and a Registry without resume triggers a safe
+  restart, never a partial Ready object.
+- Credentials are never serialized into Session grants or Image Config and
+  never leak to redirects or logs. A tag name does not imply the same digest
+  across registries.
+
+### Data flow and authority boundaries
+
+```text
+external GHCR/OCI ──authorized import──▶ Server Store (CAS + Catalog)
+                                            │  /v2/ (Server authority)
+        ┌───────────────────────────────────┤
+        ▼                                   ▼
+   Agent A Store ◀──/v2/ pull──▶ Agent B Store      (peer, #4091)
+        │  optional opt-in read-only /v2/
+        ▼
+   Sandbox verified local immutable objects + mount leases
+```
+
+- The Server keeps Project/Session/tenant authorization, official catalog
+  policy, endpoint advertising and grant issuance. Control-plane grants carry
+  pinned immutable identity and allowed sources — not raw registry secrets.
+- An Agent fetches from the Server Registry, an approved peer Registry or an
+  approved external Registry using the same SDK, and re-verifies exact
+  digest+size regardless of source. Network reachability is not authorization.
+- Direct external sources follow allowlists, SSRF/redirect/credential
+  restrictions and immutable digest verification. There is no global Server
+  bearer credential shared across peers.
+- Peer discovery (#4091) advertises or resolves only verified pinned
+  Manifest/complete-closure availability and authorized endpoints, from a
+  bounded explicit candidate list. A requester resolves and authorizes the
+  immutable digest first, then selects a reachable authorized source; on
+  failure it falls back only to another authorized source for the **same
+  pinned digest**. No public peer discovery, no automatic cross-tenant
+  sharing, no mandatory availability inventory database.
+
+### Format interoperability constraints
+
+- OCI Distribution interoperability does **not** imply Docker can execute
+  `application/vnd.erofs` layers. No claim of Docker runtime compatibility is
+  made for raw EROFS objects.
+- A referenced Composite's nested dependency closure needs an explicit
+  portable representation/compatibility decision before portable registry
+  support is claimed. Until then, opaque OCI descriptor transport is allowed
+  where valid, and unsupported EROFS runtime types are rejected explicitly at
+  the consumer boundary rather than corrupting OCI bytes.
+- Original OCI bytes are preserved end to end. Index/Manifest identity stays
+  digest-pinned; tags are mutable names scoped to one repository; there is no
+  global tag consistency across registries.
 
 ## Legacy migration, GC, failure and rollback
 
@@ -427,6 +571,34 @@ transfer tests; (4) native Sandbox mount/ENV and lease tests;
 #3180 and #3062 as the accepted baselines; do not reopen them merely because
 this architecture expands their scope.
 
+### Peer Registry delivery (#4086)
+
+The peer-capable extension is a second acyclic subtree with one owner per
+deliverable. Dependencies: **(1) → (2, 3) → (4) → (5)**. The prior #3498
+client and #3496 catalog are reused, not duplicated; #4084 remains the GHCR
+EROFS publish/readback smoke owner.
+
+```text
+#4086 peer architecture (this contract)
+  └─ #4087 1: shared CAS BlobStore / RepositoryStore / Cache lifecycle (P0)
+       ├─ #4088 2: mountable standard OCI Distribution Registry service (P1)
+       ├─ #4089 3: reusable Registry Client SDK / verified multi-source fetch (P1)
+       └──────┬─ #4090 4: Server/Agent host adapters, GHCR import, direct pulls (P1; needs 2+3)
+              └─ #4091 5: peer source discovery, scoped Agent-to-Agent pull, fallback (P2)
+```
+
+| Stage | Issue | Predecessors | Deliverable | Verification owner | Migration / rollback |
+|---|---|---|---|---|---|
+| 1 | [#4087](https://github.com/BestNathan/nession/issues/4087) | #4086; reuses #3496/#3499 | Reusable `BlobStore`/`RepositoryStore` contracts, Cache lifecycle and ownership-safe GC/eviction | Deterministic CAS/repository positive+negative fixtures at exact PR head (SCN-01): hash tampering, cross-repo reachability, eviction vs pins | Additive contracts over existing layouts; no byte migration. Rollback = revert adapters; existing Server catalog and Agent cache paths remain valid |
+| 2 | [#4088](https://github.com/BestNathan/nession/issues/4088) | #4087 | Host-agnostic `/v2/` Registry service (pull, push behind policy, read-only mode) | Source-aligned staging protocol/runtime Case at exact merged SHA (SCN-03): loopback OCI clients, ORAS readback, malformed/unauthorized probes | Service mounts alongside the proprietary endpoint; nothing replaces it yet. Rollback = unmount the router; no state change |
+| 3 | [#4089](https://github.com/BestNathan/nession/issues/4089) | #4087; reuses #3498 client | Host-independent Client SDK with verified multi-source CAS ingest | Deterministic local registry + adversarial fixtures at exact PR head (SCN-01); reuses the #3498 test registry | SDK refactor preserves #3498 pull/push behavior; Server import keeps working throughout. Rollback = retain the prior pull path until parity is proven |
+| 4 | [#4090](https://github.com/BestNathan/nession/issues/4090) | #4087, #4088, #4089 | Server Registry mount + authorized external import; Agent SDK fetch + opt-in read-only Registry; proprietary-endpoint migration | Staging Cases (SCN-03/04): authenticated import, Session-authorized Agent pull, deny probes, cache-hit, compatibility transition | Explicit compatibility window for `/images/blobs/{digest}`; cutover only after Agent adoption and parity receipts. Rollback = re-enable the proprietary path; Session pins, resume and digest verification never regress |
+| 5 | [#4091](https://github.com/BestNathan/nession/issues/4091) | #4090 | Control-plane source discovery, scoped peer pull, resilient same-digest fallback | Isolated staging Server+two-Agent Case (SCN-03) plus identity/credential isolation profile (SCN-04); positive and negative permission/network/disconnect probes | Opt-in bounded candidate list; fail-closed fallback to Server/GHCR. Rollback = disable peer sources; the #4090 Server/external paths are unchanged |
+
+No child re-imposes full regression on another. Each stage keeps the accepted
+#3494–#3500 evidence intact; a decision change updates this document instead
+of spawning a competing explanation.
+
 ## Composition and mount delivery (#3693)
 
 The Image-Compose and runtime-composition children are separate Requirements so
@@ -478,7 +650,7 @@ Target module ownership inside `nession-erofs`:
 | `catalog/` | repository, tag, reference graph, SQLite schema/migration, GC |
 | `image/` | publish, resolve, inspect |
 | `build/` | EROFS, Git, local, archive and OCI-source publication |
-| `registry/` | OCI Distribution client, auth, pull, push |
+| `registry/` | OCI Distribution Client SDK (auth, pull, push, verified multi-source ingest) and the mountable `/v2/` Registry service (#4088/#4089); both host-independent, authorization and credentials injected by the host |
 | `distribution/` | Server→Agent HTTP transfer engine |
 | `cache/` | Agent fetch/resume/verify and eviction |
 | `mount/` | FUSE primitive and physical mount lease manager |
@@ -489,19 +661,33 @@ them where needed. `nession-server`, `nession-agent`, `nession-sandbox` and
 `nession-protocol` depend on the crate; the reverse edge is forbidden. The
 catalog receives a transaction from the Server's SQLite authority rather than
 opening its own database. The crate continues to expose cargo features so a
-consumer compiles only the mechanics it uses (Server: build/store/catalog;
-Agent: cache/distribution/mount; Sandbox: mount).
+consumer compiles only the mechanics it uses (Server: build/store/catalog plus
+registry client/service; Agent: cache/distribution/mount plus registry
+client/service for approved sources; Sandbox: mount). The #4086 rule that
+reusable Registry and CAS code stays independent of `nession-server`,
+`nession-agent`, `nession-sandbox` and `nession-protocol` is checked with the
+cargo boundary commands in [Verification](#verification); the Agent's
+historical exclusion of the `registry` feature existed to keep Server
+credentials out of Agent builds, and is superseded by scoped per-host
+credential injection — never by sharing the Server's secret source.
 
 ## Non-goals
 
 No Dockerfile, generic software installer or container runtime; no execution of
-OCI `Entrypoint`/`Cmd`; no full `/v2/` OCI Registry server; no tar layer
-unpacking; no new background job queue; no second image database or mirrored
-state; no compressed/chunk-index/lazy EROFS variants in v1; the referenced
-multi-blob Composite is its own descriptor layer and is never expressed as an
-arbitrary OCI `Manifest.layers[]` union; no
+OCI `Entrypoint`/`Cmd`; no tar layer unpacking; no new background job queue; no
+second image database or mirrored state; no compressed/chunk-index/lazy EROFS
+variants in v1; the referenced multi-blob Composite is its own descriptor
+layer and is never expressed as an arbitrary OCI `Manifest.layers[]` union; no
 registry credentials in images, EROFS, Agent grants or logs; no automatic
 re-mount of a running process.
+
+The #4086 extension adds its own bounded non-goals: the `/v2/` Registry
+service is a reusable distribution surface, not a Docker/OCI runtime, a blob
+replication scheduler or an unrestricted CAS view; no host-specific
+Session/Project decisions inside the crate; no mandatory publishing,
+all-to-all P2P, public peer discovery, automatic cross-tenant sharing or
+automatic GHCR credential forwarding; no speculative P2P CDN or mandatory
+availability inventory database.
 
 ## Verification
 
@@ -516,7 +702,12 @@ rg -n '^nession-(server|agent|sandbox|protocol)' crates/nession-erofs/Cargo.toml
 
 Child phases add their own Gate/test/Case evidence at the exact PR or staging
 SHA; the [Delivery DAG](#delivery-dag) table names the verification owner for
-each. The architecture document itself is checked against the implementing PR
+each. The #4086 peer subtree (#4087–#4091) is verified the same way: the
+architecture and dependency/Issue map by document/link review at the exact PR
+SHA, and the crate boundary by the commands above plus focused
+compile/contract checks proving the reusable Registry/CAS modules carry no
+`nession-server`/`nession-agent`/`nession-sandbox`/`nession-protocol` edge.
+The architecture document itself is checked against the implementing PR
 SHA when a child changes a decision recorded here; a decision change updates
 this document instead of spawning a competing explanation.
 
@@ -530,3 +721,10 @@ this document instead of spawning a competing explanation.
 - [Sandbox policy and execution isolation](sandbox-policy-and-execution.md)
 - [#3693](https://github.com/BestNathan/nession/issues/3693) — owner decision
   separating Image Compose output from Sandbox runtime composition
+- [#4086](https://github.com/BestNathan/nession/issues/4086) — peer-capable
+  OCI Store and Registry infrastructure architecture; children
+  [#4087](https://github.com/BestNathan/nession/issues/4087),
+  [#4088](https://github.com/BestNathan/nession/issues/4088),
+  [#4089](https://github.com/BestNathan/nession/issues/4089),
+  [#4090](https://github.com/BestNathan/nession/issues/4090),
+  [#4091](https://github.com/BestNathan/nession/issues/4091)
