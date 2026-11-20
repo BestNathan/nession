@@ -79,7 +79,8 @@ for(const [mutation,needle] of [
     '| SC-02 | Pass |', '| SC-02 | Pending |')}},'Issue Success Criteria'],
 ]) {
   const result=auditFinalSource({...source,...mutation});
-  assert.equal(result.status,'merged/source-unverified',needle);
+  assert.equal(result.status,
+    mutation.pr?.merged===false?'still-open/blocked':'merged/source-unverified',needle);
   assert.ok(result.reasons.some(x=>x.includes(needle)),needle+': '+result.reasons.join('; '));
 }
 assert.equal(auditFinalSource({...source,pr:{...source.pr,state:'open',merged_at:null}})
