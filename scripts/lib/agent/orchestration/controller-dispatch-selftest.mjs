@@ -468,7 +468,7 @@ for(const bad of [
   {event:{...recoveryTools4065.event,comment:{...recoveryTools4065.event.comment,
     user:{login:'attacker'}}}},
 ])assert.throws(()=>assertDispatchAuthority({...recoveryTools4065,...bad}),
-  /authenticated owner\\/main/);
+  /authenticated owner\/main/);
 const toolPr={...pr4065,head:{...pr4065.head,sha:tool4065.source_sha}};
 const toolRef={...ref4065,object:{sha:tool4065.source_sha}};
 assert.equal(assertReviewerRecoveryPrLease(tool4065,toolPr,toolRef),true);
