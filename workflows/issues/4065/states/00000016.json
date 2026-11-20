@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "issue": 4065,
+  "version": 16,
+  "phase": "repair",
+  "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+  "repair_attempts": 1,
+  "transitions": [
+    {
+      "key": "cddaa9c1fc8ca0d85221c2bd3e3449b5dd8dc28ee9991daf541cee627fad3464",
+      "kind": "publisher",
+      "run_id": 44744656206,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "published"
+    },
+    {
+      "key": "ce7807f81dbab94a769c7267b1d8d54dad22933ba51f55a1ecd6a805864c168e",
+      "kind": "reviewer",
+      "run_id": 44773349621,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "changes_requested"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "8b7777f48a577d01961fd7d9e75311f75d6d57a1",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+        "source_run_id": 44733719096,
+        "source_attempt": 1,
+        "failure_code": "qwen_tracked_source_gate_rejected"
+      }
+    },
+    {
+      "id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "f79547b0def78418e109aba82673d7f20edbc341",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+        "source_run_id": 44744956936,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_large_base_premodel_failure"
+      }
+    },
+    {
+      "id": "dc7099c5355e73e51b579cecb5d822cdc6be2ef6a4c51148b9514214144e04ee",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "repair",
+        "sha": "f79547b0def78418e109aba82673d7f20edbc341",
+        "resume": true,
+        "agent_id": "dev-qwen-01",
+        "repair_checkpoint": {
+          "checkpoint_version": 1,
+          "checkpoint_commit_sha": "0dfa99907f92be662073e902b40463cfdd605bac",
+          "ciphertext_sha256": "c1fed975f1b2ac5525be6191d16c65589931d984c32e41b8fd975ac0b3d2b0fd",
+          "source_sha": "8b7777f48a577d01961fd7d9e75311f75d6d57a1",
+          "source_run_id": 44742578069
+        }
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "dc7099c5355e73e51b579cecb5d822cdc6be2ef6a4c51148b9514214144e04ee",
+        "source_run_id": 44775385585
+      }
+    }
+  ]
+}
