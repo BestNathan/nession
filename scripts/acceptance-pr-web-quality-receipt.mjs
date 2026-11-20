@@ -511,6 +511,25 @@ export function collectPrRequiredQuality(sha, request = githubJson) {
   }
 }
 
+// Async adapter for the trusted Issue lifecycle writer. Both adapters consume
+// the same exact-run/attempt attestor; no second Quality policy is introduced.
+export async function collectPrRequiredQualityAsync(sha, request) {
+  if (!SHA.test(String(sha))) throw new Error('exact PR HEAD SHA is required');
+  if (typeof request !== 'function') throw new Error('trusted GitHub request required');
+  try {
+    const q = new URLSearchParams({head_sha: sha, event: 'pull_request', per_page: '25'});
+    const runs = await request('/repos/' + REPO + '/actions/workflows/ci-quality.yml/runs?' + q);
+    const run = matchingQualityRuns(runs?.workflow_runs, sha)[0];
+    const jobs = run ? await request('/repos/' + REPO + '/actions/runs/' + run.id +
+      '/attempts/' + run.run_attempt + '/jobs?per_page=100') : null;
+    return attestPrRequiredQuality(sha, runs, jobs);
+  } catch (error) {
+    console.error('Trusted async required Quality readback failed:',
+      error instanceof Error ? error.message : String(error));
+    return { status: 'pending', reason: 'authenticated exact-HEAD Quality unavailable' };
+  }
+}
+
 export function enforcePrRequiredQuality(context, normalized) {
   if (context?.stage !== 'pr') return normalized;
   const observation = context.pr_required_quality;
