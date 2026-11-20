@@ -7,12 +7,15 @@ import {
   completedIssueAcceptanceDecision,
   extractSection,
   isAcceptanceIssue,
+  extractSection,
   parseAcceptanceReport,
   parseClosingIssueNumbers,
   parsePreMergeIssueNumbers,
   parseSuccessCriteria,
 } from './requirement-acceptance.mjs';
-import { planStage, validateAcceptancePlan } from './acceptance-plan.mjs';
+import { planStage, validateAcceptancePlan, canonicalAcceptanceStage } from './acceptance-plan.mjs';
+import {collectPrRequiredQualityAsync, validPrRequiredQualityReceipt}
+  from './acceptance-pr-web-quality-receipt.mjs';
 import { parseCommand } from './github-comment-command.mjs';
 
 const SHA = /^[0-9a-f]{40}$/i;
@@ -402,8 +405,57 @@ async function humanReopened(repository, issueNumber, token, request = githubReq
   return hasUnrecoveredHumanReopen(events, comments);
 }
 
+// #4146: canonical Issue closure consumes the SAME required-Quality source
+// attestor as PR SC normalization. Historical text Pass and an unrelated
+// merged PR cannot together grant completion of a different source HEAD.
+export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality) {
+  const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
+  const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
+  const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
+  if (criteria.errors.length || report.errors.length || plan.errors.length) {
+    return {qualified:false, reason:'invalid Issue SC/Acceptance contract'};
+  }
+  const heads = new Set();
+  for (const [id, sc] of criteria.criteria) {
+    const row = report.rows.get(id);
+    const stage = plan.plan ? planStage(plan.plan.get(id)) :
+      canonicalAcceptanceStage(row?.stage);
+    if (stage !== 'pr' || row?.result === 'N/A') continue;
+    // decideIssueClosure has already checked all SC states; this method
+    // requires the independent exact-HEAD proof for each PR-stage Pass.
+    if (!sc.checked || row?.result !== 'Pass') {
+      return {qualified:false, reason:id+' is not a qualified PR-stage Pass'};
+    }
+    const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source (?:agent(?:-[a-z0-9-]+)?|case-runner);/i
+      .exec(String(row.evidence ?? ''));
+    if (!match) {
+      return {qualified:false, reason:id+' lacks a canonical exact-source PR receipt'};
+    }
+    const head = match[1].toLowerCase();
+    const authorizedPr = Array.isArray(prs) && prs.some(pr =>
+      Boolean(pr.merged_at) && pr.head?.sha === head &&
+      ['main','staging','gitops'].includes(pr.base?.ref));
+    if (!authorizedPr) {
+      return {qualified:false,
+        reason:id+' accepted source HEAD is not the merged Issue implementation HEAD'};
+    }
+    heads.add(head);
+  }
+  if (heads.size > 16) return {qualified:false, reason:'too many PR Quality sources'};
+  for (const head of heads) {
+    // readQuality is always a trusted GitHub Run/Job/Step reader in production.
+    const evidence = await readQuality(head);
+    if (evidence?.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(evidence.receipt, head)) {
+      return {qualified:false,
+        reason:'accepted PR source '+head+' lacks independently verified required Quality'};
+    }
+  }
+  return {qualified:true, sources:[...heads]};
+}
+
 async function reconcileIssue(repository, number, token, { includePr = null,
-  request = githubRequest } = {}) {
+  request = githubRequest, qualityReader = null } = {}) {
   const { prefix } = repoParts(repository);
   const issue = await request(prefix + '/issues/' + number, { token });
   if (!issue || issue.number !== number) throw Error('Issue number mismatch');
@@ -414,6 +466,13 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   const manualReopened = await humanReopened(repository, number, token, request);
   const decision = decideIssueClosure(issue, prs, { manualReopened });
   if (decision.action !== 'close') return { ...decision, prs: prs.map(pr => pr.number) };
+  const qualified = await qualifyIssuePrSourceForClosure(issue, prs,
+    qualityReader ?? (head => collectPrRequiredQualityAsync(head,
+      path => request(path, {token}))));
+  if (!qualified.qualified) {
+    return {action:'pending', reason:'PR source Quality: '+qualified.reason,
+      prs:prs.map(pr => pr.number)};
+  }
   // Re-read before mutation: a later Issue edit or reopen must not be raced by
   // a stale evaluation. GitHub's Issues API has no compare-and-set PATCH.
   const fresh = await request(prefix + '/issues/' + number, { token });
