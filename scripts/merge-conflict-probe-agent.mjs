@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
+import {allowedConflictPath} from './merge-conflict-file-policy.mjs';
 import {runClaudeCli,normalizeClaudeUsage} from './lib/agent/providers/claude-code.mjs';
 import {buildAgentWorkflowTelemetry,writeAgentWorkflowTelemetry} from './agent-workflow-telemetry.mjs';
 import {providerScopedRunName} from './lib/agent/telemetry/run-name.mjs';
@@ -32,9 +33,7 @@ export function threeWayConflictContext(worktree,paths){
   let bytes=0;
   const lines=[];
   for(const p of paths){
-    if(!/^[A-Za-z0-9][A-Za-z0-9._/+-]*$/.test(p)||p.includes('..')||
-       p.startsWith('.github/')||p.startsWith('gates/')||p.endsWith('/AGENTS.md')||
-       p==='AGENTS.md')throw Error('unapproved source conflict path');
+    if(!allowedConflictPath(p))throw Error('unapproved source conflict path');
     const refs=stages.get(p);
     if(!refs||!Object.keys(refs).length)throw Error('missing original Git three-way stages');
     lines.push('PATH '+p);
