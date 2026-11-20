@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44675821806,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/3784-composite-preallocation-staging",
+    "target_sha": "968965041e07ce0d2e63b0e49ed01d5f18f0901e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44675821806",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "c613933a286457fd01d39732e1cec9170ea6753c71939ecc45b348053e9c0591"
+  },
+  "record": "runs/2026-11-20/44675821806-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "181849bfc36b2fad728cbab8584928e8ea76f8a72974a96ff2a8607349fb2d19"
+}
