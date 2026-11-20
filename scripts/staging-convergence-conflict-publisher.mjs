@@ -158,6 +158,47 @@ async function main(){
       /-b$/);
     assert.throws(()=>verifyUpstream({}, {}, {branch:'staging',main:'a'.repeat(40),
       lane:'b'.repeat(40),mode:'source-repair',repairIssue:123}),/untrusted/);
+
+    // Real Git contract: reconstruct both model-proof candidate types from the
+    // original binary-capable patch in a SEPARATE trusted index, not from JSON.
+    const oldCwd=process.cwd(),root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-publisher-selftest-'));
+    const proofCli=path.join(oldCwd,'scripts/merge-conflict-resolution-probe.mjs');
+    try{
+      process.chdir(root);
+      git(['init','-q','-b','main']);
+      git(['config','user.name','Nession Fixture']);
+      git(['config','user.email','nession-fixture@example.com']);
+      fs.writeFileSync('conflict.txt','policy=base\n');
+      git(['add','.']);git(['commit','-qm','base']);
+      const base=git(['rev-parse','HEAD']);
+      fs.writeFileSync('conflict.txt','policy=source\n');
+      git(['commit','-qam','source']);
+      const source=git(['rev-parse','HEAD']);
+      git(['checkout','-q','-b','lane',base]);
+      fs.writeFileSync('conflict.txt','policy=target\n');
+      git(['commit','-qam','lane']);
+      const lane=git(['rev-parse','HEAD']);
+      for(const mode of ['source-repair','direct-integration']){
+        const dir=path.join(root,mode);
+        fs.mkdirSync(dir);
+        const worktree=path.join(dir,'worktree'),ctx=path.join(dir,'context.json');
+        command('node',[proofCli,'prepare',root,lane,source,worktree,ctx]);
+        fs.writeFileSync(path.join(worktree,'conflict.txt'),mode==='source-repair'
+          ?'policy=source\n':'policy=target\npolicy=source\n');
+        command('node',[proofCli,'finalize',root,ctx,mode,path.join(dir,'candidate')]);
+        const proved=candidateInput(path.join(dir,'candidate'),mode,source,lane);
+        assert.deepEqual(proved.parents,mode==='source-repair'?[lane]:[lane,source]);
+        assert.deepEqual(proved.paths,['conflict.txt']);
+        assert.match(proved.tree,SHA);
+        const candidatePath=path.join(dir,'candidate','candidate.json');
+        const original=fs.readFileSync(candidatePath,'utf8');
+        const damaged=JSON.parse(original);damaged.candidate_tree='0'.repeat(40);
+        fs.writeFileSync(candidatePath,JSON.stringify(damaged));
+        assert.throws(()=>candidateInput(path.join(dir,'candidate'),mode,source,lane),
+          /did not reproduce candidate tree/);
+        fs.writeFileSync(candidatePath,original);
+      }
+    }finally{process.chdir(oldCwd);fs.rmSync(root,{recursive:true,force:true})}
     console.log('trusted conflict Publisher: identity, path policy and refusal fixtures PASS');
     return;
   }
