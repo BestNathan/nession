@@ -17,7 +17,7 @@ function recipe(root,tool,version) {
 function catalog(root) {
   const result=[];
   for (const tool of readdirSync(root,{withFileTypes:true}).filter(x=>x.isDirectory())) {
-    if (tool.name==='.github') continue;
+    if (tool.name==='.github' || tool.name==='.git') continue;
     if (!valid(tool.name)) throw Error('invalid tool directory');
     for (const version of readdirSync(join(root,tool.name),{withFileTypes:true}).filter(x=>x.isDirectory())) {
       if (!valid(version.name)) throw Error('invalid version directory');
