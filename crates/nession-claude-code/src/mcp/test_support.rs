@@ -215,20 +215,40 @@ async fn read_headers(
     }
 }
 
+/// Install fake executables without the test process holding a writable
+/// descriptor to the inode that parallel tests may execute (#4178).
+/// Forking while the executable is write-open can otherwise cause ETXTBSY.
+pub fn install_executable_fixture(path: &std::path::Path, body: &str) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let source = path.with_extension("source");
+        std::fs::write(&source, body).unwrap();
+        let copy = std::process::Command::new("cp")
+            .arg(&source)
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            copy.status.success(),
+            "cannot install fake executable: {}",
+            String::from_utf8_lossy(&copy.stderr)
+        );
+        std::fs::remove_file(&source).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    #[cfg(not(unix))]
+    std::fs::write(path, body).unwrap();
+}
+
 /// A tiny stdio MCP fixture: answers initialize and one tools/list, then waits
 /// to be killed by the probe.
 pub fn stdio_fixture(directory: &std::path::Path) -> std::path::PathBuf {
     let path = directory.join("fake-mcp-stdio.sh");
-    std::fs::write(
+    install_executable_fixture(
         &path,
         "#!/bin/sh\nread _line\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"tools\":{}}}}'\nread _line\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"echo\"}]}}'\nsleep 30\n",
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    );
     path
 }
 
@@ -236,16 +256,10 @@ pub fn stdio_fixture(directory: &std::path::Path) -> std::path::PathBuf {
 /// and refuses nothing, because the preflight under test never writes.
 pub fn claude_fixture(directory: &std::path::Path) -> std::path::PathBuf {
     let path = directory.join("claude");
-    std::fs::write(
+    install_executable_fixture(
         &path,
         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2.1.325 (Claude Code)'; exit 0; fi\nexit 0\n",
-    )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
-    }
+    );
     path
 }
 
