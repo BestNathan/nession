@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f7a5bbf257e5a3c068ace5aec3b1a26a71bb9743cebb493720c35a05245abf81",
+  "run_id": 44785298936,
+  "run_attempt": 1,
+  "issue": 4090,
+  "criterion": "SC-01",
+  "criterion_text": "With an approved external OCI Registry and scoped credentials, Server imports and persists an immutable Image to its CAS/Catalog, serves it via its standard /v2/ Registry endpoint, and rejects denied imports before secrets or writes are exposed.",
+  "stage": "staging",
+  "target_sha": "88cbc9932023b8e3a26dd0a3304313b1f67f5b7e",
+  "contract_sha256": "a1fb3093079914e3b8529877023353e867697ad109d79855d1f4a0607cea6b89",
+  "case_revision": "88cbc9932023b8e3a26dd0a3304313b1f67f5b7e",
+  "case_tree_sha": "7f282eac1352819feb0083a62691db63264189be",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T17:42:03.606Z",
+  "finished_at": "2026-11-20T17:43:05.868Z",
+  "duration_ms": 62261,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-01: Server imports an approved external OCI image into its CAS/Catalog, serves it via /v2/, fails closed on identity and repository scope, and denies unapproved imports before secrets or writes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 88cbc9932023b8e3a26dd0a3304313b1f67f5b7e: #4090 SC-01 measured: no-auth mode serves manifest v1 without a credential; proprietary route /images/blobs/sha256:ae56bcb4d36e6b5dc38da2686d94e31356ae48e33f6b81f9004bb4a5aa34e3e2 and /v2/ blob serve the same CAS digest sha256:ae56bcb4d36e6b5dc38da2686d94e31356ae48e33f6b81f9004bb4a5aa34e3e2 during the compatibility window"
+        }
+      ],
+      "duration_ms": 56366,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44785298936,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "88cbc9932023b8e3a26dd0a3304313b1f67f5b7e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44785298936",
+    "record_path": "runs/2026-11-20/44785298936-1/4090/SC-01.json",
+    "source_result_sha256": "9f4ef9fccd9600499abd4b74a7d198f520329cd63b7af8882a7df11b89052ad7"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44785298936-1",
+    "sha256": "9f4ef9fccd9600499abd4b74a7d198f520329cd63b7af8882a7df11b89052ad7",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44785298936",
+    "durability": "time-limited; object archival not configured"
+  }
+}

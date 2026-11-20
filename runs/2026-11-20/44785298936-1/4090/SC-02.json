@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4534e4d746ff30bebf456fc9beb656e395e5771a93ca209d0fe2f2cc09e19d7f",
+  "run_id": 44785298936,
+  "run_attempt": 1,
+  "issue": 4090,
+  "criterion": "SC-02",
+  "criterion_text": "With a Server-hosted OCI Registry, a Session-authorized Agent obtains the correct immutable Image through the unified SDK and locally caches/consumes it without using proprietary download URLs; an unauthorized agent/repository is denied and existing Session pins survive tag moves.",
+  "stage": "staging",
+  "target_sha": "88cbc9932023b8e3a26dd0a3304313b1f67f5b7e",
+  "contract_sha256": "a1fb3093079914e3b8529877023353e867697ad109d79855d1f4a0607cea6b89",
+  "case_revision": "88cbc9932023b8e3a26dd0a3304313b1f67f5b7e",
+  "case_tree_sha": "833fd1eccd7df7deca8bcc2368b2e363b3275911",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T17:43:05.869Z",
+  "finished_at": "2026-11-20T17:43:19.941Z",
+  "duration_ms": 14072,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-02: a Session-authorized Agent fetches the immutable Image via Server /v2/ through the unified SDK/cache (no proprietary URL), caches/consumes it, denies an unauthorized repository, and its Session pin survives a tag move",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 88cbc9932023b8e3a26dd0a3304313b1f67f5b7e: #4090 SC-02 measured: Agent fetch_manifest_image_v2 against loopback Server http://127.0.0.1:43783 resolved manifest/config/layer digests equal originals (sha256:447ce684e0e5c99d51f540a0a2c512020dbed169da3fc4275a0d95a7e354b3d0) via /v2/team/app routes only (no /images/blobs URL); foreign repository other/app denied; pinned layer sha256:2832263b7086d2d7a29ce46c564dab8396ab50dee4a1592f3c7caf0e7781abbb survives Server tag v1 move to sha256:920888ed9dcb54cf0a84ff52c48f2af47dad42c0e74bc89dfa068e7a48e3f911 and stays byte-identical"
+        }
+      ],
+      "duration_ms": 8220,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44785298936,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "88cbc9932023b8e3a26dd0a3304313b1f67f5b7e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44785298936",
+    "record_path": "runs/2026-11-20/44785298936-1/4090/SC-02.json",
+    "source_result_sha256": "3d29f2f1c6943ce5d7b815459e98c4779760ebecf9dd78f066371f780c2bb9ac"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44785298936-1",
+    "sha256": "3d29f2f1c6943ce5d7b815459e98c4779760ebecf9dd78f066371f780c2bb9ac",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44785298936",
+    "durability": "time-limited; object archival not configured"
+  }
+}
