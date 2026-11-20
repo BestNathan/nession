@@ -58,7 +58,8 @@ const TRUSTED_TELEMETRY_SOURCES = new Map([
   }],
   ['.github/workflows/agent-staging-convergence-review.yml', {
     workflow_id: 'agent-staging-convergence-review',
-    events: new Set(['workflow_dispatch']),
+    events: new Set(['workflow_dispatch', 'push']),
+    allowed_push_branches: new Set(['main']),
     workflow_dispatch_main_only: true,
   }],
   ['.github/workflows/agent-provider-smoke.yml', {
