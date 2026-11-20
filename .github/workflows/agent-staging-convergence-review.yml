@@ -1,5 +1,5 @@
 name: Agent / Staging Convergence Review
-run-name: Convergence conflict ${{ inputs.branch }} ${{ inputs.main_sha }} ${{ inputs.lane_sha }}
+run-name: ${{ github.event_name == 'push' && 'Agent / Staging Convergence Review' || format('Convergence conflict {0} {1} {2}', inputs.branch, inputs.main_sha, inputs.lane_sha) }}
 
 # #2926: model-backed but read-only, exact-ref conflict analysis. The scheduler
 # may dispatch this without giving the model any GitHub writer/merge authority.
@@ -191,6 +191,10 @@ jobs:
         shell: bash
         env:
           MODE: ${{ matrix.mode }}
+          GIT_AUTHOR_NAME: Nession Conflict Probe
+          GIT_AUTHOR_EMAIL: nession-conflict-probe@users.noreply.github.com
+          GIT_COMMITTER_NAME: Nession Conflict Probe
+          GIT_COMMITTER_EMAIL: nession-conflict-probe@users.noreply.github.com
           TARGET_SHA: 21d53b583fcefa03cdfbd1873bf3c8af424a0391
           SOURCE_SHA: ab5b7e4a99402523354e97c04c726b2ec33e5a19
         run: |
