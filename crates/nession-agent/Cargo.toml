@@ -76,6 +76,9 @@ tokio = { workspace = true, features = ["full", "test-util"] }
 # The integration harness implements the async SessionCreatedHook seam (#4073).
 async-trait.workspace = true
 nession-server = { path = "../nession-server" }
+# #4091: the two-Agent + Server peer-fetch fixture seeds the Server's authoritative
+# Catalog over an in-memory SQLite connection (test-only; no production dependency).
+sea-orm.workspace = true
 # The fixture Extension Tool in the MCP composition test derives its typed
 # schemas the same way a real provider does (#3778).
 schemars.workspace = true

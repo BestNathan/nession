@@ -27,6 +27,7 @@ use crate::digest::{is_valid_digest, regular_file_digest, DIGEST_PREFIX};
 pub use crate::distribution::http::DownloadGrant;
 use crate::distribution::transfer::{ProgressObserver, TransferEngine, TransferSpec};
 
+pub mod discovery;
 pub mod eviction;
 pub mod fetch;
 pub mod repository;
