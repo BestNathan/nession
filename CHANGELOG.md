@@ -864,3 +864,10 @@
 - Categories: architecture, protocol, security, agent, server, web
 - Reason: Record #4066 effective-exposure validation, the WebSocket browser-Origin allowance and constant-time Server Token verification from merged staging 8e6a9e882
 - Source: https://github.com/BestNathan/nession/issues/4066
+
+## 2026-11-20T18:24:46Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox, registry
+- Reason: Record #4086 peer-capable OCI Distribution Registry topology (shared CAS contracts #4087, mountable /v2/ service #4088, host-independent Client SDK #4089, host adapters #4090, bounded peer discovery and same-digest fallback #4091); reconcile the superseded Server-authoritative-only distribution and P2P-distribution non-goal claims
+- Source: https://github.com/BestNathan/nession/issues/4086

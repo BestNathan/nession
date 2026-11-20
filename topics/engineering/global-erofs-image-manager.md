@@ -1,12 +1,12 @@
 ---
 title: "Global EROFS Image Manager"
-description: "Server-owned immutable EROFS artifacts with complete paged inventory, Project-or-Session scoped access, a durable Agent cache and a directory-backed asynchronous build lifecycle: deterministic public-GitHub/local builds, stage observation, cancel/retry, restart recovery, content-addressed bytes, mutable aliases, reference-safe GC, Workspace Images discovery, and Sandbox image composition"
+description: "Server-owned immutable EROFS artifacts with complete paged inventory, Project-or-Session scoped access, a durable Agent cache and a directory-backed asynchronous build lifecycle: deterministic public-GitHub/local builds, stage observation, cancel/retry, restart recovery, content-addressed bytes, mutable aliases, reference-safe GC, Workspace Images discovery, and Sandbox image composition; plus the #4086 peer-capable OCI Registry topology (shared CAS contracts, mountable read-only/push Registry service, host-independent Client SDK, bounded authorized peer discovery with same-digest fallback)"
 topic: engineering
-categories: ["architecture", "erofs", "images", "server", "storage", "security", "agent", "workspace", "sandbox"]
+categories: ["architecture", "erofs", "images", "server", "storage", "security", "agent", "workspace", "sandbox", "registry"]
 status: verified
 created_at: 2026-11-09T12:54:48Z
-updated_at: 2026-11-16T16:56:10Z
-sources: ["https://github.com/BestNathan/nession/issues/3022","https://github.com/BestNathan/nession/pull/3120","https://github.com/BestNathan/nession/issues/3023","https://github.com/BestNathan/nession/pull/3125","https://github.com/BestNathan/nession/issues/3181","https://github.com/BestNathan/nession/pull/3309","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/erofs-image-manager.md","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/sandbox-policy-and-execution.md","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/build.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/cache.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/image/mod.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/image/v1.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/sandbox/v1.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/db/migration/m009_image_access_grants_consumers.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-agent/src/sandbox_images.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/web/src/capabilities/images/ImagesPlugin.ts","https://github.com/BestNathan/nession/issues/3334","https://github.com/BestNathan/nession/pull/3354","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/docs/architecture/erofs-image-manager.md","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/builds.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/mod.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-erofs/src/build.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-protocol/src/contracts/image/v1.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/web/src/capabilities/images/ImagesPlugin.ts","https://github.com/BestNathan/nession/issues/3449","https://github.com/BestNathan/nession/pull/3450","https://github.com/BestNathan/nession/blob/46d7a906730f9fc048e4bbf43d5e5fd3b23183fe/crates/nession-erofs/src/mount_manager.rs","https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/erofs-image-manager.md","https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/crates/nession-server/src/image/mod.rs","https://github.com/BestNathan/nession/pull/3493","https://github.com/BestNathan/nession/issues/3693","https://github.com/BestNathan/nession/issues/3695","https://github.com/BestNathan/nession/issues/3696","https://github.com/BestNathan/nession/issues/3697","https://github.com/BestNathan/nession/issues/3698","https://github.com/BestNathan/nession/pull/3725","https://github.com/BestNathan/nession/pull/3703","https://github.com/BestNathan/nession/pull/3709","https://github.com/BestNathan/nession/pull/3736","https://github.com/BestNathan/nession/pull/3741","https://github.com/BestNathan/nession/pull/3754","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-erofs/src/build/compose.rs","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-erofs/src/build/referenced.rs","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-sandbox/src/mount/mod.rs","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-sandbox/src/mount/plan.rs"]
+updated_at: 2026-11-20T18:24:46Z
+sources: ["https://github.com/BestNathan/nession/issues/3022","https://github.com/BestNathan/nession/pull/3120","https://github.com/BestNathan/nession/issues/3023","https://github.com/BestNathan/nession/pull/3125","https://github.com/BestNathan/nession/issues/3181","https://github.com/BestNathan/nession/pull/3309","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/erofs-image-manager.md","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/docs/architecture/sandbox-policy-and-execution.md","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/build.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-erofs/src/cache.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/image/mod.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/image/v1.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-protocol/src/contracts/sandbox/v1.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-server/src/db/migration/m009_image_access_grants_consumers.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/crates/nession-agent/src/sandbox_images.rs","https://github.com/BestNathan/nession/blob/21f74c944f97ad472b4f5d1d515f4b673a632b1e/web/src/capabilities/images/ImagesPlugin.ts","https://github.com/BestNathan/nession/issues/3334","https://github.com/BestNathan/nession/pull/3354","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/docs/architecture/erofs-image-manager.md","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/builds.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-server/src/image/mod.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-erofs/src/build.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/crates/nession-protocol/src/contracts/image/v1.rs","https://github.com/BestNathan/nession/blob/5e5ae99d1a6270239779894859056e21c954bf79/web/src/capabilities/images/ImagesPlugin.ts","https://github.com/BestNathan/nession/issues/3449","https://github.com/BestNathan/nession/pull/3450","https://github.com/BestNathan/nession/blob/46d7a906730f9fc048e4bbf43d5e5fd3b23183fe/crates/nession-erofs/src/mount_manager.rs","https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/erofs-image-manager.md","https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/crates/nession-server/src/image/mod.rs","https://github.com/BestNathan/nession/pull/3493","https://github.com/BestNathan/nession/issues/3693","https://github.com/BestNathan/nession/issues/3695","https://github.com/BestNathan/nession/issues/3696","https://github.com/BestNathan/nession/issues/3697","https://github.com/BestNathan/nession/issues/3698","https://github.com/BestNathan/nession/pull/3725","https://github.com/BestNathan/nession/pull/3703","https://github.com/BestNathan/nession/pull/3709","https://github.com/BestNathan/nession/pull/3736","https://github.com/BestNathan/nession/pull/3741","https://github.com/BestNathan/nession/pull/3754","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-erofs/src/build/compose.rs","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-erofs/src/build/referenced.rs","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-sandbox/src/mount/mod.rs","https://github.com/BestNathan/nession/blob/5e9e853ab8b52f836a4af0b4fcacb2a213a9d76e/crates/nession-sandbox/src/mount/plan.rs","https://github.com/BestNathan/nession/issues/4086","https://github.com/BestNathan/nession/pull/4171","https://github.com/BestNathan/nession/blob/c9190d4f15ab8b17470a8425fe7372fa238a8e98/docs/architecture/oci-erofs-image-infrastructure.md","https://github.com/BestNathan/nession/issues/4087","https://github.com/BestNathan/nession/issues/4088","https://github.com/BestNathan/nession/issues/4089","https://github.com/BestNathan/nession/issues/4090","https://github.com/BestNathan/nession/issues/4091"]
 ---
 
 
@@ -34,6 +34,16 @@ independent selection flows, and an existing Session can Enter a Sandbox Pane
 whose root is composed from Server-authorized images. The Server remains the
 only owner of metadata and bytes; the Agent only fetches paths the Server
 resolved for it, authenticating with the Server Token (#3440).
+
+[#4086](https://github.com/BestNathan/nession/issues/4086) extends this topology
+without reopening those accepted deliveries: the Server keeps catalog,
+authorization and official-source policy, but is **no longer a mandatory image
+data hop**. Every Server/Agent may own a local verified CAS, mount the same
+standard OCI Distribution Registry service and use the same Client SDK to fetch
+verified bytes from an authorized Server, peer Agent or external Registry. See
+[Peer-capable Store and Registry topology](#peer-capable-store-and-registry-topology-4086)
+below; the historical Server-authoritative path remains valid and is now one
+authorized source among several.
 
 ## Ownership
 
@@ -320,8 +330,12 @@ observed Running at that image.
   enforcement is claimed. Managed EROFS creation stays with #3062; managed
   location/mount with #3024. #3181 adds Workspace/Project/Sandbox consumption
   surfaces, not a second registry or blob owner.
-- Private GitHub authentication, OCI/layered snapshotters, cross-digest dedupe,
-  P2P distribution and automatic refresh of live Sessions remain non-goals.
+- Private GitHub authentication, OCI/layered snapshotters, cross-digest dedupe
+  and automatic refresh of live Sessions remain non-goals. Bounded authorized
+  peer Registry distribution is delivered by #4086 (see
+  [Peer-capable Store and Registry topology](#peer-capable-store-and-registry-topology-4086));
+  all-to-all P2P, public peer discovery, automatic cross-tenant sharing and a
+  speculative P2P CDN remain non-goals.
 - Builds require `mkfs.erofs` (erofs-utils) and durable disk for one
   snapshot+image per concurrent build. The accepted packaging set is
   deliberately exact; adding a compressor or block size is a contract change,
@@ -371,3 +385,119 @@ Two meanings of composition coexist; they have **different output resources**:
 **Compatibility and limits:** physical EROFS RO `MountManager` and #3449 digest-keyed consumers/cache pins are unchanged. A referenced composite has a distinct composite physical-view identity and complete pinned Blob closure, never a fake single Blob digest. Legacy single-layer Manifests, legacy `workspace.image` payloads and #3582 durable Workspace paths remain valid; the reader accepts the legacy fields and the writer records both the legacy first-lower fields and the ordered set. Sandbox runtime selection of a referenced Composite remains a non-goal and fails closed. Docs and this article are not kernel proof; the native receipts are the merged staging Cases above.
 
 **Related:** [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md). Canonical contracts in the docs PR [#3754](https://github.com/BestNathan/nession/pull/3754): [OCI/EROFS image infrastructure](https://github.com/BestNathan/nession/pull/3754/files) (this decision and the delivery DAG) and [Sandbox policy and execution isolation](https://github.com/BestNathan/nession/pull/3754/files).
+
+## Peer-capable Store and Registry topology (#4086)
+
+**Decision:** [#4086](https://github.com/BestNathan/nession/issues/4086) (canonical
+architecture PR [#4171](https://github.com/BestNathan/nession/pull/4171), merged to
+main at `26e7cc87687f812eb1b037cc5fc9224304433bb9`). The topology changes from
+Server-authoritative transfer to **reusable Registry nodes over a shared CAS
+contract**. Every Nession Server/Agent may independently (a) own a local verified
+CAS, (b) mount the same standard OCI Distribution `/v2/` Registry service, and
+(c) use the same OCI Registry Client SDK to pull/push as authorized. The Server is
+not a mandatory image data hop. This is new scope layered on the accepted
+#3494–#3500 delivery, not a regression reopening it. The single canonical owner is
+[OCI/EROFS image infrastructure](https://github.com/BestNathan/nession/blob/c9190d4f15ab8b17470a8425fe7372fa238a8e98/docs/architecture/oci-erofs-image-infrastructure.md).
+
+**Shared Store contracts (#4087).** Three reusable contracts in `nession-erofs`,
+consumed by both hosts: `BlobStore` (content/sha256-addressed bytes; atomic
+private-temp publication, identical-digest dedupe without rewriting bytes,
+re-verification of preexisting objects; reuses `blob::store`, no parallel CAS);
+`RepositoryStore` (accessible Manifests/Tags and the **complete reachable blob
+closure** of a repository — Server over the SQLite catalog, Agent as a projection
+of verified local references); and `RegistryAuthorizer` (gates pull/push/list per
+principal, repository and scope; injected by the host, never a bypassing global
+token). A local Store is either authoritative/persistent (Server CAS + catalog) or
+a re-fetchable Cache (Agent verified cache) — a Cache is a Store plus
+fetch/retention policy, not a second incompatible byte-store protocol. Removal is
+deliberately absent from `BlobStore`: retention is the owning host's policy, so a
+shared Registry reader can never reclaim another owner's pinned or transferring
+bytes. **Possessing a digest is never authorization**; a raw CAS directory must
+never be published as a globally accessible Registry, and a cache miss is distinct
+from an authorized-but-nonexistent object (distinct OCI error semantics).
+
+**Mountable Registry service (#4088).** A reusable Axum/Tower-mounted OCI
+Distribution `/v2/` service in `nession-erofs::registry::service` (feature
+`registry-service`), independent of host identity, mounted on the host's existing
+HTTP ingress — no extra accept loop and no second authorization state machine. It
+is supplied the host's `BlobStore`/`RepositoryStore`/`RegistryAuthorizer` plus a
+`RepositoryPublisher` for write mode (`RegistryMode::ReadOnly`/`ReadWrite`). Pull
+surface: `GET /v2/`, `GET/HEAD …/manifests/{ref}`, `GET/HEAD …/blobs/{digest}`,
+`GET …/tags/list` with digest, media-type/Accept negotiation, Range/ETag,
+repository scope and OCI error semantics. Push (only behind explicit push policy):
+the standard `POST/PATCH/PUT …/blobs/uploads/` sequence and `PUT …/manifests/{ref}`;
+uploads stage privately with digest/size validation and Catalog publication is
+atomic only after the complete verified referenced closure exists. Exposure follows
+the #4087 **tag-rooted reachability fence**: a Manifest pushed by Tag is readable by
+Tag and digest, and moving a Tag moves the exposed root atomically. Agent mode is
+**read-only by explicit opt-in**: all mutation verbs are denied even with a read
+credential, scoped to verified complete artifacts and authenticated peers.
+
+**Registry Client SDK (#4089).** The #3498 client becomes a host-independent SDK in
+`nession-erofs::registry`: `ImageReference` (registry, repository, tag or digest),
+canonical tag→digest resolution, Index→platform-specific Manifest selection,
+Config/Blob closure download, and immutable digest pinning **before** any
+alternate-source fetch. Network fetch, verification, CAS ingest and optional local
+Catalog tag publication are separate steps; the caller supplies the local CAS/Cache,
+a scoped credential provider, progress/cancellation and source policy. Existing
+auth/challenge, bounded redirect/SSRF defenses and resumable single-flight transfer
+are reused; a Registry without resume triggers a safe restart, never a partial Ready
+object. Credentials are never serialized into Session grants or Image Config and
+never leak to redirects or logs; a tag name does not imply the same digest across
+registries.
+
+**Host adapters (#4090) and peer discovery (#4091).** `nession-server` mounts the
+read-write Server Registry on its existing ingress and imports authorized external
+(GHCR) images into its own Store; `nession-agent` mounts an optional opt-in
+read-only Registry adapter and selects peer sources, reusing Agent P2P identity and
+transport. Peer discovery advertises or resolves only verified pinned
+Manifest/complete-closure availability and authorized endpoints from a **bounded
+explicit candidate list**. A requester resolves and authorizes the immutable digest
+first, then selects a reachable authorized source and re-verifies exact digest+size
+regardless of source; on failure it falls back only to another authorized source for
+the **same pinned digest**, never consuming partial bytes. Control-plane grants carry
+pinned immutable identity and allowed sources — not raw registry secrets; there is no
+global Server bearer credential shared across peers.
+
+**Authority and format boundaries.** The Server keeps Project/Session/tenant
+authorization, official catalog policy, endpoint advertising and grant issuance.
+`nession-erofs` does not depend on `nession-server`, `nession-agent`,
+`nession-sandbox` or `nession-protocol`; the reverse edge is forbidden and checked by
+`cargo tree -p nession-erofs --edges normal`. OCI Distribution interoperability does
+**not** imply Docker can execute `application/vnd.erofs` layers; a referenced
+Composite's nested closure needs an explicit portable representation before portable
+registry support is claimed. Original OCI bytes are preserved end to end;
+Index/Manifest identity stays digest-pinned, tags are mutable names scoped to one
+repository, and there is no global tag consistency across registries.
+
+**Bounded non-goals.** The `/v2/` service is a reusable distribution surface, not a
+Docker/OCI runtime, a blob replication scheduler or an unrestricted CAS view; no
+host-specific Session/Project decisions inside the crate; no mandatory publishing,
+all-to-all P2P, public peer discovery, automatic cross-tenant sharing, automatic GHCR
+credential forwarding, speculative P2P CDN or mandatory availability inventory
+database.
+
+**Delivery DAG and evidence.** Dependencies **(1) → (2, 3) → (4) → (5)**: #4087
+(shared contracts) → #4088 (Registry service) + #4089 (Client SDK) → #4090 (host
+adapters) → #4091 (peer discovery/fallback). The prior #3498 client and #3496 catalog
+are reused, not duplicated; #4084 remains the GHCR EROFS publish/readback smoke owner.
+
+| Child | Deliverable | Delivery evidence |
+|---|---|---|
+| #4087 | Shared `BlobStore`/`RepositoryStore` contracts + host adapters | PR [#4177](https://github.com/BestNathan/nession/pull/4177) → staging `4b59fcbde175094fd5fcfe7f2fa4cdce14385fa7` |
+| #4088 | Mountable `/v2/` Registry service | merged-staging Cases SC-01/02/03 Pass (Case run `44755679055`, ingest `44756439239`) |
+| #4089 | Host-independent Registry Client SDK | PR [#4200](https://github.com/BestNathan/nession/pull/4200) → staging `03d7251d4b2c11f90ec392764aeecf74d52c1b6c` |
+| #4090 | Server/Agent host adapters, GHCR import, direct pulls | PR [#4215](https://github.com/BestNathan/nession/pull/4215) → staging `88cbc9932023b8e3a26dd0a3304313b1f67f5b7e`; merged-staging Case run `44785298936` |
+| #4091 | Peer source discovery, scoped A2A pull, same-digest fallback | PR [#4218](https://github.com/BestNathan/nession/pull/4218) → staging `a19633cf1fd50456b88e9d969446b19c1712ad8e`; merged-staging Cases SC-01/02/03 Pass (Case run `44792675605`, ingest `44793352488`) |
+
+The architecture and dependency/Issue map were accepted by document/link review at
+the exact PR SHA (agent run `44730903223`, ref `1558e1eb54984cd6c0996d4312f2bdf951709511`);
+the crate boundary is proven by the cargo commands above plus focused compile/contract
+checks. Child runtime criteria are proven by their own exact-SHA Rust tests and
+trusted merged-staging Cases, not by this article.
+
+**Related:** [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md)
+(verified local immutable objects + mount leases), [Endpoint-owned Server and Agent
+tokens](endpoint-owned-server-and-agent-tokens.md) (host identity/authorization) and
+[Project declaration and Workspace location ownership](project-declaration-and-workspace-location-ownership.md)
+(a Project never owns blob bytes).
