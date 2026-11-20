@@ -2,7 +2,8 @@
 // #2010 main-owned trusted dispatch authority, key separation and fail-closed tests.
 import assert from 'node:assert/strict';
 import {REVIEWER_PREMODEL_FAILURE_3784_C,
-  REVIEWER_PREMODEL_FAILURE_4065} from './outbox.mjs';
+  REVIEWER_PREMODEL_FAILURE_4065,
+  REVIEWER_TOOL_FAILURE_4065} from './outbox.mjs';
 import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed,CONTROLLED_DISPATCH_COMMENT,CONTROLLED_RECOVERY_COMMENT,CONTROLLED_NATIVE_RECOVERY_COMMENT,CONTROLLED_REVIEW_RECOVERY_COMMENT,CONTROLLED_REPAIR_BIND_COMMENT,
   CONTROLLED_REPAIR_DISPATCH_COMMENT,CONTROLLED_REPAIR_FAILURE_COMMENT,
   CONTROLLED_REPAIR_RETRY_COMMENT,QWEN_V2_DISPATCH_RE,REVIEW_DISPATCH_RE,
@@ -10,6 +11,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   REVIEWER_PREMODEL_RECOVERY_COMMENT,
   REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT,
   REVIEWER_PREMODEL_4065_RECOVERY_COMMENT,REVIEWER_JSON_RECOVERY_COMMENT,
+  REVIEWER_TOOL_4065_RECOVERY_COMMENT,
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
   QWEN_TOOL_RECOVERY_COMMENT,
@@ -448,7 +450,34 @@ for(const [p,r] of [
   [pr4065,{...ref4065,object:{sha:'f'.repeat(40)}}],
   [{...pr4065,base:{...pr4065.base,ref:'staging'}},ref4065],
 ])assert.throws(()=>assertReviewerRecoveryPrLease(reviewer4065,p,r),
-  /immutable #4065 Store v9/);
+  /immutable #4065 Store source/);
+
+// #4211: actual second Review was refused by a native forbidden tool-use.
+// The owner-only command and current PR lease cannot select any other source.
+const tool4065=REVIEWER_TOOL_FAILURE_4065;
+const recoveryTools4065={...recovery4065,actionId:tool4065.action_id,
+  event:{...recovery4065.event,comment:{...recovery4065.event.comment,
+    body:REVIEWER_TOOL_4065_RECOVERY_COMMENT}}};
+assert.equal(assertDispatchAuthority(recoveryTools4065).action_id,tool4065.action_id);
+for(const bad of [
+  {issue:4066},{actionId:'e'.repeat(64)},
+  {event:{...recoveryTools4065.event,action:'edited'}},
+  {event:{...recoveryTools4065.event,issue:{number:4065,state:'closed'}}},
+  {event:{...recoveryTools4065.event,comment:{...recoveryTools4065.event.comment,
+    body:REVIEWER_TOOL_4065_RECOVERY_COMMENT+' '}}},
+  {event:{...recoveryTools4065.event,comment:{...recoveryTools4065.event.comment,
+    user:{login:'attacker'}}}},
+])assert.throws(()=>assertDispatchAuthority({...recoveryTools4065,...bad}),
+  /authenticated owner\/main/);
+const toolPr={...pr4065,head:{...pr4065.head,sha:tool4065.source_sha}};
+const toolRef={...ref4065,object:{sha:tool4065.source_sha}};
+assert.equal(assertReviewerRecoveryPrLease(tool4065,toolPr,toolRef),true);
+for(const [p,r] of [
+  [{...toolPr,number:4192},toolRef],
+  [{...toolPr,head:{...toolPr.head,sha:reviewer4065.source_sha}},toolRef],
+  [toolPr,{...toolRef,object:{sha:'f'.repeat(40)}}],
+])assert.throws(()=>assertReviewerRecoveryPrLease(tool4065,p,r),
+  /immutable #4065 Store source/);
 
 const jsonAction='8a7bbc2f61ec3bd9b64d7a25281ad5b586e61401b971c02450c3c3ff8ad7faa7';
 const jsonRecovery={...ownerReview,actionId:jsonAction,
@@ -632,6 +661,7 @@ other.fill(0);
 // #4174: the same canonical Controller Gate must execute genuine failed
 // source Run/Artifact negative fixtures and unique Store CAS/replay proof.
 await import('./qwen-tracked-source-failure-selftest.mjs');
+await import('./reviewer-tool-failure-4065-selftest.mjs');
 console.log('Controller dispatch: trusted run binding, fork/retry/role denial, HMAC domain separation passed');
 
 // New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
