@@ -5,6 +5,7 @@ root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 tmp="$(mktemp -d)"
 trap 'rm -rf -- "$tmp"' EXIT
 bash "$root/catalog-selftest.sh"
+bash "$root/cargo-v2.sh" test
 node "$root/catalog-plan.mjs" self-test
 mkdir -p "$tmp/catalog/demo/1.0"
 cat > "$tmp/catalog/demo/1.0/build.sh" <<'SCRIPT'
