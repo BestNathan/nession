@@ -27,7 +27,7 @@ use super::{
     DEFAULT_MAX_JSON_BYTES, DEFAULT_MAX_REDIRECTS, DEFAULT_MAX_TOKEN_BYTES,
     DEFAULT_REQUEST_TIMEOUT, DISTRIBUTION_PREFIX, MANIFEST_ACCEPT, OCTET_STREAM,
 };
-use crate::blob::store::FsBlobStore;
+use crate::contracts::BlobStore;
 use crate::digest::{digest_of_bytes, file_digest};
 use crate::oci::{
     parse_index, parse_manifest, validate_index, validate_manifest, Descriptor, RawDocument,
@@ -264,15 +264,20 @@ impl RegistryClient {
         Ok(RawDocument::from_bytes(bytes))
     }
 
-    /// Download one EROFS layer into the CAS.
+    /// Download one EROFS layer into a caller-provided CAS (#4089).
     ///
-    /// Bytes are written to the store's private `.tmp` directory, verified
-    /// against the descriptor's digest and size, and only then renamed into the
-    /// content-addressed store. An interrupted or mismatched transfer leaves no
+    /// Host-independent: any [`BlobStore`] adapter (Server filesystem CAS or
+    /// Agent cache) may receive the bytes. A warm cache that already holds the
+    /// verified digest is left untouched — no second network copy. Otherwise the
+    /// bytes stream to a private temp file, are verified against the descriptor's
+    /// digest and size, and only then published atomically through
+    /// [`BlobStore::put_file`]. The transfer is a full object read with a safe
+    /// restart from zero: a registry that does not support `Range` resume needs
+    /// no special handling, and an interrupted or mismatched transfer leaves no
     /// Ready object.
-    pub async fn download_blob(
+    pub async fn download_blob<B: BlobStore + ?Sized>(
         &self,
-        store: &FsBlobStore,
+        store: &B,
         repository: &str,
         descriptor: &Descriptor,
     ) -> RegistryResult<()> {
@@ -282,6 +287,15 @@ impl RegistryClient {
                 expected: MEDIA_TYPE_EROFS.to_string(),
                 actual: descriptor.media_type.clone(),
             });
+        }
+        // Warm-cache retry: the verified payload is already present, so no extra
+        // network read or physical copy is made.
+        if store.contains(&descriptor.digest)?
+            && store
+                .verify_named_size(&descriptor.digest, descriptor.size)
+                .is_ok()
+        {
+            return Ok(());
         }
         let resource = format!("layer {repository}@{}", descriptor.digest);
         let url = self.endpoint(repository, &format!("blobs/{}", descriptor.digest))?;
@@ -299,12 +313,9 @@ impl RegistryClient {
                 });
             }
         }
-        let temp = store
-            .root()
-            .join(".tmp")
-            .join(format!("registry-{}", uuid::Uuid::new_v4()));
+        let temp = std::env::temp_dir().join(format!("nession-registry-{}", uuid::Uuid::new_v4()));
         let result = stream_to_store(response, store, descriptor, &temp, &resource).await;
-        // `FsBlobStore::put_file` copies through its own private temp file, so the
+        // `put_file` copies through the store's own private temp file, so the
         // verified download source is removed on both success and failure.
         let _ = tokio::fs::remove_file(&temp).await;
         result
@@ -1095,9 +1106,9 @@ fn verify_bytes_against(
     Ok(())
 }
 
-async fn stream_to_store(
+async fn stream_to_store<B: BlobStore + ?Sized>(
     mut response: Response,
-    store: &FsBlobStore,
+    store: &B,
     descriptor: &Descriptor,
     temp: &Path,
     resource: &str,
