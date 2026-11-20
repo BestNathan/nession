@@ -347,6 +347,68 @@ describe('fixture git surface', () => {
   });
 
   /**
+   * #4116: the failure-feedback Case needs the held older page to settle as a
+   * rejection, not an error-shaped answer — the hook's catch path is what the
+   * browser asserts. The retry after a failure is the next older request, which
+   * answers immediately, and `olderSettled` still flips only after a macrotask.
+   */
+  it('rejects the held older page on demand and serves the retry (#4116)', async () => {
+    const globalRecord = globalThis as unknown as { window?: unknown };
+    const hadWindow = 'window' in globalRecord;
+    const previousWindow = globalRecord.window;
+    const fakeWindow: Record<string, unknown> = {};
+    globalRecord.window = fakeWindow;
+    try {
+      const surface = fixtureGitSurface('?capability=git&git=history-overlap');
+      const session = 'devbox-01:fix-terminal-reconnect';
+
+      const first = await surface.request<GitLogResponse>('git.log', { session });
+      expect(first.state).toBe('ok');
+      if (first.state !== 'ok') {
+        return;
+      }
+      const cursor = first.history.next_cursor;
+
+      const held = surface.request<GitLogResponse>('git.log', {
+        session,
+        before: cursor,
+      });
+      const control = fakeWindow.fixtureGitHistoryOverlap as {
+        olderRequests: () => number;
+        olderSettled: () => boolean;
+        releaseOlder: (fail?: boolean) => void;
+      };
+      expect(control.olderRequests()).toBe(1);
+      expect(control.olderSettled()).toBe(false);
+
+      control.releaseOlder(true);
+      await expect(held).rejects.toThrow('the held older page failed');
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(control.olderSettled()).toBe(true);
+
+      // The retry is a fresh older request from the same retained cursor; the
+      // fixture answers it with the page the failed read never delivered.
+      const retry = await surface.request<GitLogResponse>('git.log', {
+        session,
+        before: cursor,
+      });
+      expect(retry.state).toBe('ok');
+      if (retry.state === 'ok') {
+        expect(retry.history.commits).toHaveLength(50);
+        expect(retry.history.commits[0]?.subject).toContain('A older page 1 commit 1');
+        expect(retry.history.end_of_history).toBe(true);
+      }
+      expect(control.olderRequests()).toBe(2);
+    } finally {
+      if (hadWindow) {
+        globalRecord.window = previousWindow;
+      } else {
+        delete globalRecord.window;
+      }
+    }
+  });
+
+  /**
    * #3767: the selection Case must prove which target and OID a detail or
    * commit-sourced diff read was addressed to. The surface records each read,
    * answers a commit only when one of its served pages listed it, and refuses
