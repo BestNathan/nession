@@ -14,6 +14,7 @@ const contentHook = vi.hoisted(() => ({
 vi.mock('@/capabilities/env/hooks/useEnvProfileContent', () => contentHook);
 
 import { EnvProfileEditor } from '@/capabilities/env/components/EnvProfileEditor';
+import { WORKSPACE_BOUNDED_SCROLL_MARKER } from '@/shared/lib/workspaceScrollClearance';
 import type { EditorTarget } from '@/capabilities/env/hooks/useEnvironmentScreen';
 
 function info(name: string, overrides: Partial<EnvFileInfo> = {}): EnvFileInfo {
@@ -101,6 +102,31 @@ describe('EnvProfileEditor — existing', () => {
     await waitFor(() => expect(d.onDirtyChange).toHaveBeenLastCalledWith(true));
     expect(screen.getByTestId('env-editor-save')).toBeEnabled();
     expect(screen.getByTestId('env-editor-review')).toBeInTheDocument();
+  });
+
+  it('puts warnings and Review changes in a bounded owner below the editor (#4188)', async () => {
+    // The editor keeps its own scroll. Warnings and the expanded diff are
+    // sibling feedback, so they get an internal scroll owner that spends the
+    // host inset; otherwise a long warning/diff list is clipped by the bounded
+    // App region with no way to reach the end.
+    contentHook.useEnvProfileContent.mockReturnValue(
+      hookResult({ content: 'A=1\nBROKEN LINE\n' }),
+    );
+    renderEditor();
+    await waitForEditor();
+    await waitFor(() =>
+      expect(document.querySelector('.cm-content')?.textContent).toContain('A=1'),
+    );
+    typeInEditor('B=2\n');
+    await waitFor(() => expect(screen.getByTestId('env-editor-review')).toBeInTheDocument());
+
+    const feedback = screen.getByTestId('env-editor-feedback');
+    expect(feedback.className).toContain(WORKSPACE_BOUNDED_SCROLL_MARKER);
+    expect(feedback.className).toContain('overflow-y-auto');
+    expect(feedback).toContainElement(screen.getByTestId('env-editor-warnings'));
+    expect(feedback).toContainElement(screen.getByTestId('env-editor-review'));
+    // The editor remains a separate, usable scroll owner above it.
+    expect(document.querySelector('.cm-editor')).toBeTruthy();
   });
 
   it('Save hands the write to the parent; success ends the depth there', async () => {

@@ -299,6 +299,8 @@ function mutateFixtureRepository(
  *   /#/fixture/workspace?capability=git&git=diff-states → one file of each diff
  *     state the renderer owns: ordinary, binary, mode-only, empty, truncated,
  *     malformed/raw-fallback, and one longer than the pane
+ *   /#/fixture/workspace?capability=git&git=long-lists → enough branches and
+ *     worktrees to overflow the nested App sections (#4188)
  *   /#/fixture/workspace?capability=git&git=preview-states → untracked,
  *     conflicted, binary, truncated, missing and changed previews
  *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
@@ -419,10 +421,14 @@ export function fixtureGitSurface(search: string): PluginSurface {
         return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
       }
       if (type === 'git.branches') {
-        return Promise.resolve(branchesFor(payload.limit) as T);
+        return Promise.resolve(
+          (scenario === 'long-lists'
+            ? longBranchesFor(payload.limit)
+            : branchesFor(payload.limit)) as T,
+        );
       }
       if (type === 'git.worktrees') {
-        return Promise.resolve(WORKTREES as T);
+        return Promise.resolve((scenario === 'long-lists' ? LONG_WORKTREES : WORKTREES) as T);
       }
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
     },
@@ -1876,6 +1882,91 @@ const WORKTREES: GitWorktreesResponse = {
         prunable: 'gitdir file points to non-existent location',
       },
     ],
+    truncated_bytes: 0,
+    truncated: false,
+  },
+};
+
+/**
+ * The deterministic long ref inventory behind `git=long-lists` (#4188).
+ *
+ * The canonical three-row answers cannot overflow the App bounded section at a
+ * phone width, so the nested Branches/Worktrees Cases had no fixture that could
+ * exercise their end-of-scroll geometry. These rows are ordinary shapes the
+ * agent really reports — current, tracking, detached, locked, bare, prunable —
+ * just enough of them to require scrolling.
+ */
+const LONG_REF_COUNT = 40;
+
+function longBranchesFor(limit: unknown): GitBranchesResponse {
+  const all = Array.from({ length: LONG_REF_COUNT }, (_, index) => {
+    const name = index === 0 ? 'feat/long-list' : `feat/list-${String(index).padStart(2, '0')}`;
+    return {
+      name,
+      current: index === 0,
+      upstream: `origin/${name}`,
+      ahead: index % 3 === 0 ? index : 0,
+      behind: index % 4 === 0 ? 1 : 0,
+      upstream_gone: false,
+    };
+  });
+  // Like the agent, honor the caller's limit and report what was asked.
+  const asked =
+    typeof limit === 'number' && limit > 0 ? Math.floor(limit) : DEFAULT_BRANCH_LIMIT;
+  const branches = all.slice(0, Math.min(asked, all.length));
+  return {
+    state: 'ok',
+    branches: {
+      branches,
+      limit: asked,
+      truncated_bytes: 0,
+      truncated: false,
+    },
+  };
+}
+
+const LONG_WORKTREES: GitWorktreesResponse = {
+  state: 'ok',
+  worktrees: {
+    worktrees: Array.from({ length: LONG_REF_COUNT }, (_, index) => {
+      const path = index === 0 ? FIXTURE_ROOT : `/Users/dev/code/nession-long.wt/${index}`;
+      if (index > 0 && index % 7 === 0) {
+        return {
+          path,
+          branch: undefined,
+          current: false,
+          detached: true,
+          bare: false,
+          locked: index % 14 === 0 ? 'on a removable drive' : '',
+        };
+      }
+      if (index > 0 && index % 11 === 0) {
+        return {
+          path,
+          branch: undefined,
+          current: false,
+          detached: false,
+          bare: true,
+        };
+      }
+      if (index > 0 && index % 13 === 0) {
+        return {
+          path,
+          branch: `chore/gone-${index}`,
+          current: false,
+          detached: false,
+          bare: false,
+          prunable: 'gitdir file points to non-existent location',
+        };
+      }
+      return {
+        path,
+        branch: index === 0 ? 'feat/long-list' : `feat/list-${String(index).padStart(2, '0')}`,
+        current: index === 0,
+        detached: false,
+        bare: false,
+      };
+    }),
     truncated_bytes: 0,
     truncated: false,
   },

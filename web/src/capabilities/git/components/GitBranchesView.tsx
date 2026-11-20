@@ -1,5 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { useGitBranches } from '../hooks/useGitBranches';
 import { describeUnavailable, formatBytes } from '../state';
 import { GitNotice } from './GitNotice';
@@ -74,7 +75,17 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div data-testid="git-branch-list" className="flex flex-col p-1">
+      {/* #4188: the Branches section is a declared `bounded` App surface
+          (GitWorkspace), so this list is the internal scroll owner. It spends
+          the host-measured inset here instead of leaving a long ref listing
+          clipped by the bounded region with no way to reach its end. */}
+      <div
+        data-testid="git-branch-list"
+        className={cn(
+          'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-1',
+          workspaceBoundedScrollClearanceClass,
+        )}
+      >
         {rows.map((branch) => (
           <BranchRow key={branch.name} branch={branch} />
         ))}
