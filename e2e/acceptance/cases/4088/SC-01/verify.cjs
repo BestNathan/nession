@@ -15,7 +15,7 @@ run(({ evidence }) => {
   const sha = targetSha();
   const output = crateTests(
     'nession-erofs',
-    ['--lib', '--features', 'cache,registry', TEST],
+    ['--lib', '--features', 'cache,registry,mount', TEST],
     600000,
   );
   assertRan(output, [TEST]);
