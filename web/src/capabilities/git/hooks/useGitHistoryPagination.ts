@@ -28,6 +28,12 @@ export function useGitHistoryPagination(
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [endOfHistory, setEndOfHistory] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // A bounded, resettable error from the most recent older-page read. Cleared
+  // when the target/generation changes (the list it described is gone) and
+  // when a new read starts (the retry supersedes the previous outcome). A
+  // stale continuation may neither publish its error nor clear the loading
+  // state of the successor that replaced it (#4141, builds on #3751 fencing).
+  const [olderError, setOlderError] = useState<string | null>(null);
 
   const targetKey =
     agentId && sessionId
@@ -49,6 +55,7 @@ export function useGitHistoryPagination(
     requestSequence.current += 1;
     activeTarget.current = targetKey;
     setLoadingMore(false);
+    setOlderError(null);
     // The previous target's answer is not a first page for this one, even if
     // both are still in this render's props.
     const page = !targetChanged && history?.state === 'ok' ? history.history : null;
@@ -65,6 +72,9 @@ export function useGitHistoryPagination(
     const forGeneration = generation.current;
     const forRequest = ++requestSequence.current;
     const cursor = nextCursor;
+    // The retry supersedes the previous outcome: clear any prior error before
+    // the new read starts so a stale error cannot outlive its own request.
+    setOlderError(null);
     setLoadingMore(true);
     try {
       const page = await gitApi.gitLog({
@@ -85,6 +95,19 @@ export function useGitHistoryPagination(
         setNextCursor(page.history.next_cursor ?? null);
         setEndOfHistory(page.history.end_of_history);
       }
+    } catch (err) {
+      // Same fence as the success path: a rejected continuation for a replaced
+      // list may neither publish its error nor disturb the successor's loading
+      // state (#4141 SC-02, building on #3751 fencing).
+      if (
+        generation.current !== forGeneration ||
+        requestSequence.current !== forRequest ||
+        activeTarget.current !== forTarget
+      ) {
+        return;
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      setOlderError(message);
     } finally {
       // Same fence for the terminal state: an answer for a replaced list must
       // not clear the loading flag of the one that replaced it.
@@ -98,5 +121,5 @@ export function useGitHistoryPagination(
     }
   }, [agentId, sessionId, nextCursor, loadingMore]);
 
-  return { commits, nextCursor, endOfHistory, loadingMore, loadOlder };
+  return { commits, nextCursor, endOfHistory, loadingMore, olderError, loadOlder };
 }

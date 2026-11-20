@@ -18,11 +18,8 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
   const { history, loading, error, refresh } = useGitHistory({ agentId, sessionId });
-  const { commits, nextCursor, endOfHistory, loadingMore, loadOlder } = useGitHistoryPagination(
-    history,
-    agentId,
-    sessionId,
-  );
+  const { commits, nextCursor, endOfHistory, loadingMore, olderError, loadOlder } =
+    useGitHistoryPagination(history, agentId, sessionId);
   const targetKey =
     agentId && sessionId
       ? gitRequestTargetKey({ agent_id: agentId, session: sessionId })
@@ -109,6 +106,7 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
         endOfHistory={endOfHistory}
         nextCursor={nextCursor}
         loadingMore={loadingMore}
+        olderError={olderError}
         onSelect={onSelectCommit}
         onLoadOlder={() => {
           void loadOlder();

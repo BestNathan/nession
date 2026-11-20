@@ -13,6 +13,7 @@ export function GitHistoryCommitList({
   endOfHistory,
   nextCursor,
   loadingMore,
+  olderError,
   onSelect,
   onLoadOlder,
   onRefresh,
@@ -25,6 +26,7 @@ export function GitHistoryCommitList({
   endOfHistory: boolean;
   nextCursor: string | null;
   loadingMore: boolean;
+  olderError: string | null;
   onSelect: (hash: string) => void;
   onLoadOlder: () => void;
   onRefresh: () => void;
@@ -41,18 +43,29 @@ export function GitHistoryCommitList({
           />
         ))}
         {!endOfHistory && nextCursor ? (
-          <button
-            type="button"
-            data-testid="git-history-load-more"
-            disabled={loadingMore}
-            onClick={onLoadOlder}
-            className={cn(
-              'mx-2 my-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left text-primary hover:bg-accent',
-              chromeSansRole('metadata'),
-            )}
-          >
-            {loadingMore ? 'Loading older commits…' : 'Load older commits'}
-          </button>
+          <>
+            <button
+              type="button"
+              data-testid="git-history-load-more"
+              disabled={loadingMore}
+              onClick={onLoadOlder}
+              className={cn(
+                'mx-2 my-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left text-primary hover:bg-accent',
+                chromeSansRole('metadata'),
+              )}
+            >
+              {loadingMore ? 'Loading older commits…' : 'Load older commits'}
+            </button>
+            {olderError ? (
+              <p
+                data-testid="git-history-older-error"
+                role="alert"
+                className={cn('mx-2 my-1 text-destructive', chromeSansRole('metadata'))}
+              >
+                {olderError}
+              </p>
+            ) : null}
+          </>
         ) : null}
         {commits.length >= limit && endOfHistory ? (
           <p data-testid="git-history-more" className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
