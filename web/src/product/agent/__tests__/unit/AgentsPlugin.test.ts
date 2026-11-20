@@ -90,6 +90,73 @@ describe('AgentsPlugin', () => {
       expect(surface.protocols.targetProtocols('a2')).toEqual({ kind: 'none' });
     });
 
+    it('refuses a list response that settles after the physical socket moved on', async () => {
+      // The captured generation is the one the request went out on. An answer
+      // that arrives after that socket was replaced describes the previous
+      // connection's Agent snapshot, and republishing it would make the new
+      // generation resolve against a manifest nobody just reported (#3990).
+      surface.setPhysicalGeneration(1);
+      const pending = plugin.listAgents();
+
+      surface.setPhysicalGeneration(2);
+      surface.resolveNext('server.agent.list', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+      await pending;
+
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'unknown' });
+    });
+
+    it('refuses a list response that settles once the connection is no longer live', async () => {
+      // Between socket loss and a replacement there is no connection whose
+      // manifest this could be. The directory was emptied at the loss; a late
+      // response must not refill it.
+      const pending = plugin.listAgents();
+      surface.setConnectionState('reconnecting');
+      surface.resolveNext('server.agent.list', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+      await pending;
+
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'unknown' });
+    });
+
+    it('publishes a list whose request was queued behind the readiness gate', async () => {
+      // A request made while the transport is still connecting is sent on the
+      // socket that connects next, so its answer is that socket's snapshot —
+      // the generation fence only applies to requests issued on a live
+      // socket. Capturing the old number here would refuse the current answer.
+      surface.setConnectionState('connecting');
+      const pending = plugin.listAgents();
+
+      surface.setPhysicalGeneration(1);
+      surface.setConnectionState('connected');
+      surface.resolveNext('server.agent.list', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+      await pending;
+
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'present', manifest });
+    });
+
+    it('ignores a push delivered by a surface that has been replaced', () => {
+      // A push describes the connection it arrived on. After a rebind the old
+      // surface is no longer the current one, so its snapshot must neither
+      // overwrite the live directory nor reach consumers as if it were current.
+      const older = createMockPluginSurface();
+      plugin.install(older); // older becomes the binding
+      plugin.install(surface); // replaced again; older's teardown not yet run
+      const cb = vi.fn();
+      plugin.onAgentsChanged(cb);
+
+      older.pushMessage('server.agents.changed', {
+        agents: [{ ...makeAgent('a1'), protocols: manifest }],
+      });
+
+      expect(surface.protocols.targetProtocols('a1')).toEqual({ kind: 'unknown' });
+      expect(cb).not.toHaveBeenCalled();
+    });
+
     it('writes to the surface it is currently bound to', () => {
       // A rebind re-points publishing at the new connection, which is what
       // stops a replaced transport's manifest from being trusted. The old

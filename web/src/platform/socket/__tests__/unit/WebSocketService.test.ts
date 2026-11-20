@@ -1088,6 +1088,68 @@ describe('WebSocketService', () => {
   // real loss: downstream recovery (reconnect budget, candidate rotation,
   // force-relay) keys off the state transition and nothing else, so a special
   // path would silently skip all of it (#1233).
+  // `ProtocolDirectory` hangs off the service but describes the peers on one
+  // physical socket (#3990). The service outlives every socket, so unless the
+  // directory is emptied at each generation boundary the next connection
+  // resolves Git/Claude calls against the previous connection's Agent
+  // snapshot — a manifest nobody on the new socket has vouched for.
+  describe('protocol directory across physical sockets (#3990)', () => {
+    const MANIFEST = {
+      provider: 'agent-a',
+      protocols: { 'git.status': { versions: [1] } },
+    };
+
+    it('empties the directory when a live socket is lost, before a replacement exists', async () => {
+      const service = new WebSocketService('ws://server/ws', [], {
+        maxReconnectAttempts: 0,
+      });
+      const connected = service.connect();
+      MockWebSocket.instances[0].open();
+      await connected;
+
+      service.protocols.publish(new Map([['agent-a', MANIFEST]]));
+      expect(service.protocols.targetProtocols('agent-a')).toEqual({
+        kind: 'present',
+        manifest: MANIFEST,
+      });
+
+      MockWebSocket.instances[0].serverClose();
+
+      // The snapshot described the socket that just died. Until a fresh Agent
+      // list arrives over a live connection, the honest answer — and the one
+      // that refuses instead of resolving — is that this connection does not
+      // know the target yet.
+      expect(service.connectionState).toBe('disconnected');
+      expect(service.protocols.targetProtocols('agent-a')).toEqual({ kind: 'unknown' });
+    });
+
+    it('starts every replacement socket with no manifests inherited from its predecessor', async () => {
+      const service = new WebSocketService('ws://server/ws', [], {
+        maxReconnectAttempts: 5,
+        reconnectBaseDelay: 5,
+      });
+      const connected = service.connect();
+      MockWebSocket.instances[0].open();
+      await connected;
+      service.protocols.publish(new Map([['agent-a', MANIFEST]]));
+
+      MockWebSocket.instances[0].serverClose();
+      // A publication landing in the reconnect window — where a delayed G1
+      // list response would settle — must not survive into G2 either. The next
+      // generation starts empty and only its own list can fill it.
+      service.protocols.publish(new Map([['agent-a', MANIFEST]]));
+
+      await flushTimers(50);
+      const replacement = MockWebSocket.instances[1];
+      expect(replacement).toBeDefined();
+      expect(service.protocols.targetProtocols('agent-a')).toEqual({ kind: 'unknown' });
+
+      replacement.open();
+      expect(service.connectionState).toBe('connected');
+      expect(service.protocols.targetProtocols('agent-a')).toEqual({ kind: 'unknown' });
+    });
+  });
+
   describe('reportUnresponsive', () => {
     beforeEach(() => {
       vi.useFakeTimers();

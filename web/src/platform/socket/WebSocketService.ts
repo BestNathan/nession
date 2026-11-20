@@ -380,6 +380,10 @@ export class WebSocketService implements PluginSurface {
 
   private openSocket(resolve: () => void, reject: (error: Error) => void): void {
     const myGeneration = ++this.generation;
+    // A fresh physical socket has heard no Agent list yet. Whatever the
+    // directory still held — including a publication that landed during the
+    // reconnect window — belongs to the generation this one replaces (#3990).
+    this.protocols.invalidate();
     const ws = new WebSocket(this.url);
     this.ws = ws;
     ws.binaryType = 'arraybuffer';
@@ -594,6 +598,11 @@ export class WebSocketService implements PluginSurface {
     if (this.disposed || this.userClosed) {
       return;
     }
+    // The manifests describe the socket that just stopped being current. Until
+    // a replacement connection delivers its own Agent list, resolving against
+    // them would present the previous connection's versions as this one's
+    // (#3990); empty means `unknown`, which refuses.
+    this.protocols.invalidate();
     const error = new Error('Connection lost');
     this.router.failPending(error);
     const maxAttempts = this.options.maxReconnectAttempts ?? DEFAULT_MAX_RECONNECT_ATTEMPTS;
@@ -735,6 +744,11 @@ export class WebSocketService implements PluginSurface {
   }
 
   private teardownSocket(): void {
+    // Every path that discards a socket — disconnect, dispose, a terminal dial
+    // error, a refused handshake — takes what that socket taught the directory
+    // with it. The entries cannot be resolved against a connection that is
+    // gone (#3990).
+    this.protocols.invalidate();
     if (!this.ws) {
       return;
     }
