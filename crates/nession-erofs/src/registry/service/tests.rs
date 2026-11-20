@@ -1127,3 +1127,491 @@ async fn agent_like_cache_host_serves_pull_and_denies_push() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
 }
+
+// ---------------------------------------------------------------------------
+// SCN-03 loopback protocol proofs: the service mounted on a real loopback TCP
+// ingress, exercised by real HTTP clients (reqwest probes and the product's
+// #3498 RegistryClient / pull_image import). These are the source-aligned tests
+// the merged-staging #4088 Cases run at the exact staging SHA.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "registry")]
+async fn serve_loopback(router: Router) -> (String, tokio::task::JoinHandle<()>) {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        axum::serve(listener, router).await.unwrap();
+    });
+    (format!("http://{addr}"), handle)
+}
+
+/// A writable Server-like host with an open authorizer, so the product OCI
+/// client can import without credential plumbing (auth probes use the
+/// token-gated `server_host`).
+#[cfg(feature = "registry")]
+async fn open_server_host() -> ServerHost {
+    let dir = TempDir::new().unwrap();
+    let conn = memory_connection().await;
+    crate::catalog::migrate(&conn).await.unwrap();
+    let blobs_fs = FsBlobStore::new(dir.path().join("cas")).unwrap();
+    let blobs = Arc::new(blobs_fs.clone());
+    let repos = Arc::new(CatalogRepositoryStore::new(conn.clone(), blobs_fs.clone()));
+    let publisher = Arc::new(CatalogRepositoryPublisher::new(conn.clone(), blobs_fs));
+    let service = RegistryService::read_write(
+        Arc::clone(&blobs),
+        Arc::clone(&repos),
+        Arc::new(super::AllowAllAuthorizer),
+        publisher,
+    )
+    .unwrap();
+    let router = Arc::new(service).router();
+    ServerHost {
+        router,
+        blobs,
+        conn,
+        _dir: dir,
+    }
+}
+
+#[cfg(feature = "registry")]
+async fn probe(
+    client: &reqwest::Client,
+    method: reqwest::Method,
+    url: &str,
+    auth: Option<&str>,
+    extra: &[(&str, &str)],
+    body: Vec<u8>,
+) -> (reqwest::StatusCode, reqwest::header::HeaderMap, Vec<u8>) {
+    let mut request = client.request(method, url);
+    if let Some(token) = auth {
+        request = request.header("authorization", token);
+    }
+    for (name, value) in extra {
+        request = request.header(*name, *value);
+    }
+    let response = request.body(body).send().await.unwrap();
+    let status = response.status();
+    let headers = response.headers().clone();
+    let bytes = response.bytes().await.unwrap().to_vec();
+    (status, headers, bytes)
+}
+
+#[cfg(feature = "registry")]
+fn probe_header(headers: &reqwest::header::HeaderMap, name: &str) -> String {
+    headers.get(name).unwrap().to_str().unwrap().to_string()
+}
+
+/// #4088 SC-01 (SCN-03): standard OCI pull over loopback, plus readback through
+/// the product's own RegistryClient and a full pull_image import into a second
+/// catalog — the imported digests/bytes equal the originals.
+#[cfg(feature = "registry")]
+#[tokio::test]
+async fn sc01_loopback_pull_and_oci_client_readback() {
+    use crate::registry::auth::NoCredentials;
+    use crate::registry::client::{RegistryClient, RegistryConfig};
+    use crate::registry::pull::{pull_image, ImportRequest};
+    use crate::registry::RemoteReference;
+
+    let host = open_server_host().await;
+    let (base, server) = serve_loopback(host.router.clone()).await;
+    let fixture = seed_image(&host, "team/app", "v1", b"loopback readback layer").await;
+    let http = reqwest::Client::new();
+
+    // Manifest by tag: exact bytes, media type and digest header.
+    let (status, headers, body) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/app/manifests/v1"),
+        None,
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, fixture.manifest.bytes());
+    assert_eq!(
+        probe_header(&headers, "docker-content-digest"),
+        fixture.manifest.digest()
+    );
+    assert_eq!(probe_header(&headers, "content-type"), MEDIA_TYPE_MANIFEST);
+
+    // HEAD, Range and Accept negotiation over the wire.
+    let (status, _, body) = probe(
+        &http,
+        reqwest::Method::HEAD,
+        &format!("{base}/v2/team/app/manifests/v1"),
+        None,
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert!(body.is_empty());
+    let (status, headers, body) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/app/blobs/{}", fixture.layer.digest()),
+        None,
+        &[("range", "bytes=0-7")],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::PARTIAL_CONTENT);
+    assert_eq!(body, b"loopback");
+    assert_eq!(probe_header(&headers, "content-range"), "bytes 0-7/23");
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/app/manifests/v1"),
+        None,
+        &[(
+            "accept",
+            "application/vnd.docker.distribution.manifest.v2+json",
+        )],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+
+    // The product OCI client resolves the same immutable identity.
+    let client =
+        RegistryClient::new(RegistryConfig::new(&base).unwrap(), Arc::new(NoCredentials)).unwrap();
+    let fetched = client
+        .fetch_manifest("team/app", &RemoteReference::Tag("v1".to_string()))
+        .await
+        .unwrap();
+    assert_eq!(fetched.digest, fixture.manifest.digest());
+    assert_eq!(fetched.document.bytes(), fixture.manifest.bytes());
+
+    // A full pull_image import into a second catalog preserves every digest
+    // and the exact bytes (one physical blob per unique object).
+    let dest_dir = TempDir::new().unwrap();
+    let dest = FsBlobStore::new(dest_dir.path().join("dest")).unwrap();
+    let dest_conn = memory_connection().await;
+    crate::catalog::migrate(&dest_conn).await.unwrap();
+    let request = ImportRequest {
+        repository: "team/app".to_string(),
+        reference: RemoteReference::Tag("v1".to_string()),
+        platform: crate::oci::descriptor::Platform {
+            architecture: "amd64".to_string(),
+            os: "linux".to_string(),
+            os_features: Some(vec!["erofs".to_string()]),
+            ..Default::default()
+        },
+        local_repository: "tenant/app".to_string(),
+        local_tag: "v1".to_string(),
+        expectation: TagExpectation::Absent,
+    };
+    let outcome = pull_image(
+        &client,
+        &dest_conn,
+        &dest,
+        &request,
+        &crate::registry::auth::AllowAllImports,
+        1,
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.manifest_digest, fixture.manifest.digest());
+    assert_eq!(outcome.config_digest, fixture.config.digest());
+    assert_eq!(outcome.layer_digest, fixture.layer.digest());
+    assert_eq!(
+        dest.read(fixture.layer.digest()).unwrap(),
+        fixture.layer.bytes()
+    );
+    assert_eq!(dest.usage().unwrap().blobs, 3);
+
+    println!(
+        "#4088 SC-01 measured: loopback {} GET manifest v1 -> 200 digest {} ({} bytes), \
+         HEAD empty, blob Range bytes=0-7 -> 206 'loopback', wrong Accept -> 404; \
+         RegistryClient.fetch_manifest resolved {}; pull_image import manifest/config/layer \
+         digests equal originals with 3 physical blobs",
+        base,
+        fixture.manifest.digest(),
+        fixture.manifest.bytes().len(),
+        fetched.digest,
+    );
+    server.abort();
+}
+
+/// #4088 SC-02 (SCN-03): the writable loopback Registry accepts the standard
+/// upload/manifest push, publishes only after the complete verified closure,
+/// preserves byte/digest identity, and rejects incomplete/tampered/unauthorized
+/// pushes without a visible tag.
+#[cfg(feature = "registry")]
+#[tokio::test]
+async fn sc02_loopback_push_publishes_only_verified_closure() {
+    let host = server_host(RegistryMode::ReadWrite).await;
+    let (base, server) = serve_loopback(host.router.clone()).await;
+    let http = reqwest::Client::new();
+    let fixture = v1_fixture(b"loopback pushed layer");
+
+    // Unauthorized push is challenged before any object is revealed.
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::POST,
+        &format!("{base}/v2/team/push/blobs/uploads/"),
+        None,
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+
+    // Standard chunked upload of the layer.
+    let upload = |bytes: Vec<u8>| {
+        let http = http.clone();
+        let base = base.clone();
+        async move {
+            let (status, headers, _) = probe(
+                &http,
+                reqwest::Method::POST,
+                &format!("{base}/v2/team/push/blobs/uploads/"),
+                Some(GOOD),
+                &[],
+                Vec::new(),
+            )
+            .await;
+            assert_eq!(status, reqwest::StatusCode::ACCEPTED);
+            let location = probe_header(&headers, "location");
+            let location = format!("{base}{location}");
+            let digest = crate::digest::digest_of_bytes(&bytes);
+            let (status, _, _) = probe(
+                &http,
+                reqwest::Method::PUT,
+                &format!("{location}?digest={digest}"),
+                Some(GOOD),
+                &[],
+                bytes,
+            )
+            .await;
+            assert_eq!(status, reqwest::StatusCode::CREATED);
+            digest
+        }
+    };
+    let layer_digest = upload(fixture.layer.bytes().to_vec()).await;
+    assert_eq!(layer_digest, fixture.layer.digest());
+
+    // Manifest referencing a still-missing config is refused; no tag appears.
+    let (status, _, body) = probe(
+        &http,
+        reqwest::Method::PUT,
+        &format!("{base}/v2/team/push/manifests/v1"),
+        Some(GOOD),
+        &[("content-type", MEDIA_TYPE_MANIFEST)],
+        fixture.manifest.bytes().to_vec(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(error_code(&body), "MANIFEST_BLOB_UNKNOWN");
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/push/manifests/v1"),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+
+    // A tampered digest claim is refused and publishes nothing.
+    let (status, headers, _) = probe(
+        &http,
+        reqwest::Method::POST,
+        &format!("{base}/v2/team/push/blobs/uploads/"),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::ACCEPTED);
+    let location = format!("{base}{}", probe_header(&headers, "location"));
+    let wrong = crate::digest::digest_of_bytes(b"different bytes");
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::PUT,
+        &format!("{location}?digest={wrong}"),
+        Some(GOOD),
+        &[],
+        b"honest bytes".to_vec(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert!(!host.blobs.contains(&wrong).unwrap());
+
+    // Completing the closure lets the manifest publish; readback is exact.
+    let config_digest = upload(fixture.config.bytes().to_vec()).await;
+    assert_eq!(config_digest, fixture.config.digest());
+    let (status, headers, _) = probe(
+        &http,
+        reqwest::Method::PUT,
+        &format!("{base}/v2/team/push/manifests/v1"),
+        Some(GOOD),
+        &[("content-type", MEDIA_TYPE_MANIFEST)],
+        fixture.manifest.bytes().to_vec(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED);
+    assert_eq!(
+        probe_header(&headers, "docker-content-digest"),
+        fixture.manifest.digest()
+    );
+    let (status, _, body) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/push/manifests/v1"),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, fixture.manifest.bytes());
+
+    println!(
+        "#4088 SC-02 measured: loopback {} unauth POST -> 401; chunked upload layer {} -> 201; \
+         manifest with missing config -> 400 MANIFEST_BLOB_UNKNOWN and tag absent; tampered \
+         digest -> 400 (nothing published); complete closure PUT manifest -> 201 digest {} and \
+         GET v1 returns the exact {} bytes",
+        base,
+        layer_digest,
+        fixture.manifest.digest(),
+        body.len(),
+    );
+    server.abort();
+}
+
+/// #4088 SC-03 (SCN-03): the read-only loopback Registry denies every mutation
+/// verb even with a push credential, denies cross-repository blob/manifest
+/// access despite local bytes, and requires authorization; the Agent-like cache
+/// host serves pull and denies push.
+#[cfg(all(feature = "registry", feature = "cache"))]
+#[tokio::test]
+async fn sc03_loopback_readonly_and_repository_scope() {
+    let host = server_host(RegistryMode::ReadOnly).await;
+    let (base, server) = serve_loopback(host.router.clone()).await;
+    let http = reqwest::Client::new();
+    let a = seed_image(&host, "team/a", "v1", b"repository A loopback secret").await;
+    let b = seed_image(&host, "team/b", "v1", b"repository B loopback secret").await;
+
+    // Missing authorization is challenged.
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/a/manifests/v1"),
+        None,
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::UNAUTHORIZED);
+
+    // Every mutation verb is denied even with a valid push credential.
+    for (method, path) in [
+        (reqwest::Method::POST, "/v2/team/a/blobs/uploads/"),
+        (reqwest::Method::PUT, "/v2/team/a/manifests/v2"),
+        (reqwest::Method::DELETE, "/v2/team/a/blobs/uploads/x"),
+    ] {
+        let (status, _, body) = probe(
+            &http,
+            method.clone(),
+            &format!("{base}{path}"),
+            Some(GOOD),
+            &[],
+            Vec::new(),
+        )
+        .await;
+        assert_eq!(
+            status,
+            reqwest::StatusCode::METHOD_NOT_ALLOWED,
+            "{method} {path}"
+        );
+        assert_eq!(error_code(&body), "UNSUPPORTED");
+    }
+
+    // B's bytes are physically present but invisible through repository A.
+    assert!(host.blobs.contains(b.layer.digest()).unwrap());
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/a/blobs/{}", b.layer.digest()),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/a/manifests/{}", b.manifest.digest()),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::NOT_FOUND);
+    // A's own closure stays readable.
+    let (status, _, body) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{base}/v2/team/a/blobs/{}", a.layer.digest()),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, a.layer.bytes());
+
+    // The Agent-like cache host serves pull and denies push over loopback.
+    let agent = agent_host().await;
+    let (agent_base, agent_server) = serve_loopback(agent.router.clone()).await;
+    let agent_fixture = v1_fixture(b"agent loopback payload");
+    for document in [
+        &agent_fixture.manifest,
+        &agent_fixture.config,
+        &agent_fixture.layer,
+    ] {
+        agent.blobs.put_bytes(document.bytes()).unwrap();
+    }
+    agent
+        .repos
+        .register_tag("team/agent", "v1", agent_fixture.manifest.digest())
+        .unwrap();
+    let (status, _, body) = probe(
+        &http,
+        reqwest::Method::GET,
+        &format!("{agent_base}/v2/team/agent/manifests/v1"),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::OK);
+    assert_eq!(body, agent_fixture.manifest.bytes());
+    let (status, _, _) = probe(
+        &http,
+        reqwest::Method::POST,
+        &format!("{agent_base}/v2/team/agent/blobs/uploads/"),
+        Some(GOOD),
+        &[],
+        Vec::new(),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::METHOD_NOT_ALLOWED);
+
+    println!(
+        "#4088 SC-03 measured: loopback {} no-auth GET -> 401; POST/PUT/DELETE with push \
+         credential -> 405 UNSUPPORTED; cross-repo blob {} and manifest {} through team/a -> 404 \
+         despite local CAS bytes; own blob readable; Agent cache host {} GET manifest -> 200 and \
+         POST upload -> 405",
+        base,
+        b.layer.digest(),
+        b.manifest.digest(),
+        agent_base,
+    );
+    server.abort();
+    agent_server.abort();
+}
