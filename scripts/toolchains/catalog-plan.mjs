@@ -45,7 +45,13 @@ function changed(root,sourceSha){
   if(parents.length>2)throw Error('unexpected orphan commit parent count');
   // A reviewed orphan PR is merged using a two-parent Merge Commit. Compare
   // HEAD to its first parent (previous catalog tip), not to the PR branch.
-  if(parents.length===0)return catalog(root);
+  if(parents.length===0){
+    // A shallow checkout can falsely present any commit as a root. Refuse
+    // that ambiguity instead of scheduling the entire release catalog.
+    if(git(root,'rev-parse','--is-shallow-repository')==='true')
+      throw Error('orphan checkout is too shallow for source-parent diff');
+    return catalog(root);
+  }
   if(!COMMIT.test(parents[0]))throw Error('invalid parent');
   const output=git(root,'diff-tree','--no-commit-id','--name-only','-r',parents[0],sourceSha);
   const entries=new Map();
@@ -138,6 +144,10 @@ function selfTest() {
     assert.deepEqual(changed(work,postMergeReadme),[],
       'unrelated direct push after merge must remain no-op');
 
+    const shallow=join(root,'shallow');
+    git(root,'clone','--quiet','--depth=1','file://'+work,shallow);
+    const shallowHead=git(shallow,'rev-parse','HEAD');
+    assert.throws(()=>changed(shallow,shallowHead),/too shallow/);
   } finally {rmSync(root,{recursive:true,force:true});}
   process.stdout.write('catalog-plan deterministic selectors and targets: PASS\n');
 }
