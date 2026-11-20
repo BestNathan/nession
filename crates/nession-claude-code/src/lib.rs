@@ -5,6 +5,7 @@ pub mod canonical;
 pub mod control;
 pub mod conversation;
 pub mod conversation_reader;
+pub(crate) mod fingerprint;
 pub mod mcp;
 pub mod memory;
 pub mod messages;

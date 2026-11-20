@@ -61,10 +61,10 @@ function uniqueByRef(records: ClaudeCodeTranscriptRecord[]): ClaudeCodeTranscrip
  * Fold a freshly read newest page into the timeline (#3606, #3726).
  *
  * `record_ref` is the stable row identity: it names the transcript, the byte
- * offset and the file generation. A record the page carries replaces its
- * earlier copy; records the page does not carry are older history and stay in
- * front of it, because a poll re-reads the newest window and is not
- * authoritative for pages a reader already loaded.
+ * offset and a fingerprint of the line's own bytes (`#4027`). A record the
+ * page carries replaces its earlier copy; records the page does not carry are
+ * older history and stay in front of it, because a poll re-reads the newest
+ * window and is not authoritative for pages a reader already loaded.
  *
  * `has_more` and the older cursor describe the boundary the reader paged back
  * to, not the newest page — so they are written on the initial read only.
