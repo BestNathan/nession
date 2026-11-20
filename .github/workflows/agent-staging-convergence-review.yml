@@ -294,9 +294,18 @@ jobs:
           path: |
             ${{ runner.temp }}/convergence-repair/agent/agent-telemetry.json
             ${{ runner.temp }}/convergence-repair/agent/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload original model attempt if independent replay required correction
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-staging-convergence-repair-original-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
             ${{ runner.temp }}/convergence-repair/agent/attempt1/agent-telemetry.json
             ${{ runner.temp }}/convergence-repair/agent/attempt1/agent-execution-trace.json
-          if-no-files-found: warn
+          if-no-files-found: ignore
           retention-days: 30
 
       - name: Upload verified nonauthoritative conflict candidate
