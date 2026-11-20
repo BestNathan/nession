@@ -11,7 +11,7 @@ use sea_orm::DatabaseConnection;
 use super::auth::{ImportScope, RegistryImportAuthorizer};
 use super::client::RegistryClient;
 use super::{RegistryError, RegistryResult, RemoteReference};
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::tag::TagExpectation;
 use crate::image::publish::{publish_manifest, ManifestPublication};
 use crate::oci::{
@@ -93,7 +93,7 @@ pub struct RegistryDigestGrant {
 pub async fn pull_image(
     client: &RegistryClient,
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     request: &ImportRequest,
     authorizer: &dyn RegistryImportAuthorizer,
     now: i64,
@@ -388,7 +388,7 @@ mod tests {
         }
     }
 
-    fn fixture(store: &BlobStore, architecture: &str, payload: &[u8]) -> Fixture {
+    fn fixture(store: &FsBlobStore, architecture: &str, payload: &[u8]) -> Fixture {
         let layer = layer(store, payload);
         let (manifest, config) = manifest_and_config(store, &layer, architecture, None, None);
         Fixture {
@@ -429,7 +429,7 @@ mod tests {
 
     fn seed_manifest(
         registry: &MockRegistry,
-        store: &BlobStore,
+        store: &FsBlobStore,
         repository: &str,
         tag_name: &str,
         fixture: &Fixture,
@@ -442,7 +442,7 @@ mod tests {
 
     fn seed_index(
         registry: &MockRegistry,
-        store: &BlobStore,
+        store: &FsBlobStore,
         repository: &str,
         tag_name: &str,
         index: &RawDocument,
@@ -464,9 +464,9 @@ mod tests {
                 .any(|window| window == needle)
     }
 
-    async fn fresh() -> (TempDir, BlobStore, DatabaseConnection) {
+    async fn fresh() -> (TempDir, FsBlobStore, DatabaseConnection) {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn)
             .await

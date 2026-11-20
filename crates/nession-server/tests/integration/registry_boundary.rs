@@ -8,7 +8,7 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-use nession_erofs::blob::store::BlobStore;
+use nession_erofs::blob::store::FsBlobStore;
 use nession_erofs::catalog::tag;
 use nession_erofs::oci::Platform;
 use nession_erofs::registry::{
@@ -83,7 +83,7 @@ async fn server_owned_registry_boundary_denies_cross_tenant_import_before_io() {
     nession_erofs::catalog::migrate(database.connection())
         .await
         .expect("catalog schema");
-    let store = BlobStore::new(directory.path().join("store")).expect("blob store");
+    let store = FsBlobStore::new(directory.path().join("store")).expect("blob store");
 
     let provider = Arc::new(ServerSecret::new(
         RegistryCredential::new("robot", "server-owned-secret").expect("server credential"),

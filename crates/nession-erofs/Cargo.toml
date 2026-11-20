@@ -7,12 +7,14 @@ edition.workspace = true
 # Server composition: build, CAS, catalog, source adapters and the external OCI
 # Distribution client. Mechanics-only consumers disable defaults.
 default = ["build", "store", "catalog", "sources", "registry"]
-store = []
+# Reusable Store/Repository contracts (#4087): host-independent CAS and
+# repository-reachability surfaces consumed by the Registry service/SDK.
+store = ["dep:async-trait"]
 build = ["store", "dep:tempfile"]
 # Server→Agent authorized object transfer engine (#3499). The Agent's `cache`
 # feature enables it; both consume the same Range/verify/publish mechanics.
 distribution = ["dep:futures-util", "dep:reqwest", "dep:tokio"]
-cache = ["distribution", "dep:libc"]
+cache = ["distribution", "store", "dep:libc"]
 mount = ["dep:libc"]
 # Server image catalog (#3496): schema/metadata logic over the Server's own
 # SQLite connection. It never opens a second database.
@@ -35,6 +37,7 @@ registry = [
 
 [dependencies]
 anyhow.workspace = true
+async-trait = { workspace = true, optional = true }
 base64 = { workspace = true, optional = true }
 serde.workspace = true
 serde_json.workspace = true

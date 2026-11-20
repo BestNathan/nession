@@ -27,7 +27,7 @@ use super::{
     DEFAULT_MAX_JSON_BYTES, DEFAULT_MAX_REDIRECTS, DEFAULT_MAX_TOKEN_BYTES,
     DEFAULT_REQUEST_TIMEOUT, DISTRIBUTION_PREFIX, MANIFEST_ACCEPT, OCTET_STREAM,
 };
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::digest::{digest_of_bytes, file_digest};
 use crate::oci::{
     parse_index, parse_manifest, validate_index, validate_manifest, Descriptor, RawDocument,
@@ -272,7 +272,7 @@ impl RegistryClient {
     /// Ready object.
     pub async fn download_blob(
         &self,
-        store: &BlobStore,
+        store: &FsBlobStore,
         repository: &str,
         descriptor: &Descriptor,
     ) -> RegistryResult<()> {
@@ -304,7 +304,7 @@ impl RegistryClient {
             .join(".tmp")
             .join(format!("registry-{}", uuid::Uuid::new_v4()));
         let result = stream_to_store(response, store, descriptor, &temp, &resource).await;
-        // `BlobStore::put_file` copies through its own private temp file, so the
+        // `FsBlobStore::put_file` copies through its own private temp file, so the
         // verified download source is removed on both success and failure.
         let _ = tokio::fs::remove_file(&temp).await;
         result
@@ -1097,7 +1097,7 @@ fn verify_bytes_against(
 
 async fn stream_to_store(
     mut response: Response,
-    store: &BlobStore,
+    store: &FsBlobStore,
     descriptor: &Descriptor,
     temp: &Path,
     resource: &str,

@@ -7,7 +7,7 @@ use std::io::Read;
 use std::path::Path;
 
 use super::publication::{publish_layer, LayerPublication};
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::tag::TagExpectation;
 use crate::image::publish::PublishOutcome;
 use crate::oci::annotation::MEDIA_TYPE_EROFS;
@@ -93,7 +93,7 @@ pub fn validate_erofs_file(path: &Path) -> Result<u64> {
 /// Importing identical bytes under another Tag reuses the same physical blob.
 pub async fn import_raw_erofs(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     path: &Path,
     import: &RawErofsImport,
 ) -> Result<ImportOutcome> {
@@ -155,7 +155,7 @@ mod tests {
     #[tokio::test]
     async fn import_publishes_exact_bytes_without_a_rebuild() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let image = dir.path().join("image.erofs");

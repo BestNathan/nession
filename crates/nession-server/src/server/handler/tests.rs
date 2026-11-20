@@ -52,7 +52,7 @@ impl TestDeps {
 
     /// One Server whose image manager owns a durable build root (#3334).
     fn with_db_and_builds(db: Arc<Database>, build_root: std::path::PathBuf) -> Self {
-        let blobs = nession_erofs::BlobStore::new(build_root.join("blobs")).unwrap();
+        let blobs = nession_erofs::FsBlobStore::new(build_root.join("blobs")).unwrap();
         let image_manager = Arc::new(
             crate::image::ImageManager::new(
                 Arc::clone(&db),

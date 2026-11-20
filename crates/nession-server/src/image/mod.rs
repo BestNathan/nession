@@ -41,8 +41,8 @@ use nession_erofs::catalog::{
 use nession_erofs::oci::config::{ImageConfig, RuntimeConfig};
 use nession_erofs::oci::descriptor::{Descriptor, Platform};
 use nession_erofs::{
-    discard_packaged_image, discard_snapshot_artifacts, verify_snapshot, BlobStore, BuildObserver,
-    BuildRequest, BuildSource, BuiltImage, ErofsBuilder, ProcessControl, ResumePoint,
+    discard_packaged_image, discard_snapshot_artifacts, verify_snapshot, BuildObserver,
+    BuildRequest, BuildSource, BuiltImage, ErofsBuilder, FsBlobStore, ProcessControl, ResumePoint,
     SnapshotSource, Stage, TreeStats,
 };
 use nession_protocol::contracts::image::v1::{
@@ -622,7 +622,7 @@ fn protocol_stage(stage: Stage) -> ImageBuildStage {
 pub struct ImageManager {
     db: Arc<Database>,
     builder: Arc<dyn ImageBuildBackend>,
-    blobs: BlobStore,
+    blobs: FsBlobStore,
     semaphore: Arc<Semaphore>,
     /// In-process active transfers, keyed by digest. GC consults this so a
     /// reader is never racing a delete.
@@ -666,7 +666,7 @@ impl ImageManager {
     /// diagnostics but never submits or recovers a build.
     pub fn unavailable(db: Arc<Database>, blob_dir: impl Into<std::path::PathBuf>) -> Result<Self> {
         let blob_dir = blob_dir.into();
-        let blobs = BlobStore::new(&blob_dir)?;
+        let blobs = FsBlobStore::new(&blob_dir)?;
         Ok(Self::assemble(
             db,
             Arc::new(UnavailableBackend),
@@ -682,7 +682,7 @@ impl ImageManager {
     pub fn new(
         db: Arc<Database>,
         builder: Arc<dyn ImageBuildBackend>,
-        blobs: BlobStore,
+        blobs: FsBlobStore,
         options: ImageManagerOptions,
     ) -> Result<Self> {
         let store = BuildStore::open(&options.build_root, options.build_log_max_bytes)
@@ -703,7 +703,7 @@ impl ImageManager {
     fn assemble(
         db: Arc<Database>,
         builder: Arc<dyn ImageBuildBackend>,
-        blobs: BlobStore,
+        blobs: FsBlobStore,
         builds: Option<Arc<BuildStore>>,
         max_concurrent_builds: usize,
         stage_timeout: Option<Duration>,
@@ -3371,7 +3371,7 @@ impl ImageManager {
         })
     }
 
-    pub fn blob_store(&self) -> &BlobStore {
+    pub fn blob_store(&self) -> &FsBlobStore {
         &self.blobs
     }
 
@@ -3603,13 +3603,13 @@ mod tests {
     };
 
     struct FakeBackend {
-        blobs: BlobStore,
+        blobs: FsBlobStore,
         content: Mutex<HashMap<String, Vec<u8>>>,
         fail_next: Mutex<Option<String>>,
     }
 
     impl FakeBackend {
-        fn new(blobs: BlobStore) -> Self {
+        fn new(blobs: FsBlobStore) -> Self {
             Self {
                 blobs,
                 content: Mutex::new(HashMap::new()),
@@ -3713,7 +3713,7 @@ mod tests {
         source_root: Option<std::path::PathBuf>,
     ) -> (Arc<ImageManager>, Arc<FakeBackend>, Arc<Database>) {
         let db = Arc::new(Database::new(":memory:").await.unwrap());
-        let blobs = BlobStore::new(dir.join("blobs")).unwrap();
+        let blobs = FsBlobStore::new(dir.join("blobs")).unwrap();
         let backend = Arc::new(FakeBackend::new(blobs.clone()));
         let manager = Arc::new(
             ImageManager::new(
@@ -3784,7 +3784,7 @@ mod tests {
     async fn an_unconfigured_source_root_disables_local_directory_sources() {
         let dir = tempfile::tempdir().unwrap();
         let db = Arc::new(Database::new(":memory:").await.unwrap());
-        let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+        let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
         let backend = Arc::new(FakeBackend::new(blobs.clone()));
         let options = test_options_with_root(dir.path(), None);
         let manager =
@@ -4560,7 +4560,7 @@ mod tests {
     async fn restart_preserves_image_metadata_and_project_references() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("server.db");
-        let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+        let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
         let backend = Arc::new(FakeBackend::new(blobs.clone()));
         backend.set("/source/persist", b"persistent image");
         let digest = {

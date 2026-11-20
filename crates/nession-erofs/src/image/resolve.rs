@@ -12,7 +12,7 @@
 use anyhow::{Context, Result};
 use sea_orm::ConnectionTrait;
 
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::legacy::legacy_manifest_digest;
 use crate::catalog::reference::{get_object, ObjectKind, StoredObject};
 use crate::catalog::tag;
@@ -188,7 +188,7 @@ pub async fn resolve_root(
 /// an incompatible platform and an ambiguous Index all fail closed.
 pub async fn resolve_root_for_platform(
     conn: &impl ConnectionTrait,
-    store: &BlobStore,
+    store: &FsBlobStore,
     root: &ResolvedRoot,
     target: &Platform,
 ) -> Result<ResolvedTarget> {
@@ -369,7 +369,7 @@ pub async fn resolve_root_for_platform(
 /// Tag or an unverified descriptor.
 pub async fn resolve_for_platform(
     conn: &impl ConnectionTrait,
-    store: &BlobStore,
+    store: &FsBlobStore,
     repository: Option<&str>,
     reference: &str,
     target: &Platform,
@@ -380,7 +380,7 @@ pub async fn resolve_for_platform(
 
 async fn verified_object(
     conn: &impl ConnectionTrait,
-    store: &BlobStore,
+    store: &FsBlobStore,
     digest: &str,
     expected: ObjectKind,
 ) -> Result<StoredObject> {
@@ -429,14 +429,14 @@ mod tests {
 
     async fn fixture() -> (
         tempfile::TempDir,
-        BlobStore,
+        FsBlobStore,
         sea_orm::DatabaseConnection,
         Descriptor,
         RawDocument,
         RawDocument,
     ) {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let layer = layer(&store, b"verified erofs bytes");
@@ -499,7 +499,7 @@ mod tests {
         assert!(error.contains("targets linux/amd64"), "{error}");
     }
 
-    fn index_entry(store: &BlobStore, architecture: &str, payload: &[u8]) -> IndexEntry {
+    fn index_entry(store: &FsBlobStore, architecture: &str, payload: &[u8]) -> IndexEntry {
         let layer = layer(store, payload);
         let (manifest, config) = manifest_and_config(store, &layer, architecture, None, None);
         IndexEntry {
@@ -537,7 +537,7 @@ mod tests {
     #[tokio::test]
     async fn an_index_selects_only_the_compatible_platform_manifest() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let amd64 = index_entry(&store, "amd64", b"amd64 payload");
@@ -593,7 +593,7 @@ mod tests {
         };
 
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let first = index_entry(&store, "amd64", b"first payload");

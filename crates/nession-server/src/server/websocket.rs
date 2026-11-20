@@ -102,7 +102,7 @@ impl WebSocketServer {
 
         // The global image manager (#3022): one content-addressed blob store,
         // one bounded build worker, one owner of image metadata.
-        let blob_store = nession_erofs::BlobStore::new(&config.image_blob_dir)
+        let blob_store = nession_erofs::FsBlobStore::new(&config.image_blob_dir)
             .context("failed to open the image blob store")?;
         // Historical digest-addressed rows remain readable while the catalog
         // gains one deterministic Manifest identity per ready Blob. The

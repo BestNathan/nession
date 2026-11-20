@@ -11,6 +11,7 @@ pub mod legacy;
 pub mod pin;
 pub mod reference;
 pub mod repository;
+pub mod repository_store;
 pub mod sqlite;
 pub mod tag;
 
@@ -22,6 +23,7 @@ pub use legacy::{
 pub use pin::{CatalogPin, ConsumerKind};
 pub use reference::{ObjectKind, StoredObject};
 pub use repository::{ensure_repository, validate_repository_name};
+pub use repository_store::CatalogRepositoryStore;
 pub use sqlite::CATALOG_SCHEMA_VERSION;
 pub use tag::{get_tag, set_tag, TagExpectation, TagUpdate};
 
