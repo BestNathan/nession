@@ -1,184 +1,97 @@
 name: Release / Toolchains
-# #4092: reviewed shell Recipe -> one ROOTFS -> native nession-erofs OCI -> GHCR.
-# No untrusted PR or tool-preparation job receives package-write authority.
+# #4160: trusted default-branch dispatch. Never execute orphan recipes with Registry credentials.
 on:
-  pull_request:
-    branches: [main]
-    paths:
-      - 'scripts/toolchains/**'
-      - '.github/workflows/release-toolchains.yml'
-  push:
-    branches: [main]
-    paths:
-      - 'scripts/toolchains/**'
-      - '.github/workflows/release-toolchains.yml'
   workflow_dispatch:
     inputs:
       tool:
-        description: 'Reviewed tool recipe'
-        type: choice
-        options: [jq, kubectl, k8s-bundle, gh]
-        default: jq
+        description: 'Tool directory in toolchains orphan branch'
+        type: string
         required: true
       version:
-        description: 'Pinned upstream tool/bundle version (must be supported by recipe)'
+        description: 'Exact version directory'
         type: string
-        default: '1.8.1'
         required: true
-      revision:
-        description: 'Packaging revision (existing tag must have identical digest)'
-        type: string
-        default: '1'
-        required: true
-
+      platform:
+        description: 'Platform filter or all'
+        type: choice
+        options: [all, linux]
+        default: all
+      arch:
+        description: 'Architecture filter or all'
+        type: choice
+        options: [all, amd64, arm64]
+        default: all
+  workflow_run:
+    workflows: ['Toolchains / Catalog Change']
+    types: [completed]
+    branches: [toolchains]
 permissions:
   contents: read
-
-concurrency:
-  group: toolchain-release-${{ github.event_name == 'pull_request' && github.run_id || format('{0}-{1}-r{2}', inputs.tool || 'jq', inputs.version || '1.8.1', inputs.revision || '1') }}
-  cancel-in-progress: false
-
-env:
-  RUSTC_WRAPPER: ''
-  CARGO_BUILD_JOBS: '2'
-  TOOLCHAIN_TOOL: ${{ inputs.tool || 'jq' }}
-  TOOLCHAIN_VERSION: ${{ inputs.version || '1.8.1' }}
-  TOOLCHAIN_REVISION: ${{ inputs.revision || '1' }}
-  TOOLCHAIN_PLATFORM: linux/amd64
-
 jobs:
-  verify-pr:
-    if: github.repository == 'BestNathan/nession' && github.event_name == 'pull_request'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 45
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: '1.96.0'
-      - uses: Swatinem/rust-cache@v2
-      - name: Install upstream EROFS userspace tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends erofs-utils
-      - name: Verify rejected recipe selectors, multiple versions and one bundled rootfs
-        run: bash scripts/toolchains/self-test.sh
-
-  prepare:
+  plan:
     if: >-
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
-      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'toolchains' &&
+        github.event.workflow_run.name == 'Toolchains / Catalog Change' &&
+        github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
     permissions:
       contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - name: Prepare version-pinned executables inside one private directory
-        env:
-          ROOTFS: ${{ runner.temp }}/toolchain-rootfs
-          STAGING: ${{ runner.temp }}/toolchain-artifact
-        run: |
-          set -euo pipefail
-          bash scripts/toolchains/prepare.sh prepare "$TOOLCHAIN_TOOL" "$TOOLCHAIN_VERSION" "$TOOLCHAIN_PLATFORM" "$ROOTFS"
-          mkdir -p "$STAGING"
-          # Transport-only tar preserves executable modes through Actions artifacts;
-          # this is NOT an OCI archive or the published image.
-          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$STAGING/toolchain-rootfs.tar" -C "$ROOTFS" .
-          ( cd "$STAGING" && sha256sum toolchain-rootfs.tar > toolchain-rootfs.tar.sha256 )
-          echo "Prepared $(find "$ROOTFS" -type f | wc -l) files with verified upstream checksums"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: toolchain-prepared-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/toolchain-artifact/
-          retention-days: 7
-          if-no-files-found: error
-
-  publish:
-    needs: prepare
-    if: >-
-      needs.prepare.result == 'success' &&
-      github.repository == 'BestNathan/nession' &&
-      github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 35
-    permissions:
-      contents: read
-      packages: write
     outputs:
-      digest: ${{ steps.native-push.outputs.digest }}
+      matrix: ${{ steps.catalog.outputs.matrix }}
+      count: ${{ steps.catalog.outputs.count }}
+      source_sha: ${{ steps.catalog.outputs.source_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: toolchain-prepared-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/toolchain-prepared
-      - name: Verify transferred artifact SHA256 and restore rootfs
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'toolchains' }}
+          path: toolchain-catalog
+          persist-credentials: false
+      - id: catalog
+        name: Resolve pinned orphan source and catalog candidates
         env:
-          STAGING: ${{ runner.temp }}/toolchain-prepared
+          EVENT: ${{ github.event_name }}
+          TOOL: ${{ inputs.tool }}
+          VERSION: ${{ inputs.version }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -euo pipefail
-          ( cd "$STAGING" && sha256sum --check toolchain-rootfs.tar.sha256 )
-          mkdir -p "$STAGING/rootfs"
-          tar -xf "$STAGING/toolchain-rootfs.tar" -C "$STAGING/rootfs" --no-same-owner
-          test -d "$STAGING/rootfs/bin"
-          test -z "$(find "$STAGING/rootfs" -type l -print -quit)"
-          test -z "$(find "$STAGING/rootfs" ! -type f ! -type d -print -quit)"
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: '1.96.0'
-      - uses: Swatinem/rust-cache@v2
-      - name: Install EROFS packer/extractor
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends erofs-utils
-      - id: native-push
-        name: Build EROFS OCI from prepared directory and push exact objects to GHCR
-        env:
-          TOOLCHAIN_ROOTFS: ${{ runner.temp }}/toolchain-prepared/rootfs
-          GHCR_ACTOR: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
-        run: bash scripts/toolchains/cargo.sh publish
-
-  readback:
-    needs: publish
-    if: >-
-      needs.publish.result == 'success' &&
-      github.repository == 'BestNathan/nession' &&
-      github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
+          source_sha="$(git -C toolchain-catalog rev-parse HEAD)"
+          if [ "$EVENT" = workflow_run ]; then
+            test "$source_sha" = "$EXPECTED_SHA"
+            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" all)"
+          else
+            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" one "$TOOL" "$VERSION")"
+          fi
+          count="$(node -e 'console.log(JSON.parse(process.argv[1]).include.length)' "$matrix")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "Selected $count catalog versions at $source_sha"
+  release:
+    needs: plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/release-toolchain-one.yml
+    with:
+      tool: ${{ matrix.tool }}
+      version: ${{ matrix.version }}
+      source_sha: ${{ needs.plan.outputs.source_sha }}
+      platform: ${{ github.event_name == 'workflow_dispatch' && inputs.platform || 'all' }}
+      arch: ${{ github.event_name == 'workflow_dispatch' && inputs.arch || 'all' }}
     permissions:
       contents: read
-      packages: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: '1.96.0'
-      - uses: Swatinem/rust-cache@v2
-      - name: Install unprivileged EROFS extraction tool
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends erofs-utils
-      - name: Independently fetch immutable GHCR image, extract and run pinned CLI versions
-        env:
-          GHCR_ACTOR: ${{ github.actor }}
-          GHCR_TOKEN: ${{ github.token }}
-          TOOLCHAIN_EXPECTED_DIGEST: ${{ needs.publish.outputs.digest }}
-        run: bash scripts/toolchains/cargo.sh readback
+      actions: read
+      packages: write
