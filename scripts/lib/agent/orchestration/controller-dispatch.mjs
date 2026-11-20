@@ -12,7 +12,8 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedRepairRuntimeFailure,
   recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
   recoverAttestedQwenPreflightV3,recoverAttestedQwenCliFailure,
-  recoverAttestedQwenRepairTurnsFailure,recoverAttestedQwenToolFailure}
+  recoverAttestedQwenRepairTurnsFailure,recoverAttestedQwenToolFailure,
+  recoverAttestedQwenTrackedSourceFailure}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
@@ -49,6 +50,9 @@ import {SOURCE as QWEN_REPAIR_TURNS_FAILURE,
   from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE,verifyQwenToolPolicyFailureLive}
   from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_TRACKED_SOURCE_FAILURE,
+  verifyQwenTrackedSourceFailureLive}
+  from './qwen-tracked-source-failure.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -100,6 +104,8 @@ export const QWEN_REPAIR_TURNS_RECOVERY_COMMENT=
   '/nession recover-qwen-turns issue=3784 run=44470557905';
 export const QWEN_TOOL_RECOVERY_COMMENT=
   '/nession recover-qwen-tools issue=3784 run=44256663685';
+export const QWEN_TRACKED_SOURCE_RECOVERY_COMMENT=
+  '/nession recover-qwen-source issue=4065 run=44733719096';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
@@ -165,6 +171,14 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     positive(event?.comment?.id)&&
     event.comment.body===QWEN_TOOL_RECOVERY_COMMENT&&
     issue===QWEN_TOOL_FAILURE.issue&&actionId===QWEN_TOOL_FAILURE.action_id;
+  const trackedSourceComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===QWEN_TRACKED_SOURCE_FAILURE.issue&&
+    event?.issue?.state==='open'&&!event?.issue.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&
+    event.comment.body===QWEN_TRACKED_SOURCE_RECOVERY_COMMENT&&
+    issue===QWEN_TRACKED_SOURCE_FAILURE.issue&&
+    actionId===QWEN_TRACKED_SOURCE_FAILURE.action_id;
   const repairTurnsComment=commanded&&event?.action==='created'&&
     event?.issue?.number===QWEN_REPAIR_TURNS_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
@@ -202,7 +216,7 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     reviewCommand?.[2]===actionId;
   const permitted=publisherWake||ownerReview||ownerRepair||
     recoveryComment||jsonRecovery||cliRecoveryComment||
-    repairTurnsComment||toolRecoveryComment||(commanded
+    repairTurnsComment||toolRecoveryComment||trackedSourceComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -405,7 +419,10 @@ async function main(){
     event?.comment?.body===QWEN_REPAIR_TURNS_RECOVERY_COMMENT;
   const recoveringQwenTools=commanded&&
     event?.comment?.body===QWEN_TOOL_RECOVERY_COMMENT;
-  const issue=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.issue:
+  const recoveringTrackedSource=commanded&&
+    event?.comment?.body===QWEN_TRACKED_SOURCE_RECOVERY_COMMENT;
+  const issue=commanded?(recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.issue:
+    recoveringQwenTools?QWEN_TOOL_FAILURE.issue:
     recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.issue:
     recoveringQwenCli?QWEN_CLI_FAILURE.issue:
     qwenV2CommentAction?3001:
@@ -431,7 +448,8 @@ async function main(){
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=ownerReviewCommand?.[2]??null;
   const newRepairAction=ownerRepairCommand?.[2]??null;
-  const actionId=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
+  const actionId=commanded?(recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.action_id:
+    recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
     recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.action_id:
     recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
     qwenV2CommentAction??newReviewAction??newRepairAction??
@@ -451,6 +469,18 @@ async function main(){
     await authenticatePublisherReviewerWake({environment:env,event,token}):null;
   assertDispatchAuthority({environment:env,event,run,issue,actionId,
     publisherWakeProof});
+  if(recoveringTrackedSource){
+    // Unlike historic one-offs, independently bind the CURRENT unedited
+    // owner comment to its canonical Issue URL before any App credential.
+    const live=await api(token,'/issues/comments/'+event.comment.id);
+    if(live?.id!==event.comment.id||
+       live.body!==QWEN_TRACKED_SOURCE_RECOVERY_COMMENT||
+       live.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+issue||
+       live.user?.login!=='BestNathan'||live.user?.type!=='User'||
+       live.author_association!=='OWNER'||
+       !live.created_at||live.created_at!==live.updated_at)
+      fail('tracked-source recovery requires live unedited Owner command');
+  }
   const issueRecord=await api(token,'/issues/'+issue);
   if(issueRecord.number!==issue||issueRecord.state!=='open'||issueRecord.pull_request||
       issueRecord.repository_url!=='https://api.github.com/repos/'+REPO)
@@ -466,6 +496,25 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recoveringTrackedSource){
+      // #4174: the old Worker itself has no Store write authority.
+      // Independently fetch the exact failed Run/Job/Artifact/log, and
+      // transition Store by CAS before dispatching a NEW signed ticket.
+      const proof=await verifyQwenTrackedSourceFailureLive(token);
+      const recovered=recoverAttestedQwenTrackedSourceFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
     if(recoveringQwenTools){
       const proof=await verifyQwenToolPolicyFailureLive(token);
       const recovered=recoverAttestedQwenToolFailure({
