@@ -4022,3 +4022,104 @@ async fn an_origin_less_client_stays_compatible() {
         .unwrap();
     assert_eq!(reply["payload"]["status"], "success");
 }
+
+#[tokio::test]
+async fn an_empty_presented_token_is_refused_when_one_is_configured() {
+    let (_db_dir, db_path) = test_db("test_ws_empty_token.db").unwrap();
+    let (addr, _handle) = start_test_server(origin_server_config(db_path, &[]))
+        .await
+        .unwrap();
+
+    let (mut ws_stream, _) = connect_async(upgrade_request(addr, "/ws", None).unwrap())
+        .await
+        .expect("connect");
+
+    let reply = authenticate_with(&mut ws_stream, "").await.unwrap();
+    assert_eq!(
+        reply["payload"]["status"], "failed",
+        "a missing credential must not authenticate a configured Server"
+    );
+}
+
+#[tokio::test]
+async fn an_unreadable_auth_frame_is_refused_when_one_is_configured() {
+    let (_db_dir, db_path) = test_db("test_ws_malformed_auth.db").unwrap();
+    let (addr, _handle) = start_test_server(origin_server_config(db_path, &[]))
+        .await
+        .unwrap();
+
+    let (mut ws_stream, _) = connect_async(upgrade_request(addr, "/ws", None).unwrap())
+        .await
+        .expect("connect");
+
+    // `{}` cannot be read as `ClientAuthPayload`; the handler maps an
+    // unreadable handshake to an empty token, which must fail closed.
+    let auth_msg = serde_json::json!({
+        "msg_type": "server.auth",
+        "id": "malformed-auth-1",
+        "timestamp": current_timestamp(),
+        "payload": {}
+    });
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            auth_msg.to_string(),
+        ))
+        .await
+        .unwrap();
+    let response = ws_stream.next().await.unwrap().unwrap();
+    let text = match response {
+        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+        other => panic!("Expected text response, got {other:?}"),
+    };
+    let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(reply["payload"]["status"], "failed");
+}
+
+#[tokio::test]
+async fn an_agent_registration_with_a_wrong_token_is_rejected() {
+    let (_db_dir, db_path) = test_db("test_ws_agent_wrong_token.db").unwrap();
+    let (addr, _handle) = start_test_server(origin_server_config(db_path, &[]))
+        .await
+        .unwrap();
+
+    let (mut ws_stream, _) = connect_async(upgrade_request(addr, "/ws", None).unwrap())
+        .await
+        .expect("connect");
+
+    let register_msg = serde_json::json!({
+        "msg_type": "server.agent.register",
+        "id": "wrong-agent-token",
+        "timestamp": current_timestamp(),
+        "payload": {
+            "agent_id": "wrong-token-agent",
+            "hostname": "test_host",
+            "ip_address": "127.0.0.1",
+            "port": 8080,
+            "auth_token": "wrong_token",
+            "protocol_manifest": {
+                "provider": "test-agent",
+                "protocols": {"git.status": {"versions": [1], "wire": ["git.status"]}}
+            },
+            "metadata": {
+                "tmux_version": "3.3a",
+                "os_version": "Linux",
+                "nession_version": "0.1.0"
+            },
+        }
+    });
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            register_msg.to_string(),
+        ))
+        .await
+        .unwrap();
+
+    let response = ws_stream.next().await.unwrap().unwrap();
+    let text = match response {
+        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+        other => panic!("Expected text response, got {other:?}"),
+    };
+    let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(reply["msg_type"], "server.agent.register");
+    assert_eq!(reply["payload"]["status"], "rejected");
+}
