@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Markdown } from '@/shared/markdown';
@@ -180,7 +181,13 @@ function PullRequestListBody({
   onLoadMore: () => void;
 }) {
   return (
-    <div data-testid="github-pr-list-scroll" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2">
+    <div
+      data-testid="github-pr-list-scroll"
+      className={cn(
+        'min-h-0 flex-1 overflow-y-auto overscroll-contain p-2',
+        workspaceBoundedScrollClearanceClass,
+      )}
+    >
       {error ? (
         <GithubNotice error={error} testId="github-pr-error" onRetry={onRefresh} />
       ) : loading ? (
@@ -360,7 +367,9 @@ export function GithubPullRequestDetailBody({
   repository: GithubRepositoryRef;
 }) {
   return (
-    <article data-testid={`github-pr-detail-${pull.number}`} className="flex flex-col gap-3 p-4 pb-16">
+    // #4188: the reader scroller owns the measured Capsule clearance; the
+    // detail must not reserve a capability-specific fixed band.
+    <article data-testid={`github-pr-detail-${pull.number}`} className="flex flex-col gap-3 p-4">
       <header className="flex flex-col gap-1">
         <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>#{pull.number}</p>
         <h2 className={chromeSansRole('title')}>{pull.title}</h2>

@@ -178,6 +178,79 @@ const workflows: GithubWorkflow[] = [
   },
 ];
 
+/**
+ * The deterministic long inventory behind `github=long` (#4188).
+ *
+ * The canonical fixture answers a handful of rows, which cannot overflow the
+ * nested App lists or a pushed reader at a phone width. These are ordinary
+ * shapes at a count that requires scrolling, so the Issues / Pull Requests /
+ * Actions Cases can measure the end of the real section scrollers.
+ */
+const LONG_COUNT = 36;
+
+const longIssues = Array.from({ length: LONG_COUNT }, (_, index) => ({
+  number: 4001 + index,
+  title: `Long fixture Issue ${index + 1}: read-only repository context`,
+  state: 'open',
+  author: { login: index % 2 === 0 ? 'fixture-dev' : 'fixture-owner' },
+  labels: index % 3 === 0 ? [{ name: 'requirement', color: '0e8a16' }] : [],
+  assignees: [],
+  updated_at: `2026-11-${String((index % 28) + 1).padStart(2, '0')}T00:00:00Z`,
+  url: `https://github.com/fixture-owner/nession/issues/${4001 + index}`,
+}));
+
+const longPullRequests = Array.from({ length: LONG_COUNT }, (_, index) => {
+  const ref = index === 0 ? 'feature/git-github' : `feature/long-${String(index).padStart(2, '0')}`;
+  return {
+    number: 5001 + index,
+    title: `Long fixture Pull Request ${index + 1}`,
+    state: 'open',
+    draft: index % 5 === 0,
+    merged: false,
+    author: { login: 'fixture-dev' },
+    head_ref_name: ref,
+    base_ref_name: 'main',
+    head: {
+      // The first entry is the fixture's own current branch; the rest are a
+      // realistic spread of same-repository and fork heads.
+      owner: index !== 0 && index % 4 === 0 ? 'fork-owner' : 'fixture-owner',
+      repo: 'nession',
+      ref,
+      sha: String(index + 1).padStart(40, '0'),
+    },
+    base: { ref: 'main', sha: '2'.repeat(40) },
+    updated_at: `2026-11-${String((index % 28) + 1).padStart(2, '0')}T00:00:00Z`,
+    url: `https://github.com/fixture-owner/nession/pull/${5001 + index}`,
+  };
+});
+
+const longWorkflows: GithubWorkflow[] = Array.from({ length: LONG_COUNT }, (_, index) => ({
+  id: 7001 + index,
+  name: `Workflow ${index + 1}`,
+  path: `.github/workflows/long-${String(index).padStart(2, '0')}.yml`,
+  state: index % 6 === 0 ? 'disabled' : 'active',
+  latest_run: index % 6 === 0
+    ? undefined
+    : {
+        id: 9001 + index,
+        status: index % 3 === 0 ? 'in_progress' : 'completed',
+        conclusion: index % 3 === 0 ? null : 'success',
+        branch: index === 0 ? 'feature/git-github' : 'main',
+        sha: String(index + 1).padStart(40, 'a'),
+        event: 'push',
+        created_at: '2026-11-01T00:00:00Z',
+        updated_at: '2026-11-01T00:05:00Z',
+        url: `https://github.com/fixture-owner/nession/actions/runs/${9001 + index}`,
+      },
+}));
+
+/** A reader body long enough to overflow the pushed App reader on a phone. */
+const LONG_DETAIL_BODY = Array.from(
+  { length: 40 },
+  (_, index) =>
+    `### Section ${index + 1}\n\nThis paragraph is part of the deterministic long fixture body (#4188). It exists so the pushed reader has real painted content past the first screenful.\n`,
+).join('\n');
+
 function error(code: GithubErrorResponse['code'], message: string, retryAfterSeconds?: number): GithubErrorResponse {
   return { state: 'error', code, message, retry_after_seconds: retryAfterSeconds };
 }
@@ -271,7 +344,23 @@ function answerIssues(context: GithubScenario, payload: Record<string, unknown>)
   }
   const state = String(payload.state ?? 'open');
   const cursor = payload.cursor ? Number(payload.cursor) : 1;
-  const filtered = issues.filter((issue) => state === 'all' || issue.state === state);
+  const source = context.scenario === 'long' ? longIssues : issues;
+  const filtered = source.filter((issue) => state === 'all' || issue.state === state);
+  if (context.scenario === 'long') {
+    // The caller's limit is what the real agent clamps to; one page is enough
+    // for the long App list to overflow at a phone width.
+    const limit = requestedLimit(payload, 20);
+    const start = Math.max(0, (cursor - 1) * limit);
+    const page = filtered.slice(start, start + limit);
+    const hasMore = start + page.length < filtered.length;
+    return {
+      state: 'ok',
+      repository,
+      issues: page,
+      has_more: hasMore,
+      next_cursor: hasMore ? String(cursor + 1) : null,
+    };
+  }
   const page = context.scenario === 'empty' ? [] : filtered.slice((cursor - 1) * 2, cursor * 2);
   const hasMore = context.scenario !== 'empty' && cursor * 2 < filtered.length;
   return {
@@ -283,6 +372,13 @@ function answerIssues(context: GithubScenario, payload: Record<string, unknown>)
   };
 }
 
+/** The page size a real provider would clamp the request to. */
+function requestedLimit(payload: Record<string, unknown>, fallback: number): number {
+  return typeof payload.limit === 'number' && payload.limit > 0
+    ? Math.floor(payload.limit)
+    : fallback;
+}
+
 function answerIssueDetail(
   context: GithubScenario,
   payload: Record<string, unknown>,
@@ -291,7 +387,8 @@ function answerIssueDetail(
   if (context.scenario === 'error-detail') {
     return error('not_found', 'fixture missing');
   }
-  const issue = issues.find((candidate) => candidate.number === Number(payload.number));
+  const source = context.scenario === 'long' ? longIssues : issues;
+  const issue = source.find((candidate) => candidate.number === Number(payload.number));
   if (!issue) {
     return error('not_found', 'fixture missing');
   }
@@ -301,7 +398,7 @@ function answerIssueDetail(
     issue: {
       ...issue,
       created_at: '2026-10-01T00:00:00Z',
-      body: ISSUE_BODY,
+      body: context.scenario === 'long' ? LONG_DETAIL_BODY : ISSUE_BODY,
     },
   };
 }
@@ -315,23 +412,37 @@ function answerPullRequests(
     return error('access_denied', 'fixture denied');
   }
   const state = String(payload.state ?? 'open');
-  const filtered = pullRequests.filter((pull) => state === 'all' || pull.state === state);
+  const source = context.scenario === 'long' ? longPullRequests : pullRequests;
+  const filtered = source.filter((pull) => state === 'all' || pull.state === state);
   const current = filtered.find(
     (pull) =>
       pull.head.owner === repository.owner &&
       pull.head.repo === repository.repo &&
       pull.head.ref === 'feature/git-github',
   );
+  // `long` honors the caller's page limit and cursor like the real provider;
+  // the first page is enough for the nested App list to overflow at a phone
+  // width.
+  const cursor = payload.cursor ? Math.max(1, Number(payload.cursor)) : 1;
+  const limit = requestedLimit(payload, 20);
+  const start = (cursor - 1) * limit;
+  const page = context.scenario === 'long'
+    ? filtered.slice(start, start + limit)
+    : context.scenario === 'empty'
+      ? []
+      : filtered;
+  const hasMore =
+    context.scenario === 'long' && start + page.length < filtered.length;
   return {
     state: 'ok',
     repository,
-    pull_requests: context.scenario === 'empty' ? [] : filtered,
+    pull_requests: page,
     current_branch:
       context.scenario === 'relation-unknown' ? 'unknown' : current ? 'matched' : 'none',
     current_branch_pr:
       context.scenario === 'relation-unknown' ? null : current?.number ?? null,
-    has_more: false,
-    next_cursor: null,
+    has_more: hasMore,
+    next_cursor: hasMore ? '2' : null,
   };
 }
 
@@ -340,7 +451,8 @@ function answerPullRequestDetail(
   payload: Record<string, unknown>,
 ): GithubPullRequestDetailResponse {
   context.counts.pullRequestDetail += 1;
-  const pull = pullRequests.find((candidate) => candidate.number === Number(payload.number));
+  const source = context.scenario === 'long' ? longPullRequests : pullRequests;
+  const pull = source.find((candidate) => candidate.number === Number(payload.number));
   if (!pull) {
     return error('not_found', 'fixture missing');
   }
@@ -351,7 +463,9 @@ function answerPullRequestDetail(
       ...pull,
       created_at: '2026-10-01T00:00:00Z',
       merged_at: pull.merged ? '2026-10-02T00:00:00Z' : null,
-      body: '## Fixture PR\n\nA **read-only** Pull Request body.',
+      body: context.scenario === 'long'
+        ? LONG_DETAIL_BODY
+        : '## Fixture PR\n\nA **read-only** Pull Request body.',
     },
   };
 }
@@ -363,8 +477,17 @@ function answerWorkflows(
   context.counts.workflows += 1;
   const scope: GithubRunScope = payload.scope === 'branch' ? 'branch' : 'repository';
   const branch = 'feature/git-github';
-  const scoped: GithubWorkflow[] = workflows.map((workflow): GithubWorkflow =>
-    workflow.id === 1 && scope === 'branch'
+  const source = context.scenario === 'long' ? longWorkflows : workflows;
+  // `long` honors the caller's page limit and cursor like the real provider.
+  const cursor = payload.cursor ? Math.max(1, Number(payload.cursor)) : 1;
+  const limit = requestedLimit(payload, 30);
+  const start = (cursor - 1) * limit;
+  const page = context.scenario === 'long'
+    ? source.slice(start, start + limit)
+    : source;
+  const currentId = page.find((workflow) => workflow.latest_run)?.id;
+  const scoped: GithubWorkflow[] = page.map((workflow): GithubWorkflow =>
+    workflow.id === currentId && scope === 'branch'
       ? {
           ...workflow,
           latest_run: {
@@ -377,13 +500,14 @@ function answerWorkflows(
         }
       : workflow,
   );
+  const hasMore = context.scenario === 'long' && start + page.length < source.length;
   return {
     state: 'ok',
     repository,
     scope,
     branch: scope === 'branch' ? branch : null,
     workflows: scoped,
-    has_more: false,
-    next_cursor: null,
+    has_more: hasMore,
+    next_cursor: hasMore ? String(cursor + 1) : null,
   };
 }

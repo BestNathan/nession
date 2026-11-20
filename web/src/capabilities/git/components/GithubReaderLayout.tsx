@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { ArrowLeft, Columns2 } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 
 /**
@@ -81,7 +82,16 @@ export function GithubReaderLayout({
             </Button>
           </div>
         ) : null}
-        <div data-testid={`${readerTestId}-scroll`} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        {/* #4188: the reader column is a declared bounded surface, so its
+            reader is an internal scroll owner and spends the host inset. The
+            list column's own scroller does the same in each section view. */}
+        <div
+          data-testid={`${readerTestId}-scroll`}
+          className={cn(
+            'min-h-0 flex-1 overflow-y-auto overscroll-contain',
+            workspaceBoundedScrollClearanceClass,
+          )}
+        >
           {reader}
         </div>
       </div>

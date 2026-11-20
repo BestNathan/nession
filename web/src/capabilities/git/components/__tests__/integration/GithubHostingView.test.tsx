@@ -5,6 +5,7 @@ import { GithubHostingView } from '@/capabilities/git/components/GithubHostingVi
 import { githubApi } from '@/capabilities/git/GithubPlugin';
 import { fixtureGithubSurface } from '@/app/fixture/fixtureGithub';
 import { FIXTURE_AGENTS } from '@/app/fixture/fixtureData';
+import { WORKSPACE_BOUNDED_SCROLL_MARKER } from '@/shared/lib/workspaceScrollClearance';
 
 const agentId = FIXTURE_AGENTS[0]!.agent_id;
 const sessionId = `${agentId}:dev`;
@@ -36,6 +37,33 @@ describe('GithubHostingView', () => {
     });
     expect(await screen.findByTestId('github-issue-list')).toBeInTheDocument();
     expect(await screen.findByTestId('github-issue-row-1290')).toBeInTheDocument();
+  });
+
+  it('gives every nested GitHub section a declared bounded scroll owner (#4188)', async () => {
+    // GitWorkspace is `appScroll: 'bounded'`, so no host page scroller exists
+    // below the tab bar. Each list and each pushed reader must be its own
+    // marked scroll owner that spends the measured inset — not a capability
+    // padding guess, and not a clipped column.
+    renderHosting();
+    const marker = WORKSPACE_BOUNDED_SCROLL_MARKER;
+
+    const issueList = await screen.findByTestId('github-issue-list-scroll');
+    expect(issueList.className).toContain(marker);
+    expect(issueList.className).toContain('overflow-y-auto');
+
+    await userEvent.click(await screen.findByTestId('github-issue-row-1290'));
+    const issueReader = await screen.findByTestId('github-issue-reader-scroll');
+    expect(issueReader.className).toContain(marker);
+
+    await userEvent.click(screen.getByTestId('github-tab-pull-requests'));
+    const prList = await screen.findByTestId('github-pr-list-scroll');
+    expect(prList.className).toContain(marker);
+
+    await userEvent.click(screen.getByTestId('github-tab-actions'));
+    const actions = await screen.findByTestId('github-actions-scroll');
+    expect(actions.className).toContain(marker);
+    // The retired fixed band must not reappear beside the measured one.
+    expect(actions.className).not.toContain('pb-16');
   });
 
   it('fetches a detail lazily, renders its Markdown safely and never injects raw HTML', async () => {
