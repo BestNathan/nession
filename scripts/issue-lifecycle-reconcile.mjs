@@ -1077,17 +1077,17 @@ async function selfTest() {
     throw Error('unexpected fixture API path ' + path);
   };
   // GitHub-native completion must not bypass exact-source qualification.
-  const nativeRead=async(path,opts={}) =>
+  const nativeCloseFixtureRead=async(path,opts={}) =>
     path.endsWith('/issues/19') && opts.method!=='PATCH'
       ? {...live,state:'closed',state_reason:'completed'} : mock(path,opts);
   assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
-    request:nativeRead,qualityReader:fixtureQuality})).qualified,true);
+    request:nativeCloseFixtureRead,qualityReader:fixtureQuality})).qualified,true);
   assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
-    request:nativeRead,qualityReader:async()=>({status:'fail'})})).qualified,false);
+    request:nativeCloseFixtureRead,qualityReader:async()=>({status:'fail'})})).qualified,false);
   assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
     request:async(path,opts)=>{
       if(path.endsWith('/pulls/21'))return {...effectivePr,merged_at:null};
-      return nativeRead(path,opts);
+      return nativeCloseFixtureRead(path,opts);
     },qualityReader:fixtureQuality})).qualified,false);
   const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock, qualityReader: fixtureQuality });
   assert.equal(once.action, 'closed');
