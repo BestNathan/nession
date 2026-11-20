@@ -79,6 +79,13 @@ jobs:
          github.event.comment.body == '/nession recover-qwen-tools issue=3784 run=44256663685') ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
+         github.event.issue.number == 4065 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession recover-qwen-source issue=4065 run=44733719096') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
          github.event.issue.number == 3784 &&
          github.event.issue.state == 'open' &&
          !github.event.issue.pull_request &&
@@ -190,6 +197,7 @@ jobs:
           # This includes original post-model failure, Store CAS and replay negatives.
           node scripts/lib/agent/orchestration/qwen-cli-failure-selftest.mjs
           node scripts/lib/agent/orchestration/qwen-tool-policy-failure-selftest.mjs
+          node scripts/lib/agent/orchestration/qwen-tracked-source-failure-selftest.mjs
           node scripts/lib/agent/orchestration/publisher-reviewer-wake-selftest.mjs
           node scripts/lib/agent/orchestration/dispatch-intent-selftest.mjs
           node scripts/lib/agent/orchestration/worker-preflight-selftest.mjs
