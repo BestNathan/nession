@@ -496,6 +496,123 @@ function dispatchBatchAudit(repo,issue){
   return {status:'AUDIT_DISPATCHED'};
 }
 
+// #4140: an Agent-authored source repair is an implementation PR, not the
+// Controller's synthetic release sync. It must own a real Bug before model edits.
+export function conflictRepairIssueMarker(branch,mainSha,laneSha){
+  branchName(branch);
+  if(!SHA.test(mainSha)||!SHA.test(laneSha))reject('invalid conflict Issue SHA pair');
+  return '<!-- nession-agent-conflict-repair:v1 lane='+branch+
+    ' main='+mainSha+' target='+laneSha+' -->';
+}
+export function conflictRepairIssueBody(branch,mainSha,laneSha){
+  const marker=conflictRepairIssueMarker(branch,mainSha,laneSha);
+  return [
+    '## Description',
+    'Real main → '+branch+' source conflict detected by the trusted Controller (#2926/#4140).',
+    'Only a Draft repair PR is authorized. No protected merge or Acceptance grant.',
+    '',
+    '## Reproduction',
+    '- Pinned main SHA: '+mainSha,
+    '- Pinned target lane SHA: '+laneSha,
+    '- Git merge-tree reports a conflict for exactly this source pair.',
+    '',
+    '## Root Cause',
+    'Concurrent branches changed incompatible content; semantic root cause must be',
+    'examined in the resulting Draft PR, not inferred from GitHub workflow success.',
+    '',
+    '## Requirements: source-pinned conflict repair',
+    'The Agent may edit only ordinary conflict files, preserving both histories.',
+    'A trusted Publisher independently checks the tree, parents and clean replay.',
+    'No workflow, instruction, Gate or credentials files may be changed.',
+    '',
+    '### Success Criteria',
+    '- [ ] SC-01: Real Agent edit on exact pinned Git conflict passes independent',
+    '  conflict-only and one-parent clean-replay Git tree verification.',
+    '- [ ] SC-02: Independently authorized Publisher publishes source-pinned Draft PR',
+    '  and verifies exact HEAD/tree/parent with no protected source mutation.',
+    '- [ ] SC-03: After reviewed protected repair merge and exact-head CI/Acceptance,',
+    '  original Convergence Controller rechecks the updated source refs.',
+    '',
+    '## Acceptance Plan',
+    '~~~yaml',
+    'acceptance:',
+    '  SC-01:',
+    '    when: pr',
+    '    method: agent',
+    '  SC-02:',
+    '    when: pr',
+    '    method: agent',
+    '  SC-03:',
+    '    when: merged',
+    '    branch: staging',
+    '    method: agent',
+    '~~~',
+    '',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-01 | Pending | exact Agent Run/Attempt and independent Git tree |',
+    '| SC-02 | Pending | Publisher App/PR and Git readback |',
+    '| SC-03 | Pending | reviewed merge, Quality/Case/E2E and Controller follow-up |',
+    '',
+    '## Product alignment',
+    '- [x] Follows VISION.md continuous AI workspace goal.',
+    '- [x] Preserves PRINCIPLE.md progressive review and one Controller owner.',
+    '',
+    '## E2E Verification',
+    '### New',
+    '- none: Git/CI-only; native Git and GitHub receipts are primary evidence',
+    '### Regression',
+    '- none: source-aligned PR Quality/Case/selected E2E own regression proof',
+    '',
+    '## E2E Report',
+    '| ID | Type | Result | Evidence |',
+    '|---|---|---|---|',
+    '',
+    '### Knowledge Impact',
+    '- Decision: Read',
+    '- Related knowledge: #2926 Staging Convergence; #4140 Agent conflict integration.',
+    '- Reason: transient source conflict, no new architecture.',
+    '- Owner and timing: CI/Convergence owner after protected repair merge.',
+    '- Evidence: exact Run/Artifact/PR/Acceptance provenance.',
+    '',
+    '## Prototype',
+    '- Not needed: Draft PR is the review surface, no new UI.',
+    '',
+    '**Status:** Approved for Draft-only Agent assistance, not protected merge.',
+    marker,'',
+  ].join('\n');
+}
+function ensureConflictRepairIssue(repo,plan,lane){
+  const marker=conflictRepairIssueMarker(lane.branch,plan.main_sha,lane.sha);
+  const title='Bug: Agent Convergence repair '+lane.branch+' '+
+    plan.main_sha.slice(0,12)+' '+lane.sha.slice(0,12);
+  const query='repo:'+repo+' is:issue in:title "'+title+'"';
+  const found=ghIssueWrite(['--method','GET','search/issues?q='+
+    encodeURIComponent(query)+'&per_page=50']);
+  if(!Array.isArray(found.items)||found.total_count>=50)
+    reject('incomplete conflict Bug discovery; no duplicate Issue is safe');
+  const matched=found.items.filter(x=>x.title===title);
+  if(matched.length>1)reject('duplicate source-pinned conflict Bug');
+  if(matched.length){
+    const item=matched[0];
+    if(item.state!=='open'||!item.body?.includes(marker)||
+      !item.labels?.some(x=>x.name==='bug')||
+      !item.labels?.some(x=>x.name==='status:in-progress'))
+      reject('previous conflict Bug is closed or lacks provenance/ownership');
+    return {number:item.number,action:'reused'};
+  }
+  const body=conflictRepairIssueBody(lane.branch,plan.main_sha,lane.sha);
+  const created=ghIssueWrite(['--method','POST','repos/'+repo+'/issues',
+    '-f','title='+title,'-f','body='+body,
+    '-f','labels[]=bug','-f','labels[]=ci',
+    '-f','labels[]=verification:integration','-f','labels[]=status:in-progress']);
+  if(!Number.isSafeInteger(created.number)||created.number<1||
+    created.title!==title||created.body!==body||created.state!=='open')
+    reject('new source-bound conflict Issue write could not be authenticated');
+  return {number:created.number,action:'created'};
+}
+
 function dispatchConflictReview(repo, receipt, action, plan, lane) {
   const token = process.env.DISPATCH_GITHUB_TOKEN;
   if (!token) reject('the trusted Controller Actions dispatcher token is missing');
@@ -517,14 +634,22 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
     run.repository?.full_name === repo &&
     run.head_repository?.full_name === repo);
   if (recorded) return { status: 'EXISTING_ANALYSIS', run_id: recorded.id };
+  const production=action==='sync-main-to-lane'&&
+    process.env.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED==='true'&&
+    lane.workflow_write_required!==true;
+  const repairIssue=production?ensureConflictRepairIssue(repo,plan,lane):null;
   api(['--method', 'POST', 'repos/' + repo + '/actions/workflows/' + workflow + '/dispatches',
     '-f', 'ref=main',
+    '-f', 'inputs[repair_issue_number]=' + (repairIssue?.number??''),
     '-f', 'inputs[pr_number]=' + receipt.number,
     '-f', 'inputs[branch]=' + lane.branch,
     '-f', 'inputs[main_sha]=' + plan.main_sha,
     '-f', 'inputs[lane_sha]=' + lane.sha,
     '-f', 'inputs[direction]=' + action]);
-  return { status: 'ANALYSIS_DISPATCHED' };
+  return {status:'ANALYSIS_DISPATCHED',
+    ...(repairIssue?{repair_issue_number:repairIssue.number,
+      repair_issue_action:repairIssue.action}:{}),
+  };
 }
 
 // One-time transition: preserve already-approved legacy batches but retire
@@ -754,6 +879,11 @@ function reconcile(plan) {
 }
 
 function selfTest() {
+  const sourceMarker=conflictRepairIssueMarker('staging','a'.repeat(40),'b'.repeat(40));
+  assert.match(sourceMarker,/nession-agent-conflict-repair:v1/);
+  const repairBody=conflictRepairIssueBody('staging','a'.repeat(40),'b'.repeat(40));
+  assert.ok(repairBody.includes(sourceMarker)&&repairBody.includes('## Acceptance Plan'));
+  assert.throws(()=>conflictRepairIssueMarker('../evil','a'.repeat(40),'b'.repeat(40)));
   // A YAML comment indented *inside* an `if: >-` block scalar is not a
   // comment: GitHub parses it as part of the job expression and rejects the
   // entire workflow before any job is created (#2953, run 42569835883).
