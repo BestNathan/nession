@@ -27,7 +27,7 @@ export function auditFinalSource({repository,issue,pr,merge,store,reviewer,
   scResults,ci}={}) {
   const reasons=[];
   const finalSha=pr?.head?.sha;
-  const merged=pr?.state==='closed'&&pr?.merged_at!=null;
+  const merged=pr?.state==='closed'&&pr?.merged_at!=null&&pr?.merged===true;
   const status=()=>merged?'merged/source-unverified':'still-open/blocked';
   reason(reasons,repository==='BestNathan/nession','repository identity mismatch');
   reason(reasons,positive(issue?.number)&&issue?.state==='open',
@@ -38,7 +38,8 @@ export function auditFinalSource({repository,issue,pr,merge,store,reviewer,
   reason(reasons,merged&&sha(pr?.merge_commit_sha),
     'PR not merged at an independently attested merge commit');
   reason(reasons,merge?.sha===pr?.merge_commit_sha&&Array.isArray(merge?.parents)&&
-    merge.parents.length===2&&merge.parents.includes(finalSha),
+    merge.parents.length===2&&merge.parents[1]===finalSha&&
+    sha(merge.parents[0])&&merge.parents[0]!==finalSha,
     'merge commit does not bind final PR head as parent');
   reason(reasons,store?.issue===issue?.number&&store?.pr_number===pr?.number&&
     positive(store?.version)&&sha(store?.source_sha)&&ACTION.test(store?.review_action_id??''),
