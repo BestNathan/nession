@@ -49,9 +49,9 @@ done
 bash "$root/catalog-selftest.sh"
 mkdir -p "$tmp/generic/linux-amd64"
 cp -a "$tmp/jq-new/." "$tmp/generic/linux-amd64/"
-TOOLCHAIN_TOOL=jq TOOLCHAIN_VERSION=1.8.1 TOOLCHAIN_TARGETS=linux/amd64 \\
-TOOLCHAIN_FINGERPRINT="sha256:$(printf sample | sha256sum | cut -d ' ' -f1)" \\
-TOOLCHAIN_CATALOG_SHA="$(printf 'a%.0s' {1..40})" TOOLCHAIN_ROOTFS="$tmp/generic" \\
+TOOLCHAIN_TOOL=jq TOOLCHAIN_VERSION=1.8.1 TOOLCHAIN_TARGETS=linux/amd64 \
+TOOLCHAIN_FINGERPRINT="sha256:$(printf sample | sha256sum | cut -d ' ' -f1)" \
+TOOLCHAIN_CATALOG_SHA="$(printf 'a%.0s' {1..40})" TOOLCHAIN_ROOTFS="$tmp/generic" \
   bash "$root/cargo-v2.sh" local
 echo "Generic catalog + OCI Index fixture: PASS"
 
