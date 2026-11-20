@@ -71,9 +71,21 @@ export const REVIEWER_PREMODEL_FAILURE_3784_C=Object.freeze({
   failure_code:'qwen_reviewer_owner_reconciler_premodel_failure',
   state_version:35,
 });
+// #4192: actual #4065/#4191 Reviewer prepare failed on a valid 161-KiB base.
+// This is a terminal pre-model Run: no model or verdict artifacts were emitted.
+export const REVIEWER_PREMODEL_FAILURE_4065=Object.freeze({
+  issue:4065,
+  action_id:'73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127',
+  run_id:44744956936,
+  source_sha:'f79547b0def78418e109aba82673d7f20edbc341',
+  main_sha:'a1e9ae535f5581cfbfeaee6b0ce35a07aab40b3e',
+  publisher_run_id:44744656206,
+  failure_code:'qwen_reviewer_large_base_premodel_failure',
+  state_version:9,
+});
 export const REVIEWER_PREMODEL_FAILURE_SOURCES=Object.freeze([
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
-  REVIEWER_PREMODEL_FAILURE_3784_C,
+  REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_FAILURE_4065,
 ]);
 export const REVIEWER_JSON_FAILURE=Object.freeze({
   issue:3433,
@@ -297,6 +309,7 @@ export function validateDevelopmentState(state) {
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
+            REVIEWER_PREMODEL_FAILURE_4065.failure_code,
             REVIEWER_JSON_FAILURE.failure_code,
             REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
@@ -335,6 +348,14 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_PREMODEL_FAILURE_4065.failure_code&&(
+            state.issue!==REVIEWER_PREMODEL_FAILURE_4065.issue||
+            item.id!==REVIEWER_PREMODEL_FAILURE_4065.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||
+            item.task.sha!==REVIEWER_PREMODEL_FAILURE_4065.source_sha||
+            r.source_run_id!==REVIEWER_PREMODEL_FAILURE_4065.run_id||
             r.source_attempt!==1))||
           (r.failure_code===REVIEWER_PREMODEL_FAILURE_3784_C.failure_code&&(
             state.issue!==REVIEWER_PREMODEL_FAILURE_3784_C.issue||
@@ -405,6 +426,7 @@ export function validateDevelopmentState(state) {
               [REVIEWER_PREMODEL_FAILURE.failure_code,
                 REVIEWER_PREMODEL_FAILURE_3784.failure_code,
                 REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
+                REVIEWER_PREMODEL_FAILURE_4065.failure_code,
                 REVIEWER_JSON_FAILURE.failure_code,
                 REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code))))
         reject('invalid authenticated failure receipt');
@@ -1034,7 +1056,16 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
      !state.transitions.some(t=>t.kind==='publisher'&&
        t.run_id===f.publisher_run_id&&t.attempt===1&&
        t.target_sha===f.source_sha&&t.outcome==='published')||
-     (f.issue===3784
+     (f.issue===4065
+       ?(state.outbox.length!==2||state.repair_attempts!==0||
+         !state.outbox.some(x=>
+           x.id===QWEN_TRACKED_SOURCE_FAILURE.action_id&&
+           x.status==='failed'&&x.task.role==='developer'&&
+           x.task.task==='implement'&&
+           x.task.sha===QWEN_TRACKED_SOURCE_FAILURE.source_sha&&
+           x.receipt?.source_run_id===QWEN_TRACKED_SOURCE_FAILURE.run_id&&
+           x.receipt?.failure_code===QWEN_TRACKED_SOURCE_FAILURE.failure_code))
+       :f.issue===3784
        ?(state.outbox.length!==3||
          !state.outbox.some(x=>x.id===QWEN_CLI_FAILURE.action_id&&x.status==='failed')||
          !state.outbox.some(x=>x.id===QWEN_TOOL_FAILURE.action_id&&x.status==='failed'))
