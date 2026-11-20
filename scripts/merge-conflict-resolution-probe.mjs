@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {allowedConflictPath} from './merge-conflict-file-policy.mjs';
 
 const SHA = /^[a-f0-9]{40}$/;
 function git(cwd, args, {allowConflict=false, env={}}={}) {
@@ -24,8 +25,8 @@ function pathsFromUnmerged(cwd) {
     return match[2];
   }))];
   if(!p.length||p.length>32)throw Error('expected 1..32 ordinary conflict files');
-  for(const v of p)if(v.startsWith('.github/workflows/')||v.endsWith('/AGENTS.md')||v==='AGENTS.md')
-    throw Error('pilot does not resolve workflow or instruction files');
+  for(const v of p)if(!allowedConflictPath(v))
+    throw Error('unsupported security-sensitive Git conflict path');
   return p;
 }
 function mergeTree(cwd,a,b) {
