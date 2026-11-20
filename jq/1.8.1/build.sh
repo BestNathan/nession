@@ -18,3 +18,4 @@ if [[ "$mode" == prepare ]]; then
 fi
 [[ -x "$rootfs/bin/jq" && ! -L "$rootfs/bin/jq" ]] || { echo "missing jq binary" >&2; exit 1; }
 [[ "$("$rootfs/bin/jq" --version)" == "jq-${version}" ]] || { echo "incorrect jq version" >&2; exit 1; }
+printf '%s  %s\n' "$digest" "$rootfs/bin/jq" | sha256sum --check --status || { echo "installed jq digest differs from official pinned source" >&2; exit 1; }
