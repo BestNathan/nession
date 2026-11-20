@@ -591,6 +591,9 @@ assert.throws(()=>sourceAllowed(sourceSha,'reviewer',{run:args=>{
 key.fill(0);
 second.fill(0);
 other.fill(0);
+// #4174: the same canonical Controller Gate must execute genuine failed
+// source Run/Artifact negative fixtures and unique Store CAS/replay proof.
+await import('./qwen-tracked-source-failure-selftest.mjs');
 console.log('Controller dispatch: trusted run binding, fork/retry/role denial, HMAC domain separation passed');
 
 // New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
