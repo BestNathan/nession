@@ -618,9 +618,10 @@ impl ClaudeCodeAgentExtension {
     /// rendering decisions, and keeping them there is what makes every physical
     /// record visible regardless of what this version understands.
     ///
-    /// A cursor names both the transcript and a file generation. A cursor from
-    /// another transcript or a replaced file is `stale_cursor` and carries no
-    /// records, so stale offsets are never applied to different bytes.
+    /// A cursor names both the transcript and the byte range of the page it
+    /// was issued with. A cursor from another transcript, or one whose page
+    /// was rewritten, is `stale_cursor` and carries no records, so stale
+    /// offsets are never applied to different bytes.
     async fn handle_transcript_records(&self, payload: Value) -> anyhow::Result<Value> {
         let request: TranscriptRecordsRequestV1 = match serde_json::from_value(payload) {
             Ok(request) => request,
@@ -648,11 +649,13 @@ impl ClaudeCodeAgentExtension {
             ))?);
         };
 
-        let (end_offset, expected_generation) = match &request.cursor {
-            None => (u64::MAX, None),
+        let cursor = match &request.cursor {
+            None => None,
             Some(raw) => match records::decode_ref(raw) {
-                Some(decoded) if decoded.transcript_id == request.transcript_id => {
-                    (decoded.offset, Some(decoded.generation))
+                Some(records::Reference::Cursor(cursor))
+                    if cursor.transcript_id == request.transcript_id =>
+                {
+                    Some(cursor)
                 }
                 // A cursor this provider did not issue, or one issued for a
                 // different transcript, names no page here. Fail closed rather
@@ -667,33 +670,30 @@ impl ClaudeCodeAgentExtension {
 
         let limit = TranscriptRecordsResponseV1::page_limit(request.limit);
         let has_cursor = request.cursor.is_some();
-        let page =
-            match read_raw_page_blocking(chosen.clone(), end_offset, expected_generation, limit)
-                .await
+        let page = match read_raw_page_blocking(chosen.clone(), cursor, limit).await {
+            Ok(page) => page,
+            // The reader reports every unusable cursor as `InvalidInput`; the
+            // caller asked to continue from a boundary this file no longer has.
+            Err(ReadFailure::Read(e))
+                if has_cursor && e.kind() == std::io::ErrorKind::InvalidInput =>
             {
-                Ok(page) => page,
-                // The reader reports every unusable cursor as `InvalidInput`; the
-                // caller asked to continue from a boundary this file no longer has.
-                Err(ReadFailure::Read(e))
-                    if has_cursor && e.kind() == std::io::ErrorKind::InvalidInput =>
-                {
-                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
-                        TranscriptRecordsStateV1::StaleCursor,
-                    ))?);
-                }
-                Err(ReadFailure::Read(e)) => {
-                    debug!("claude-code raw transcript read failed: {e}");
-                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
-                        "the transcript could not be read",
-                    ))?);
-                }
-                Err(ReadFailure::Task(e)) => {
-                    debug!("claude-code raw transcript read task failed: {e}");
-                    return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
-                        "the transcript read did not complete",
-                    ))?);
-                }
-            };
+                return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
+                    TranscriptRecordsStateV1::StaleCursor,
+                ))?);
+            }
+            Err(ReadFailure::Read(e)) => {
+                debug!("claude-code raw transcript read failed: {e}");
+                return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
+                    "the transcript could not be read",
+                ))?);
+            }
+            Err(ReadFailure::Task(e)) => {
+                debug!("claude-code raw transcript read task failed: {e}");
+                return Ok(serde_json::to_value(TranscriptRecordsResponseV1::error(
+                    "the transcript read did not complete",
+                ))?);
+            }
+        };
 
         let is_bound = self
             .bound_conversation(&request.session_id, &found)
@@ -710,10 +710,10 @@ impl ClaudeCodeAgentExtension {
             .records
             .into_iter()
             .map(|record| TranscriptRecordV1 {
-                record_ref: records::encode_ref(
+                record_ref: records::encode_record_ref(
                     &chosen.claude_session_id,
                     record.offset,
-                    &page.generation,
+                    record.fingerprint,
                 ),
                 offset: record.offset,
                 size_bytes: record.size_bytes,
@@ -726,9 +726,7 @@ impl ClaudeCodeAgentExtension {
             transcript: Some(transcript_item(&chosen)),
             activity: Some(activity),
             records,
-            next_cursor: page.next_offset.map(|offset| {
-                records::encode_ref(&chosen.claude_session_id, offset, &page.generation)
-            }),
+            next_cursor: page.next_cursor.as_ref().map(records::encode_cursor),
             has_more: page.has_more,
             partial_tail: page.partial_tail,
             error: None,
@@ -738,10 +736,10 @@ impl ClaudeCodeAgentExtension {
     /// Answer `claude-code.transcript-record` (#3726).
     ///
     /// The bounded full-record read for a page placeholder. The opaque
-    /// reference carries the transcript identity, byte offset and generation;
-    /// the identity is resolved against the Session's authorized transcripts
-    /// before anything is opened, and the generation is re-checked before any
-    /// bytes are returned.
+    /// reference carries the transcript identity, byte offset and a
+    /// fingerprint of the line's bytes; the identity is resolved against the
+    /// Session's authorized transcripts before anything is opened, and the
+    /// fingerprint is re-checked before any bytes are returned.
     async fn handle_transcript_record(&self, payload: Value) -> anyhow::Result<Value> {
         let request: TranscriptRecordRequestV1 = match serde_json::from_value(payload) {
             Ok(request) => request,
@@ -752,7 +750,8 @@ impl ClaudeCodeAgentExtension {
             }
         };
 
-        let Some(decoded) = records::decode_ref(&request.record_ref) else {
+        let Some(records::Reference::Record(decoded)) = records::decode_ref(&request.record_ref)
+        else {
             return Ok(serde_json::to_value(TranscriptRecordResponseV1::bare(
                 TranscriptRecordStateV1::NotFound,
             ))?);
@@ -780,7 +779,7 @@ impl ClaudeCodeAgentExtension {
         let limit = TranscriptRecordResponseV1::chunk_limit(request.limit);
         let chunk = match read_record_blocking(
             chosen,
-            decoded.generation,
+            decoded.fingerprint,
             decoded.offset,
             request.offset.unwrap_or(0),
             limit,
@@ -1097,17 +1096,11 @@ async fn read_transcript_page_blocking(
 /// Read a raw record page off the async worker.
 async fn read_raw_page_blocking(
     conversation: conversation::Discovered,
-    offset: u64,
-    expected_generation: Option<String>,
+    cursor: Option<records::Cursor>,
     limit: u32,
 ) -> Result<records::RawPage, ReadFailure> {
     tokio::task::spawn_blocking(move || {
-        records::read_page(
-            &conversation,
-            Some(offset),
-            expected_generation.as_deref(),
-            limit as usize,
-        )
+        records::read_page(&conversation, cursor.as_ref(), limit as usize)
     })
     .await
     .map_err(ReadFailure::Task)?
@@ -1117,7 +1110,7 @@ async fn read_raw_page_blocking(
 /// Read one raw record chunk off the async worker.
 async fn read_record_blocking(
     conversation: conversation::Discovered,
-    generation: String,
+    fingerprint: u64,
     line_offset: u64,
     chunk_offset: u64,
     chunk_limit: u32,
@@ -1125,7 +1118,7 @@ async fn read_record_blocking(
     tokio::task::spawn_blocking(move || {
         records::read_record(
             &conversation,
-            &generation,
+            fingerprint,
             line_offset,
             chunk_offset,
             chunk_limit,
@@ -2206,6 +2199,134 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_rewrite_that_preserves_the_first_line_is_refused_for_ref_and_cursor() {
+        // `#4027`: the generation used to hash only the first line, so this
+        // rewrite kept the old reference and cursor valid. The reference then
+        // returned "three" under the identity issued for "two".
+        let lines = vec![spoken("u1", "user", "one"), spoken("u2", "user", "two")];
+        let (root, _guard) = projects_with_lines("aaa", &lines);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let first = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+            }))
+            .await
+            .unwrap();
+        let record = &raw_records(&first)[0];
+        assert_eq!(record["raw"], spoken("u2", "user", "two"));
+        let record_ref = record["record_ref"]
+            .as_str()
+            .expect("a reference")
+            .to_string();
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a continuation")
+            .to_string();
+
+        // Rewrite in place: byte-identical first line, different later record.
+        let path = root.path().join("-work-bound").join("aaa.jsonl");
+        std::fs::write(
+            &path,
+            format!("{}\n{}\n", lines[0], spoken("u3", "user", "three")),
+        )
+        .expect("rewrite the transcript");
+
+        let stale_ref = extension
+            .handle_transcript_record(serde_json::json!({
+                "session_id": "agent:s",
+                "record_ref": record_ref,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stale_ref["state"], "stale_generation", "{stale_ref}");
+        assert!(stale_ref.get("raw").is_none(), "{stale_ref}");
+
+        let stale_cursor = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+                "cursor": cursor,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stale_cursor["state"], "stale_cursor", "{stale_cursor}");
+        assert!(raw_records(&stale_cursor).is_empty(), "{stale_cursor}");
+
+        // A fresh page shows the rewritten record under a fresh identity.
+        let fresh = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(raw_records(&fresh)[0]["raw"], spoken("u3", "user", "three"));
+    }
+
+    #[tokio::test]
+    async fn an_append_keeps_issued_raw_identities_usable() {
+        // The append requirement behind `#4027` SC-02: growth adds bytes after
+        // the page that was read, so neither identity may be invalidated.
+        use std::io::Write as _;
+
+        let lines = vec![spoken("u1", "user", "one"), spoken("u2", "user", "two")];
+        let (root, _guard) = projects_with_lines("aaa", &lines);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
+
+        let first = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+            }))
+            .await
+            .unwrap();
+        let record_ref = raw_records(&first)[0]["record_ref"]
+            .as_str()
+            .expect("a reference")
+            .to_string();
+        let cursor = first["next_cursor"]
+            .as_str()
+            .expect("a continuation")
+            .to_string();
+
+        let path = root.path().join("-work-bound").join("aaa.jsonl");
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .expect("open the transcript")
+            .write_all(format!("{}\n", spoken("u3", "user", "three")).as_bytes())
+            .expect("append a complete record");
+
+        let chunk = extension
+            .handle_transcript_record(serde_json::json!({
+                "session_id": "agent:s",
+                "record_ref": record_ref,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(chunk["state"], "ready", "{chunk}");
+        assert_eq!(chunk["raw"], spoken("u2", "user", "two"), "{chunk}");
+
+        let older = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s",
+                "transcript_id": "aaa",
+                "limit": 1,
+                "cursor": cursor,
+            }))
+            .await
+            .unwrap();
+        assert_eq!(older["state"], "ready", "{older}");
+        assert_eq!(raw_records(&older)[0]["raw"], spoken("u1", "user", "one"));
+    }
+
+    #[tokio::test]
     async fn an_oversized_line_is_a_placeholder_that_reads_back_completely() {
         let huge = "z".repeat(64 * 1024 * 2 + 17);
         // Written with `cwd`/`sessionId` ahead of the huge body, the way Claude
@@ -2269,7 +2390,7 @@ mod tests {
     async fn a_reference_for_an_unvisible_transcript_is_not_found() {
         let (_root, _guard) = projects_with_lines("aaa", &[spoken("u1", "user", "one")]);
         let extension = ClaudeCodeAgentExtension::new(Arc::new(FixedContext::at(Some(BOUND_CWD))));
-        let foreign = records::encode_ref("not-visible", 0, "0123456789abcdef");
+        let foreign = records::encode_record_ref("not-visible", 0, 0x0123_4567_89ab_cdef);
 
         let value = extension
             .handle_transcript_record(serde_json::json!({

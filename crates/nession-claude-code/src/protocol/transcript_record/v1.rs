@@ -5,8 +5,8 @@
 //! when they fit. A record too large for a page arrives as a placeholder with
 //! its `record_ref`; this unit is how the caller reads that record completely
 //! without asking for an unbounded response. The reference is resource-scoped
-//! and carries a generation fingerprint, so it cannot be replayed against
-//! another transcript or a replaced file.
+//! and carries a fingerprint of the record's own bytes, so it cannot be
+//! replayed against another transcript or a rewritten record.
 //!
 //! The response is one bounded chunk of the line. `has_more` says whether the
 //! line continues; a caller concatenates chunks until it is false. Invalid
@@ -36,10 +36,12 @@ pub enum TranscriptRecordStateV1 {
     Ready,
     /// The reference does not name a record visible to this Session.
     NotFound,
-    /// The reference was issued for a different file generation.
+    /// The reference was issued for different bytes.
     ///
-    /// The caller must reload the transcript page; this response carries no
-    /// bytes, so a stale reference never returns text from a replaced file.
+    /// The line it named was rewritten or the file replaced — even when the
+    /// file's first line is unchanged. The caller must reload the transcript
+    /// page; this response carries no bytes, so a stale reference never returns
+    /// changed text under the old identity.
     StaleGeneration,
     /// The provider cannot establish the Session's cwd, so it cannot scope the
     /// read.
