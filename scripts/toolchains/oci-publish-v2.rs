@@ -1,6 +1,6 @@
 //! #4160: trusted generic single-tool, multi-platform OCI release adapter.
 //! Tool-specific code and executable probes never run with Registry write credentials.
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use nession_erofs::oci::annotation::{
     ANNOTATION_KIND, ANNOTATION_PATH_PREPEND, MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS,
     MEDIA_TYPE_MANIFEST, MEDIA_TYPE_INDEX,
@@ -153,7 +153,14 @@ async fn check_remote(c:&RegistryClient,r:&Release,download:Option<&Path>)->Resu
             store.verify_named_size(&manifest.layers[0].digest,manifest.layers[0].size)?;
             extract(&store.path_for(&manifest.layers[0].digest)?,&out.join(target_dir(platform)))?;
         } else {
-            ensure!(c.blob_exists(REMOTE_REPOSITORY,&manifest.layers[0]).await?,"missing EROFS blob");
+            let probe=tempfile::tempdir()?;
+            let store=BlobStore::new(probe.path().join("probe-cas"))?;
+            match c.download_blob(&store,REMOTE_REPOSITORY,&manifest.layers[0]).await {
+                Err(RegistryError::NotFound(_))=>return Ok(None),
+                Err(error)=>return Err(error.into()),
+                Ok(())=>{},
+            }
+            store.verify_named_size(&manifest.layers[0].digest,manifest.layers[0].size)?;
         }
     }
     Ok(Some(root_digest))
