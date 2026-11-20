@@ -7,7 +7,6 @@ import {
   completedIssueAcceptanceDecision,
   extractSection,
   isAcceptanceIssue,
-  extractSection,
   parseAcceptanceReport,
   parseClosingIssueNumbers,
   parsePreMergeIssueNumbers,
