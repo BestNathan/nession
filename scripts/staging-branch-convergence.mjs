@@ -587,13 +587,27 @@ function ensureConflictRepairIssue(repo,plan,lane){
   const marker=conflictRepairIssueMarker(lane.branch,plan.main_sha,lane.sha);
   const title='Bug: Agent Convergence repair '+lane.branch+' '+
     plan.main_sha.slice(0,12)+' '+lane.sha.slice(0,12);
-  const query='repo:'+repo+' is:issue in:title "'+title+'"';
+  // One outstanding Agent repair per lane. Main may advance repeatedly
+  // while the prior scoped Draft awaits review; do not create new Issues or
+  // invoke a model for every Main push. All matching refs remain immutable.
+  const prefix='Bug: Agent Convergence repair '+lane.branch+' ';
+  const query='repo:'+repo+' is:issue is:open in:title "'+prefix.trim()+'"';
   const found=ghIssueWrite(['--method','GET','search/issues?q='+
     encodeURIComponent(query)+'&per_page=50']);
   if(!Array.isArray(found.items)||found.total_count>=50)
     reject('incomplete conflict Bug discovery; no duplicate Issue is safe');
-  const matched=found.items.filter(x=>x.title===title);
+  const active=found.items.filter(x=>x.state==='open'&&
+    x.title?.startsWith(prefix)&&!x.pull_request);
+  if(active.some(x=>!x.body?.includes(
+      '<!-- nession-agent-conflict-repair:v1 lane='+lane.branch+' ')||
+      !x.labels?.some(y=>y.name==='bug')))
+    reject('foreign or malformed open conflict Bug; cannot skip review');
+  const matched=active.filter(x=>x.title===title);
   if(matched.length>1)reject('duplicate source-pinned conflict Bug');
+  // Existing older pair blocks a newer Agent attempt until the previous
+  // repair is accepted/closed or explicitly superseded by its owner.
+  const older=active.filter(x=>x.title!==title);
+  if(older.length)return {blocked_by:older.map(x=>x.number),action:'awaiting_previous_repair'};
   if(matched.length){
     const item=matched[0];
     if(item.state!=='open'||!item.body?.includes(marker)||
@@ -656,7 +670,12 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
       repairSkip='UNSUPPORTED_OR_UNVERIFIED_CONFLICT_PATHS';
     }
   }
-  const production=Boolean(repairPaths);
+  let repairIssue=repairPaths?ensureConflictRepairIssue(repo,plan,lane):null;
+  if(repairIssue?.blocked_by){
+    repairSkip='EXISTING_LANE_REPAIR_AWAITING_REVIEW';
+    repairPaths=null;
+  }
+  const production=Boolean(repairPaths&&repairIssue?.number);
   const identity=(production?'Convergence repair ':'Convergence conflict ')+
     lane.branch+' '+plan.main_sha+' '+lane.sha;
   const recorded=previous.workflow_runs.find(run=>
@@ -667,7 +686,6 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
   if(recorded)return {status:production?'EXISTING_REPAIR':'EXISTING_ANALYSIS',
     run_id:recorded.id,
     ...(repairSkip?{repair_skipped:repairSkip}:{})};
-  const repairIssue=production?ensureConflictRepairIssue(repo,plan,lane):null;
   api(['--method', 'POST', 'repos/' + repo + '/actions/workflows/' + workflow + '/dispatches',
     '-f', 'ref=main',
     '-f', 'inputs[repair_issue_number]=' + (repairIssue?.number??''),
@@ -680,6 +698,7 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
     ...(repairIssue?{repair_issue_number:repairIssue.number,
       repair_issue_action:repairIssue.action,conflict_paths:repairPaths}:{}),
     ...(repairSkip?{repair_skipped:repairSkip}:{}),
+    ...(repairIssue?.blocked_by?{previous_repair_issues:repairIssue.blocked_by}:{}),
   };
 }
 
