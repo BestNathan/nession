@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e6a5eb2ac9031b545553f7d6eba7d0386c27585e838d399bc7bbae06690477fb",
+  "run_id": 44679615434,
+  "run_attempt": 1,
+  "issue": 4115,
+  "criterion": "SC-04",
+  "criterion_text": "— Bounded scrollers / keyboard / navigation regression. CodeMirror and a Diff or virtualized/Transcript reader remain usable with their own internal scroll, cursor/focus and touch selection, and can reveal final content above the Capsule via Host-provided geometry. When App viewport/keyboard visibility changes, the focused editable element remains reachable without duplicate keyboard compensation. App Back/Pop/Forward and dirty guard continue working, with Terminal xterm mount and PTY rows unchanged for keyboard-only changes.",
+  "stage": "staging",
+  "target_sha": "752847e26a23f89dbfc778901f8c5693665fc118",
+  "contract_sha256": "baa6d30dd469b16a93eb7018ba23e9897c254fb299822781fc94a274e33f3394",
+  "case_revision": "752847e26a23f89dbfc778901f8c5693665fc118",
+  "case_tree_sha": "4e30ab777d2bb64c3e4421241e54e6fdfba2e217",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T05:18:02.538Z",
+  "finished_at": "2026-11-20T05:18:16.977Z",
+  "duration_ms": 14439,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-bounded-viewers.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=43"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 43
+      },
+      "duration_ms": 4456,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-keyboard-navigation.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips (1 recovered assertion retries)",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=23"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 23
+      },
+      "duration_ms": 4131,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44679615434,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "752847e26a23f89dbfc778901f8c5693665fc118",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44679615434",
+    "record_path": "runs/2026-11-20/44679615434-1/4115/SC-04.json",
+    "source_result_sha256": "7808bde6f262ad0f24433ae1229d07a6333391b9e2f5f93aa40d9e77ed2642a3"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44679615434-1",
+    "sha256": "7808bde6f262ad0f24433ae1229d07a6333391b9e2f5f93aa40d9e77ed2642a3",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44679615434",
+    "durability": "time-limited; object archival not configured"
+  }
+}
