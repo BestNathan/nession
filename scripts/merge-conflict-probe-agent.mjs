@@ -10,7 +10,7 @@ import {providerScopedRunName} from './lib/agent/telemetry/run-name.mjs';
 import {promptTelemetry} from './lib/agent/telemetry/prompt.mjs';
 import {normalizeNativeTrace,writeExecutionTrace} from './lib/agent/telemetry/execution-trace.mjs';
 
-const WORKFLOW_ID='agent-merge-conflict-probe';
+const WORKFLOW_ID='agent-staging-convergence-review';
 function main(){
   const [contextFile,mode,outDir]=process.argv.slice(2);
   if(!['source-repair','direct-integration'].includes(mode))throw Error('invalid mode');
@@ -53,12 +53,12 @@ function main(){
     const template='merge-conflict-probe-'+mode+'-v1';
     const record=buildAgentWorkflowTelemetry({
       workflow_id:WORKFLOW_ID,
-      github_workflow:process.env.GITHUB_WORKFLOW||'Agent / Merge Conflict Probe',
+      github_workflow:process.env.GITHUB_WORKFLOW||'Agent / Staging Convergence Review',
       unique_run_name:providerScopedRunName({workflowId:WORKFLOW_ID,
         runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,
         taskId:'probe-'+mode,provider:'claude-code'}),
       job:'resolve',
-      task:{id:'probe-'+mode,type:'merge-conflict-probe',issue:4124,pr:null,
+      task:{id:'probe-'+mode,type:'merge-conflict-probe',issue:4124,
         target_ref:r.target_sha,fingerprint:r.target_sha+':'+r.source_sha+':'+mode},
       agent:{provider:'claude-code',id:'merge-conflict-probe',role:'developer',
         prompt:promptTelemetry({template_id:template,template_version:'v1',
