@@ -60,6 +60,11 @@ pub struct WebSocketServer {
 
 impl WebSocketServer {
     pub async fn new(config: ServerConfig, db: Arc<Database>) -> anyhow::Result<Self> {
+        // The bind is the exposed boundary: validate the effective config here
+        // as well as in `runtime::run`, so a caller that constructs the
+        // listener directly cannot bind an unauthenticated remote control
+        // plane (#4066 SC-01).
+        config.validate()?;
         let listener = TcpListener::bind(&config.listen_address).await?;
         let agent_registry = Arc::new(AgentRegistry::new(
             config.heartbeat_timeout_secs,
@@ -402,6 +407,10 @@ impl WebSocketServer {
         let pending_auth_slots = Arc::new(tokio::sync::Semaphore::new(
             self.config.max_pending_ws_auth.max(1),
         ));
+        // The WS browser-Origin allowance and the canonical Server Token
+        // verifier are fixed for the listener's lifetime (#4066).
+        let allowed_origins = Arc::new(self.config.allowed_origins.clone());
+        let server_auth = nession_protocol::TokenVerifier::new(self.config.auth_token.clone());
         let mut connections = tokio::task::JoinSet::new();
 
         loop {
@@ -438,7 +447,8 @@ impl WebSocketServer {
                         mcp_path: self.config.mcp.path.clone(),
                         image_manager: Arc::clone(&self.image_manager),
                         image_http: Arc::clone(&self.image_http),
-                        auth_token: self.config.auth_token.clone(),
+                        allowed_origins: Arc::clone(&allowed_origins),
+                        server_auth: server_auth.clone(),
                         heartbeat_interval_secs,
                         terminal_cols: self.config.terminal_cols,
                         terminal_web_font_size: self.config.terminal_web_font_size,
@@ -539,7 +549,14 @@ struct ServerContext {
     /// Global EROFS image manager and its authorized HTTP route (#3022).
     image_manager: Arc<ImageManager>,
     image_http: Arc<ImageHttpService>,
-    auth_token: String,
+    /// Browser origins allowed to open the protocol WebSocket (#4066).
+    ///
+    /// Empty refuses every upgrade that presents an `Origin`; requests without
+    /// one (CLI, Agent, native clients) pass.
+    allowed_origins: Arc<Vec<String>>,
+    /// The canonical constant-time verifier for the configured Server Token.
+    /// An empty token keeps the documented no-auth mode.
+    server_auth: nession_protocol::TokenVerifier,
     heartbeat_interval_secs: u64,
     /// The release-selected fixed column count (#2487).
     terminal_cols: u16,
@@ -646,7 +663,17 @@ fn http_router(
 
 /// The `/ws` route: a valid upgrade is accepted, anything else is the
 /// extractor's own rejection (405 for a non-GET, 400 for a malformed upgrade).
-async fn ws_upgrade(State(state): State<HttpState>, ws: WebSocketUpgrade) -> Response {
+/// A browser upgrade must pass the Origin policy before it reaches the
+/// extractor's upgrade decision (#4066 SC-02).
+async fn ws_upgrade(
+    State(state): State<HttpState>,
+    headers: HeaderMap,
+    ws: WebSocketUpgrade,
+) -> Response {
+    if !origin_policy_allows(&state.ctx.allowed_origins, &headers) {
+        debug!("refusing a WebSocket upgrade: its browser Origin is not allowed");
+        return StatusCode::FORBIDDEN.into_response();
+    }
     finish_ws_upgrade(state, ws)
 }
 
@@ -655,7 +682,8 @@ async fn ws_upgrade(State(state): State<HttpState>, ws: WebSocketUpgrade) -> Res
 /// The registry advertises `/ws`, but the Server has always also accepted
 /// `ws://host:port` and a configured `connect_url` with any path. The fallback
 /// keeps that contract while still answering every non-upgrade request with
-/// 404 rather than an implicit upgrade.
+/// 404 rather than an implicit upgrade. The compatibility path applies the same
+/// browser-Origin policy as `/ws` (#4066 SC-02).
 async fn websocket_or_not_found(
     State(state): State<HttpState>,
     request: axum::extract::Request,
@@ -664,10 +692,30 @@ async fn websocket_or_not_found(
         return StatusCode::NOT_FOUND.into_response();
     }
     let (mut parts, _body) = request.into_parts();
+    if !origin_policy_allows(&state.ctx.allowed_origins, &parts.headers) {
+        debug!("refusing a fallback WebSocket upgrade: its browser Origin is not allowed");
+        return StatusCode::FORBIDDEN.into_response();
+    }
     match WebSocketUpgrade::from_request_parts(&mut parts, &state).await {
         Ok(ws) => finish_ws_upgrade(state, ws),
         Err(rejection) => rejection.into_response(),
     }
+}
+
+/// Whether an upgrade request passes the browser-Origin policy (#4066).
+///
+/// A request without `Origin` is a non-browser client — the CLI, the Agent, a
+/// native transport — and stays compatible. A request carrying one is a
+/// browser page and must be named explicitly in the Server's
+/// `allowed_origins`: reachability, including through a loopback listener, is
+/// not proof of trust, and an approved Origin is never a credential.
+fn origin_policy_allows(allowed_origins: &[String], headers: &HeaderMap) -> bool {
+    let Some(origin) = headers.get(axum::http::header::ORIGIN) else {
+        return true;
+    };
+    origin
+        .to_str()
+        .is_ok_and(|origin| allowed_origins.iter().any(|allowed| allowed == origin))
 }
 
 fn finish_ws_upgrade(state: HttpState, ws: WebSocketUpgrade) -> Response {
@@ -734,7 +782,6 @@ async fn handle_ws_stream(
         env_service,
         db,
         mutations,
-        auth_token,
         heartbeat_interval_secs,
         terminal_cols,
         terminal_web_font_size,
@@ -747,6 +794,8 @@ async fn handle_ws_stream(
         mcp_enabled,
         mcp_path,
         image_http: _,
+        allowed_origins: _,
+        server_auth,
     } = ctx;
 
     let (mut write, mut read) = ws_stream.split();
@@ -771,7 +820,7 @@ async fn handle_ws_stream(
             extension_tools: Some(extension_tools),
         },
         crate::server::handler::ConnectionHandlerConfig {
-            server_auth_token: auth_token,
+            server_auth,
             heartbeat_interval_secs,
             terminal_cols,
             terminal_web_font_size,
@@ -3669,6 +3718,28 @@ mod tests {
         assert!(
             !marker.exists(),
             "a Server that never served must not announce that it did"
+        );
+    }
+
+    /// #4066 SC-01: the bind owner refuses an unauthenticated remote listener
+    /// before any socket binds, so a caller that constructs the listener
+    /// directly cannot bypass the startup entrypoint's validation.
+    #[tokio::test]
+    async fn a_remote_blank_token_listener_is_refused_before_it_binds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let config = nession_common::config::ServerConfig {
+            listen_address: "0.0.0.0:0".to_string(),
+            db_path: dir.path().join("server.db").to_string_lossy().into_owned(),
+            ..Default::default()
+        };
+        let db = Database::new(&config.db_path).await.expect("database");
+        let error = match WebSocketServer::new(config, Arc::new(db)).await {
+            Ok(_) => panic!("a remote blank-token listener must fail closed"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("allow_insecure_remote"),
+            "{error}"
         );
     }
 }
