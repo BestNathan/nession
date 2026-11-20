@@ -569,3 +569,6 @@ await import('./qwen-reviewer-source-selftest.mjs');
 await import('./qwen-preflight-recovery-selftest.mjs');
 await import('./qwen-cli-failure-selftest.mjs');
 await import('./qwen-tool-policy-failure-selftest.mjs');
+
+// #4108: canonical Agent Gate runs final-source and exact merged C-recovery negatives.
+await import('./final-source-audit-selftest.mjs');
