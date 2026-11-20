@@ -1,23 +1,45 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {qwenWorkerAuthority,qwenDeveloperPrompt,classifyQwenCliFailure,
-  qwenDeveloperTurnBudget} from './qwen-development-worker.mjs';
+  qwenDeveloperExecutionTimeoutMs,qwenDeveloperCliArgs,
+  qwenDeveloperCliEnvironment} from './qwen-development-worker.mjs';
 import {attestQwenRepairIssueReview} from './qwen-review-context.mjs';
 import {formatReviewerIssueReceipt}
   from './reviewer-result-ingest.mjs';
 
-// Two independently attested real CLI max-turns failures (#3885) prove the
-// former initial implement cap of 10 turns can exhaust before producing a
-// patch. Both implement and signed Repair now have a finite 24-turn budget;
-// no new task kind, unbounded continuation or replay is admitted.
-assert.equal(qwenDeveloperTurnBudget('implement',false),24);
-assert.equal(qwenDeveloperTurnBudget('implement',true),24);
-assert.equal(qwenDeveloperTurnBudget('repair',true),24);
+// Execution policy is wall-clock bounded, not turn bounded. Check the
+// actual CLI argv for fresh and signed Repair/Resume, not only its budget.
+for(const [task,resuming] of [['implement',false],['implement',true],['repair',true]]){
+  assert.equal(qwenDeveloperExecutionTimeoutMs(task,resuming),30*60*1000);
+  const argv=qwenDeveloperCliArgs({prompt:'single focused fix',sessionId:'s-123',
+    task,resuming,plan:{model:'qwen-pinned',tools:['Read','Grep','Glob','Edit','Write']}});
+  assert.ok(!argv.includes('--max-turns'),'no CLI turn cap even for Repair');
+  assert.ok(argv.includes('--strict-mcp-config'),'keep strict MCP config');
+  assert.ok(argv.includes('--restricted'),'keep restricted tools');
+  assert.ok(argv.includes('--disallowedTools'),'keep MCP tool denial');
+  assert.ok(argv.includes(resuming?'--resume':'--session-id'),
+    'native Session identity/Resume mode must remain explicit');
+}
 for(const [task,resuming] of [
   ['repair',false],['review',true],['evil',false],
   ['repair','true'],['implement',null],
-])assert.throws(()=>qwenDeveloperTurnBudget(task,resuming),
-  /Qwen Developer/);
+]){
+  assert.throws(()=>qwenDeveloperExecutionTimeoutMs(task,resuming),
+    /Qwen Developer/);
+  assert.throws(()=>qwenDeveloperCliArgs({prompt:'x',sessionId:'s',
+    task,resuming,plan:{model:'qwen-pinned',tools:['Read']}}),
+    /Qwen Developer/);
+}
+
+// The runner may export Claude Code's implicit turns limit. It must not
+// survive into the provider environment even when no --max-turns is passed.
+const inherited={CLAUDE_CODE_MAX_TURNS:'1',KEEP_ME:'present'};
+const child=qwenDeveloperCliEnvironment(inherited,'/tmp/qwen-native','pinned-qwen');
+assert.ok(!Object.hasOwn(child,'CLAUDE_CODE_MAX_TURNS'));
+assert.equal(inherited.CLAUDE_CODE_MAX_TURNS,'1','parent environment unchanged');
+assert.equal(child.KEEP_ME,'present');
+assert.equal(child.CLAUDE_CONFIG_DIR,'/tmp/qwen-native');
+assert.equal(child.ANTHROPIC_MODEL,'pinned-qwen');
 
 // A real Provider failure must be classifiable without exposing raw model
 // output, prompts, stderr or Gateway credentials to public Actions logs.
@@ -63,6 +85,8 @@ assert.match(prompt,/Fix tracked application source/);
 assert.match(prompt,/Read\/Grep\/Glob\/Edit\/Write/);
 assert.match(prompt,/Grep\/Glob are read-only discovery/);
 assert.match(prompt,/No Bash, shell, MCP/);
+assert.match(prompt,/do not perform broad repository exploration/);
+assert.match(prompt,/stop and report the scope blocker/);
 assert.match(prompt,/The trusted Publisher/);
 for(const extra of [
   {GITHUB_TOKEN:'leaked'}, {STORE_APP_TOKEN:'unsafe'},
