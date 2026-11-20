@@ -627,16 +627,46 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
   if (!Array.isArray(previous.workflow_runs) || previous.total_count > 100) {
     return { status: 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY' };
   }
-  const identity = 'Convergence conflict ' + lane.branch + ' ' + plan.main_sha + ' ' + lane.sha;
-  const recorded = previous.workflow_runs.find(run =>
-    run.display_title === identity && run.event === 'workflow_dispatch' &&
-    run.head_branch === 'main' &&
-    run.repository?.full_name === repo &&
-    run.head_repository?.full_name === repo);
-  if (recorded) return { status: 'EXISTING_ANALYSIS', run_id: recorded.id };
-  const production=action==='sync-main-to-lane'&&
-    process.env.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED==='true'&&
-    lane.workflow_write_required!==true;
+  const productionRequested=action==='sync-main-to-lane'&&
+    process.env.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED==='true';
+  let repairPaths=null,repairSkip=null;
+  if(productionRequested){
+    // Inspect actual stage-1/2/3 conflicts, not the *entire* branch diff.
+    // A clean workflow file addition needs the separately authorized
+    // Convergence integration writer later, not a workflow-writing repair.
+    try{
+      const content=shell('node',[path.join(ROOT,'scripts',
+        'merge-conflict-resolution-probe.mjs'),'inspect',
+        ROOT,lane.sha,plan.main_sha],{env:{
+          ...process.env,
+          GIT_AUTHOR_NAME:'Nession Conflict Inspection',
+          GIT_AUTHOR_EMAIL:'nession-conflict-inspect@users.noreply.github.com',
+          GIT_COMMITTER_NAME:'Nession Conflict Inspection',
+          GIT_COMMITTER_EMAIL:'nession-conflict-inspect@users.noreply.github.com',
+        }});
+      const proof=JSON.parse(content);
+      if(proof.eligible!==true||proof.target_sha!==lane.sha||
+         proof.source_sha!==plan.main_sha||
+         !Array.isArray(proof.conflict_paths)||!proof.conflict_paths.length)
+        reject('untrusted conflict path inspection result');
+      repairPaths=proof.conflict_paths;
+    }catch(error){
+      // Unsupported, dangerous, mixed or unverifiable conflict file(s)
+      // still get read-only diagnosis, never a writable Coding Agent task.
+      repairSkip='UNSUPPORTED_OR_UNVERIFIED_CONFLICT_PATHS';
+    }
+  }
+  const production=Boolean(repairPaths);
+  const identity=(production?'Convergence repair ':'Convergence conflict ')+
+    lane.branch+' '+plan.main_sha+' '+lane.sha;
+  const recorded=previous.workflow_runs.find(run=>
+    run.display_title===identity&&run.event==='workflow_dispatch'&&
+    run.head_branch==='main'&&
+    run.repository?.full_name===repo&&
+    run.head_repository?.full_name===repo);
+  if(recorded)return {status:production?'EXISTING_REPAIR':'EXISTING_ANALYSIS',
+    run_id:recorded.id,
+    ...(repairSkip?{repair_skipped:repairSkip}:{})};
   const repairIssue=production?ensureConflictRepairIssue(repo,plan,lane):null;
   api(['--method', 'POST', 'repos/' + repo + '/actions/workflows/' + workflow + '/dispatches',
     '-f', 'ref=main',
@@ -646,9 +676,10 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
     '-f', 'inputs[main_sha]=' + plan.main_sha,
     '-f', 'inputs[lane_sha]=' + lane.sha,
     '-f', 'inputs[direction]=' + action]);
-  return {status:'ANALYSIS_DISPATCHED',
+  return {status:production?'REPAIR_DISPATCHED':'ANALYSIS_DISPATCHED',
     ...(repairIssue?{repair_issue_number:repairIssue.number,
-      repair_issue_action:repairIssue.action}:{}),
+      repair_issue_action:repairIssue.action,conflict_paths:repairPaths}:{}),
+    ...(repairSkip?{repair_skipped:repairSkip}:{}),
   };
 }
 
