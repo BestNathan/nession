@@ -1117,6 +1117,70 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
       successor]});
 }
 
+// #4211: an independently attested policy-denied post-model Reviewer may
+// retire only the exact consumed Action and mint one new signed successor.
+export function reviewerToolSuccessorId(issue,actionId,runId){
+  const f=REVIEWER_TOOL_FAILURE_4065;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized Reviewer tool-policy source');
+  return hash([issue,actionId,runId,'qwen-reviewer-readonly-denial-recovery-v1']);
+}
+export function recordAttestedReviewerToolFailure(state,version,proof){
+  const f=REVIEWER_TOOL_FAILURE_4065;
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','failure_code'],'Reviewer native tool failure proof');
+  const old=state.outbox.find(o=>o.id===f.action_id);
+  const first=state.outbox.find(o=>
+    o.id==='73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127');
+  const developer=state.outbox.find(o=>
+    o.id==='f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44');
+  const expected=[
+    ['publisher',44744656206,'published','f79547b0def78418e109aba82673d7f20edbc341'],
+    ['reviewer',44773349621,'changes_requested','f79547b0def78418e109aba82673d7f20edbc341'],
+    ['publisher',f.publisher_run_id,'published',f.source_sha],
+  ];
+  const transitionsOk=Array.isArray(state.transitions)&&
+    state.transitions.length===expected.length&&
+    expected.every(([kind,run_id,outcome,target_sha],i)=>{
+      const x=state.transitions[i];
+      return x.kind===kind&&x.run_id===run_id&&x.attempt===1&&
+        x.outcome===outcome&&x.target_sha===target_sha;
+    });
+  if(state.issue!==f.issue||state.version!==f.state_version||
+     version!==f.state_version||state.phase!=='review'||
+     state.target_sha!==f.source_sha||state.repair_attempts!==1||
+     state.assignments?.developer!=='dev-qwen-01'||
+     state.assignments?.reviewer!=='review-qwen-01'||
+     !transitionsOk||state.outbox.length!==3||
+     developer?.status!=='failed'||
+     developer.receipt?.failure_code!=='qwen_tracked_source_gate_rejected'||
+     developer.receipt?.source_run_id!==44733719096||
+     first?.status!=='failed'||
+     first.receipt?.failure_code!=='qwen_reviewer_large_base_premodel_failure'||
+     first.receipt?.source_run_id!==44744956936||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='reviewer'||
+     old.task.task!=='review'||old.task.agent_id!=='review-qwen-01'||
+     old.task.sha!==f.source_sha||old.receipt?.status!=='verified'||
+     old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id||
+     proof?.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.failure_code!==f.failure_code)
+    reject('unverified or consumed #4065 Reviewer tool-policy failure');
+  const id=reviewerToolSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(o=>o.id===id))
+    reject('Reviewer tool-policy successor collision');
+  const failed={...old,status:'failed',receipt:{status:'failed',
+    dispatch_id:old.id,source_run_id:f.run_id,source_attempt:1,
+    failure_code:f.failure_code}};
+  const successor={id,task:{...old.task},status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(o=>o.id===f.action_id?failed:o),successor]});
+}
+
 // #3601: one exact *post-model* Reviewer output-format failure has no
 // accepted result Artifact. Retire only its verified signed Run and add one
 // deterministic successor. The original immutable repair Publisher and older
