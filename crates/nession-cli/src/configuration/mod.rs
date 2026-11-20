@@ -123,6 +123,16 @@ pub fn initialized_server_config() -> ServerConfig {
     if config.auth_token.is_empty() {
         config.listen_address = CLI_SERVER_FALLBACK_LISTEN.to_string();
     }
+    // The Web development and preview servers connect from their own origin,
+    // so the local profile names them explicitly (#4066). Any other browser
+    // origin — including one reached through a loopback listener — is refused
+    // until the operator adds it; CLI and Agent clients present no Origin.
+    config.allowed_origins = vec![
+        "http://localhost:13000".to_string(),
+        "http://127.0.0.1:13000".to_string(),
+        "http://localhost:4173".to_string(),
+        "http://127.0.0.1:4173".to_string(),
+    ];
     config
 }
 
@@ -480,6 +490,14 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::Secret,
     },
     FieldSpec {
+        key: "allowed_origins",
+        kind: FieldKind::StringList,
+    },
+    FieldSpec {
+        key: "allow_insecure_remote",
+        kind: FieldKind::Bool,
+    },
+    FieldSpec {
         key: "heartbeat_interval_secs",
         kind: FieldKind::U64,
     },
@@ -728,6 +746,13 @@ const SERVER_INIT_HEADER: &str = "\
 # can reach, set a credential too (add --config when this file is not the
 # default):
 #   nession config server set auth_token <token>
+#
+# Browser clients (the Web UI) present an Origin and must be listed in
+# allowed_origins. This file names the Vite dev (:13000) and preview (:4173)
+# origins; add a deployment's Web origin the same way. CLI and Agent clients
+# present no Origin and need no entry. Setting allow_insecure_remote = true
+# deliberately permits a non-loopback listener with no token; do not use it
+# on a reachable network.
 ";
 
 /// Create the selected config file from the target's typed defaults.
@@ -1294,6 +1319,29 @@ mod tests {
             .is_loopback());
     }
 
+    /// #4066: the local profile keeps the documented Vite dev and preview
+    /// origins working; every other browser origin is refused until the
+    /// operator names it.
+    #[test]
+    fn the_initialized_server_config_names_the_local_web_origins() {
+        let config = initialized_server_config();
+        for origin in [
+            "http://localhost:13000",
+            "http://127.0.0.1:13000",
+            "http://localhost:4173",
+            "http://127.0.0.1:4173",
+        ] {
+            assert!(
+                config
+                    .allowed_origins
+                    .iter()
+                    .any(|allowed| allowed == origin),
+                "the local profile must keep {origin} connectable"
+            );
+        }
+        config.validate().expect("the local profile validates");
+    }
+
     #[test]
     fn init_writes_the_safe_server_profile_including_a_force_rewrite() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1411,7 +1459,9 @@ mod tests {
         ];
         for (target, key, value, server) in valid {
             let defaults = if server {
-                toml::to_string_pretty(&ServerConfig::default()).expect("serialize")
+                // The initialized profile is the startable local Server (#4066);
+                // the raw `ServerConfig::default()` is deliberately invalid.
+                toml::to_string_pretty(&initialized_server_config()).expect("serialize")
             } else {
                 toml::to_string_pretty(&AgentConfig::default()).expect("serialize")
             };
@@ -1503,6 +1553,8 @@ mod tests {
             ("tls_cert_path", "/tmp/cert.pem"),
             ("tls_key_path", "/tmp/key.pem"),
             ("auth_token", "server-secret"),
+            ("allowed_origins", r#"["http://localhost:13000","null"]"#),
+            ("allow_insecure_remote", "true"),
             ("heartbeat_interval_secs", "11"),
             ("heartbeat_timeout_secs", "22"),
             ("db_path", "/tmp/server.db"),
@@ -1526,6 +1578,11 @@ mod tests {
         assert_eq!(config.tls_cert_path, "/tmp/cert.pem");
         assert_eq!(config.tls_key_path, "/tmp/key.pem");
         assert_eq!(config.auth_token, "server-secret");
+        assert_eq!(
+            config.allowed_origins,
+            vec!["http://localhost:13000".to_string(), "null".to_string()]
+        );
+        assert!(config.allow_insecure_remote);
         assert_eq!(config.heartbeat_interval_secs, 11);
         assert_eq!(config.heartbeat_timeout_secs, 22);
         assert_eq!(config.db_path, "/tmp/server.db");

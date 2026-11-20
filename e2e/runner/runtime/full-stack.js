@@ -65,7 +65,7 @@ function replaceRequired(source, pattern, replacement, label) {
   return source.replace(pattern, replacement);
 }
 
-function renderServerConfig(template, { serverPort, home }) {
+function renderServerConfig(template, { serverPort, home, webPort }) {
   let output = String(template);
   output = replaceRequired(
     output,
@@ -79,6 +79,17 @@ function renderServerConfig(template, { serverPort, home }) {
     `db_path = "${tomlString(path.join(requiredText(home, 'home'), 'nession.db'))}"`,
     'server db_path',
   );
+  // The checked-in template carries placeholder Web origins; the Server must
+  // approve the preview origin this run actually serves (#4066). A custom
+  // template with no allowance is left alone: its author owns that decision.
+  const originLine = /^allowed_origins\s*=\s*\[[^\]]*\]$/m;
+  if (originLine.test(output)) {
+    const port = positivePort(webPort, 'webPort');
+    output = output.replace(
+      originLine,
+      `allowed_origins = ["http://localhost:${port}", "http://127.0.0.1:${port}"]`,
+    );
+  }
   return output;
 }
 
@@ -384,6 +395,7 @@ async function startFullStackRuntime(options) {
     renderServerConfig(readFileSync(serverTemplate, 'utf8'), {
       serverPort,
       home,
+      webPort,
     }),
   );
   writeFileSync(
@@ -527,6 +539,7 @@ function selfTest() {
   const serverTemplate = [
     'listen_address = "127.0.0.1:19090"',
     'db_path = "/tmp/nession-e2e/nession.db"',
+    'allowed_origins = ["http://localhost:4173", "http://127.0.0.1:4173"]',
   ].join('\n');
   const agentTemplate = [
     'server_url = "ws://127.0.0.1:19090/ws"',
@@ -540,9 +553,15 @@ function selfTest() {
   const server = renderServerConfig(serverTemplate, {
     serverPort: 21090,
     home,
+    webPort: 24173,
   });
   assert.match(server, /127\.0\.0\.1:21090/);
   assert.match(server, /nession-runtime-selftest\/nession\.db/);
+  assert.match(
+    server,
+    /^allowed_origins = \["http:\/\/localhost:24173", "http:\/\/127\.0\.0\.1:24173"\]$/m,
+    'a browser origin allowance must name the preview origin actually served',
+  );
 
   const agent = renderAgentConfig(agentTemplate, {
     serverPort: 21090,
