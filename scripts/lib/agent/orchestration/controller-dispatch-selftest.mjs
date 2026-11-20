@@ -11,6 +11,7 @@ import {assertDispatchAuthority,deriveDispatchKey,parseDispatchKey,sourceAllowed
   REVIEWER_JSON_3784_RECOVERY_COMMENT,
   QWEN_CLI_RECOVERY_COMMENT,QWEN_REPAIR_TURNS_RECOVERY_COMMENT,
   QWEN_TOOL_RECOVERY_COMMENT,
+  QWEN_TRACKED_SOURCE_RECOVERY_COMMENT,
   assertReviewerRecoveryPrLease,assertOwnerReviewDispatchRole}
   from './controller-dispatch.mjs';
 import {CONTROLLED_ORIGINAL_PUBLICATION} from '../publisher/publication-readback.mjs';
@@ -237,6 +238,34 @@ for(const mutation of [
 ])
   assert.throws(()=>assertDispatchAuthority({...toolsRecovery,...mutation}),
     /authenticated owner\/main/);
+
+// #4174: authenticate only the real #4065 source-gate failure; event text
+// is never permission to mint arbitrary Actions tickets or pass a model patch.
+const trackedFailure=(await import('./qwen-tracked-source-failure.mjs')).SOURCE;
+const trackedCommentEvent={...cliCommentEvent,
+  issue:{number:4065,state:'open'},
+  comment:{...cliCommentEvent.comment,id:7039178946,
+    body:QWEN_TRACKED_SOURCE_RECOVERY_COMMENT}};
+const trackedRecovery={...cliRecovery,event:trackedCommentEvent,
+  issue:4065,actionId:trackedFailure.action_id};
+assert.equal(assertDispatchAuthority(trackedRecovery).issue,4065);
+for(const mutation of [
+  {issue:4066},{actionId:cliFailure.action_id},
+  {event:{...trackedCommentEvent,issue:{number:4065,state:'closed'}}},
+  {event:{...trackedCommentEvent,issue:{number:4065,state:'open',pull_request:{}}}},
+  {event:{...trackedCommentEvent,action:'edited'}},
+  {event:{...trackedCommentEvent,comment:{...trackedCommentEvent.comment,
+    body:QWEN_TRACKED_SOURCE_RECOVERY_COMMENT+' '}}},
+  {event:{...trackedCommentEvent,comment:{...trackedCommentEvent.comment,
+    body:'/nession recover-qwen-source issue=4065 run=44733719097'}}},
+  {event:{...trackedCommentEvent,comment:{...trackedCommentEvent.comment,
+    user:{login:'other'}}}},
+  {event:{...trackedCommentEvent,comment:{...trackedCommentEvent.comment,id:0}}},
+  {environment:{...commentEnvironment,GITHUB_ACTOR:'github-actions[bot]'}},
+  {environment:{...commentEnvironment,GITHUB_RUN_ATTEMPT:'2'}},
+  {environment:{...commentEnvironment,GITHUB_REF:'refs/heads/staging'}},
+])assert.throws(()=>assertDispatchAuthority({...trackedRecovery,...mutation}),
+  /authenticated owner\/main/);
 
 const actualAction=await import('./outbox.mjs').then(m=>
   m.failedDeveloperRetryActionId(1997,
@@ -562,6 +591,9 @@ assert.throws(()=>sourceAllowed(sourceSha,'reviewer',{run:args=>{
 key.fill(0);
 second.fill(0);
 other.fill(0);
+// #4174: the same canonical Controller Gate must execute genuine failed
+// source Run/Artifact negative fixtures and unique Store CAS/replay proof.
+await import('./qwen-tracked-source-failure-selftest.mjs');
 console.log('Controller dispatch: trusted run binding, fork/retry/role denial, HMAC domain separation passed');
 
 // New signed Qwen Reviewer branch lookup shares the canonical dispatch Gate.
