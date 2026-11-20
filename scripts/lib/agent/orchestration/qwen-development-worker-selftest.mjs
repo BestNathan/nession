@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {qwenWorkerAuthority,qwenDeveloperPrompt,classifyQwenCliFailure,
-  qwenDeveloperExecutionTimeoutMs,qwenDeveloperCliArgs} from './qwen-development-worker.mjs';
+  qwenDeveloperExecutionTimeoutMs,qwenDeveloperCliArgs,
+  qwenDeveloperCliEnvironment} from './qwen-development-worker.mjs';
 import {attestQwenRepairIssueReview} from './qwen-review-context.mjs';
 import {formatReviewerIssueReceipt}
   from './reviewer-result-ingest.mjs';
@@ -29,6 +30,16 @@ for(const [task,resuming] of [
     task,resuming,plan:{model:'qwen-pinned',tools:['Read']}}),
     /Qwen Developer/);
 }
+
+// The runner may export Claude Code's implicit turns limit. It must not
+// survive into the provider environment even when no --max-turns is passed.
+const inherited={CLAUDE_CODE_MAX_TURNS:'1',KEEP_ME:'present'};
+const child=qwenDeveloperCliEnvironment(inherited,'/tmp/qwen-native','pinned-qwen');
+assert.ok(!Object.hasOwn(child,'CLAUDE_CODE_MAX_TURNS'));
+assert.equal(inherited.CLAUDE_CODE_MAX_TURNS,'1','parent environment unchanged');
+assert.equal(child.KEEP_ME,'present');
+assert.equal(child.CLAUDE_CONFIG_DIR,'/tmp/qwen-native');
+assert.equal(child.ANTHROPIC_MODEL,'pinned-qwen');
 
 // A real Provider failure must be classifiable without exposing raw model
 // output, prompts, stderr or Gateway credentials to public Actions logs.
