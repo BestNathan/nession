@@ -136,6 +136,12 @@ export function workflowFileWriteRequired(paths) {
   return paths.some(p => p.startsWith('.github/workflows/'));
 }
 
+export function workflowPushAuthorization(paths, hasSeparateWriter) {
+  const needsWorkflowWriter = workflowFileWriteRequired(paths);
+  return {needsWorkflowWriter,
+    allowed: !needsWorkflowWriter || hasSeparateWriter === true};
+}
+
 function workflowSourceDiff(laneSha, mainSha) {
   if (!SHA.test(laneSha) || !SHA.test(mainSha))
     reject('invalid workflow-diff source SHA');
@@ -274,9 +280,10 @@ function ensureIntegrationBranch(repo, plan, lane) {
   }
   // Re-read actual pinned source diff; do not trust webhook or plan claims.
   const workflowChanges = workflowSourceDiff(lane.sha, plan.main_sha);
-  const workflowWriterNeeded = workflowFileWriteRequired(workflowChanges);
   const workflowToken = process.env.CONVERGENCE_WORKFLOW_PUSH_TOKEN;
-  if (workflowWriterNeeded && !workflowToken) {
+  const authorization = workflowPushAuthorization(workflowChanges, Boolean(workflowToken));
+  const workflowWriterNeeded = authorization.needsWorkflowWriter;
+  if (!authorization.allowed) {
     return {blocked_workflow_writer:true,branch,
       workflow_files:workflowChanges};
   }
@@ -883,6 +890,12 @@ function selfTest() {
   assert.equal(workflowFileWriteRequired(['scripts/ci/quality-scope.mjs']), false);
   assert.equal(workflowFileWriteRequired(['.github/workflows-extra.yml']), false);
   assert.equal(workflowFileWriteRequired(['.github/workflows/release-staging.yml']), true);
+  assert.deepEqual(workflowPushAuthorization(['src/app.ts'], false),
+    {needsWorkflowWriter:false,allowed:true});
+  assert.deepEqual(workflowPushAuthorization(['.github/workflows/deploy.yml'], false),
+    {needsWorkflowWriter:true,allowed:false});
+  assert.deepEqual(workflowPushAuthorization(['.github/workflows/deploy.yml'], true),
+    {needsWorkflowWriter:true,allowed:true});
   assert.equal(workflowFileWriteRequired(['docs/README.md',
     '.github/workflows/acceptance-cases.yaml']), true);
   assert.throws(()=>workflowFileWriteRequired(['valid', '\0']),
