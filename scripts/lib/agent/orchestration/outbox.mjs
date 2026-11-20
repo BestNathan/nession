@@ -83,6 +83,16 @@ export const REVIEWER_PREMODEL_FAILURE_4065=Object.freeze({
   failure_code:'qwen_reviewer_large_base_premodel_failure',
   state_version:9,
 });
+export const REVIEWER_TOOL_FAILURE_4065=Object.freeze({
+  issue:4065,
+  action_id:'320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde',
+  run_id:44776788638,
+  source_sha:'8d512ec934770944a208c9e1a797bc155a7a46d2',
+  main_sha:'d81b5b0af5b18b3ded368f04b12da9ad8c657f9f',
+  publisher_run_id:44776472241,
+  failure_code:'qwen_reviewer_forbidden_tool_postmodel_failure',
+  state_version:19,
+});
 export const REVIEWER_PREMODEL_FAILURE_SOURCES=Object.freeze([
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
   REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_FAILURE_4065,
@@ -310,6 +320,7 @@ export function validateDevelopmentState(state) {
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
             REVIEWER_PREMODEL_FAILURE_4065.failure_code,
+            REVIEWER_TOOL_FAILURE_4065.failure_code,
             REVIEWER_JSON_FAILURE.failure_code,
             REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
@@ -348,6 +359,13 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_TOOL_FAILURE_4065.failure_code&&(
+            state.issue!==REVIEWER_TOOL_FAILURE_4065.issue||
+            item.id!==REVIEWER_TOOL_FAILURE_4065.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||item.task.sha!==REVIEWER_TOOL_FAILURE_4065.source_sha||
+            r.source_run_id!==REVIEWER_TOOL_FAILURE_4065.run_id||
             r.source_attempt!==1))||
           (r.failure_code===REVIEWER_PREMODEL_FAILURE_4065.failure_code&&(
             state.issue!==REVIEWER_PREMODEL_FAILURE_4065.issue||
@@ -427,6 +445,7 @@ export function validateDevelopmentState(state) {
                 REVIEWER_PREMODEL_FAILURE_3784.failure_code,
                 REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
                 REVIEWER_PREMODEL_FAILURE_4065.failure_code,
+                REVIEWER_TOOL_FAILURE_4065.failure_code,
                 REVIEWER_JSON_FAILURE.failure_code,
                 REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code))))
         reject('invalid authenticated failure receipt');
