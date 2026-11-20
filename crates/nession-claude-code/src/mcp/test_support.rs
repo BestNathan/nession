@@ -215,38 +215,88 @@ async fn read_headers(
     }
 }
 
-/// A tiny stdio MCP fixture: answers initialize and one tools/list, then waits
-/// to be killed by the probe.
-pub fn stdio_fixture(directory: &std::path::Path) -> std::path::PathBuf {
-    let path = directory.join("fake-mcp-stdio.sh");
-    std::fs::write(
-        &path,
-        "#!/bin/sh\nread _line\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"capabilities\":{\"tools\":{}}}}'\nread _line\nprintf '%s\\n' '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"echo\"}]}}'\nsleep 30\n",
-    )
-    .unwrap();
+/// Install executable test scripts without an inherited writable descriptor on
+/// the executed inode. Rust coverage runs many tests in parallel: a direct
+/// fs::write can be inherited across a concurrent fork and yield ETXTBSY on
+/// execve even after the writing thread closes its handle (#4178).
+pub(crate) fn install_executable_fixture(
+    directory: &std::path::Path,
+    name: &str,
+    body: &str,
+) -> std::path::PathBuf {
+    let path = directory.join(name);
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
+        let source = directory.join(format!("{name}.source"));
+        std::fs::write(&source, body).unwrap();
+        // Only the child cp process opens the final executable for writing.
+        // It exits (and closes all descriptors) before the parent can exec it.
+        let copy = std::process::Command::new("cp")
+            .arg(&source)
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            copy.status.success(),
+            "cannot install executable fixture: {}",
+            String::from_utf8_lossy(&copy.stderr)
+        );
+        std::fs::remove_file(&source).unwrap();
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
+    #[cfg(not(unix))]
+    std::fs::write(&path, body).unwrap();
     path
 }
 
-/// A fake `claude` CLI for Connect preflight tests: it supports `--version`
+/// A tiny stdio MCP fixture: answers initialize and one tools/list, then waits
+/// to be killed by the probe.
+pub fn stdio_fixture(directory: &std::path::Path) -> std::path::PathBuf {
+    install_executable_fixture(
+        directory,
+        "fake-mcp-stdio.sh",
+        r#"#!/bin/sh
+read _line
+printf '%s\n' '{"jsonrpc":"2.0","id":1,"result":{"capabilities":{"tools":{}}}}'
+read _line
+printf '%s\n' '{"jsonrpc":"2.0","id":2,"result":{"tools":[{"name":"echo"}]}}'
+sleep 30
+"#,
+    )
+}
+
+/// A fake \`claude\` CLI for Connect preflight tests: it supports \`--version\`
 /// and refuses nothing, because the preflight under test never writes.
 pub fn claude_fixture(directory: &std::path::Path) -> std::path::PathBuf {
-    let path = directory.join("claude");
-    std::fs::write(
-        &path,
+    install_executable_fixture(
+        directory,
+        "claude",
         "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo '2.1.325 (Claude Code)'; exit 0; fi\nexit 0\n",
     )
-    .unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn fake_claude_executable_fixtures_can_run_in_parallel() {
+    let tasks = (0..8)
+        .map(|_| std::thread::spawn(|| {
+            let temp = tempfile::tempdir().unwrap();
+            let claude = claude_fixture(temp.path());
+            let result = std::process::Command::new(&claude)
+                .arg("--version")
+                .output()
+                .unwrap();
+            assert!(result.status.success());
+            assert_eq!(
+                String::from_utf8(result.stdout).unwrap().trim(),
+                "2.1.325 (Claude Code)"
+            );
+        }))
+        .collect::<Vec<_>>();
+    for task in tasks {
+        task.join().unwrap();
     }
-    path
 }
 
 /// The header map a Connect test uses for the fake endpoint.
