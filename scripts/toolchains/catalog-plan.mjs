@@ -29,32 +29,31 @@ function catalog(root) {
   return result.sort((a,b)=> (a.tool+'/'+a.version).localeCompare(b.tool+'/'+b.version));
 }
 
+
 function git(root,...args){
   return execFileSync('git',['-C',root,...args],{
     encoding:'utf8',timeout:30000,maxBuffer:1024*1024,
     env:{PATH:process.env.PATH??'/usr/bin:/bin',HOME:'/nonexistent',GIT_NO_REPLACE_OBJECTS:'1'},
   }).trim();
 }
-// Only the exact orphan commit's changed version scripts become auto candidates.
-// The caller pins the checkout to that SHA; README and historical deletions never
-// schedule a release. The GHCR fingerprint probe independently rejects stale,
-// absent or incomplete OCI objects, including replayed change signals.
+// Changed recipe bytes are the auto candidate set. The publisher's remote OCI
+// fingerprint probe decides whether those candidates still need publication.
 function changed(root,sourceSha){
   if(!COMMIT.test(sourceSha)||git(root,'rev-parse','HEAD')!==sourceSha)
     throw Error('stale or forged orphan source SHA');
-  const parents=git(root,'rev-list','--parents','-n','1',sourceSha).split(/\\s+/).slice(1);
+  const parents=git(root,'rev-list','--parents','-n','1',sourceSha).split(/\s+/).slice(1);
   if(parents.length>1)throw Error('merge commits forbidden in orphan change scanner');
   if(parents.length===0)return catalog(root);
   if(!COMMIT.test(parents[0]))throw Error('invalid parent');
   const output=git(root,'diff-tree','--no-commit-id','--name-only','-r',parents[0],sourceSha);
   const entries=new Map();
-  for(const file of output.split('\\n').filter(Boolean)){
-    const m=/^([^/]+)\\/([^/]+)\\/build\\.sh$/.exec(file);
-    if(!m)continue; // unrelated or deleted artifacts have no release side effect
+  for(const file of output.split('\n').filter(Boolean)){
+    const m=/^([^/]+)\/([^/]+)\/build\.sh$/.exec(file);
+    if(!m)continue;
     const [,tool,version]=m;
     if(!valid(tool)||!valid(version))throw Error('malformed changed recipe selector');
     const script=join(root,tool,version,'build.sh');
-    if(!existsSync(script))continue; // deletion preserves previously published OCI history
+    if(!existsSync(script))continue; // deletion never removes previously published OCI history
     recipe(root,tool,version);
     entries.set(tool+'/'+version,{tool,version});
   }
@@ -91,9 +90,8 @@ function selfTest() {
     assert.throws(()=>targets(root,'jq','1.0','darwin'),/not supported/);
     writeFileSync(join(root,'jq','1.0','build.sh'),'#!/bin/bash\nprintf "linux/amd64\\nlinux/amd64\\n"\n');
     assert.throws(()=>targets(root,'jq','1.0'),/duplicate/);
-    // Model immutable source/parent semantics using local Git fixtures:
-    // initial catalog, unrelated README no-op, script change, deletion, restore,
-    // repeated source, forged SHA and wrong ref all have stable decisions.
+
+    // Synthetic Git history tests the real source-pinned scanner, not an invented list.
     const work=join(root,'orphan');
     mkdirSync(work,{recursive:true});
     git(work,'init','-q');
@@ -101,15 +99,15 @@ function selfTest() {
       '-c','user.email=fixture@example.invalid','commit','-qm',message);return git(work,'rev-parse','HEAD');};
     mkdirSync(join(work,'jq','1.8.1'),{recursive:true});
     mkdirSync(join(work,'gh','2.105.0'),{recursive:true});
-    writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\\nprintf "linux/amd64\\\\n"\\n');
-    writeFileSync(join(work,'gh','2.105.0','build.sh'),'#!/bin/bash\\nprintf "linux/amd64\\\\n"\\n');
+    writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\nprintf "linux/amd64\\n"\n');
+    writeFileSync(join(work,'gh','2.105.0','build.sh'),'#!/bin/bash\nprintf "linux/amd64\\n"\n');
     const initial=commit('first scripts');
     assert.deepEqual(changed(work,initial),[{tool:'gh',version:'2.105.0'},{tool:'jq',version:'1.8.1'}]);
-    writeFileSync(join(work,'README.md'),'unrelated update\\n');
+    writeFileSync(join(work,'README.md'),'unrelated update\n');
     const unrelated=commit('readme only');
     assert.deepEqual(changed(work,unrelated),[]);
     assert.deepEqual(changed(work,unrelated),[],'replay of unaffected source stays no-op');
-    writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\\nprintf "linux/arm64\\\\n"\\n');
+    writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\nprintf "linux/arm64\\n"\n');
     const modified=commit('change jq');
     assert.deepEqual(changed(work,modified),[{tool:'jq',version:'1.8.1'}]);
     assert.throws(()=>changed(work,initial),/stale or forged/);
@@ -118,10 +116,9 @@ function selfTest() {
     rmSync(join(work,'jq','1.8.1','build.sh'));
     const deleted=commit('delete jq');
     assert.deepEqual(changed(work,deleted),[]);
-    writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\\nprintf "linux/amd64\\\\n"\\n');
+    writeFileSync(join(work,'jq','1.8.1','build.sh'),'#!/bin/bash\nprintf "linux/amd64\\n"\n');
     const restored=commit('restore jq');
     assert.deepEqual(changed(work,restored),[{tool:'jq',version:'1.8.1'}]);
-
   } finally {rmSync(root,{recursive:true,force:true});}
   process.stdout.write('catalog-plan deterministic selectors and targets: PASS\n');
 }
