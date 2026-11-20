@@ -10,7 +10,7 @@ bash scripts/toolchains/prepare.sh prepare jq 1.8.1 linux/amd64 "$ROOTFS"
 
 `ROOTFS` must be a private absolute empty directory. The selected allowlisted recipe is invoked as `bash recipes/<tool>.sh prepare VERSION PLATFORM ROOTFS`. Recipes obtain exact pinned binary sources, verify their SHA256, copy **all** required files into ROOTFS and run their version checks. They cannot accept arbitrary download URLs, shell commands or filesystem destinations from workflow_dispatch.
 
-Today: jq 1.7.1/1.8.1, kubectl 1.35.0, and bundle 2026.11 (jq 1.8.1 + kubectl 1.35.0 installed into the **same directory**); linux/amd64 only. Add versions and future tools in reviewed scripts; do not duplicate a GitHub Actions workflow for each version. Bundles pin their component versions.
+Today: jq 1.7.1/1.8.1, kubectl 1.35.0, gh 2.105.0 (the official GitHub CLI), and bundle 2026.11 (jq 1.8.1 + kubectl 1.35.0 installed into the **same directory**); linux/amd64 only. The gh recipe installs only the pinned executable from the upstream SHA256-verified release archive; authentication/Session ENV is supplied by consumers, not baked into the image. Add versions and future tools in reviewed scripts; do not duplicate a GitHub Actions workflow for each version. Bundles pin their component versions.
 
 The common `release-toolchains.yml` workflow:
 1. A read-only, uncredentialed prepare job generates ROOTFS and checks the binaries. It stores the prepared file tree in an ephemeral tar **solely to retain Unix modes across GitHub Actions artifacts**. This is **not** an OCI Archive or an OCI image format.
