@@ -564,6 +564,46 @@ async function selfTest() {
   const issue = { number: 19, state: 'open', labels: [{ name: 'bug' }], body };
   const pr = { number: 21, title: 'fix (#19)', body: 'Fixes #19', head: { sha },
     base: { ref: 'staging' }, merged_at: '2026-11-11T01:00:00Z', merge_commit_sha: sha };
+  // #4146: signed SC Pass alone cannot close an Issue when the exact
+  // implementing PR head failed Quality or no longer matches the merged PR.
+  const qualityReceipt = {
+    kind:'pr_required_quality_v1', repository:'BestNathan/nession',
+    workflow:'.github/workflows/ci-quality.yml', head_sha:sha,
+    result:'success', run_id:101, run_attempt:1, scope_job_id:102,
+    web_check_job_id:103,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  };
+  const fixtureQuality = async head => ({status:'pass',
+    receipt:{...qualityReceipt,head_sha:head}});
+  assert.equal((await qualifyIssuePrSourceForClosure(issue,[pr],fixtureQuality)).qualified,
+    true,'source-aligned qualified PR is eligible for eventual closure');
+  for (const blocked of [
+    {prs:[{...pr,head:{sha:'b'.repeat(40)}}],reader:fixtureQuality},
+    {prs:[pr],reader:async()=>({status:'fail',reason:'#4143 web-check failure'})},
+    {prs:[pr],reader:async()=>({status:'pending',reason:'CI in progress'})},
+    {prs:[pr],reader:async()=>({status:'pass',receipt:{
+      ...qualityReceipt,head_sha:'b'.repeat(40)}})},
+    {prs:[pr],reader:async()=>({status:'pass',receipt:{
+      ...qualityReceipt,run_attempt:0}})},
+    {prs:[{...pr,merged_at:null}],reader:fixtureQuality},
+  ]) assert.equal((await qualifyIssuePrSourceForClosure(issue,blocked.prs,
+    blocked.reader)).qualified,false,
+    'failed/pending/stale Quality or amended/nonmerged head cannot close');
+  const liveNegativeHead='fa04599e1e9bb3f344d9dc43597f477c4063afc2';
+  const originalIssue={...issue,body:body.replaceAll(sha,liveNegativeHead)};
+  const failedPr={...pr,head:{sha:liveNegativeHead}};
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,[failedPr],
+    async()=>({status:'fail',reason:'Quality run 44694739296'}))).qualified,false,
+    'real #4143 source was not Quality qualified despite approved Reviewer');
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,
+    [{...pr,head:{sha:'b'.repeat(40)}}],fixtureQuality)).qualified,false,
+    'Owner #4145 merged patch cannot retroactively qualify source #4143');
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,
+    [{...failedPr,head:{sha:'c'.repeat(40)}}],fixtureQuality)).qualified,false,
+    'amended PR head invalidates previously accepted source');
   assert.equal(decideIssueClosure(issue, [pr]).action, 'close');
   const gitopsPr = { ...pr, number: 22, state: 'closed',
     base: { ref: 'gitops' }, merged_at: '2026-11-18T09:49:12Z' };
@@ -939,37 +979,37 @@ async function selfTest() {
     }
     throw Error('unexpected fixture API path ' + path);
   };
-  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock });
+  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock, qualityReader: fixtureQuality });
   assert.equal(once.action, 'closed');
   assert.equal(writes, 1);
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'skip');
+    { request: mock, qualityReader: fixtureQuality })).action, 'skip');
   assert.equal(writes, 1, 'repeat delivery must never write another closure');
   // Acceptance-first: a trusted Pass arriving before merge cannot close;
   // the subsequent merge event converges using the already projected proof.
   live = { ...issue, updated_at: '2026-11-11T01:00:01Z' };
   effectivePr = { ...effectivePr, merged_at: null };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'pending');
+    { request: mock, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 1);
   effectivePr = {...pr, head:{...pr.head,repo:{full_name:'X/y'}},
     base:{...pr.base,repo:{full_name:'X/y'}}};
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'closed');
+    { request: mock, qualityReader: fixtureQuality })).action, 'closed');
   assert.equal(writes, 2);
   // Merge-first: missing SC proof keeps Issue Open until the later
   // authorized Acceptance projection causes another reconciliation.
   live = { ...issue, updated_at: '2026-11-11T01:00:02Z',
     body: body.replace('| Pass |', '| Pending |') };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'pending');
+    { request: mock, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 2);
   live = { ...issue, updated_at: '2026-11-11T01:00:03Z' };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'closed');
+    { request: mock, qualityReader: fixtureQuality })).action, 'closed');
   assert.equal(writes, 3);
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'skip');
+    { request: mock, qualityReader: fixtureQuality })).action, 'skip');
   assert.equal(writes, 3, 'both event orders must converge exactly once');
   // Restore an open pending Issue to exercise explicitly requested recovery.
   live = { ...issue, updated_at: '2026-11-11T01:01:00Z',
@@ -1019,7 +1059,7 @@ async function selfTest() {
     return mock(path, options);
   };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: race })).action, 'pending');
+    { request: race, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 3, 'racing edits must not close the Issue');
   await assert.rejects(reconcileIssue('X/y', 19, 'fixture-token', {
     request: async (path, options) => path.endsWith('/events?per_page=100')
