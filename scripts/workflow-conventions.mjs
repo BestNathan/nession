@@ -159,10 +159,10 @@ export function approvedExternalWorkflowRunSource(consumerFile, content, display
   // #4160: this third independent orphan signal is permitted ONLY for Toolchain
   // Release, bound to the owned source, successful push and exact branch.
   if (consumerFile === 'release-toolchains.yml' && displayName === 'Toolchains / Catalog Change') {
-    const exactHeader = /^  workflow_run:\\s*$/m.test(content) &&
-      /^    workflows: \\['Toolchains \\/ Catalog Change'\\]\\s*$/m.test(content) &&
-      /^    types: \\[completed\\]\\s*$/m.test(content) &&
-      /^    branches: \\[toolchains\\]\\s*$/m.test(content);
+    const exactHeader = /^  workflow_run:\s*$/m.test(content) &&
+      /^    workflows: \['Toolchains \/ Catalog Change'\]\s*$/m.test(content) &&
+      /^    types: \[completed\]\s*$/m.test(content) &&
+      /^    branches: \[toolchains\]\s*$/m.test(content);
     const required = [
       "github.repository == 'BestNathan/nession' &&",
       "github.event_name == 'workflow_run' &&",
@@ -438,7 +438,7 @@ function selfTest() {
     "        github.event.workflow_run.head_branch == 'toolchains' &&",
     "        github.event.workflow_run.name == 'Toolchains / Catalog Change' &&",
     "        github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'))",
-  ].join('\\n')+'\\n';
+  ].join('\n')+'\n';
   assert.equal(approvedExternalWorkflowRunSource('release-toolchains.yml',toolchainSignal,'Toolchains / Catalog Change'),true);
   for(const [from,to] of [
     ['branches: [toolchains]','branches: [main]'],
