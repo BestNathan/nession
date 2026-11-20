@@ -737,6 +737,8 @@ function render(){
   const previousWorkspace=root.querySelector('.documents-workspace');
   const previousSection=previousWorkspace?.dataset.section;
   const previousListScroll=previousWorkspace?.querySelector('.documents-list-scroll')?.scrollTop||0;
+  const previousKnowledgeList=root.querySelector('.knowledge-entries');
+  const previousKnowledgeScroll=previousKnowledgeList?.scrollTop??null;
   root.replaceChildren();
   // A hashchange may arrive while the independent site.json request is still
   // pending. Only these routes need that snapshot; Prototypes, Knowledge and Documents
@@ -787,6 +789,11 @@ function render(){
     if(nextWorkspace&&nextWorkspace.dataset.section===previousSection){
       const nextList=nextWorkspace.querySelector('.documents-list-scroll');
       if(nextList)nextList.scrollTop=previousListScroll;
+    }
+    // Hash-based article selection re-renders the reader; retain catalog position.
+    if(route==='/knowledge'&&previousKnowledgeScroll!==null){
+      const nextList=root.querySelector('.knowledge-entries');
+      if(nextList)nextList.scrollTop=previousKnowledgeScroll;
     }
     document.title=(detail?'Evidence':route==='/'?'Overview':route==='/missing'?'Unavailable':route.slice(1).replace(/^\w/, x=>x.toUpperCase()))+' — Nession';
   } catch(error){
