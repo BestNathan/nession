@@ -104,7 +104,7 @@ impl TestDeps {
                 extension_tools: None,
             },
             ConnectionHandlerConfig {
-                server_auth_token: auth_token.to_string(),
+                server_auth: nession_protocol::TokenVerifier::new(auth_token),
                 heartbeat_interval_secs: 30,
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
                 terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,

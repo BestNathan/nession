@@ -1074,14 +1074,15 @@ fn global_target_flags_are_rejected_where_they_have_no_effect() {
 /// The positive control for the restart ordering: a valid replacement passes
 /// validation and the command reaches `start`. The start itself fails on a
 /// deliberately unbindable TEST-NET address, so no daemon is left behind and
-/// the failure cannot be mistaken for a rejected config.
+/// the failure cannot be mistaken for a rejected config. The token is present
+/// because a non-loopback listener without one is now refused (#4066).
 #[test]
 fn restart_accepts_a_valid_replacement_and_reaches_start() {
     let dir = tempfile::tempdir().expect("tempdir");
     let config_path = dir.path().join("server.toml");
     std::fs::write(
         &config_path,
-        "listen_address = \"203.0.113.1:1\"\ntls_cert_path = \"\"\ntls_key_path = \"\"\nauth_token = \"\"\n",
+        "listen_address = \"203.0.113.1:1\"\ntls_cert_path = \"\"\ntls_key_path = \"\"\nauth_token = \"restart-test-token\"\n",
     )
     .expect("seed a valid config");
     let pid_path = dir.path().join("server.pid");
