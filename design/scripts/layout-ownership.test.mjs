@@ -72,6 +72,33 @@ test('the App host owns page scrolling and Capsule clearance (#4115)', () => {
     ['no-capability-app-surface-owner'],
   );
 
+  // Negative: a nested capability scroll owner hardcoding a Capsule-sized band
+  // instead of spending the host's measured inset (#4188).
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div data-testid="github-actions" className="min-h-0 flex-1 overflow-y-auto p-3 pb-16" />',
+      'web/src/capabilities/bad/components/Bad.tsx',
+    )),
+    ['no-capability-fixed-scroll-clearance'],
+  );
+
+  // Positive: a small padding on a scroller is content spacing, and a fixed
+  // band on a non-scrolling box is not a second clearance owner.
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div className="overflow-y-auto pb-2" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div className="overflow-hidden p-4 pb-16" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+  );
+
   // Positive: a declared bounded adapter spends the host's scroll value and a
   // local list/editor remains a legal inner scroll.
   assert.deepEqual(
