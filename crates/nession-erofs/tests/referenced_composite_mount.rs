@@ -24,7 +24,7 @@ use nession_erofs::oci::annotation::{
 use nession_erofs::oci::config::{ImageConfig, RootFs, RuntimeConfig};
 use nession_erofs::oci::descriptor::{Descriptor, Platform};
 use nession_erofs::{
-    BlobStore, MkfsRunner, NoopObserver, Packaging, ProcessControl, ProcessMkfsRunner,
+    FsBlobStore, MkfsRunner, NoopObserver, Packaging, ProcessControl, ProcessMkfsRunner,
 };
 use serde_json::Map;
 
@@ -109,7 +109,7 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
     let composer = ErofsReferencedComposer::new(
         Arc::new(ProcessErofsExtractor::default()),
         mkfs,
-        BlobStore::new(root.path().join("server-blobs")).unwrap(),
+        FsBlobStore::new(root.path().join("server-blobs")).unwrap(),
         root.path().join("work"),
     )
     .unwrap();
@@ -155,7 +155,7 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         (
             format!("{ROUTE_PREFIX}{}", referenced.descriptor.digest),
             std::fs::read(
-                nession_erofs::BlobStore::new(root.path().join("server-blobs"))
+                nession_erofs::FsBlobStore::new(root.path().join("server-blobs"))
                     .unwrap()
                     .path_for(&referenced.descriptor.digest)
                     .unwrap(),
@@ -165,7 +165,7 @@ async fn a_referenced_composite_transfers_and_mounts_after_sources_are_deleted()
         (
             format!("{ROUTE_PREFIX}{}", referenced.metadata.digest),
             std::fs::read(
-                nession_erofs::BlobStore::new(root.path().join("server-blobs"))
+                nession_erofs::FsBlobStore::new(root.path().join("server-blobs"))
                     .unwrap()
                     .path_for(&referenced.metadata.digest)
                     .unwrap(),

@@ -29,6 +29,8 @@ use crate::distribution::transfer::{ProgressObserver, TransferEngine, TransferSp
 
 pub mod eviction;
 pub mod fetch;
+pub mod repository;
+pub mod store;
 
 /// The local readiness of one digest, observed without downloading or mutating.
 ///

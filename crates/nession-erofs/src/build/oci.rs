@@ -270,7 +270,7 @@ mod tests {
         }
         .convert(&request)
         .unwrap();
-        let store = crate::blob::store::BlobStore::new(dir.path().join("store")).unwrap();
+        let store = crate::blob::store::FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = crate::catalog::sqlite::tests::memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let imported = crate::build::import::import_raw_erofs(

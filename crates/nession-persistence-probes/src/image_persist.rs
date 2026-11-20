@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
         .context("failed to create the configured Nession component directories")?;
 
     let db = Arc::new(Database::new(&config.db_path).await?);
-    let blobs = nession_erofs::BlobStore::new(&config.image_blob_dir)
+    let blobs = nession_erofs::FsBlobStore::new(&config.image_blob_dir)
         .context("failed to open the image blob store")?;
     let builder = nession_erofs::ErofsBuilder::new(
         Arc::new(nession_erofs::ProcessGitRunner::default()),

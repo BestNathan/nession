@@ -2166,6 +2166,7 @@ name = "nession-erofs"
 version = "0.35.0"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "base64 0.21.7",
  "flate2",
