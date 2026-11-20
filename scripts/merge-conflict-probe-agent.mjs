@@ -203,7 +203,6 @@ function main(){
 }
 function selfTest(){
   assert.equal(allowedModelTurns(false,'32'),'8');
-  assert.equal('source-replay-mismatch'.length>0,true);
   assert.equal(allowedModelTurns(true,undefined),'24');
   assert.equal(allowedModelTurns(true,'24'),'24');
   for(const invalid of ['0','7','33','999','inf','20.5','20;echo bad']){
