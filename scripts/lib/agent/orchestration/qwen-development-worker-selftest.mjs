@@ -6,11 +6,12 @@ import {attestQwenRepairIssueReview} from './qwen-review-context.mjs';
 import {formatReviewerIssueReceipt}
   from './reviewer-result-ingest.mjs';
 
-// A real native second-cycle Repair hit error_max_turns at the old
-// 10-turn limit. Only an authenticated Repair Resume receives a bounded
-// 24-turn budget; plain/initial Developer remains 10 with unchanged policy.
-assert.equal(qwenDeveloperTurnBudget('implement',false),10);
-assert.equal(qwenDeveloperTurnBudget('implement',true),10);
+// Two independently attested real CLI max-turns failures (#3885) prove the
+// former initial implement cap of 10 turns can exhaust before producing a
+// patch. Both implement and signed Repair now have a finite 24-turn budget;
+// no new task kind, unbounded continuation or replay is admitted.
+assert.equal(qwenDeveloperTurnBudget('implement',false),24);
+assert.equal(qwenDeveloperTurnBudget('implement',true),24);
 assert.equal(qwenDeveloperTurnBudget('repair',true),24);
 for(const [task,resuming] of [
   ['repair',false],['review',true],['evil',false],

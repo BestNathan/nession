@@ -185,14 +185,16 @@ export function classifyQwenCliFailure(proc) {
   detail.push('stderr_category=' + category);
   return 'Qwen CLI failed (' + detail.join(', ') + '); raw model output withheld';
 }
-// #3885: the real second native Repair exhausted the original 10-turn
-// bound without creating a patch. Increase only the independently admitted
-// Repair budget; keep a finite limit, identical tools and unchanged Run fence.
+// #3885: a real signed initial Developer (#4116, Run 44677181513)
+// exhausted the former 10-turn limit without producing a patch. Initial
+// implement and signed Repair have the same finite 24-turn cap; tool scope,
+// Store Action one-shot fencing and the CLI 8-minute timeout do not change.
+// Exceeding this cap remains a failed Run, never partial patch publication.
 export function qwenDeveloperTurnBudget(task,resuming){
   if(!['implement','repair'].includes(task)||
       typeof resuming!=='boolean'||(task==='repair'&&!resuming))
     fail('invalid signed task / native Resume turn policy');
-  return task==='repair'?24:10;
+  return 24;
 }
 function cliCall({prompt,sessionId,resuming,task,plan,configDir,workspace}){
   const argv=['-p',prompt,'--output-format','stream-json','--verbose',
