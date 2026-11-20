@@ -198,7 +198,6 @@ for(const bad of [
     'changes_requested','approved')}]},
   {comments:[{...comment,id:0}]},
   {verdict:{...verdict,summary:'tampered Reviewer body'}},
-  {verdict:{...verdict,outcome:'approved'}},
   {verdict:null},
   {readReceipt:()=>({...receipt,result:{...result,target_sha:'f'.repeat(40)}})},
   {readCommitState:()=>({...state,transitions:[{...latest,
@@ -207,6 +206,14 @@ for(const bad of [
   assert.throws(()=>attestQwenRepairIssueReview({...context,...bad}),
     /Qwen Reviewer Issue context|untrusted authenticated|untrusted original Reviewer findings source/);
 }
+// An approved verdict with unresolved findings fails at the shared canonical
+// Reviewer validator; approval without findings still conflicts with signed Store.
+assert.throws(()=>attestQwenRepairIssueReview({
+  ...context,verdict:{...verdict,outcome:'approved'},
+}),/approved verdict must not contain findings/);
+assert.throws(()=>attestQwenRepairIssueReview({
+  ...context,verdict:{...verdict,outcome:'approved',findings:[]},
+}),/untrusted original Reviewer findings source/);
 console.log('Qwen Reviewer Issue-thread repair: signed Store transition, exact bot projection, native prompt synchronization and forgery denials pass');
 
 console.log('Qwen isolated Developer: signed Run admission, absent Store credentials, exact issue context and defensive prompt passed');
