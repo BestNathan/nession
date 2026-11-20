@@ -178,6 +178,7 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
+      github.run_attempt == 1 &&
       (github.actor == 'BestNathan' || github.actor == 'github-actions[bot]') &&
       inputs.direction == 'sync-main-to-lane' &&
       inputs.repair_issue_number != '' &&
@@ -299,7 +300,7 @@ jobs:
           name: staging-convergence-repair-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/convergence-repair/candidate/
           if-no-files-found: error
-          retention-days: 7
+          retention-days: 30
 
   # Distinct trusted Publisher. Revalidates the model artifact as untrusted
   # data before minting any GitHub App writer; creates Draft PR only.
