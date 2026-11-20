@@ -282,7 +282,14 @@ async function relatedPulls(repository, issueNumber, token, includePr = null, re
   if (found.incomplete_results || found.total_count > 100 || !Array.isArray(found.items)) {
     throw Error('incomplete implementation PR discovery; refusing Issue closure');
   }
-  const numbers = new Set(found.items.map(pr => pr.number));
+  // Search can surface the Issue itself or another non-PR item; only an item
+  // GitHub typed as a pull request whose number is not this Issue's may be
+  // fetched as /pulls/<n> (#4214). A claimed PR that cannot be read still
+  // fails closed below.
+  const numbers = new Set(found.items
+    .filter(item => item && Number.isSafeInteger(item.number) &&
+      item.number !== issueNumber && item.pull_request)
+    .map(item => item.number));
   if (includePr) numbers.add(includePr);
   const prs = [];
   for (const number of numbers) {
@@ -1054,7 +1061,7 @@ async function selfTest() {
     base:{...pr.base,repo:{full_name:'X/y'}}};
   const mock = async (path, options = {}) => {
     if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
-      items: [{ number: 21 }] };
+      items: [{ number: 21, pull_request: {} }] };
     if (path.endsWith('/pulls/21')) return effectivePr;
     if (path.endsWith('/commits/'+sha+'/pulls?per_page=100'))
       return [{number:21,head:effectivePr.head,base:effectivePr.base}];
@@ -1089,6 +1096,27 @@ async function selfTest() {
       if(path.endsWith('/pulls/21'))return {...effectivePr,merged_at:null};
       return nativeCloseFixtureRead(path,opts);
     },qualityReader:fixtureQuality})).qualified,false);
+  // A search result may include the Issue itself (a non-PR item). It must
+  // never be fetched as /pulls/<issue-number>; the real merged PR still
+  // qualifies (#4214).
+  const searchWithIssue = async (path, opts = {}) =>
+    path.startsWith('/search/issues?')
+      ? { incomplete_results: false, total_count: 2,
+          items: [{ number: 19 }, { number: 21, pull_request: {} }] }
+      : nativeCloseFixtureRead(path, opts);
+  assert.equal((await assessNativeCompletedIssueSource('X/y', 19, 'fixture-token', {
+    request: searchWithIssue, qualityReader: fixtureQuality })).qualified, true);
+  // A search item that claims to be a PR but cannot be read still fails
+  // closed; the filter must not silently drop a real PR.
+  const unreadableClaimedPr = async (path, opts = {}) => {
+    if (path.startsWith('/search/issues?'))
+      return { incomplete_results: false, total_count: 2,
+        items: [{ number: 21, pull_request: {} }, { number: 22, pull_request: {} }] };
+    if (path.endsWith('/pulls/22')) throw Error('GitHub GET /repos/X/y/pulls/22: 404');
+    return nativeCloseFixtureRead(path, opts);
+  };
+  await assert.rejects(() => assessNativeCompletedIssueSource('X/y', 19, 'fixture-token', {
+    request: unreadableClaimedPr, qualityReader: fixtureQuality }), /404/);
   const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock, qualityReader: fixtureQuality });
   assert.equal(once.action, 'closed');
   assert.equal(writes, 1);
