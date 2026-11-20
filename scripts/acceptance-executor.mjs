@@ -1022,10 +1022,10 @@ function selfTest() {
     job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
       'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
   }};
-  const recover=verifiedFailedPrQualityRecovery(3843,exactA,exactB,{
+  const qualityRecover=verifiedFailedPrQualityRecovery(3843,exactA,exactB,{
     previousQuality:{status:'fail',reason:'old web-check failed'},
     nextQuality:qualitySucceeded,sourceProof:recoveryProof});
-  assert.equal(recover.pr_number,4188);
+  assert.equal(qualityRecover.pr_number,4188);
   for (const bad of [
     {previousQuality:{status:'pass'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
     {previousQuality:{status:'pending'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
@@ -1044,7 +1044,7 @@ function selfTest() {
   const recoverContext=recoverFailedQualityPrCriteria(anchoredIssue,
     buildAcceptanceContext(anchoredIssue,'pr',{
       targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
-    {recoveryReader:()=>recover});
+    {recoveryReader:()=>qualityRecover});
   assert.deepEqual(recoverContext.criteria.map(x=>x.criterion),
     ['SC-01','SC-02','SC-04']);
   const recoveredResult=normalizeAcceptanceResult(recoverContext,{
@@ -1052,7 +1052,7 @@ function selfTest() {
       evidence:'test: independent Quality and same-PR source proof'})),
   },'agent-qwen');
   const recoveredBody=applyAcceptanceResultToBody(anchoredBody,{
-    ...recoveredResult,pr_quality_recovery:{...recover,criteria:['SC-01','SC-02','SC-04']}},
+    ...recoveredResult,pr_quality_recovery:{...qualityRecover,criteria:['SC-01','SC-02','SC-04']}},
     {prSourceSupersession:recoveryProof});
   assert.match(recoveredBody,/Acceptance Source Recovery History/);
   assert.match(recoveredBody,/SC-01 prior Pass at a{40}/);
