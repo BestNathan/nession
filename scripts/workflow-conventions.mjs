@@ -47,6 +47,7 @@ export const CATALOG = [
   ['acceptance-manual-request', 'acceptance-manual-request.yml', 'Acceptance / Manual Request', 'acceptance-manual-request.yml', 'Acceptance / Manual Request', 'acceptance'],
   ['acceptance-orchestrator-background', 'acceptance-orchestrator-background.yml', 'Acceptance / Orchestrator Background', 'acceptance-orchestrator-background.yml', 'Acceptance / Orchestrator Background', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
+  ['acceptance-pr-quality-waker', 'acceptance-pr-quality-waker.yml', 'Acceptance / PR Quality Waker', 'acceptance-pr-quality-waker.yml', 'Acceptance / PR Quality Waker', 'acceptance'],
   ['acceptance-event-consumer', 'acceptance-event-consumer.yml', 'Acceptance / Event Consumer', 'acceptance-event-consumer.yml', 'Acceptance / Event Consumer', 'acceptance'],
   ['acceptance-e2e-failure-bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance'],
   ['acceptance-verified-stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance'],
