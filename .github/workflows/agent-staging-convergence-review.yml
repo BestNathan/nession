@@ -255,7 +255,7 @@ jobs:
           npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
             "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
 
-      - name: Agent edits conflict worktree without GitHub writer or shell
+      - name: Agent edits conflict and retries one strict source replay mismatch
         shell: bash
         env:
           CONVERGENCE_PRODUCTION: 'true'
@@ -268,9 +268,12 @@ jobs:
           PATH: ${{ runner.temp }}/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
         run: |
           set -euo pipefail
-          node scripts/merge-conflict-probe-agent.mjs \
+          # Trusted orchestrator invokes only the restricted model and the
+          # strict Git validator; no model shell, GitHub writer or direct merge.
+          node scripts/staging-convergence-repair-runner.mjs \
             "$RUNNER_TEMP/convergence-repair/context.json" "$REPAIR_MODE" \
-            "$RUNNER_TEMP/convergence-repair/agent"
+            "$RUNNER_TEMP/convergence-repair/agent" \
+            "$RUNNER_TEMP/convergence-repair/candidate"
 
       - name: Independently validate exact Git repair and immutable parent order
         shell: bash
@@ -291,6 +294,8 @@ jobs:
           path: |
             ${{ runner.temp }}/convergence-repair/agent/agent-telemetry.json
             ${{ runner.temp }}/convergence-repair/agent/agent-execution-trace.json
+            ${{ runner.temp }}/convergence-repair/agent/attempt1/agent-telemetry.json
+            ${{ runner.temp }}/convergence-repair/agent/attempt1/agent-execution-trace.json
           if-no-files-found: warn
           retention-days: 30
 
