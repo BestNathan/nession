@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44784070545,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4090-registry-host-adapters",
+    "target_sha": "890b5caec28408c9a8615073d655a83c527f3681",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44784070545",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "d410b39177ada6bc5144d859cbf718b3b19b645ec1b31e6dbbdd5a025e45954b"
+  },
+  "record": "runs/2026-11-20/44784070545-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "4d49f7226700659d1973866a69f016fc57ccdbe2b72eb207e823f9cfe5f47459"
+}
