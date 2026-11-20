@@ -34,6 +34,15 @@ export interface UseSwipeSettleResult {
   settle: SwipeSettleState | null;
   /** Turn a release into a commit animation, a snapback, or an instant route. */
   complete: (end: SwipeEndResult, before: SwipeSnapshot) => void;
+  /**
+   * Finish the active settle now, applying its pending commit. Returns the
+   * state that was finalized, or null when no settle was active.
+   *
+   * The rendered transition calls this when it ends; the timer is the bounded
+   * fallback (reduced motion, a hidden tab, a browser that fires no event) and
+   * a new contact uses it to catch up instead of being dropped (#4185).
+   */
+  finishSettle: () => SwipeSettleState | null;
   clearSettle: () => void;
 }
 
@@ -131,10 +140,12 @@ function completeSwipe(
     return;
   }
 
-  // An inner stack move is the capability's own guarded navigation, so it runs
-  // at release and the page frame settles from the live offset. The
-  // capability's guard may refuse (dirty editor) — then the same settle is the
-  // snapback and the depth stays.
+  // An inner stack move is the capability's own guarded navigation, so a
+  // commit runs at release; either outcome settles the Workspace frame from
+  // the live offset. A rejected contact keeps its inner owner here: its return
+  // is the same in-stack animation, never the outer layer's page snapback
+  // (#4185). The capability's guard may refuse (dirty editor) — then the same
+  // settle is the snapback and the depth stays.
   if (end.innerAction !== null) {
     if (end.outcome === 'commit') {
       onInnerCommitRef.current(end.innerAction);
@@ -207,6 +218,10 @@ export function useSwipeSettle({
   const [settle, setSettle] = useState<SwipeSettleState | null>(null);
   const timerRef = useRef<number | null>(null);
   const serialRef = useRef(0);
+  // The rendered state is not readable synchronously inside an event; the ref
+  // is what lets a new contact catch up a settle that is still on screen.
+  const settleRef = useRef<SwipeSettleState | null>(settle);
+  settleRef.current = settle;
 
   // Timers and animation callbacks outlive the render that started them; read
   // the latest policy through refs rather than a stale closure.
@@ -219,8 +234,41 @@ export function useSwipeSettle({
   const getShellBoundsRef = useRef(getShellBounds);
   getShellBoundsRef.current = getShellBounds;
 
+  const finalize = useCallback(
+    (next: SwipeSettleState) => {
+      settleRef.current = null;
+      if (next.commitIndex !== null) {
+        onIndexChangeRef.current(next.commitIndex);
+      }
+      if (next.commitInnerAction !== null) {
+        onInnerCommitRef.current(next.commitInnerAction);
+      }
+      publish();
+      setSettle(null);
+    },
+    [publish],
+  );
+
+  const finishSettle = useCallback((): SwipeSettleState | null => {
+    const current = settleRef.current;
+    if (current === null) {
+      return null;
+    }
+    // Invalidate the fallback timer before finalizing; whichever of the
+    // transition event, the timer, or a new contact gets here first owns the
+    // single commit.
+    serialRef.current += 1;
+    if (timerRef.current !== null) {
+      window.clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    finalize(current);
+    return current;
+  }, [finalize]);
+
   const clearSettle = useCallback(() => {
     serialRef.current += 1;
+    settleRef.current = null;
     if (timerRef.current !== null) {
       window.clearTimeout(timerRef.current);
       timerRef.current = null;
@@ -242,6 +290,7 @@ export function useSwipeSettle({
     (next: SwipeSettleState) => {
       const serial = serialRef.current + 1;
       serialRef.current = serial;
+      settleRef.current = next;
       setSettle(next);
       publish();
       timerRef.current = window.setTimeout(() => {
@@ -249,17 +298,10 @@ export function useSwipeSettle({
         if (serial !== serialRef.current) {
           return;
         }
-        if (next.commitIndex !== null) {
-          onIndexChangeRef.current(next.commitIndex);
-        }
-        if (next.commitInnerAction !== null) {
-          onInnerCommitRef.current(next.commitInnerAction);
-        }
-        publish();
-        setSettle(null);
+        finalize(next);
       }, SWIPE_SETTLE_MS);
     },
-    [publish],
+    [finalize, publish],
   );
 
   const complete = useCallback(
@@ -280,5 +322,5 @@ export function useSwipeSettle({
     [beginSettle, publish],
   );
 
-  return { settle, complete, clearSettle };
+  return { settle, complete, finishSettle, clearSettle };
 }

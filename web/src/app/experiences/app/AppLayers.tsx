@@ -107,8 +107,9 @@ function innerStackMotion(
   action: AppInnerStackMotion['action'],
   offset: number,
   settling: boolean,
+  finishSettle: () => void,
 ): AppInnerStackMotion {
-  return { action, offset, settling };
+  return { action, offset, settling, onSettled: settling ? finishSettle : null };
 }
 
 function capsuleExchangeFor(
@@ -175,9 +176,8 @@ export function AppLayers({
     destinationIndex,
     innerAction,
     innerOffset,
-    innerSettling,
-    destinationLabel,
-    direction,
+    innerSettling, destinationLabel, direction,
+    finishSettle,
     lastReason,
   } = useSwipePager({
       // Two positions before a Session exists, three after (#1082). The pager
@@ -231,11 +231,7 @@ export function AppLayers({
     [workspace, workspaceX, width],
   );
 
-  // The Workspace host translates only its header + content frame for an inner
-  // stack move; the Capsule keeps its own geometry. The outer layer offset is
-  // deliberately not reused here — that would slide the opaque Workspace layer
-  // and expose the Terminal underneath.
-  const innerMotion = innerStackMotion(innerAction, innerOffset, innerSettling);
+  const innerMotion = innerStackMotion(innerAction, innerOffset, innerSettling, finishSettle);
 
   return (
     <div
@@ -272,6 +268,7 @@ export function AppLayers({
             x={sessionsX}
             moving={moving}
             transition={transition}
+            onSettled={settling ? finishSettle : undefined}
           >
             {sessions}
           </AppLayerSlab>
@@ -284,6 +281,7 @@ export function AppLayers({
               x={workspaceX}
               moving={moving}
               transition={transition}
+              onSettled={settling ? finishSettle : undefined}
             >
               {workspace}
             </AppLayerSlab>

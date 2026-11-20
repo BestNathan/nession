@@ -3,11 +3,14 @@ import {
   SWIPE_FLICK_MIN_PX,
   SWIPE_FLICK_VELOCITY_PX_PER_MS,
   SWIPE_INNER_MAX_REVEAL_PX,
+  SWIPE_INNER_TRAVEL_LIMIT_PX,
   SWIPE_MAX_REVEAL_FRACTION,
   SWIPE_RESIST_FACTOR,
   SWIPE_RESIST_MAX_PX,
+  SWIPE_REVEAL_LIMIT_FRACTION,
   SWIPE_SLOP_PX,
   SWIPE_VERTICAL_DOMINANCE,
+  resistedTravel,
   swipeCommitThreshold,
 } from './gesture';
 import { hasActiveSelectionWithin, isInteractiveOwner, isWorkSurface } from './workSurface';
@@ -95,7 +98,13 @@ export interface SwipeMoveResult {
 export interface SwipeEndResult {
   outcome: 'none' | 'commit' | 'snapback';
   destinationIndex: number | null;
-  /** The inner Workspace stack operation a commit should run, if any. */
+  /**
+   * The inner Workspace stack operation this contact resolved to, if any.
+   *
+   * Present for a rejected contact too: a below-threshold Pop/Forward is still
+   * the Workspace frame's return animation, so the settle needs the owner even
+   * though it must not run the operation (#4185).
+   */
   innerAction: InnerSwipeAction | null;
   reason: string;
   /** Travel toward the frozen destination at release, in pixels. */
@@ -334,9 +343,12 @@ export class SwipeGesture {
 
     // Navigation: destination and direction are frozen at claim. Travel
     // against that direction clamps the preview to zero; it never settles,
-    // because only release decides commit or snapback.
+    // because only release decides commit or snapback. Forward travel follows
+    // the finger to the preferred reveal, then continues under continuous
+    // resistance toward the bounded limit (#4185).
     const forward = Math.max(0, dx * this.direction);
-    this.offset = this.direction * Math.min(forward, this.maxReveal());
+    const { preferred, limit } = this.revealRange();
+    this.offset = this.direction * resistedTravel(forward, preferred, limit);
     return { snapshot: this.snapshot(), preventDefault: true };
   }
 
@@ -367,7 +379,11 @@ export class SwipeGesture {
       return {
         outcome: commit ? 'commit' : 'snapback',
         destinationIndex: destination,
-        innerAction: commit ? innerAction : null,
+        // Keep the inner owner through a rejection: the frame still has to
+        // animate home inside its own stack, never through the outer pager
+        // snapback path (#4185). The settle only invokes the operation on a
+        // commit.
+        innerAction,
         reason,
         travel,
         velocity,
@@ -432,7 +448,8 @@ export class SwipeGesture {
     this.destinationLabel = destination.kind === 'inner' ? destination.title : null;
     this.direction = directionOf(dx);
     this.reason = null;
-    this.offset = this.direction * Math.min(Math.abs(dx), this.maxReveal());
+    const { preferred, limit } = this.revealRange();
+    this.offset = this.direction * resistedTravel(Math.abs(dx), preferred, limit);
   }
 
   /**
@@ -466,16 +483,28 @@ export class SwipeGesture {
       : null;
   }
 
-  private maxReveal(): number {
+  /**
+   * The preferred reveal and the hard limit for the frozen destination.
+   *
+   * The limit is not a second threshold: the preview moves continuously
+   * between the two values, and release still decides the navigation.
+   */
+  private revealRange(): { preferred: number; limit: number } {
     if (this.innerAction !== null) {
-      return SWIPE_INNER_MAX_REVEAL_PX;
+      return {
+        preferred: SWIPE_INNER_MAX_REVEAL_PX,
+        limit: SWIPE_INNER_TRAVEL_LIMIT_PX,
+      };
     }
     if (this.shellWidth <= 0) {
       // No measurable shell: let the geometry clamp rather than inventing a
       // width. The commit threshold still has its 64px floor.
-      return Number.POSITIVE_INFINITY;
+      return { preferred: Number.POSITIVE_INFINITY, limit: Number.POSITIVE_INFINITY };
     }
-    return this.shellWidth * SWIPE_MAX_REVEAL_FRACTION;
+    return {
+      preferred: this.shellWidth * SWIPE_MAX_REVEAL_FRACTION,
+      limit: this.shellWidth * SWIPE_REVEAL_LIMIT_FRACTION,
+    };
   }
 
   private result(

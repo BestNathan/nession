@@ -64,6 +64,12 @@ export interface UseSwipePagerResult {
   /** Why the last contact ended; observed by device diagnostics and E2E. */
   lastReason: string | null;
   isDragging: boolean;
+  /**
+   * Finish the rendered settle now. Both animated surfaces (the outer slab and
+   * the inner Workspace frame) call this from `transitionend`; the settle's
+   * own timer remains the bounded fallback (#4185).
+   */
+  finishSettle: () => void;
 }
 
 function reportStandDown(reason: string, snapshot: SwipeSnapshot): void {
@@ -87,6 +93,7 @@ function reportStandDown(reason: string, snapshot: SwipeSnapshot): void {
 function pagerResult(
   settle: SwipeSettleState | null,
   snapshot: SwipeSnapshot,
+  finishSettle: () => void,
 ): UseSwipePagerResult {
   const phase: SwipePhase = settle !== null ? 'settling' : snapshot.phase;
   const innerAction = settle?.innerAction ?? snapshot.innerAction;
@@ -110,7 +117,33 @@ function pagerResult(
     direction: snapshot.direction,
     lastReason: snapshot.reason,
     isDragging: phase === 'navigation' || phase === 'resisting' || phase === 'settling',
+    finishSettle,
   };
+}
+
+/**
+ * Catch a running settle up when a new contact arrives (#4185).
+ *
+ * The pending commit of that settle is applied now. The authority changes it
+ * causes — the route itself and any capability stack that the route owns — are
+ * expected consequences of this contact's own start, so the cancellation hook
+ * must not treat them as authority moving under the new contact.
+ */
+function useSettleCatchUp(finishSettle: () => SwipeSettleState | null): {
+  catchUpSettle: () => void;
+  isSettledRouteChange: () => boolean;
+  clearSettledRouteChange: () => void;
+} {
+  const caughtUpRef = useRef(false);
+  const isSettledRouteChange = useCallback(() => caughtUpRef.current, []);
+  const clearSettledRouteChange = useCallback(() => {
+    caughtUpRef.current = false;
+  }, []);
+  const catchUpSettle = useCallback(() => {
+    const finished = finishSettle();
+    caughtUpRef.current = finished !== null && finished.commitIndex !== null;
+  }, [finishSettle]);
+  return { catchUpSettle, isSettledRouteChange, clearSettledRouteChange };
 }
 
 /**
@@ -185,15 +218,18 @@ export function useSwipePager({
     destination?.onActivate();
   }, []);
 
-  const { settle, complete, clearSettle } = useSwipeSettle({
+  const { settle, complete, finishSettle, clearSettle } = useSwipeSettle({
     publish,
     onIndexChange,
     onInnerCommit,
     getShellBounds,
     reducedMotion,
   });
-  const settleRef = useRef<SwipeSettleState | null>(settle);
-  settleRef.current = settle;
+  // A settle's commit runs when the animation ends, not at release. If the
+  // user's next contact arrives first, catch the settle up rather than
+  // ignoring the contact (#4185).
+  const { catchUpSettle, isSettledRouteChange, clearSettledRouteChange } =
+    useSettleCatchUp(finishSettle);
 
   const standDown = useCallback(
     (reason: string) => {
@@ -218,9 +254,9 @@ export function useSwipePager({
       publish,
       standDown,
       complete,
-      isSettling: () => settleRef.current !== null,
+      catchUpSettle,
     });
-  }, [complete, engine, publish, rootRef, standDown]);
+  }, [catchUpSettle, complete, engine, publish, rootRef, standDown]);
 
   useSwipePagerCancellations({
     engine,
@@ -229,6 +265,8 @@ export function useSwipePager({
     index,
     pageCount,
     standDown,
+    isSettledRouteChange,
+    clearSettledRouteChange,
   });
 
   useEffect(
@@ -238,5 +276,5 @@ export function useSwipePager({
     [engine],
   );
 
-  return pagerResult(settle, snapshot);
+  return pagerResult(settle, snapshot, finishSettle);
 }

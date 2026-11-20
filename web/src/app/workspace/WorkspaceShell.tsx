@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef, useState, type TransitionEvent } from 'react';
 import {
   capsuleExchangeStyle,
   useCapsuleExchange,
@@ -150,6 +150,23 @@ function AppWorkspaceSurface({
 }
 
 /**
+ * Report the frame's own return transition, not a nested child's, so the
+ * coordinator can finish the settle from rendered motion (#4185).
+ */
+function innerMotionEndHandler(
+  onSettled: (() => void) | null,
+): ((event: TransitionEvent<HTMLDivElement>) => void) | undefined {
+  if (onSettled === null) {
+    return undefined;
+  }
+  return (event) => {
+    if (event.target === event.currentTarget && event.propertyName === 'transform') {
+      onSettled();
+    }
+  };
+}
+
+/**
  * Workspace framework: semantic capabilities resolve first, then one
  * Nession-owned presentation model yields the lifecycle-visible, view-bound
  * registration-ordered row. Overflow belongs to the row itself, not to a
@@ -297,6 +314,7 @@ export function WorkspaceShell({
         data-testid="workspace-tool-content"
         className="flex min-h-0 flex-1 flex-col overflow-hidden will-change-transform"
         style={contentMotionStyle}
+        onTransitionEnd={innerMotionEndHandler(innerMotion.onSettled)}
       >
         {ctx.experience === 'app' ? (
           <AppWorkspaceSurface

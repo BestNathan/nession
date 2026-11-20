@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { subscribeTouchOwnership } from '@/shared/lib/touchOwnership';
 import type { WorkspaceStackReport } from '@/app/workspace/workspaceContext';
 import type { SwipeGesture } from './swipeGesture';
@@ -20,6 +20,8 @@ export function useSwipePagerCancellations({
   index,
   pageCount,
   standDown,
+  isSettledRouteChange = () => false,
+  clearSettledRouteChange = () => {},
 }: {
   engine: SwipeGesture;
   shellMayPage: boolean;
@@ -27,6 +29,13 @@ export function useSwipePagerCancellations({
   index: number;
   pageCount: number;
   standDown: (reason: string) => void;
+  /**
+   * Whether the authority currently changing is the commit a newly arrived
+   * contact just caught up, rather than authority moving under the contact.
+   */
+  isSettledRouteChange?: () => boolean;
+  /** Clear that expectation after the change has been observed. */
+  clearSettledRouteChange?: () => void;
 }): void {
   useEffect(
     () => subscribeTouchOwnership((identifier, owner) => {
@@ -45,17 +54,46 @@ export function useSwipePagerCancellations({
     }
   }, [engine, shellMayPage, standDown]);
 
+  const previousIndexRef = useRef(index);
   useEffect(() => {
+    if (previousIndexRef.current === index) {
+      return;
+    }
+    previousIndexRef.current = index;
+    // A settle caught up by the contact's own start owns the route change it
+    // commits; standing down here would kill the gesture the user just began.
+    if (isSettledRouteChange()) {
+      return;
+    }
     if (engine.trackedIdentifier() !== null) {
       standDown('route-change');
     }
-  }, [engine, index, pageCount, standDown]);
+  }, [engine, index, isSettledRouteChange, standDown]);
+
+  const previousPageCountRef = useRef(pageCount);
+  useEffect(() => {
+    if (previousPageCountRef.current === pageCount) {
+      return;
+    }
+    previousPageCountRef.current = pageCount;
+    if (engine.trackedIdentifier() !== null) {
+      standDown('route-change');
+    }
+  }, [engine, pageCount, standDown]);
 
   // The capability's inner stack is authority too: a depth that changed while
-  // a contact was live must not commit the destination the finger froze.
+  // a contact was live must not commit the destination the finger froze. A
+  // catch-up commit may itself unmount the previous capability's stack, which
+  // is the expected consequence of the contact that just started (#4185).
   useEffect(() => {
-    if (engine.trackedIdentifier() !== null) {
+    if (engine.trackedIdentifier() !== null && !isSettledRouteChange()) {
       standDown('stack-change');
     }
-  }, [engine, innerStack, standDown]);
+  }, [engine, innerStack, isSettledRouteChange, standDown]);
+
+  // This effect runs after every render, therefore after the change-observing
+  // effects above in the same commit, and clears the one-commit expectation.
+  useEffect(() => {
+    clearSettledRouteChange();
+  });
 }

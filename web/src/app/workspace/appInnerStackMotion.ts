@@ -17,9 +17,20 @@ export interface AppInnerStackMotion {
   offset: number;
   /** True while the page animates back to rest after release. */
   settling: boolean;
+  /**
+   * Report that the rendered return transition finished. The coordinator uses
+   * it to finish the settle from real motion; its timer remains the bounded
+   * fallback (#4185). Null when no settle is running.
+   */
+  onSettled: (() => void) | null;
 }
 
-const REST: AppInnerStackMotion = { action: null, offset: 0, settling: false };
+const REST: AppInnerStackMotion = {
+  action: null,
+  offset: 0,
+  settling: false,
+  onSettled: null,
+};
 
 export const AppInnerStackMotionContext = createContext<AppInnerStackMotion>(REST);
 

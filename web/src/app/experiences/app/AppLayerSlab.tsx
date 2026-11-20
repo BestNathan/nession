@@ -1,10 +1,12 @@
-import type { ReactNode } from 'react';
+import type { ReactNode, TransitionEvent } from 'react';
 
 export interface AppLayerSlabProps {
   testId: string;
   x: number;
   moving: boolean;
   transition?: string;
+  /** Called when this slab's own settle transform transition completes. */
+  onSettled?: () => void;
   children: ReactNode;
 }
 
@@ -16,7 +18,16 @@ export interface AppLayerSlabProps {
  * `will-change-transform` is scoped to this element rather than the shell so
  * the static Terminal does not hold a compositor layer.
  */
-export function AppLayerSlab({ testId, x, moving, transition, children }: AppLayerSlabProps) {
+export function AppLayerSlab({ testId, x, moving, transition, onSettled, children }: AppLayerSlabProps) {
+  const handleTransitionEnd = onSettled === undefined
+    ? undefined
+    : (event: TransitionEvent<HTMLDivElement>) => {
+      // Nested content can run its own transform transitions; only the slab's
+      // own settle is the coordinator's signal (#4185).
+      if (event.target === event.currentTarget && event.propertyName === 'transform') {
+        onSettled();
+      }
+    };
   return (
     <div
       data-testid={testId}
@@ -27,6 +38,7 @@ export function AppLayerSlab({ testId, x, moving, transition, children }: AppLay
         transition,
         boxShadow: moving ? 'var(--nession-elevation-floating)' : undefined,
       }}
+      onTransitionEnd={handleTransitionEnd}
     >
       {children}
     </div>
