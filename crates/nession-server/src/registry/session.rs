@@ -361,7 +361,9 @@ impl SessionRegistry {
     /// Returns `true` only when the persisted row was still the stale
     /// recovering row and was deleted. The in-memory entry is removed in the
     /// same decision, so the caller may then clear the Session's Environment
-    /// Binding.
+    /// Binding. A reclaim that does not delete the persisted row restores the
+    /// removed in-memory entry, so a failed conditional DELETE can never hide
+    /// a still-durable Session from the live Session list (#4166).
     pub(crate) async fn reclaim_stale_recovering_under_lock(
         &self,
         agent_id: &str,
@@ -370,6 +372,7 @@ impl SessionRegistry {
     ) -> bool {
         // The live registry is the authority: a restore writes the fresh
         // status and activity here before its persisted write completes.
+        // Keep the removed projection so a failed DELETE can put it back.
         let removed_from_memory = {
             let mut sessions = self.sessions.write().await;
             match sessions.get(session_id) {
@@ -379,13 +382,14 @@ impl SessionRegistry {
                 {
                     return false;
                 }
-                Some(_) => {
+                Some(current) => {
+                    let removed = current.clone();
                     sessions.remove(session_id);
-                    true
+                    Some(removed)
                 }
                 // A persisted row with no in-memory entry (for example after
                 // a restart that has not loaded it) is decided by the row.
-                None => false,
+                None => None,
             }
         };
 
@@ -405,7 +409,7 @@ impl SessionRegistry {
                 // the current row back rather than serving a deleted view; a
                 // locking restore cannot have run here (the guard is held),
                 // but a non-locking writer may have replaced the row.
-                if removed_from_memory {
+                if removed_from_memory.is_some() {
                     match self.db.get_session(session_id).await {
                         Ok(Some(row)) => {
                             let info = session_info_from_row(row);
@@ -430,6 +434,17 @@ impl SessionRegistry {
                     session_id,
                     e
                 );
+                // The conditional DELETE did not run, so the persisted row is
+                // still the stale recovering Session. Restore the in-memory
+                // entry we removed above instead of serving a Session list
+                // that has lost a Session SQLite still holds (#4166). The
+                // snapshot is used because a database error is exactly when a
+                // reload would fail too; a concurrent writer that re-projected
+                // this Session keeps its newer entry.
+                if let Some(removed) = removed_from_memory {
+                    let mut sessions = self.sessions.write().await;
+                    sessions.entry(session_id.to_string()).or_insert(removed);
+                }
                 false
             }
         }

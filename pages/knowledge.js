@@ -216,6 +216,9 @@ export function renderKnowledge(root,data,hash){
   search.type='search';search.value=state.query;search.placeholder='Search decisions and concepts';
   search.setAttribute('aria-label','Search Knowledge articles');listBox.append(search);
   const count=el('div','knowledge-result-count'),entries=el('div','knowledge-entries');
+  entries.setAttribute('role','region');
+  entries.setAttribute('aria-label','Knowledge article list');
+  entries.tabIndex=0;
   add(listBox,count,entries);
   const paths=new Set(data.articles.map(a=>a.path));
   const selected=route.article?data.articles.find(a=>a.path===route.article):data.articles[0]||null;
@@ -237,6 +240,9 @@ export function renderKnowledge(root,data,hash){
   search.oninput=()=>{state.query=search.value;update();};
   update();add(layout,side,listBox);
   const detail=el('div','knowledge-reader-slot');
+  detail.setAttribute('role','region');
+  detail.setAttribute('aria-label','Knowledge article reader');
+  detail.tabIndex=0;
   if(route.article&&!selected)detail.append(el('div','panel','Article not found in this source snapshot.'));
   else if(selected)detail.append(articleReader(selected,data.source,paths));
   else detail.append(el('div','panel','No published knowledge articles.'));
