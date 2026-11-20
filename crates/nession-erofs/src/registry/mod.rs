@@ -34,6 +34,8 @@ pub mod client;
 pub mod pull;
 #[cfg(feature = "registry")]
 pub mod push;
+#[cfg(feature = "registry")]
+pub mod sdk;
 #[cfg(feature = "registry-service")]
 pub mod service;
 
@@ -54,6 +56,8 @@ pub use client::{FetchedManifest, RegistryClient, RegistryConfig};
 pub use pull::{pull_image, ImportOutcome, ImportRequest, RegistryDigestGrant};
 #[cfg(feature = "registry")]
 pub use push::{export_layout, push_image, push_tag, LayoutExport, PushOutcome};
+#[cfg(feature = "registry")]
+pub use sdk::{ingest_image, ingest_pinned, ImageReference, VerifiedImage};
 #[cfg(feature = "registry-service")]
 pub use service::{
     AllowAllAuthorizer, Authorization, DenyAllAuthorizer, NoPublisher, RegistryAction,
