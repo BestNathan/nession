@@ -57,7 +57,7 @@ impl Release {
         let platform = env::var("TOOLCHAIN_PLATFORM").context("TOOLCHAIN_PLATFORM missing")?;
         let revision = env::var("TOOLCHAIN_REVISION").context("TOOLCHAIN_REVISION missing")?;
         ensure!(
-            matches!(tool.as_str(), "jq" | "kubectl" | "k8s-bundle"),
+            matches!(tool.as_str(), "jq" | "kubectl" | "k8s-bundle" | "gh"),
             "unknown tool"
         );
         ensure!(
@@ -369,6 +369,7 @@ fn verify_tool(root: &Path, release: &Release) -> Result<()> {
     match release.tool.as_str() {
         "jq" => verify_jq(root, &release.version),
         "kubectl" => verify_kubectl(root, &release.version),
+        "gh" => verify_gh(root, &release.version),
         "k8s-bundle" => {
             ensure!(release.version == "2026.11", "unexpected bundle release");
             verify_jq(root, "1.8.1")?;
@@ -394,6 +395,17 @@ fn verify_kubectl(root: &Path, version: &str) -> Result<()> {
     ensure!(
         value["clientVersion"]["gitVersion"].as_str() == Some(expected.as_str()),
         "kubectl version differs from pinned recipe"
+    );
+    Ok(())
+}
+
+fn verify_gh(root: &Path, version: &str) -> Result<()> {
+    let output = execute(&root.join("bin/gh"), &["--version"])?;
+    let stdout = String::from_utf8(output.stdout)?;
+    let first_line = stdout.lines().next().context("missing gh version output")?;
+    ensure!(
+        first_line.starts_with(&format!("gh version {version} (")),
+        "gh version differs from pinned recipe"
     );
     Ok(())
 }
