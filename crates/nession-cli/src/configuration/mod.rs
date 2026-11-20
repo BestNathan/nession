@@ -382,6 +382,10 @@ pub const AGENT_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::OptionalString,
     },
     FieldSpec {
+        key: "registry.enabled",
+        kind: FieldKind::Bool,
+    },
+    FieldSpec {
         key: "logging.level",
         kind: FieldKind::LogLevel,
     },
@@ -1121,7 +1125,11 @@ mod tests {
         let agent = toml::Value::try_from(AgentConfig::default()).expect("agent defaults");
         let agent_table = agent.as_table().expect("agent table");
         for key in agent_table.keys().filter(|key| {
-            *key != "logging" && *key != "sandbox" && *key != "mcp" && *key != "erofs"
+            *key != "logging"
+                && *key != "sandbox"
+                && *key != "mcp"
+                && *key != "erofs"
+                && *key != "registry"
         }) {
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == key),
@@ -1145,6 +1153,17 @@ mod tests {
             .expect("agent erofs table");
         for key in agent_erofs.keys() {
             let dotted = format!("erofs.{key}");
+            assert!(
+                AGENT_FIELDS.iter().any(|field| field.key == dotted),
+                "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"
+            );
+        }
+        let agent_registry = agent_table
+            .get("registry")
+            .and_then(toml::Value::as_table)
+            .expect("agent registry table");
+        for key in agent_registry.keys() {
+            let dotted = format!("registry.{key}");
             assert!(
                 AGENT_FIELDS.iter().any(|field| field.key == dotted),
                 "AgentConfig field '{dotted}' is missing from AGENT_FIELDS"
