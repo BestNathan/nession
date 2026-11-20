@@ -21,7 +21,7 @@ const MAX_PRODUCTION_TURNS=32;
 // exploration, and the owner may tune the budget without editing source code.
 export function allowedModelTurns(production,requested){
   if(!production)return '8';
-  const count=String(requested??'20').trim();
+  const count=String(requested??'24').trim();
   if(!/^(?:[89]|1[0-9]|2[0-9]|3[0-2])$/.test(count))
     throw Error('invalid production model turn budget (8-32 only)');
   return count;
@@ -197,7 +197,7 @@ function main(){
 }
 function selfTest(){
   assert.equal(allowedModelTurns(false,'32'),'8');
-  assert.equal(allowedModelTurns(true,undefined),'20');
+  assert.equal(allowedModelTurns(true,undefined),'24');
   assert.equal(allowedModelTurns(true,'24'),'24');
   for(const invalid of ['0','7','33','999','inf','20.5','20;echo bad']){
     assert.throws(()=>allowedModelTurns(true,invalid),/turn budget/);
