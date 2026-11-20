@@ -1,5 +1,7 @@
 # Toolchain directory preparation and OCI publishing (#4092)
 
+For execution guidance use the [nession-toolchain-release Skill](../../.claude/skills/nession-toolchain-release/SKILL.md); for the source-grounded decision and authenticated GHCR release proof use [Nession native Toolchain OCI release to GHCR](https://github.com/BestNathan/nession/blob/knowledge/topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md). The checked-in recipes, [Release Workflow](../../.github/workflows/release-toolchains.yml) and Nession EROFS library remain authoritative.
+
 This workflow has **no declarative Recipe model**. A reviewed shell script implements the only tool-specific contract:
 
 ```sh
