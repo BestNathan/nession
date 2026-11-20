@@ -141,14 +141,25 @@ async function capsuleTop(page) {
  *
  * The primary owner is the visible vertical scroller with the largest client
  * height inside `workspace-tool-content`; that is the Host page scrollport for
- * a document view and the declared internal scroller for a bounded view.
+ * a document view and the declared internal scroller for a bounded view. A
+ * split surface may have more than one legitimate owner (#4188), so a Case can
+ * name the exact element it is measuring instead of relying on size.
  */
-async function scrollToEndAndMeasure(page) {
+async function scrollToEndAndMeasure(page, targetSelector = null) {
   // A virtualized/lazily-rendered reader (the Git patch renderer is one) can
   // report a full-height but empty body for a frame. Wait for the designated
   // surface to really overflow before measuring; the Case should not encode a
   // guess about how many frames a renderer needs.
-  await page.waitForFunction(() => {
+  await page.waitForFunction((selector) => {
+    if (selector) {
+      const target = document.querySelector(selector);
+      if (!(target instanceof HTMLElement) || target.offsetParent === null) return false;
+      const style = getComputedStyle(target);
+      return (
+        (style.overflowY === 'auto' || style.overflowY === 'scroll') &&
+        target.scrollHeight > target.clientHeight + 1
+      );
+    }
     const content = document.querySelector('[data-testid="workspace-tool-content"]');
     if (!(content instanceof HTMLElement)) return false;
     return [content, ...content.querySelectorAll('*')].some((element) => {
@@ -159,8 +170,8 @@ async function scrollToEndAndMeasure(page) {
         element.scrollHeight > element.clientHeight + 1
       );
     });
-  }, null, { timeout: 20_000 });
-  return page.evaluate(() => {
+  }, targetSelector, { timeout: 20_000 });
+  return page.evaluate((selector) => {
     const content = document.querySelector('[data-testid="workspace-tool-content"]');
     const shell = document.querySelector('[data-testid="workspace-shell"]');
     const bar = document.querySelector('[data-testid="workspace-tool-bar"]');
@@ -172,6 +183,21 @@ async function scrollToEndAndMeasure(page) {
       && element.closest('[data-covered="true"]') === null
       && getComputedStyle(element).visibility !== 'hidden'
       && getComputedStyle(element).display !== 'none';
+    let named = null;
+    if (selector) {
+      const candidate = document.querySelector(selector);
+      if (!(candidate instanceof HTMLElement) || !visible(candidate)) {
+        throw new Error('named scroll owner is missing or hidden: ' + selector);
+      }
+      const style = getComputedStyle(candidate);
+      if (
+        (style.overflowY !== 'auto' && style.overflowY !== 'scroll') ||
+        candidate.scrollHeight <= candidate.clientHeight + 1
+      ) {
+        throw new Error('named scroll owner does not scroll: ' + selector);
+      }
+      named = candidate;
+    }
     const scrollers = [content, ...content.querySelectorAll('*')].filter((element) => {
       if (!visible(element)) return false;
       const style = getComputedStyle(element);
@@ -180,12 +206,12 @@ async function scrollToEndAndMeasure(page) {
         element.scrollHeight > element.clientHeight + 1
       );
     });
-    if (scrollers.length === 0) {
-      throw new Error('no vertical scroll owner in the Workspace content');
-    }
-    const scroller = scrollers.sort(
+    const scroller = named ?? scrollers.sort(
       (a, b) => b.clientHeight - a.clientHeight,
     )[0];
+    if (!scroller) {
+      throw new Error('no vertical scroll owner in the Workspace content');
+    }
 
     const rect = scroller.getBoundingClientRect();
     const style = getComputedStyle(scroller);

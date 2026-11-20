@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -189,29 +190,44 @@ function EditorBody({
           filename={draft.isNew ? draft.name : (profile?.name ?? '')}
         />
       </div>
-      {warnings.length > 0 ? (
-        <div className="border-t px-4 py-2" data-testid="env-editor-warnings">
-          <p className={cn('text-warning', chromeSansRole('metadata'))}>
-            {warnings.length === 1
-              ? '1 line will be skipped'
-              : `${warnings.length} lines will be skipped`}
-          </p>
-          {warnings.map((w, i) => (
-            <p key={i} className={cn('mt-0.5 font-mono text-muted-foreground', chromeSansRole('metadata'))}>
-              {w}
-            </p>
-          ))}
+      {/* #4188: warnings and the Review-changes detail are the editor depth's
+          feedback surface. They sit below the CodeMirror fill region, so they
+          get their own bounded scroll owner that spends the host inset: a long
+          warning list or an expanded diff stays reachable above the Capsule
+          without taking scroll ownership away from the editor. */}
+      {warnings.length > 0 || hasDiff ? (
+        <div
+          className={cn(
+            'max-h-[40%] min-h-0 shrink-0 overflow-y-auto overscroll-contain border-t',
+            workspaceBoundedScrollClearanceClass,
+          )}
+          data-testid="env-editor-feedback"
+        >
+          {warnings.length > 0 ? (
+            <div className="px-4 py-2" data-testid="env-editor-warnings">
+              <p className={cn('text-warning', chromeSansRole('metadata'))}>
+                {warnings.length === 1
+                  ? '1 line will be skipped'
+                  : `${warnings.length} lines will be skipped`}
+              </p>
+              {warnings.map((w, i) => (
+                <p key={i} className={cn('mt-0.5 font-mono text-muted-foreground', chromeSansRole('metadata'))}>
+                  {w}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {hasDiff ? (
+            <details className="border-t px-4 py-2" data-testid="env-editor-review">
+              <summary className={cn('cursor-pointer select-none text-muted-foreground', chromeSansRole('metadata'))}>
+                Review changes
+              </summary>
+              <div className="mt-2">
+                <EnvDiff original={draft.originalContent} modified={draft.content} />
+              </div>
+            </details>
+          ) : null}
         </div>
-      ) : null}
-      {hasDiff ? (
-        <details className="border-t px-4 py-2" data-testid="env-editor-review">
-          <summary className={cn('cursor-pointer select-none text-muted-foreground', chromeSansRole('metadata'))}>
-            Review changes
-          </summary>
-          <div className="mt-2">
-            <EnvDiff original={draft.originalContent} modified={draft.content} />
-          </div>
-        </details>
       ) : null}
     </>
   );
