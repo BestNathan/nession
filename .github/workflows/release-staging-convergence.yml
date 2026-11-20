@@ -294,6 +294,8 @@ jobs:
           # #4140: rollout independently; disabled until protected main CI/real
           # App and source-pair end-to-end proof are verified.
           # #4140 one-shot owner-merged smoke: this enables no recurring job.
+          # Round 2 uses the exact merge-stage bounded-text fix (#4154) to
+          # exercise the original live Rust/TS conflict, not a synthetic fixture.
           # Only this exact main merge commit triggers a Draft-only repair.
           # Persistent rollout remains controlled by the repository variable.
           NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED: >-
