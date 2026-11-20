@@ -28,3 +28,7 @@ images:
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
 - patch-claims.yaml
+
+# #4066: the Server refuses a browser WebSocket whose Origin is not listed.
+patches:
+- path: patch-server-env.yaml
