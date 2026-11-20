@@ -78,9 +78,9 @@ export type TranscriptRecordV1 = {
 /**
  * Opaque, resource-scoped identity of this line.
  *
- * Encodes the transcript identity, the line's byte offset and the file's
- * generation fingerprint. It is the identity a renderer keys its row on,
- * and the only way to ask for the full record.
+ * Encodes the transcript identity, the line's byte offset and a
+ * fingerprint of the line's own bytes. It is the identity a renderer keys
+ * its row on, and the only way to ask for the full record.
  */
 record_ref: string, 
 /**

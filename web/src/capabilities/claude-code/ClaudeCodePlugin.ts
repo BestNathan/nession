@@ -258,8 +258,8 @@ export class ClaudeCodePlugin implements TransportPlugin {
    *
    * The provider returns physical JSONL lines and opaque references; it does
    * not classify them. `transcript_id` is the only selection mechanism, and a
-   * cursor from another transcript or a replaced file answers `stale_cursor`
-   * with no page.
+   * cursor from another transcript or one whose page was rewritten answers
+   * `stale_cursor` with no page.
    */
   async claudeCodeTranscriptRecords(
     req: ClaudeCodeTranscriptRecordsRequest,
@@ -274,8 +274,8 @@ export class ClaudeCodePlugin implements TransportPlugin {
    * One raw record's full text, in bounded chunks (#3726).
    *
    * `record_ref` comes from a `claudeCodeTranscriptRecords` page. The same
-   * reference cannot be replayed against another transcript or a replaced
-   * file; those answer `not_found`/`stale_generation` with no bytes.
+   * reference cannot be replayed against another transcript or a rewritten
+   * record; those answer `not_found`/`stale_generation` with no bytes.
    */
   async claudeCodeTranscriptRecord(
     req: ClaudeCodeTranscriptRecordRequest,
