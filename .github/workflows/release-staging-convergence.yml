@@ -293,7 +293,15 @@ jobs:
           NESSION_CONVERGENCE_NATIVE_AUTO_MERGE: ${{ vars.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE }}
           # #4140: rollout independently; disabled until protected main CI/real
           # App and source-pair end-to-end proof are verified.
-          NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED: ${{ vars.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED || 'false' }}
+          # #4140 one-shot owner-merged smoke: this enables no recurring job.
+          # Only this exact main merge commit triggers a Draft-only repair.
+          # Persistent rollout remains controlled by the repository variable.
+          NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED: >-
+            ${{ (vars.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED == 'true' ||
+                 (github.event_name == 'push' &&
+                  github.actor == 'BestNathan' &&
+                  contains(github.event.head_commit.message, '[conflict-repair-canary-4140]'))) &&
+                'true' || 'false' }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"
