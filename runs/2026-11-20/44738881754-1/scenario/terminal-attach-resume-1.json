@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "50eba357cf8768c790c85e5d11e77ac76effe710",
+  "scenario_revision": "50eba357cf8768c790c85e5d11e77ac76effe710",
+  "run_id": 44738881754,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-20T12:51:59.908Z",
+  "finished_at": "2026-11-20T12:52:09.308Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-20T12:52:08.525Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "10cc63fabb936437a44d88d1fd739bb8ad69393c6b04da31f731f7b889abcb5e",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-20T12:52:08.779Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "10cc63fabb936437a44d88d1fd739bb8ad69393c6b04da31f731f7b889abcb5e",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-20T12:52:09.262Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "10cc63fabb936437a44d88d1fd739bb8ad69393c6b04da31f731f7b889abcb5e",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44738881754,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4087-shared-cas-store-contracts",
+    "target_sha": "50eba357cf8768c790c85e5d11e77ac76effe710",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44738881754",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e2ab752022916b3c222c481cf4a0bb603e1301ed65ee00b73da6ae9a59627def"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-44738881754-1",
+    "sha256": "e2ab752022916b3c222c481cf4a0bb603e1301ed65ee00b73da6ae9a59627def",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44738881754",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "3c677c78e70bb617c70bff91eeb0b493013180b634cb6eb2ce88fc2a94df891f"
+}
