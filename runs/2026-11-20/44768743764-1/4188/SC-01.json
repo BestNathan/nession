@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "984951963db95fde3be46ff1a862cc4a6e703fa6ce6ee62156e63fb18b5eadc0",
+  "run_id": 44768743764,
+  "run_attempt": 1,
+  "issue": 4188,
+  "criterion": "SC-01",
+  "criterion_text": "— Git bounded collections. On App 375/390/430px with enough Branches and Worktrees to overflow, the real list scroll owner can reach its last row/control fully above the measured Capsule top (1px rounding), with no clipped content, unexpected document scrolling or >64px non-content blank tail; switching Git sections retains functional scroll.",
+  "stage": "staging",
+  "target_sha": "e014dc90465765f2e98d1838b8154d82cb5feb04",
+  "contract_sha256": "f22dbe45ee34376c6de5efb0b3d5375c297f81048073bdfbf10c11e6a860aedd",
+  "case_revision": "e014dc90465765f2e98d1838b8154d82cb5feb04",
+  "case_tree_sha": "20656c4904acae32cdee73377935ee0a36d048e1",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T16:02:41.318Z",
+  "finished_at": "2026-11-20T16:02:51.461Z",
+  "duration_ms": 10143,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-git-collections.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=123"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 123
+      },
+      "duration_ms": 3836,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44768743764,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e014dc90465765f2e98d1838b8154d82cb5feb04",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44768743764",
+    "record_path": "runs/2026-11-20/44768743764-1/4188/SC-01.json",
+    "source_result_sha256": "c81491a3769c1091527d59327578dcd12207c212e285bc27b2717463f7fa5d05"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44768743764-1",
+    "sha256": "c81491a3769c1091527d59327578dcd12207c212e285bc27b2717463f7fa5d05",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44768743764",
+    "durability": "time-limited; object archival not configured"
+  }
+}

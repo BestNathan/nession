@@ -1,0 +1,68 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2a6cad80c44dc31726f9b3d42722d132e6335ac70028ca8ba88d0c109c934228",
+  "run_id": 44768743764,
+  "run_attempt": 1,
+  "issue": 4188,
+  "criterion": "SC-03",
+  "criterion_text": "— Env split surfaces and keyboard. With long variables, multiple warnings, long edited content and expanded diff/review, the final warning and App action remain visible/tappable above Capsule at scroll end; editor caret/selection remains usable; safe-area/keyboard updates do not hide controls, count insets twice or leave unscrollable blank tails.",
+  "stage": "staging",
+  "target_sha": "e014dc90465765f2e98d1838b8154d82cb5feb04",
+  "contract_sha256": "f22dbe45ee34376c6de5efb0b3d5375c297f81048073bdfbf10c11e6a860aedd",
+  "case_revision": "e014dc90465765f2e98d1838b8154d82cb5feb04",
+  "case_tree_sha": "19855eec3772ddea90ad25b441c9b7b403f28f19",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T16:03:02.708Z",
+  "finished_at": "2026-11-20T16:03:10.839Z",
+  "duration_ms": 8131,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-env-split.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify-env-split.spec.js:44:8",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 31
+      },
+      "duration_ms": 2277,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44768743764,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "e014dc90465765f2e98d1838b8154d82cb5feb04",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44768743764",
+    "record_path": "runs/2026-11-20/44768743764-1/4188/SC-03.json",
+    "source_result_sha256": "a3c5278ac6f34b3523c6ec434e076072ec5d324f72bc6d53225a3d90a44337d5"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44768743764-1",
+    "sha256": "a3c5278ac6f34b3523c6ec434e076072ec5d324f72bc6d53225a3d90a44337d5",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44768743764",
+    "durability": "time-limited; object archival not configured"
+  }
+}
