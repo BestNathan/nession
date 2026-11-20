@@ -432,7 +432,7 @@ for(const bad of [
   {event:{...recovery4065.event,comment:{...recovery4065.event.comment,
     user:{login:'external'}}}},
 ])assert.throws(()=>assertDispatchAuthority({...recovery4065,...bad}),
-  /authenticated owner\\/main/);
+  /authenticated owner\/main/);
 const reviewer4065Branch='agent/4065/qwen-74024299b457f8c0';
 const pr4065={number:4191,state:'open',draft:false,merged_at:null,
   head:{sha:reviewer4065.source_sha,ref:reviewer4065Branch,
