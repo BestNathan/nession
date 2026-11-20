@@ -258,19 +258,20 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
-      # #4059: a separate, owner-approved workflow writer is never inherited
-      # by ordinary PR Publisher credentials. Missing config stays BLOCKED.
-      - name: Mint approved workflow-file integration writer
+      # #4059: reuse the installed Publisher App identity but mint a distinct
+      # short-lived token for workflow-bearing integration pushes only.
+      # The owner must approve Workflows write on the App installation; the
+      # ordinary Publisher token above remains limited to PR/Contents writes.
+      - name: Mint workflow-file integration token from Publisher App
         id: workflow_writer
         if: >-
           steps.plan.outputs.actionable == 'true' &&
           steps.plan.outputs.workflow_write_required == 'true' &&
-          inputs.dry_run != true &&
-          vars.CONVERGENCE_WORKFLOW_WRITER_APP_ID != ''
+          inputs.dry_run != true
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
         with:
-          app-id: ${{ vars.CONVERGENCE_WORKFLOW_WRITER_APP_ID }}
-          private-key: ${{ secrets.CONVERGENCE_WORKFLOW_WRITER_PRIVATE_KEY }}
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
           repositories: nession
           permission-contents: write
           permission-workflows: write
