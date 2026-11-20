@@ -47,6 +47,23 @@ function prepare(repo,target,source,dir) {
   return {schema_version:1,target_sha:target,source_sha:source,
     auto_tree:auto.tree,conflict_paths:conflicts,worktree:path.resolve(dir)};
 }
+// Read-only eligibility preflight for the trusted Controller. Use the same
+// actual merge index as the isolated Agent job; never guess from changed paths.
+// Always drop the disposable worktree, even after rejecting sensitive files.
+export function inspectConflictPaths(repo,target,source){
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-conflict-inspect-'));
+  const worktree=path.join(root,'worktree');
+  try {
+    const info=prepare(repo,target,source,worktree);
+    return {schema_version:1,target_sha:target,source_sha:source,
+      conflict_paths:[...info.conflict_paths].sort(),eligible:true};
+  } finally {
+    if(fs.existsSync(worktree)){
+      git(repo,['worktree','remove','--force',worktree]);
+    }
+    fs.rmSync(root,{recursive:true,force:true});
+  }
+}
 function pathsFromUnmergedOrEmpty(cwd){
   const raw=git(cwd,['ls-files','-u','-z']).stdout;
   return [...new Set(raw.split('\0').filter(Boolean).map(x=>x.split('\t').slice(1).join('\t')))];
@@ -128,7 +145,10 @@ function testFixture(root){
   const base=git(repo,['rev-parse','HEAD']).stdout.trim();
   fs.writeFileSync(path.join(repo,'conflict.txt'),'policy=main\n');
   fs.writeFileSync(path.join(repo,'clean.txt'),'clean=main\n');
-  git(repo,['commit','-qam','main']);const source=git(repo,['rev-parse','HEAD']).stdout.trim();
+  // A clean source-only workflow change is NOT an unsafe conflict path.
+  fs.mkdirSync(path.join(repo,'.github','workflows'),{recursive:true});
+  fs.writeFileSync(path.join(repo,'.github','workflows','source.yml'),'name: source\n');
+  git(repo,['add','.']);git(repo,['commit','-qm','main']);const source=git(repo,['rev-parse','HEAD']).stdout.trim();
   git(repo,['checkout','-q','-b','lane',base]);
   fs.writeFileSync(path.join(repo,'conflict.txt'),'policy=lane\n');
   fs.writeFileSync(path.join(repo,'lane.txt'),'lane-only\n');
@@ -139,7 +159,36 @@ function selfTest(){
   const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-conflict-probe-'));
   try {
     const f=testFixture(root);
+    // A blocked workflow path produces no eligible report or leaked worktree.
+    const blockedRepo=path.join(root,'blocked');
+    fs.mkdirSync(blockedRepo);
+    git(blockedRepo,['init','-q','-b','main']);
+    git(blockedRepo,['config','user.name','Nession Test']);
+    git(blockedRepo,['config','user.email','test@example.com']);
+    fs.mkdirSync(path.join(blockedRepo,'.github','workflows'),{recursive:true});
+    const wf=path.join(blockedRepo,'.github','workflows','ci.yml');
+    fs.writeFileSync(wf,'name: base\n');
+    git(blockedRepo,['add','.']);git(blockedRepo,['commit','-qm','base']);
+    const blockedBase=git(blockedRepo,['rev-parse','HEAD']).stdout.trim();
+    fs.writeFileSync(wf,'name: source\n');
+    git(blockedRepo,['commit','-qam','source']);
+    const blockedSource=git(blockedRepo,['rev-parse','HEAD']).stdout.trim();
+    git(blockedRepo,['checkout','-q','-b','lane',blockedBase]);
+    fs.writeFileSync(wf,'name: target\n');
+    git(blockedRepo,['commit','-qam','target']);
+    const blockedTarget=git(blockedRepo,['rev-parse','HEAD']).stdout.trim();
+    assert.throws(()=>inspectConflictPaths(blockedRepo,blockedTarget,blockedSource),
+      /unsupported security-sensitive Git conflict path/);
+    assert.doesNotMatch(git(blockedRepo,['worktree','list','--porcelain']).stdout,
+      /nession-conflict-inspect-/);
     assert.equal(mergeTree(f.repo,f.target,f.source).conflict,true);
+    assert.deepEqual(inspectConflictPaths(f.repo,f.target,f.source),{
+      schema_version:1,target_sha:f.target,source_sha:f.source,
+      conflict_paths:['conflict.txt'],eligible:true,
+    });
+    // Verify the normal repository worktree is unchanged by inspection.
+    assert.equal(git(f.repo,['worktree','list','--porcelain']).stdout.includes(
+      'nession-conflict-inspect-'),false);
     const a=prepare(f.repo,f.target,f.source,path.join(root,'a'));
     assert.throws(()=>finalize(f.repo,a,'source-repair',null),/unresolved conflict marker/);
     fs.writeFileSync(path.join(a.worktree,'conflict.txt'),'policy=both\n');
@@ -163,7 +212,10 @@ function selfTest(){
 }
 const command=process.argv[2];
 if(command==='self-test')selfTest();
-else if(command==='prepare'){
+else if(command==='inspect'){
+  const [repo,target,source]=process.argv.slice(3);
+  console.log(JSON.stringify(inspectConflictPaths(repo,target,source)));
+}else if(command==='prepare'){
   const [repo,target,source,dir,output]=process.argv.slice(3);
   const context=prepare(repo,target,source,dir);
   fs.writeFileSync(output,JSON.stringify(context,null,2)+'\n');
@@ -171,4 +223,4 @@ else if(command==='prepare'){
 }else if(command==='finalize'){
   const [repo,contextPath,mode,outDir]=process.argv.slice(3);
   console.log(JSON.stringify(finalize(repo,JSON.parse(fs.readFileSync(contextPath,'utf8')),mode,outDir)));
-}else throw Error('usage: self-test | prepare <repo> <target_sha> <source_sha> <dir> <context.json> | finalize <repo> <context.json> <source-repair|direct-integration> <outdir>');
+}else throw Error('usage: self-test | inspect <repo> <target_sha> <source_sha> | prepare <repo> <target_sha> <source_sha> <dir> <context.json> | finalize <repo> <context.json> <source-repair|direct-integration> <outdir>');
