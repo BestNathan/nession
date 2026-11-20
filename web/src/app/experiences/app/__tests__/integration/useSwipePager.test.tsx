@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { claimTouchOwnership } from '@/shared/lib/touchOwnership';
@@ -349,10 +349,17 @@ describe('useSwipePager — Workspace inner stack (#3971)', () => {
     touchEnd(chrome, 130);
 
     expect(onPop).not.toHaveBeenCalled();
+    // The rejected contact still belongs to the Workspace frame: the settle
+    // must keep the inner owner instead of falling through to the outer page
+    // snapback, which would remove the transform immediately (#4185).
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'settling');
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-inner', 'pop');
+
     await waitFor(() =>
       expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'idle'),
     );
     expect(screen.getByTestId('inner-offset')).toHaveTextContent('0');
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-inner', '');
     expect(screen.getByTestId('pager-root')).toHaveAttribute('data-reason', 'below-threshold');
   });
 
@@ -415,6 +422,167 @@ describe('useSwipePager — Workspace inner stack (#3971)', () => {
 
     expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'idle');
     expect(onPop).not.toHaveBeenCalled();
+  });
+});
+
+describe('useSwipePager — a settle is caught up, not blocked (#4185)', () => {
+  it('lets a contact that arrives during an inner snapback settle start immediately', async () => {
+    const onPop = vi.fn();
+    render(
+      <Harness
+        index={2}
+        shellMayPage={false}
+        innerStack={{ pop: { title: 'Transcripts', onActivate: onPop }, forward: null }}
+      />,
+    );
+    const chrome = screen.getByTestId('chrome');
+
+    touchStart(chrome, 100);
+    touchMove(chrome, 130);
+    touchEnd(chrome, 130);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'settling');
+
+    touchStart(chrome, 100);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'candidate');
+    touchMove(chrome, 180);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'navigation');
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-inner', 'pop');
+    touchEnd(chrome, 180);
+
+    expect(onPop).toHaveBeenCalledTimes(1);
+    await waitFor(() =>
+      expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'idle'),
+    );
+  });
+
+  function StatefulHarness({
+    onIndexChange = vi.fn(),
+  }: {
+    onIndexChange?: (index: number) => void;
+  }) {
+    const [index, setIndex] = useState(1);
+    const rootRef = useRef<HTMLDivElement>(null);
+    const pager = useSwipePager({
+      pageCount: 3,
+      index,
+      onIndexChange: (next) => {
+        onIndexChange(next);
+        setIndex(next);
+      },
+      getShellBounds: () => SHELL,
+      shellMayPage: true,
+      innerStack: null,
+      rootRef,
+    });
+
+    return (
+      <div
+        ref={rootRef}
+        data-testid="pager-root"
+        data-phase={pager.phase}
+        data-destination={pager.destinationIndex ?? ''}
+      >
+        <div data-testid="chrome" style={{ height: 600 }} />
+      </div>
+    );
+  }
+
+  it('finalizes a pending page commit when the next contact arrives', async () => {
+    const onIndexChange = vi.fn();
+    render(<StatefulHarness onIndexChange={onIndexChange} />);
+    const chrome = screen.getByTestId('chrome');
+
+    touchStart(chrome, 200);
+    touchMove(chrome, 360);
+    touchEnd(chrome, 360);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'settling');
+    expect(onIndexChange).not.toHaveBeenCalled();
+
+    // Catch up: the commit the user can already see becomes real, and the new
+    // contact is a candidate — not ignored for the rest of the animation.
+    touchStart(chrome, 200);
+    expect(onIndexChange).toHaveBeenCalledWith(0);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'candidate');
+
+    // The caught-up route change belongs to this contact, so it must not stand
+    // the contact down. From Sessions the reverse direction is the Terminal.
+    touchMove(chrome, 120);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'navigation');
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-destination', '1');
+
+    touchEnd(chrome, 120);
+    await waitFor(() =>
+      expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'idle'),
+    );
+    expect(onIndexChange).toHaveBeenLastCalledWith(1);
+  });
+
+  function LayerAwareHarness({
+    onIndexChange = vi.fn(),
+  }: {
+    onIndexChange?: (index: number) => void;
+  }) {
+    const [index, setIndex] = useState(2);
+    const rootRef = useRef<HTMLDivElement>(null);
+    // The Workspace root reports an empty stack, exactly as AppLayers does; a
+    // commit to Terminal replaces it with null in the same render.
+    const innerStack = useMemo<WorkspaceStackReport | null>(
+      () => (index === 2 ? { pop: null, forward: null } : null),
+      [index],
+    );
+    const pager = useSwipePager({
+      pageCount: 3,
+      index,
+      onIndexChange: (next) => {
+        onIndexChange(next);
+        setIndex(next);
+      },
+      getShellBounds: () => SHELL,
+      shellMayPage: true,
+      innerStack,
+      rootRef,
+    });
+
+    return (
+      <div
+        ref={rootRef}
+        data-testid="pager-root"
+        data-phase={pager.phase}
+        data-destination={pager.destinationIndex ?? ''}
+        data-inner={pager.innerAction ?? ''}
+      >
+        <div data-testid="chrome" style={{ height: 600 }} />
+      </div>
+    );
+  }
+
+  it('keeps a caught-up contact when the commit also replaces the inner stack', async () => {
+    const onIndexChange = vi.fn();
+    render(<LayerAwareHarness onIndexChange={onIndexChange} />);
+    const chrome = screen.getByTestId('chrome');
+
+    // Workspace root -> Terminal is an outer page commit.
+    touchStart(chrome, 200);
+    touchMove(chrome, 360);
+    touchEnd(chrome, 360);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'settling');
+    expect(onIndexChange).not.toHaveBeenCalled();
+
+    // Catching it up both changes the route and unmounts the Workspace stack.
+    touchStart(chrome, 200);
+    expect(onIndexChange).toHaveBeenCalledWith(1);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'candidate');
+
+    // That authority change must not be mistaken for an external handoff.
+    touchMove(chrome, 230);
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'navigation');
+    expect(screen.getByTestId('pager-root')).toHaveAttribute('data-destination', '0');
+
+    touchEnd(chrome, 230);
+    await waitFor(() =>
+      expect(screen.getByTestId('pager-root')).toHaveAttribute('data-phase', 'idle'),
+    );
+    expect(onIndexChange).toHaveBeenLastCalledWith(1);
   });
 });
 

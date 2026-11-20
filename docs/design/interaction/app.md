@@ -268,6 +268,17 @@ contact after that, and the answer is: much less until release.
   names the frozen destination with its direction. There is no resting swipe
   tutorial, edge rail or navigation overlay; release removes the label. The
   no-Session root names its index-1 destination **Home**, never a fake Terminal.
+- **The preview keeps following a moving finger.** Up to the preferred reveal
+  (80% of the shell) the layer tracks the finger one-to-one. Past it the
+  preview continues with continuous resistance toward an absolute 92% bound
+  instead of going flat, so a still-moving contact never reads as a frozen UI;
+  the bound keeps the current layer from fully leaving, and release still
+  decides the navigation (#4185). Dragged-through and rejected previews return
+  to rest in the same owned animation.
+- **Settle is interruptible, never a dead window.** A contact that arrives while
+  a return or commit animation is still on screen catches the animation up
+  (applying its pending route or in-stack decision) and becomes the live
+  candidate; it is not silently dropped for the animation's remainder (#4185).
 - **Interactive owners outrank the band.** A button, input, open alert dialog,
   an expanded Capsule Peek, a nested horizontal scroller (including the
   capability row) or an active text selection keeps its touch even at the
@@ -281,9 +292,11 @@ contact after that, and the answer is: much less until release.
   approved mobile prototype
   ([shared `prototype` branch](https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724)),
   plus the 2026-11-05 iPhone Safari finding that the outer edge belongs to the
-  OS. The guard, band, thresholds and velocity are initial exploration values;
-  a physical Safari/PWA lane must confirm the platform's own edge ownership and
-  settle the final numbers before they are treated as measured.
+  OS. The guard, band, thresholds, resistance curve and velocity are initial
+  exploration values; a physical Safari/PWA lane must confirm the platform's
+  own edge ownership and settle the final numbers before they are treated as
+  measured. `docs/design/interaction/app.md` is the current contract; the
+  linked prototype's pre-#4185 flat-cap motion is historical.
 
 The exact header/button implementation may evolve. The invariant is the spatial relationship and the existence of a visible alternative to gestures.
 
@@ -305,9 +318,13 @@ platform guard → interactive/work-surface owner → Workspace inner stack → 
   (`WorkspaceDepthControl.setForward` / `WorkspacePush.onLeave`), so a dirty
   Files editor asks before a swipe discards it. Back, the optional Stack Sheet
   and the gesture all run the same leave guard.
-- The header and content frame follow the finger up to a short bounded reveal;
-  the Capability Capsule keeps its station and the Workspace layer stays opaque,
-  so an internal-depth gesture never exposes the mounted Terminal underneath.
+- The header and content frame follow the finger up to a short preferred reveal
+  (125px), then continue under the same bounded continuous resistance to an
+  180px limit (#4185); the Capability Capsule keeps its station and the
+  Workspace layer stays opaque, so an internal-depth gesture never exposes the
+  mounted Terminal underneath. A rejected Pop/Forward still belongs to the
+  Workspace frame: its return animates in place, never through the outer
+  page-snapback path, and a new contact during that return catches it up.
 - Interactive owners (a button, input, open dialog, xterm, CodeMirror, nested
   horizontal scroller or active selection) keep their contact. The outer
   platform guard and shell edge bands keep the ownership they have outside
@@ -512,7 +529,10 @@ supersedes the deep-detail presentation of the #3829 Claude prototype and the
 inner-gesture presentation of the #2724 mobile-swipe prototype. Those older
 prototype pages carry in-place historical/superseded notices on the orphan
 `prototype` branch and remain IA/outer-gesture references only; their
-production owners are unchanged.
+production owners are unchanged. The #4185 motion revision (2026-11-20) updates
+both swipe prototypes to the bounded continuous resistance and interruptible
+settle above; its pinned source is
+`2cb721ccedc54a544749980d32a0167904eb5dbb` on the shared `prototype` branch.
 
 See `#1051`, `#3971` and [workspace.md](../workspace.md). The App presentation of this rule —
 including where the capability switcher may appear — is in

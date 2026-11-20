@@ -136,7 +136,7 @@ pub async fn push_tag(
             "local tag {local_repository}:{local_tag}"
         )));
     };
-    let reference = RemoteReference::parse(remote_tag)?;
+    let reference = RemoteReference::parse(remote_tag).map_err(RegistryError::InvalidReference)?;
     if !matches!(reference, RemoteReference::Tag(_)) {
         return Err(RegistryError::InvalidReference(
             "push_tag requires a tag reference".to_string(),
