@@ -70,6 +70,16 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body, '/nession dispatch-review issue=')) ||
+        # #4174: explicit one-off Owner command is a request only. Trusted
+        # main Controller independently re-reads the original unedited GitHub
+        # comment and failed Run/Job/Artifact/log, then commits Store CAS.
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 4065 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession recover-qwen-source issue=4065 run=44733719096') ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
          github.event.issue.number == 3784 &&
