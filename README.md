@@ -13,3 +13,7 @@ See [Requirement #4160](https://github.com/BestNathan/nession/issues/4160) and t
 ## First managed main-only auto-release validation
 
 The first successful catalog push after #4164 activation triggers the trusted main release pipeline to inspect all catalog tool/version fingerprints and publish only missing or changed immutable OCI content. This update does not modify any build.sh or its fingerprint. The workflow Run, not this prose, proves any actual GHCR publication.
+
+## Idempotent fingerprint probe validation
+
+A subsequent documentation-only change requests a second unprivileged catalog notification. All versioned build.sh bytes are unchanged; the trusted main release must detect the verified GHCR fingerprints and skip package preparation/publishing. The actual workflow receipt, not this document, is the evidence.
