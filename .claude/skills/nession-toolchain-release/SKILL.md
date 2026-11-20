@@ -5,7 +5,7 @@ description: Use for the single-tool orphan catalog, version-pinned build.sh pre
 
 # Nession Toolchain Release
 
-**Read current executable owners first:** [scripts/toolchains/README.md](../../../scripts/toolchains/README.md), [Release / Toolchains](../../../.github/workflows/release-toolchains.yml), the future `release-toolchain-one.yml` reusable workflow, `scripts/toolchains/catalog-plan.mjs` and the existing `crates/nession-erofs`. [Issue #4160](https://github.com/BestNathan/nession/issues/4160) is the canonical migration contract; [#4092](https://github.com/BestNathan/nession/issues/4092) and [#4147](https://github.com/BestNathan/nession/issues/4147) preserve legacy proof.
+**Read current executable owners first:** [scripts/toolchains/README.md](../../../scripts/toolchains/README.md), [Release / Toolchains](../../../.github/workflows/release-toolchains.yml), [Reusable single-tool release](../../../.github/workflows/release-toolchain-one.yml), `scripts/toolchains/catalog-plan.mjs` and the existing `crates/nession-erofs`. [Issue #4160](https://github.com/BestNathan/nession/issues/4160) is the canonical migration contract; [#4092](https://github.com/BestNathan/nession/issues/4092) and [#4147](https://github.com/BestNathan/nession/issues/4147) preserve legacy proof.
 
 Load `nession-development` for Issue-first worktrees/PRs, `nession-workflows` and `nession-cicd` for GitHub Actions ownership and Registry permission boundary, `nession-gates` for tests, and `nession-knowledge` for the protected Knowledge update. Follow scoped `.github/AGENTS.md` and `scripts/AGENTS.md`.
 
@@ -33,4 +33,4 @@ Load `nession-development` for Issue-first worktrees/PRs, `nession-workflows` an
 - Registry failure, media-type refusal, remote digest mismatch: repair `nession-erofs`/Registry owner or permissions; don't add Docker tar layers or another OCI client.
 - Tool composition/mount/PATH: defer to Images/Sandbox consumer, not Toolchain Release.
 
-The [curated Knowledge article](https://github.com/BestNathan/nession/blob/knowledge/topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md) is historical until protected publication updates it from verified #4160 main/Run evidence. Do not push to the protected `knowledge` branch directly.
+Current [curated Knowledge article](https://github.com/BestNathan/nession/blob/knowledge/topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md) is verified against protected publication `b74b8457cfc0232fa2bc982f813a3e59f8cf60bb` and anonymous Pages readback Run `44723952582`. Canonical GHCR release Run `44721571308` and identical-fingerprint skip Run `44723079703` are the source-bound producer receipts. After future changes, update that article through the owner-authenticated Knowledge Publisher, never by direct writes to the protected orphan branch.
