@@ -327,6 +327,14 @@ Consequences that are part of the contract:
   with ordinary block/section/row content uses the host scrollport with no
   clearance class at all. `appScroll: 'bounded'` is the explicit exception for
   surfaces that genuinely scroll internally.
+- A split bounded surface may have more than one internal scroller (a list plus
+  a pinned footer, an editor plus its warnings/review). The owner that meets the
+  pane bottom spends the measured inset; siblings that already end above it must
+  not reserve the band again. Nested routes of a bounded capability (a Git
+  section, a GitHub reader, an Env split surface) follow the same rule — a
+  bounded declaration is not satisfied by the root view alone. A capability
+  must not substitute a Capsule-sized fixed `pb-*` band for the measured inset
+  (`layout-ownership` rejects it).
 
 ### Representative inventory
 
@@ -353,8 +361,10 @@ utilities and fixed inset variants), capability-local App headers/Back/actions
 swipe/stack markers), duplicated master/detail or scroll-owner markers, and raw
 numeric spacing in the shared recipe owner. From #4115 it also rejects a
 capability-owned App page scroll, a capability claiming the host App surface
-marker, and a reintroduction of the retired per-scroller Capsule padding; it
-accepts the declared bounded-surface class and a local list/editor scroller. It
+marker, and a reintroduction of the retired per-scroller Capsule padding; from
+#4188 it rejects a capability scroll owner that hardcodes a Capsule-sized
+`pb-*` band. It accepts the declared bounded-surface class and a local
+list/editor scroller. It
 accepts local flex/grid composition, `data-swipe-owner` surfaces, and the
 Issue's control sample. It also owns the keyboard-avoidance binding from §15:
 only the App Experience scrollport may publish the keyboard scroll owner, and
