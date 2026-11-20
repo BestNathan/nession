@@ -194,7 +194,12 @@ pub enum SourceRead<T> {
     Error(String),
 }
 
-fn read_json(path: &Path) -> SourceRead<Value> {
+/// Read one Claude configuration file with the shared size bound.
+///
+/// The Workspace Trust owner consumes this too: the trust state file is the
+/// same `.claude.json`, so "missing", "unreadable" and "not valid JSON" must
+/// have one definition rather than two.
+pub(crate) fn read_json(path: &Path) -> SourceRead<Value> {
     let metadata = match std::fs::metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return SourceRead::Missing,

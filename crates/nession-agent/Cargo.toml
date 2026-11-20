@@ -70,6 +70,8 @@ libc = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
+# The integration harness implements the async SessionCreatedHook seam (#4073).
+async-trait.workspace = true
 nession-server = { path = "../nession-server" }
 # The fixture Extension Tool in the MCP composition test derives its typed
 # schemas the same way a real provider does (#3778).
