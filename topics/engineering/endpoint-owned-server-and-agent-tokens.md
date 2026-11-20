@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "protocol", "security", "agent", "server", "web"]
 status: verified
 created_at: 2026-11-14T10:05:23Z
-updated_at: 2026-11-14T10:05:23Z
-sources: ["https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/docs/architecture/protocol.md", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/crates/nession-protocol/src/secret.rs", "https://github.com/BestNathan/nession/blob/2909dcbb0ad65c9e9bff4c874a36f2a8de29918f/crates/nession-agent/src/token.rs"]
+updated_at: 2026-11-20T16:51:05Z
+sources: ["https://github.com/BestNathan/nession/blob/8e6a9e882467beaa7607d19c0e392819659af928/docs/architecture/protocol.md", "https://github.com/BestNathan/nession/blob/8e6a9e882467beaa7607d19c0e392819659af928/crates/nession-common/src/config.rs", "https://github.com/BestNathan/nession/blob/8e6a9e882467beaa7607d19c0e392819659af928/crates/nession-server/src/server/websocket.rs", "https://github.com/BestNathan/nession/blob/8e6a9e882467beaa7607d19c0e392819659af928/crates/nession-server/src/server/handler/server_auth_v1.rs", "https://github.com/BestNathan/nession/blob/8e6a9e882467beaa7607d19c0e392819659af928/crates/nession-protocol/src/secret.rs"]
 ---
 
 # Endpoint-owned Server and Agent tokens
@@ -75,6 +75,37 @@ as such.
   boundary, not inside the same literal; adding a user identity must not
   recreate per-attach credential orchestration.
 
+## Effective exposure and the browser-Origin boundary (#4066)
+
+Authentication is only meaningful if the listener and the upgrade boundary make
+the right admission decision first.
+
+- **Effective exposure is validated before any socket binds.** A loopback
+  `listen_address` keeps the documented no-auth mode (empty `auth_token`). Any
+  other listener with an empty token is refused at startup unless the operator
+  sets `allow_insecure_remote = true`; that opt-in is deliberately unsafe. The
+  standalone binary and `nession server start` both reach the same
+  `ServerConfig::validate` through `runtime::run`, and the listener constructor
+  validates again before it binds.
+- **Address classification is fail-closed.** IP literals are classified by
+  family: the IPv4 loopback block, `::1` and IPv4-mapped loopback addresses are
+  local. Wildcards (`0.0.0.0`, `::`) and every other literal are remote. A
+  hostname is remote unless it is the reserved name `localhost`: a name may
+  resolve anywhere, so its spelling is not proof of a loopback interface.
+- **A browser Origin is admitted only by explicit allowance.** The HTTP upgrade
+  boundary on `/ws` and the compatibility fallback passes requests without
+  `Origin` (CLI, Agent, native clients) and refuses an `Origin`-bearing upgrade
+  with `403` unless the exact RFC 6454 origin (or the literal `null`) is listed
+  in the Server's `allowed_origins`. Empty is the fail-closed default, and an
+  accepted Origin is **not** a credential: `server.auth` still verifies the
+  Server Token. The generated local profile names the Vite dev/preview origins;
+  a deployment names its own Web UI and server hosts (the OCI image projection
+  carries the same allowance as `SERVER_ALLOWED_ORIGINS`).
+- **Configured tokens use the canonical verifier.** Both `server.auth` and
+  `server.agent.register` compare the Server Token through the constant-time
+  `TokenVerifier`. Empty, wrong and malformed credentials fail closed, and
+  neither the refusal answer nor the rejection log names a credential value.
+
 ## Related knowledge
 
 - [Nession MCP access layer semantic tool ownership and protocol versions](nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md):
@@ -85,6 +116,9 @@ as such.
 ## Limits and when to revisit
 
 - Rotation requires an Agent restart; an in-place token reload is not defined.
+- A deployment must keep `allowed_origins` in sync with the browser origins its
+  ingress actually serves; a missing entry refuses the page, while an
+  origin-less CLI/Agent client needs none.
 - The model trades per-resource authorization for one predictable key per
   endpoint. Revisit when multi-user or per-Project authorization becomes a
   requirement.

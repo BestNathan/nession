@@ -857,3 +857,10 @@
 - Categories: architecture, ci, erofs, release, security, toolchain, workflows
 - Reason: Supersede historical per-tool Bundle/revision GHCR contract with delivered #4160 orphan single-tool source fingerprints, multi-platform OCI Index, authorized GHCR publication and idempotent skip receipts
 - Source: https://github.com/BestNathan/nession/issues/4160
+
+## 2026-11-20T16:51:05Z | update | Endpoint-owned Server and Agent tokens
+- Path: topics/engineering/endpoint-owned-server-and-agent-tokens.md
+- Topic: engineering
+- Categories: architecture, protocol, security, agent, server, web
+- Reason: Record #4066 effective-exposure validation, the WebSocket browser-Origin allowance and constant-time Server Token verification from merged staging 8e6a9e882
+- Source: https://github.com/BestNathan/nession/issues/4066
