@@ -998,6 +998,74 @@ function selfTest() {
     targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   }).criteria.map(x=>x.criterion),['SC-04']);
 
+  // #4146: old model Pass at failing PR Quality is neither immutable success
+  // nor a reason to borrow a newer, unrelated PR's green CI. The same
+  // implementing PR can be re-evaluated only with actual GitHub ancestry,
+  // exact-head Quality success and fully retained historical row evidence.
+  const recoveryPr={number:4188,title:'fix (#3843)',body:'Refs #3843',
+    state:'closed',merged_at:'2026-11-20T10:17:54Z',
+    head:{sha:exactB,repo:{full_name:'BestNathan/nession'}},
+    base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
+  const recoveryProof={
+    issue:3843,previous:exactA,next:exactB,repo:'BestNathan/nession',
+    comparison:{status:'ahead',ahead_by:2,behind_by:0,
+      base_commit:{sha:exactA},merge_base_commit:{sha:exactA}},
+    previous_pulls:[recoveryPr],next_pulls:[recoveryPr],
+  };
+  const qualitySucceeded={status:'pass',receipt:{
+    kind:'pr_required_quality_v1',
+    repository:'BestNathan/nession',workflow:'.github/workflows/ci-quality.yml',
+    head_sha:exactB,result:'success',run_id:99,run_attempt:1,
+    scope_job_id:98,web_check_job_id:97,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  }};
+  const recover=verifiedFailedPrQualityRecovery(3843,exactA,exactB,{
+    previousQuality:{status:'fail',reason:'old web-check failed'},
+    nextQuality:qualitySucceeded,sourceProof:recoveryProof});
+  assert.equal(recover.pr_number,4188);
+  for (const bad of [
+    {previousQuality:{status:'pass'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'pending'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:{status:'pending'},sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:{...qualitySucceeded,
+      receipt:{...qualitySucceeded.receipt,head_sha:exactA}},sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,comparison:{...recoveryProof.comparison,behind_by:1}}},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,number:4189,
+        body:'Supersedes #4188'}]}},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,
+        merged_at:null,state:'closed'}]}},
+  ])assert.equal(verifiedFailedPrQualityRecovery(3843,exactA,exactB,bad),null);
+  const recoverContext=recoverFailedQualityPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>recover});
+  assert.deepEqual(recoverContext.criteria.map(x=>x.criterion),
+    ['SC-01','SC-02','SC-04']);
+  const recoveredResult=normalizeAcceptanceResult(recoverContext,{
+    criteria:recoverContext.criteria.map(c=>({criterion:c.criterion,result:'Pass',
+      evidence:'test: independent Quality and same-PR source proof'})),
+  },'agent-qwen');
+  const recoveredBody=applyAcceptanceResultToBody(anchoredBody,{
+    ...recoveredResult,pr_quality_recovery:{...recover,criteria:['SC-01','SC-02','SC-04']}},
+    {prSourceSupersession:recoveryProof});
+  assert.match(recoveredBody,/Acceptance Source Recovery History/);
+  assert.match(recoveredBody,/SC-01 prior Pass at a{40}/);
+  assert.match(recoveredBody,/SC-04 prior Pass at a{40}/);
+  assert.match(recoveredBody,/SC-01 \| Pass \| run 200; ref b{40};/);
+  assert.equal(validateRequirementBody(recoveredBody,{mode:'closure'}).ok,false,
+    'merged-stage SC-03 remains independently Pending after PR recovery');
+  const stillLocked=recoverFailedQualityPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>null});
+  assert.deepEqual(stillLocked.criteria,[]);
+  // The old Issue is never silently accepted just because a new Run exists.
   const post = buildAcceptanceContext({ ...issue, body: passedBody }, 'post-merge', {
     targetRef: 'def456', deployment: 'production', runId: 101,
   });
