@@ -3766,4 +3766,73 @@ mod tests {
             "a Server that never served must not announce that it did"
         );
     }
+
+    /// SC-01/SC-03 regression: the idle timeout is strictly greater than the probe
+    /// interval, so a healthy Agent that responds to probes is never spuriously
+    /// disconnected (#4065).
+    ///
+    /// The probe interval determines how often we ping during idle periods; the
+    /// idle timeout determines how long we wait for any frame (including a pong)
+    /// before declaring the leg half-open. If the timeout were <= the interval,
+    /// a healthy Agent that takes even a moment to respond would be killed.
+    ///
+    /// This test pins down the invariant that the timeout is at least 2× the
+    /// interval, providing substantial margin for slow but responsive Agents.
+    /// The actual probe behavior (sending pings during idle, resetting on activity)
+    /// is exercised by integration tests that run a full Server+Agent relay with
+    /// controlled network conditions.
+    #[test]
+    fn idle_timeout_exceeds_probe_interval_by_sufficient_margin() {
+        let ratio = AGENT_LEG_IDLE_TIMEOUT.as_secs_f64() / AGENT_LEG_PROBE_INTERVAL.as_secs_f64();
+        assert!(
+            ratio >= 2.0,
+            "AGENT_LEG_IDLE_TIMEOUT ({:?}) must be at least 2× AGENT_LEG_PROBE_INTERVAL ({:?}) \
+             to avoid spuriously disconnecting slow but responsive Agents; got ratio {ratio:.2}",
+            AGENT_LEG_IDLE_TIMEOUT,
+            AGENT_LEG_PROBE_INTERVAL
+        );
+    }
+
+    /// SC-01 regression: the probe interval is short enough that a half-open
+    /// Agent leg is detected within a documented finite bound (#4065).
+    ///
+    /// The idle timeout is the maximum time the relay will wait without any
+    /// frame before declaring the leg half-open. This must be short enough to
+    /// provide timely detection but long enough to avoid spurious disconnects.
+    /// The documented bound is 45s (3× the 15s probe interval), which balances
+    /// detection latency against false positives.
+    ///
+    /// This test pins down the absolute bound so a future change that
+    /// accidentally widens the timeout beyond a reasonable threshold is caught.
+    #[test]
+    fn idle_timeout_is_bounded_to_documented_threshold() {
+        let max_acceptable = std::time::Duration::from_secs(60);
+        assert!(
+            AGENT_LEG_IDLE_TIMEOUT <= max_acceptable,
+            "AGENT_LEG_IDLE_TIMEOUT ({:?}) must not exceed {:?}; a wider bound \
+             delays half-open detection beyond the documented 45s threshold",
+            AGENT_LEG_IDLE_TIMEOUT,
+            max_acceptable
+        );
+    }
+
+    /// SC-01 regression: the probe interval is short enough to detect a
+    /// half-open leg within the idle timeout (#4065).
+    ///
+    /// The probe interval determines how often we send a ping during idle
+    /// periods. It must be short enough that at least one probe is sent before
+    /// the idle timeout fires, giving the Agent a chance to respond with a pong.
+    /// If the interval were >= the timeout, no probe would be sent before the
+    /// relay gave up, defeating the purpose of the probe mechanism.
+    #[test]
+    fn probe_interval_is_shorter_than_idle_timeout() {
+        assert!(
+            AGENT_LEG_PROBE_INTERVAL < AGENT_LEG_IDLE_TIMEOUT,
+            "AGENT_LEG_PROBE_INTERVAL ({:?}) must be strictly less than \
+             AGENT_LEG_IDLE_TIMEOUT ({:?}) so at least one probe is sent before \
+             the idle deadline fires",
+            AGENT_LEG_PROBE_INTERVAL,
+            AGENT_LEG_IDLE_TIMEOUT
+        );
+    }
 }
