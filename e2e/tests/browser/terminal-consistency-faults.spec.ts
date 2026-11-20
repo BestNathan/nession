@@ -1496,6 +1496,9 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
             data: JSON.stringify({
               id: `overflow-inject-${i}`,
               msg_type: 'agent.terminal.output',
+              // #4070: the transport rejects notifications without the
+              // canonical timestamp before they can reach the renderer.
+              timestamp: Date.now(),
               payload: { session_name: name, data: payload },
             }),
           }));

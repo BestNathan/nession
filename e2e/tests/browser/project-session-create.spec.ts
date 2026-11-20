@@ -218,7 +218,12 @@ test.describe('Project Existing-location Session creation', () => {
     await page.getByTestId('project-item-row').nth(1).click();
     await page.getByTestId('project-detail-create-session').click();
     const dialog = page.getByRole('dialog').filter({ hasText: 'Create Session in' });
-    await expect(dialog.getByText(/No Existing Location/)).toBeVisible();
+    // Both the form guidance and the location empty state use this phrase.
+    // Assert the precise actionable empty state rather than an ambiguous match.
+    await expect(dialog.getByText(
+      'No Existing Location. Add an Agent directory in Project settings.',
+      { exact: true },
+    )).toBeVisible();
     await expect(dialog.getByTestId('project-location-trigger')).toHaveCount(0);
     await expect(dialog.getByTestId('create-session-submit')).toBeDisabled();
   });
