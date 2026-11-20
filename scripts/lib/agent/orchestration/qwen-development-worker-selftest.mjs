@@ -17,6 +17,12 @@ for(const [task,resuming] of [['implement',false],['implement',true],['repair',t
   assert.ok(argv.includes('--strict-mcp-config'),'keep strict MCP config');
   assert.ok(argv.includes('--restricted'),'keep restricted tools');
   assert.ok(argv.includes('--disallowedTools'),'keep MCP tool denial');
+  for (const flag of ['--tools','--allowedTools']) {
+    const i=argv.indexOf(flag);
+    assert.ok(i>=0,'native tool flag missing: '+flag);
+    assert.deepEqual(argv[i+1].split(','),['Edit','Glob','Grep','Read'],
+      'native Qwen may not receive file-creating Write tool');
+  }
   assert.ok(argv.includes(resuming?'--resume':'--session-id'),
     'native Session identity/Resume mode must remain explicit');
 }
@@ -82,7 +88,8 @@ const issue={number:2274,state:'open',title:'Fix tracked application source',
   body:'Accept a bounded patch after reading code'};
 const prompt=qwenDeveloperPrompt(issue,admission);
 assert.match(prompt,/Fix tracked application source/);
-assert.match(prompt,/Read\/Grep\/Glob\/Edit\/Write/);
+assert.match(prompt,/Read\/Grep\/Glob\/Edit tools/);
+assert.match(prompt,/Write tool is disabled/);
 assert.match(prompt,/Grep\/Glob are read-only discovery/);
 assert.match(prompt,/No Bash, shell, MCP/);
 assert.match(prompt,/do not perform broad repository exploration/);
