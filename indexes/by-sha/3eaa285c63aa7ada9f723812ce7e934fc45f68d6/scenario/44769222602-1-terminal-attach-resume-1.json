@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44769222602,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4066-ws-auth-exposure-policy",
+    "target_sha": "3eaa285c63aa7ada9f723812ce7e934fc45f68d6",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44769222602",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "338ebfe8b791d7de965a2c89a71c36ec217505054bb1f7487fd61071dc3f2962"
+  },
+  "record": "runs/2026-11-20/44769222602-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "d5887e7f06e4f54565107689a319b497691b6ef42b19471d6d45c1585f757062"
+}
