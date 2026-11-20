@@ -35,3 +35,4 @@ patchesStrategicMerge:
 patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
+- path: patch-server-env.yaml

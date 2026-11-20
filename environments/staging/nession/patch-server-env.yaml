@@ -1,0 +1,16 @@
+# #4066: a browser WebSocket upgrade must match the Server's Origin
+# allowance exactly; CLI/Agent clients present no Origin and stay compatible.
+# These are this lane's own Web UI + server hosts (LAN over HTTP, public hosts
+# over HTTP/HTTPS). Keep this list in sync with patch-ingress.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: nession-server
+          env:
+            - name: SERVER_ALLOWED_ORIGINS
+              value: "http://staging.nession.nhome.local,http://staging.ui.nession.nhome.local,http://staging.nession.bestnathan.top,https://staging.nession.bestnathan.top,http://staging.ui.nession.bestnathan.top,https://staging.ui.nession.bestnathan.top"

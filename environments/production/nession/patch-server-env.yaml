@@ -1,0 +1,16 @@
+# #4066: a browser WebSocket upgrade must match the Server's Origin
+# allowance exactly; CLI/Agent clients present no Origin and stay compatible.
+# Production's hosts come from the base ingress (LAN over HTTP, public hosts
+# over HTTP/HTTPS). Keep this list in sync with base/nession/ingress-*.yaml.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-server
+spec:
+  template:
+    spec:
+      containers:
+        - name: nession-server
+          env:
+            - name: SERVER_ALLOWED_ORIGINS
+              value: "http://nession.nhome.local,http://ui.nession.nhome.local,http://nession.bestnathan.top,https://nession.bestnathan.top,http://ui.nession.bestnathan.top,https://ui.nession.bestnathan.top"

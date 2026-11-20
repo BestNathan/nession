@@ -46,6 +46,7 @@ patches:
 - path: patch-ingress.yaml
 - path: patch-agent-env.yaml
 - path: patch-agent-sandbox.yaml
+- path: patch-server-env.yaml
 - patch: |-
     - op: add
       path: /spec/template/spec/containers/0/volumeMounts/0/subPath
