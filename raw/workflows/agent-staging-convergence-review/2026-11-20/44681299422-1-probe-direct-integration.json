@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-staging-convergence-review",
+    "github_workflow": "Agent / Staging Convergence Review",
+    "github_run_id": 44681299422,
+    "github_run_attempt": 1,
+    "job": "resolve",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "44681299422-1-probe-direct-integration"
+  },
+  "task": {
+    "id": "probe-direct-integration",
+    "type": "merge-conflict-probe",
+    "issue": 4124,
+    "target_ref": "21d53b583fcefa03cdfbd1873bf3c8af424a0391",
+    "fingerprint": "21d53b583fcefa03cdfbd1873bf3c8af424a0391:ab5b7e4a99402523354e97c04c726b2ec33e5a19:direct-integration"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "merge-conflict-probe",
+    "role": "developer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "dacce8a7-8fd4-4246-b546-e7dd7d58019f",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "merge-conflict-probe-direct-integration-v1",
+      "version": "v1",
+      "sha256": "6613be0b8852f4c0aadc2abaf671262e17ddc5c0b17e010b7367ff7d88b9a6ff"
+    }
+  },
+  "execution": {
+    "turns": 4,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 24,
+    "output": 726,
+    "cache_read": 23402,
+    "cache_write": 3582,
+    "reasoning": null,
+    "total": 27734
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-20T05:30:07.199Z",
+    "finished_at": "2026-11-20T05:30:07.199Z",
+    "agent_duration_ms": 36299,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed"
+  }
+}

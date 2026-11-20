@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-staging-convergence-review",
+    "github_workflow": "Agent / Staging Convergence Review",
+    "github_run_id": 44681299422,
+    "github_run_attempt": 1,
+    "job": "resolve",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "44681299422-1-probe-source-repair"
+  },
+  "task": {
+    "id": "probe-source-repair",
+    "type": "merge-conflict-probe",
+    "issue": 4124,
+    "target_ref": "21d53b583fcefa03cdfbd1873bf3c8af424a0391",
+    "fingerprint": "21d53b583fcefa03cdfbd1873bf3c8af424a0391:ab5b7e4a99402523354e97c04c726b2ec33e5a19:source-repair"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "merge-conflict-probe",
+    "role": "developer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "5dad1724-5af6-4357-9307-54d911d061fc",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "merge-conflict-probe-source-repair-v1",
+      "version": "v1",
+      "sha256": "21a8c9baf2ce73e88f28e7ba9343d492f68ffba6a0263be6f08f7ae5c3836fea"
+    }
+  },
+  "execution": {
+    "turns": 4,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 24,
+    "output": 1038,
+    "cache_read": 20559,
+    "cache_write": 7483,
+    "reasoning": null,
+    "total": 29104
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-20T05:30:18.166Z",
+    "finished_at": "2026-11-20T05:30:18.166Z",
+    "agent_duration_ms": 37318,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed"
+  }
+}
