@@ -204,11 +204,18 @@ export function qwenDeveloperCliArgs({prompt,sessionId,resuming,task,plan}){
     ...claudeCliToolPolicy(plan.tools,{restricted:true}),
     ...(resuming?['--resume',sessionId]:['--session-id',sessionId])];
 }
+// Claude Code can also apply an implicit turn cap through its environment.
+// Never inherit CLAUDE_CODE_MAX_TURNS from the runner or hosting process.
+export function qwenDeveloperCliEnvironment(parent,configDir,model){
+  const cliEnv={...parent,CLAUDE_CONFIG_DIR:configDir,
+    DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:model,
+    ANTHROPIC_DEFAULT_SONNET_MODEL:model};
+  delete cliEnv.CLAUDE_CODE_MAX_TURNS;
+  return cliEnv;
+}
 function cliCall({prompt,sessionId,resuming,task,plan,configDir,workspace}){
   const argv=qwenDeveloperCliArgs({prompt,sessionId,resuming,task,plan});
-  const cliEnv={...process.env,CLAUDE_CONFIG_DIR:configDir,
-    DISABLE_AUTOUPDATER:'1',ANTHROPIC_MODEL:plan.model,
-    ANTHROPIC_DEFAULT_SONNET_MODEL:plan.model};
+  const cliEnv=qwenDeveloperCliEnvironment(process.env,configDir,plan.model);
   if(cliEnv.CLAUDE_CODE_SKIP_PROMPT_HISTORY==='1')
     fail('native Session persistence cannot be disabled');
   const started=Date.now();
