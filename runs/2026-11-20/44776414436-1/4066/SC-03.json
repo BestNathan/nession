@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9d195088f78bb1b87ee25c5e13a378b02c74857dcb403a908a60e8c10d735ade",
+  "run_id": 44776414436,
+  "run_attempt": 1,
+  "issue": 4066,
+  "criterion": "SC-03",
+  "criterion_text": "Nonempty Server Token comparison uses the canonical constant-time verifier; invalid/missing/malformed credentials fail, valid credentials pass, and no token bytes appear in rejection logs.",
+  "stage": "staging",
+  "target_sha": "8e6a9e882467beaa7607d19c0e392819659af928",
+  "contract_sha256": "323c73c10f1cbc7502d1259d1467d5f4208cbb04ea3f2721f07b9e9cb86768cd",
+  "case_revision": "8e6a9e882467beaa7607d19c0e392819659af928",
+  "case_tree_sha": "d7902b8b8d6ee1fac88b4571956e6a25819b2c37",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T16:49:12.364Z",
+  "finished_at": "2026-11-20T16:49:21.254Z",
+  "duration_ms": 8890,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The configured Server Token is verified by the canonical constant-time verifier: valid credentials pass and invalid, empty or malformed ones fail for both client and Agent handshakes",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "8e6a9e882467beaa7607d19c0e392819659af928: real Server sockets accepted the configured Server Token, refused a wrong token, an empty presented token and a malformed auth frame, and refused an Agent registration with a wrong token while accepting a valid one; refusal replies named no credential value"
+        }
+      ],
+      "duration_ms": 2987,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44776414436,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8e6a9e882467beaa7607d19c0e392819659af928",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44776414436",
+    "record_path": "runs/2026-11-20/44776414436-1/4066/SC-03.json",
+    "source_result_sha256": "2367560477bd0d2e9e0b868c54b02f490201ea3b07c0214fc6eef7fe089c46bc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44776414436-1",
+    "sha256": "2367560477bd0d2e9e0b868c54b02f490201ea3b07c0214fc6eef7fe089c46bc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44776414436",
+    "durability": "time-limited; object archival not configured"
+  }
+}
