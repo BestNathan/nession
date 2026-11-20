@@ -2,7 +2,7 @@
 // #4160: source-pinned, single-tool catalog selector. No registry access and no arbitrary command input.
 import assert from 'node:assert/strict';
 import { readdirSync, lstatSync, existsSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync } from 'node:child_process';
 
@@ -49,6 +49,8 @@ function selfTest() {
     assert.throws(()=>recipe(root,'jq','latest'),/missing/);
     mkdirSync(join(root,'jq','1.0'),{recursive:true});
     writeFileSync(join(root,'jq','1.0','build.sh'),'#!/bin/bash\nif [ "$1" = targets ]; then printf "linux/amd64\\nlinux/arm64\\n"; fi\n');
+    mkdirSync(join(root,'.git'));
+    mkdirSync(join(root,'.github','workflows'),{recursive:true});
     assert.deepEqual(catalog(root),[{tool:'jq',version:'1.0'}]);
     assert.equal(targets(root,'jq','1.0','linux','arm64').target_csv,'linux/arm64');
     assert.equal(targets(root,'jq','1.0').all_supported,true);
