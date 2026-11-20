@@ -181,7 +181,7 @@ impl Clone for ConnectionHandler {
             db: Arc::clone(&self.db),
             extension_tools: self.extension_tools.clone(),
             config: ConnectionHandlerConfig {
-                server_auth_token: self.config.server_auth_token.clone(),
+                server_auth: self.config.server_auth.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
                 terminal_cols: self.config.terminal_cols,
                 terminal_web_font_size: self.config.terminal_web_font_size,
@@ -201,7 +201,10 @@ impl Clone for ConnectionHandler {
 
 /// Immutable per-connection configuration.
 pub struct ConnectionHandlerConfig {
-    pub server_auth_token: String,
+    /// The canonical constant-time verifier for this host's inbound Server
+    /// Token (`#4066`). A disabled verifier is the documented no-auth mode; a
+    /// configured token never goes through plain string equality.
+    pub server_auth: nession_protocol::TokenVerifier,
     pub heartbeat_interval_secs: u64,
     /// The release-selected fixed column count (#2487).
     pub terminal_cols: u16,

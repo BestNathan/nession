@@ -27,10 +27,12 @@ Two Protocol Units carry the new surface:
   placeholder with no `raw` rather than a truncated line.
 
 Both references are opaque and resource-scoped. They encode the transcript
-identity, byte offset and a generation fingerprint of the file's first line. A
-cursor from another transcript, or from before the file was replaced, is
-refused (`stale_cursor` / `stale_generation`) without returning bytes. No
-filesystem path travels on the wire.
+identity and byte offset, and carry a fingerprint of the bytes they name: a
+record reference covers its own line, while a cursor covers the byte range of
+the page it was issued with. Rewriting a record a caller already saw is refused
+(`stale_cursor` / `stale_generation`) without returning bytes, even when the
+transcript's first line is unchanged; appending records leaves both identities
+valid. No filesystem path travels on the wire.
 
 Bounds: one record may travel inline up to `RECORD_INLINE_CEILING` (64 KiB); a
 page carries at most `PAGE_INLINE_BUDGET` (256 KiB) inline across records; a
@@ -63,7 +65,7 @@ consumer audit confirms no deployed or non-Web caller depends on it.
 ## Verification
 
 - `crates/nession-claude-code/src/records.rs` — page order/completeness,
-  oversize placeholders, chunked reassembly, generation/cursor safety,
+  oversize placeholders, chunked reassembly, content-identity/cursor safety,
   partial-tail withholding.
 - `crates/nession-claude-code/src/agent.rs` — wire-level raw handler tests,
   foreign-reference refusal, no content/path on errors.

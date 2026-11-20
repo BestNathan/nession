@@ -12,7 +12,13 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-3705-image-'));
 const token = 'test-server-secret-never-in-logs';
-const envKeys = ['NESSION_MCP_ENABLED', 'SERVER_AUTH_TOKEN', 'NESSION_HOME'];
+const envKeys = [
+  'NESSION_MCP_ENABLED',
+  'SERVER_AUTH_TOKEN',
+  'SERVER_ALLOWED_ORIGINS',
+  'SERVER_ALLOW_INSECURE_REMOTE',
+  'NESSION_HOME',
+];
 const cleanEnv = { ...process.env };
 for (const key of envKeys) delete cleanEnv[key];
 
@@ -73,6 +79,31 @@ try {
   refused(renderServer('server-invalid.toml', {
     SERVER_AUTH_TOKEN: token, NESSION_MCP_ENABLED: 'yes',
   }).result, /NESSION_MCP_ENABLED/, 'invalid Server override');
+
+  // #4066: the image projection carries the browser-Origin allowance and the
+  // explicit unsafe exposure opt-in. The defaults are fail-closed.
+  const defaultPolicy = renderServer('server-default-policy.toml', { SERVER_AUTH_TOKEN: token });
+  ok(defaultPolicy.result, 'Server default policy');
+  includes(defaultPolicy.output, [
+    'allowed_origins = []',
+    'allow_insecure_remote = false',
+  ], 'Server fail-closed exposure defaults');
+  const origins = renderServer('server-origins.toml', {
+    SERVER_AUTH_TOKEN: token,
+    SERVER_ALLOWED_ORIGINS: 'http://localhost:18080,http://127.0.0.1:18080',
+  });
+  ok(origins.result, 'Server with browser origins');
+  includes(origins.output, [
+    'allowed_origins = ["http://localhost:18080", "http://127.0.0.1:18080"]',
+  ], 'Server browser-origin allowance');
+  const optIn = renderServer('server-insecure.toml', {
+    SERVER_AUTH_TOKEN: token, SERVER_ALLOW_INSECURE_REMOTE: 'true',
+  });
+  ok(optIn.result, 'Server explicit unsafe opt-in');
+  includes(optIn.output, ['allow_insecure_remote = true'], 'Server unsafe opt-in');
+  refused(renderServer('server-invalid-exposure.toml', {
+    SERVER_AUTH_TOKEN: token, SERVER_ALLOW_INSECURE_REMOTE: 'yes',
+  }).result, /SERVER_ALLOW_INSECURE_REMOTE/, 'invalid Server exposure opt-in');
 
   // Both embedded images use one config validator. Do not accidentally change
   // the Rust default, create a second MCP listener or synthesize a token.

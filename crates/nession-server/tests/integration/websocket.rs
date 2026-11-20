@@ -4,6 +4,8 @@ use nession_server::server::WebSocketServer;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use tokio_tungstenite::connect_async;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::handshake::client::Request as WsRequest;
 
 use super::current_timestamp;
 
@@ -3865,4 +3867,158 @@ async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyho
          socket buffers"
     );
     Ok(())
+}
+
+// ── Browser Origin policy at the upgrade boundary (#4066 SC-02) ─────────────
+
+/// A Server config whose WS origin allowance names `origins`.
+fn origin_server_config(db_path: String, origins: &[&str]) -> nession_common::config::ServerConfig {
+    nession_common::config::ServerConfig {
+        listen_address: "127.0.0.1:0".to_string(),
+        auth_token: "test_token".to_string(),
+        allowed_origins: origins.iter().map(|origin| (*origin).to_string()).collect(),
+        image_blob_dir: format!("{db_path}.images/blobs"),
+        image_build_dir: format!("{db_path}.images/build"),
+        db_path,
+        ..Default::default()
+    }
+}
+
+/// One WebSocket upgrade request, optionally carrying a browser `Origin`.
+fn upgrade_request(
+    addr: std::net::SocketAddr,
+    path: &str,
+    origin: Option<&str>,
+) -> anyhow::Result<WsRequest> {
+    let mut request = format!("ws://{addr}{path}").into_client_request()?;
+    if let Some(origin) = origin {
+        let value: tokio_tungstenite::tungstenite::http::HeaderValue = origin.parse()?;
+        request.headers_mut().insert("origin", value);
+    }
+    Ok(request)
+}
+
+/// The HTTP status of a refused handshake, when the refusal was an HTTP answer.
+fn handshake_status(error: tokio_tungstenite::tungstenite::Error) -> Option<u16> {
+    match error {
+        tokio_tungstenite::tungstenite::Error::Http(response) => Some(response.status().as_u16()),
+        _ => None,
+    }
+}
+
+async fn authenticate_with(
+    ws_stream: &mut tokio_tungstenite::WebSocketStream<
+        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+    >,
+    token: &str,
+) -> anyhow::Result<serde_json::Value> {
+    let auth_msg = serde_json::json!({
+        "msg_type": "server.auth",
+        "id": "origin-auth-1",
+        "timestamp": current_timestamp(),
+        "payload": { "auth_token": token }
+    });
+    ws_stream
+        .send(tokio_tungstenite::tungstenite::Message::Text(
+            auth_msg.to_string(),
+        ))
+        .await?;
+    let response = ws_stream
+        .next()
+        .await
+        .ok_or_else(|| anyhow::anyhow!("the Server closed before answering server.auth"))??;
+    let text = match response {
+        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+        other => panic!("Expected text response, got {other:?}"),
+    };
+    Ok(serde_json::from_str(&text)?)
+}
+
+#[tokio::test]
+async fn an_unapproved_browser_origin_is_rejected_on_ws() {
+    let (_db_dir, db_path) = test_db("test_ws_origin_reject.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, &["http://approved.example"]))
+            .await
+            .unwrap();
+
+    let error =
+        connect_async(upgrade_request(addr, "/ws", Some("https://attacker.example")).unwrap())
+            .await
+            .expect_err("an Origin outside the allowance must not upgrade");
+    assert_eq!(handshake_status(error), Some(403));
+}
+
+#[tokio::test]
+async fn an_unapproved_browser_origin_is_rejected_on_the_fallback_path() {
+    let (_db_dir, db_path) = test_db("test_ws_origin_reject_fallback.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, &["http://approved.example"]))
+            .await
+            .unwrap();
+
+    let error =
+        connect_async(upgrade_request(addr, "/legacy", Some("https://attacker.example")).unwrap())
+            .await
+            .expect_err("the compatibility fallback applies the same Origin policy");
+    assert_eq!(handshake_status(error), Some(403));
+}
+
+#[tokio::test]
+async fn an_approved_browser_origin_connects_and_authenticates() {
+    let (_db_dir, db_path) = test_db("test_ws_origin_approved.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, &["http://approved.example"]))
+            .await
+            .unwrap();
+
+    let (mut ws_stream, _) =
+        connect_async(upgrade_request(addr, "/ws", Some("http://approved.example")).unwrap())
+            .await
+            .expect("an approved browser origin connects");
+
+    let reply = authenticate_with(&mut ws_stream, "test_token")
+        .await
+        .unwrap();
+    assert_eq!(reply["payload"]["status"], "success");
+}
+
+#[tokio::test]
+async fn an_approved_origin_is_not_a_credential() {
+    let (_db_dir, db_path) = test_db("test_ws_origin_not_credential.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, &["http://approved.example"]))
+            .await
+            .unwrap();
+
+    let (mut ws_stream, _) =
+        connect_async(upgrade_request(addr, "/ws", Some("http://approved.example")).unwrap())
+            .await
+            .expect("an approved browser origin connects");
+
+    let reply = authenticate_with(&mut ws_stream, "wrong_token")
+        .await
+        .unwrap();
+    assert_eq!(
+        reply["payload"]["status"], "failed",
+        "Origin bounds browser admission; it never replaces the Server Token"
+    );
+}
+
+#[tokio::test]
+async fn an_origin_less_client_stays_compatible() {
+    let (_db_dir, db_path) = test_db("test_ws_origin_less.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, &["http://approved.example"]))
+            .await
+            .unwrap();
+
+    let (mut ws_stream, _) = connect_async(upgrade_request(addr, "/ws", None).unwrap())
+        .await
+        .expect("CLI/Agent clients do not present Origin and must stay compatible");
+
+    let reply = authenticate_with(&mut ws_stream, "test_token")
+        .await
+        .unwrap();
+    assert_eq!(reply["payload"]["status"], "success");
 }

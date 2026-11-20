@@ -327,7 +327,7 @@ async function scrollToEndAndMeasure(page, targetSelector = null) {
         scrollWidth: document.documentElement.scrollWidth,
       },
     };
-  });
+  }, targetSelector);
 }
 
 /** The SC-02 endpoint contract for one measured flow. */

@@ -85,7 +85,7 @@ pub(crate) fn build(
     let handler = ConnectionHandler::new_authenticated(
         deps,
         ConnectionHandlerConfig {
-            server_auth_token: config.auth_token.clone(),
+            server_auth: nession_protocol::TokenVerifier::new(config.auth_token.clone()),
             heartbeat_interval_secs: config.heartbeat_interval_secs,
             terminal_cols: config.terminal_cols,
             terminal_web_font_size: config.terminal_web_font_size,
