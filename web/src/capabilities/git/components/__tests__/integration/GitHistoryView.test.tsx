@@ -630,4 +630,112 @@ describe('GitHistoryView', () => {
       mockedCommit.mock.calls.filter(([request]) => request.oid === second.hash),
     ).toHaveLength(1);
   });
+
+  // #4141 SC-01: a rejected continuation must not produce an unhandled
+  // rejection, must keep the first page and cursor intact, must clear loading,
+  // and must present a visible retryable error. The existing Load Older action
+  // is itself the retry.
+  it('handles a rejected older-page read with a visible retry and keeps the first page (#4141 SC-01)', async () => {
+    let olderShouldFail = true;
+    mockedLog.mockImplementation((request) => {
+      if (request.before === 'cursor-a') {
+        return olderShouldFail
+          ? Promise.reject(new Error('connection reset'))
+          : Promise.resolve(paged([labeled('a older', 1)]));
+      }
+      return Promise.resolve(paged([labeled('a', 1), labeled('a', 2)], 'cursor-a'));
+    });
+
+    render(<GitHistoryView ctx={ctx()} />);
+    expect(await screen.findByText('a 1')).toBeInTheDocument();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(2);
+
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(await screen.findByTestId('git-history-older-error')).toHaveTextContent(
+      'Could not load older commits. Try again.',
+    );
+
+    // The first page is still on screen and the cursor is preserved: the
+    // rejected continuation did not drop the list it was extending.
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(2);
+    expect(screen.getByText('a 1')).toBeInTheDocument();
+    expect(screen.getByText('a 2')).toBeInTheDocument();
+
+    // Loading cleared: the retry action is enabled again.
+    expect(screen.getByTestId('git-history-load-more')).toBeEnabled();
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent('Load older commits');
+
+    // The same Load Older action is the retry. Flip the failure off and retry.
+    olderShouldFail = false;
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+
+    expect(await screen.findByText('a older 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('git-history-older-error')).toBeNull();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(3);
+  });
+
+  // #4141 SC-02: a late rejected continuation for a replaced target or
+  // generation must not publish its error into the successor's list, and must
+  // not clear the successor's own loading state. The #3751 fence covers both
+  // halves of a read — its data and its terminal state — and rejection is no
+  // exception.
+  it('a late rejected older-page read for a stale target cannot publish error or clear the successor loading (#4141 SC-02)', async () => {
+    const heldOlder = {
+      promise: new Promise<GitLogResponse>(() => {}),
+      reject: null as null | ((reason: unknown) => void),
+    };
+    heldOlder.promise = new Promise<GitLogResponse>((_, setReject) => {
+      heldOlder.reject = setReject;
+    });
+    const heldSuccessor = deferred<GitLogResponse>();
+    mockedLog.mockImplementation((request) => {
+      if (request.session === session.session_id && request.before === 'cursor-a') {
+        return heldOlder.promise;
+      }
+      if (request.session === otherSession.session_id) {
+        return request.before
+          ? heldSuccessor.promise
+          : Promise.resolve(paged([labeled('b', 1), labeled('b', 2)], 'cursor-b'));
+      }
+      return Promise.resolve(paged([labeled('a', 1), labeled('a', 2)], 'cursor-a'));
+    });
+
+    const view = render(<GitHistoryView ctx={ctx()} />);
+    await screen.findByTestId('git-commit-list');
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent(
+      'Loading older commits…',
+    );
+
+    // The Session moves while A's older read is still in flight. B's first
+    // page establishes B's list and B's own continuation.
+    view.rerender(<GitHistoryView ctx={ctx(otherSession)} />);
+    expect(await screen.findByText('b 1')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent(
+      'Loading older commits…',
+    );
+
+    // A's older read now rejects. It belongs to A's list, not B's — it must
+    // neither surface an error in B's panel nor clear B's loading flag.
+    await act(async () => {
+      heldOlder.reject!(new Error('connection closed'));
+    });
+
+    expect(screen.queryByTestId('git-history-older-error')).toBeNull();
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent(
+      'Loading older commits…',
+    );
+    expect(screen.getByTestId('git-history-load-more')).toBeDisabled();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(2);
+
+    // Settling B's own continuation still appends normally after A's stale
+    // failure, with B's loading and cursor remaining independently owned.
+    await act(async () => {
+      heldSuccessor.resolve(paged([labeled('b older', 1)]));
+    });
+    expect(await screen.findByText('b older 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('git-history-older-error')).toBeNull();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(3);
+  });
 });
