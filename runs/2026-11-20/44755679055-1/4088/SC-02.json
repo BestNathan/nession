@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1bd4ea7a86916010576985c0f4ad79a1254924b7fbc23e07a4df3e315d622a18",
+  "run_id": 44755679055,
+  "run_attempt": 1,
+  "issue": 4088,
+  "criterion": "SC-02",
+  "criterion_text": "An enabled writable Registry accepts OCI upload/manifest push via standard Distribution endpoints, publishes only after complete verified referenced objects, preserves byte/digest identity, and rejects incomplete/tampered/unauthorized uploads without visible tags.",
+  "stage": "staging",
+  "target_sha": "29fdb830f2040615595f56240ea3d35432971d9e",
+  "contract_sha256": "d6b8a859eeda739bf58f0a7b0c4c92090a2276023f093694573e91f67ded65e2",
+  "case_revision": "29fdb830f2040615595f56240ea3d35432971d9e",
+  "case_tree_sha": "3c69f9f3a221e6eeac5d80e582b047794e2743d8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-20T14:44:24.572Z",
+  "finished_at": "2026-11-20T14:44:30.673Z",
+  "duration_ms": 6101,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-02: the writable loopback Registry publishes only a complete verified closure with preserved identity and rejects incomplete/tampered/unauthorized pushes without a visible tag",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 29fdb830f2040615595f56240ea3d35432971d9e: #4088 SC-02 measured: loopback http://127.0.0.1:33515 unauth POST -> 401; chunked upload layer sha256:9ffbaecbdc57730bf7f8e23593caa0e91ee0a52b3b659905488cfcdb4607cc14 -> 201; manifest with missing config -> 400 MANIFEST_BLOB_UNKNOWN and tag absent; tampered digest -> 400 (nothing published); complete closure PUT manifest -> 201 digest sha256:3a711a5626bba969669851d6c25da88d5541a7745b207c00be66fdac234595cf and GET v1 returns the exact 378 bytes"
+        }
+      ],
+      "duration_ms": 247,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44755679055,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "29fdb830f2040615595f56240ea3d35432971d9e",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44755679055",
+    "record_path": "runs/2026-11-20/44755679055-1/4088/SC-02.json",
+    "source_result_sha256": "3e645f6f3550ddd1b6dca71e8063590c622a301a1304df5df2bca5e097d57a86"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44755679055-1",
+    "sha256": "3e645f6f3550ddd1b6dca71e8063590c622a301a1304df5df2bca5e097d57a86",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44755679055",
+    "durability": "time-limited; object archival not configured"
+  }
+}
