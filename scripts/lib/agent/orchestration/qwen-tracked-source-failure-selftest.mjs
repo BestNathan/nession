@@ -99,6 +99,16 @@ assert.equal(next.outbox[1].status,'pending');
 assert.equal(next.outbox[1].attempts,0);
 assert.equal(next.outbox[1].id,qwenTrackedSourceSuccessorId(s.issue,s.action_id,s.run_id));
 assert.deepEqual(next.outbox[1].task,dispatched.outbox[0].task);
+for(const delta of [
+  {source_run_id:s.run_id+1},
+  {source_attempt:2},
+  {failure_code:'qwen_native_sealing_public_key_missing'},
+]){
+  const forged={...next,outbox:next.outbox.map((item,i)=>i===0?{
+    ...item,receipt:{...item.receipt,...delta},
+  }:item)};
+  assert.throws(()=>validateDevelopmentState(forged),/invalid authenticated failure receipt/);
+}
 for(const bad of [{issue:3785},{run_id:s.run_id+1},
   {verified:false},{source_sha:'0'.repeat(40)},{attempt:2},
   {failure_code:'native_sdk_sandbox_unavailable'}])
