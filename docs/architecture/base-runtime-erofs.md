@@ -195,3 +195,73 @@ Docker Pod, CAP_SYS_ADMIN, host socket, or unrestricted network egress.
 Success is not a documentation PR, a test-only synthetic EROFS fixture, a
 green workflow alone, or an unverified `docker run --privileged` demonstration.
 Each phase retains its own outstanding acceptance evidence in #4245/#4247.
+
+## Decision record and current delivery issues
+
+| Responsibility | Work item | Acceptance owner |
+| --- | --- | --- |
+| OCI layered RootFS → correct native standalone EROFS | [#4252](https://github.com/BestNathan/nession/issues/4252) | nession-erofs source importer, Linux metadata + malicious layer tests |
+| Distro/profile catalog → trusted complete multi-platform GHCR release | [#4254](https://github.com/BestNathan/nession/issues/4254) | main-only publisher and independent readback |
+| Debian Agent → Ubuntu root + separate Toolchain runtime | [#4255](https://github.com/BestNathan/nession/issues/4255) | Agent/Sandbox Linux-native ABI and mount lease Cases |
+| Transient writable root → real apt/dpkg + cleanup | [#4247](https://github.com/BestNathan/nession/issues/4247) | Sandbox native namespace/package manager/teardown Cases |
+| Minimal Debian Agent Docker packaging | [#4256](https://github.com/BestNathan/nession/issues/4256) | reproducible CI Buildx and deployed staging compatibility |
+| Integration roll-up | [#4245](https://github.com/BestNathan/nession/issues/4245) | no duplicate Registry, Layer or Sandbox owner |
+
+The `bases` orphan catalog is a **proposal approved for this slice**, not an existing branch. The Catalog may reuse trust and CLI protocols of `toolchains`, but its distro filesystem semantics demand their own profile validation. `/etc/os-release=Ubuntu` does not by itself prove executable compatibility: `/lib*/ld-linux*`, glibc, NSS, CA, distro files and actual Toolchain commands must run inside the isolated mount view. The exact OCI Index digest and each platform child Manifest are two different identities; Server/Agent resolve to a compatible immutable per-platform Manifest and the physical EROFS Blob. Mutable catalog tags are never a Session pin.
+
+### Why standalone EROFS instead of a referenced Composite Base
+
+The existing Sandbox Base mount path consumes one verified raw EROFS view. A referenced Composite is a separately modeled OCI closure that requires multiple EROFS backing-device leases and a different mount adapter; #3784 explicitly tracks its unsupported Base role. Publishing one flattened filesystem per architecture makes the first Ubuntu milestone compatible with the current Base mount contract. Separate Toolchains stay **runtime RO mounts**, not flattened into every Base. If Composite Base is later wanted, introduce a dedicated typed source+dependency lease contract rather than quietly passing a metadata EROFS as a standalone lower.
+
+### Operational sequence
+
+```text
+[Base release, noncredentialed]
+audit Ubuntu OCI digest / apt package set
+  -> platform OCI layer resolution
+  -> validate+flatten into private root
+  -> preserve safe Linux filesystem metadata
+  -> make standalone EROFS + extract/native probe
+  -> source-bound artifact upload
+  -> [trusted main publish, never executes untrusted recipes]
+     OCI Config / Manifest / complete platform Index -> GHCR
+  -> [read-only independent validation]
+     manifest/blob digest and native extracted probes
+
+[Linux Session, normal runtime]
+Server resolves authorized Base/Tool Manifest and selected architecture
+  -> Agent fetches missing Blob by OCI/authorized route; verifies digest, pins
+  -> EROFS MountManager acquires shared immutable Base/Tool physical view
+  -> Sandbox MountPlan acquires optional transient root Overlay
+  -> bwrap mounts /, /opt/* RO, /workspace independent, /tmp/home/proc/dev
+  -> trusted launch barrier verifies policy and starts real Ubuntu shell
+  -> tmux detach/reconnect does NOT destroy a running execution
+  -> on last real execution exit, unmount owned root, remove ephemeral upper/work,
+     then release immutable leases; preserve Workspace and verified Blob cache
+```
+
+### Rootless package installation is a separate capability, not a RootFS format
+
+The existing bwrap path uses user namespace isolation and `--cap-drop ALL`; that is a **security constraint**, not proof that root-in-namespace supports every dpkg maintainer script. Native #4247 evidence must inspect `/proc/self/uid_map`, `gid_map`, effective UID/GID/capabilities, Overlay UID ownership/copy-up and actual dpkg `chown`/metadata writes. A specific Ubuntu package (starting with `tree`) may work while service-managing packages remain unsupported. Never change `--cap-drop ALL` to broad capabilities just to claim success. Package installation is user code inside the Sandbox, not an Agent API that executes APT on the host.
+
+Sandbox networking owns permitted egress. Provide only necessary safe resolver/hosts/CA inputs in the namespace; no implicit Debian `/etc` bind, host credential injection or bypass of offline/restricted network policy. APT cannot gain greater network authority than any other user code. Dynamic changes to `/etc`, `/usr`, `/var/lib/dpkg` and `/var/cache/apt` are upper-layer writes; `/workspace` has an independent durable ownership contract.
+
+### Concrete lifecycle and failure table
+
+| Event / failure | Expected behavior |
+| --- | --- |
+| Read-only Base selected | Existing Base EROFS mounted RO; system package changes are denied |
+| Explicit ephemeral writable root | One verified Base lower + one execution-owned Overlay upper/work; no change to EROFS bytes |
+| Package installed in A, B uses same Base | B cannot observe A's dynamic package or dpkg state |
+| tmux detach / client disconnect | Running execution remains live and retains its current temporary upper |
+| Exit/Stop/Reset and new execution | Old upper disposed after safe unmount; persistent Workspace continues |
+| Cache warm hit | Same manifest/blob fingerprint, no new image payload download |
+| Missing or corrupt OCI/EROFS closure | Fail preflight/Enter with actionable error, never Native fallback |
+| Unsupported `/dev/fuse`, userns, Overlay upper filesystem | Report unavailable capability; do not run privileged fallback |
+| Apt with forbidden egress | Network request denied; no automatic proxy bypass |
+| Agent crash / failed or foreign unmount | Persist ownership/generation receipt, preserve referenced lower and upper for safe reconciliation; never blindly delete |
+| Quota/ENOSPC in ephemeral upper | Bound write impact and report failure without corrupting durable Workspace or CAS |
+
+### Verify distinct proof boundaries
+
+PR-head deterministic tests prove parser/sanitizer/trust invariants but **not** Ubuntu runtime compatibility. Real native Linux Case proves mount/ELF/apt/cleanup but **not** GHCR publication. Only authenticated trusted-main release Run/Attempt and independent remote Index/Manifest/Blob readback prove a published Base. Only controlled staging deployment evidence proves that a minimal Docker Agent can execute it with the actual Kernel/FUSE/UID setup. Parent and child Issues preserve these independently Pending until the corresponding receipts exist.
