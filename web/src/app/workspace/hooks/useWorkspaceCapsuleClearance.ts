@@ -142,8 +142,28 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
       // requiring the outer element's own `scrollHeight` to exceed its
       // `clientHeight` would zero the inset for exactly those adapters. A
       // constrained element already above the bar yields zero naturally.
+      //
+      // A marked element nested inside another marked owner is not an
+      // independent surface: it is a renderer inside the outer scroll area
+      // (a CodeMirror host inside the Git preview body). Measuring it from its
+      // content-height bottom would inflate its padding and steal the scroll
+      // relation; it inherits the outer owner's published value instead.
+      const nestedInsideOwner = (element: HTMLElement): boolean => {
+        for (let parent = element.parentElement; parent && parent !== shell; parent = parent.parentElement) {
+          if (scrollports.has(parent)) {
+            return true;
+          }
+        }
+        return false;
+      };
       for (const element of scrollports) {
         observe(element);
+        if (nestedInsideOwner(element)) {
+          if (measuredInsets.delete(element)) {
+            element.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+          }
+          continue;
+        }
         const inset = Math.max(0, element.getBoundingClientRect().bottom - floatingTop);
         if (measuredInsets.get(element) === inset) {
           continue;
