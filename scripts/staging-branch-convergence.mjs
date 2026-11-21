@@ -16,6 +16,7 @@ import vm from 'node:vm';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const WORKFLOWS = path.join(ROOT, '.github/workflows');
@@ -36,6 +37,37 @@ function branchName(value) {
 }
 function shell(program, args, options = {}) {
   return execFileSync(program, args, { encoding: 'utf8', cwd: ROOT, stdio: ['ignore', 'pipe', 'pipe'], ...options }).trim();
+}
+
+// #4186: synchronous `gh api` child stdout must be bounded. Requesting only the
+// necessary fields through a `--jq` projection is the PRIMARY bound against
+// unbounded API payload growth (a runs/PR listing otherwise carries a full
+// repository object per item). GH_API_MAX_BUFFER is a documented finite
+// defensive backstop, not a license to keep fetching full metadata: an
+// oversized or truncated response fails closed — never a broad retry and never
+// a silently accepted partial inventory. Raising the cap alone would mask
+// growth, so every list call below projects away the heavy nested objects.
+const GH_API_MAX_BUFFER = 4 * 1024 * 1024;
+// Only the fields the conflict-review/audit dedup actually reads; the full
+// repository/head_repository objects (the overflow source) reduce to full_name.
+const RUNS_INVENTORY_JQ = '{total_count: .total_count, workflow_runs: [.workflow_runs[] | {id, display_title, event, head_branch, created_at, repository: {full_name: .repository.full_name}, head_repository: {full_name: .head_repository.full_name}}]}';
+// PR consumers read scalar fields plus head.repo.full_name/base.repo.full_name
+// only; shrink those nested repository objects and keep every other field.
+const PR_LIST_JQ = '[.[] | .head.repo = {full_name: .head.repo.full_name} | .base.repo = {full_name: .base.repo.full_name}]';
+// Conflict-Bug discovery reads number/state/title/body/pull_request and
+// labels[].name; keep exactly those (labels stay {name} objects).
+const SEARCH_ISSUES_JQ = '{total_count: .total_count, items: [.items[] | {number, state, title, body, pull_request, labels: [.labels[]? | {name}]}]}';
+function ghApi(args, { jq, env } = {}) {
+  const full = jq ? ['--jq', jq, ...args] : args;
+  let raw;
+  try {
+    raw = shell('gh', ['api', ...full], { maxBuffer: GH_API_MAX_BUFFER, ...(env ? { env } : {}) });
+  } catch (error) {
+    if (error && (error.code === 'ENOBUFS' || String(error.message ?? '').includes('ENOBUFS')))
+      reject('bounded GitHub API response overflowed the finite buffer; fail closed without retry (#4186)');
+    throw error;
+  }
+  return raw;
 }
 function unquote(text) {
   const value = text.trim();
@@ -183,19 +215,17 @@ function calculatePlan() {
   return { schema_version: 1, main_sha: mainSha, branches: states };
 }
 
-function gh(args) {
-  return JSON.parse(shell('gh', ['api', ...args]));
+function gh(args, jq) {
+  return JSON.parse(ghApi(args, { jq }));
 }
 
 // The existing Publisher App identity only has Contents/PR write, not Issue
 // write. Legacy Issue cleanup uses the separate GitHub Actions issues:write
 // token, narrowly scoped to the trusted cleanup calls below.
-function ghIssueWrite(args) {
+function ghIssueWrite(args, jq) {
   const token=process.env.ISSUE_GITHUB_TOKEN;
   if(!token)reject('trusted Issue cleanup token unavailable');
-  return JSON.parse(shell('gh',['api',...args],{
-    env:{...process.env,GH_TOKEN:token}
-  }));
+  return JSON.parse(ghApi(args, { jq, env:{...process.env,GH_TOKEN:token} }));
 }
 export function legacyIssueArchiveRequests(repo,number,prNumber,headSha) {
   if(!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)||
@@ -319,7 +349,7 @@ function ensureIntegrationBranch(repo, plan, lane) {
 function existingPr(repo, owner, head, base) {
   const results = gh(['--method', 'GET', 'repos/' + repo + '/pulls',
     '-f', 'head=' + owner + ':' + head, '-f', 'base=' + base,
-    '-f', 'state=open', '-f', 'per_page=100']);
+    '-f', 'state=open', '-f', 'per_page=100'], PR_LIST_JQ);
   if (!Array.isArray(results)) reject('unexpected GitHub PR lookup response');
   const matches = results.filter(pr => pr.head?.ref === head && pr.base?.ref === base &&
     pr.head?.repo?.full_name === repo);
@@ -350,7 +380,7 @@ export function pinnedSyncIdentity(pr,repo,lane,laneSha,headSha,parents,mainIsAn
 }
 function pendingSyncIntegration(repo,lane,liveMainSha) {
   const opened=gh(['--method','GET','repos/'+repo+'/pulls',
-    '-f','base='+lane.branch,'-f','state=open','-f','per_page=100']);
+    '-f','base='+lane.branch,'-f','state=open','-f','per_page=100'], PR_LIST_JQ);
   if(!Array.isArray(opened)||opened.length>=100)
     reject('unbounded active Staging PR inventory');
   const prefix='chore/staging-sync-'+lane.branch.replace(/[\\/._]/g,'-')+'-';
@@ -386,7 +416,7 @@ function pendingSyncIntegration(repo,lane,liveMainSha) {
 
 function closeSupersededSyncPrs(repo,lane,currentHead,policyRetirement=null) {
   const list=gh(['--method','GET','repos/'+repo+'/pulls',
-    '-f','base='+lane,'-f','state=open','-f','per_page=100']);
+    '-f','base='+lane,'-f','state=open','-f','per_page=100'], PR_LIST_JQ);
   if(!Array.isArray(list)||list.length>=100)
     reject('unbounded active staging sync PR inventory');
   const closed=[];
@@ -477,8 +507,8 @@ function dispatchBatchAudit(repo,issue){
   // A dispatch can succeed remotely while the Controller loses its reply.
   // Reconcile the immutable Issue identity against actual GitHub runs before
   // spending another model invocation; do not rely on the created flag.
-  const raw=shell('gh',['api','repos/'+repo+
-    '/actions/workflows/agent-issue-audit.yml/runs?event=workflow_dispatch&per_page=100'],{env});
+  const raw=ghApi(['repos/'+repo+
+    '/actions/workflows/agent-issue-audit.yml/runs?event=workflow_dispatch&per_page=100'],{jq:RUNS_INVENTORY_JQ,env});
   const inventory=JSON.parse(raw);
   if(!Array.isArray(inventory.workflow_runs))reject('untrusted Issue Audit run inventory');
   const expected='Issue Audit #'+issue.number;
@@ -593,7 +623,7 @@ function ensureConflictRepairIssue(repo,plan,lane){
   const prefix='Bug: Agent Convergence repair '+lane.branch+' ';
   const query='repo:'+repo+' is:issue is:open in:title "'+prefix.trim()+'"';
   const found=ghIssueWrite(['--method','GET','search/issues?q='+
-    encodeURIComponent(query)+'&per_page=50']);
+    encodeURIComponent(query)+'&per_page=50'], SEARCH_ISSUES_JQ);
   if(!Array.isArray(found.items)||found.total_count>=50)
     reject('incomplete conflict Bug discovery; no duplicate Issue is safe');
   const active=found.items.filter(x=>x.state==='open'&&
@@ -627,18 +657,35 @@ function ensureConflictRepairIssue(repo,plan,lane){
   return {number:created.number,action:'created'};
 }
 
+// #4186: a bounded review inventory is at most one per_page=100 page. A missing
+// array or a total_count beyond that page is an incomplete inventory and fails
+// closed (never a silently accepted partial listing).
+export function reviewInventoryBlocked(previous) {
+  return !Array.isArray(previous?.workflow_runs) || previous.total_count > 100;
+}
+// Only an exact-identity, same-repository, main-branch workflow_dispatch run is
+// an existing analysis/repair. A foreign repository, wrong base/branch, wrong
+// event or missing identity field must never be reused as the recorded run.
+export function findRecordedConflictRun(previous, identity, repo) {
+  return previous.workflow_runs.find(run =>
+    run.display_title === identity && run.event === 'workflow_dispatch' &&
+    run.head_branch === 'main' &&
+    run.repository?.full_name === repo &&
+    run.head_repository?.full_name === repo) || null;
+}
+
 function dispatchConflictReview(repo, receipt, action, plan, lane) {
   const token = process.env.DISPATCH_GITHUB_TOKEN;
   if (!token) reject('the trusted Controller Actions dispatcher token is missing');
-  function api(args) {
-    return shell('gh', ['api', ...args], { env: { ...process.env, GH_TOKEN: token } });
+  function api(args, jq) {
+    return ghApi(args, { jq, env: { ...process.env, GH_TOKEN: token } });
   }
   const workflow = 'agent-staging-convergence-review.yml';
   // Exact SHA pair is embedded in the trusted Agent Run display title. This
   // keeps a repeatedly discovered conflict from spending tokens every tick.
   const previous = JSON.parse(api(['repos/' + repo + '/actions/workflows/' + workflow +
-    '/runs?event=workflow_dispatch&per_page=100']));
-  if (!Array.isArray(previous.workflow_runs) || previous.total_count > 100) {
+    '/runs?event=workflow_dispatch&per_page=100'], RUNS_INVENTORY_JQ));
+  if (reviewInventoryBlocked(previous)) {
     return { status: 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY' };
   }
   const productionRequested=action==='sync-main-to-lane'&&
@@ -678,11 +725,7 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
   const production=Boolean(repairPaths&&repairIssue?.number);
   const identity=(production?'Convergence repair ':'Convergence conflict ')+
     lane.branch+' '+plan.main_sha+' '+lane.sha;
-  const recorded=previous.workflow_runs.find(run=>
-    run.display_title===identity&&run.event==='workflow_dispatch'&&
-    run.head_branch==='main'&&
-    run.repository?.full_name===repo&&
-    run.head_repository?.full_name===repo);
+  const recorded=findRecordedConflictRun(previous,identity,repo);
   if(recorded)return {status:production?'EXISTING_REPAIR':'EXISTING_ANALYSIS',
     run_id:recorded.id,
     ...(repairSkip?{repair_skipped:repairSkip}:{})};
@@ -928,7 +971,122 @@ function reconcile(plan) {
   return results;
 }
 
+// #4186 deterministic fake `gh`: emits a full-metadata listing (the overflow
+// source) and applies the real `--jq` projection client-side exactly as `gh`
+// does, so the bounded controller is exercised against authentic payload shapes.
+const FAKE_GH_SCRIPT = `#!/usr/bin/env node
+const { execFileSync } = require('node:child_process');
+const args = process.argv.slice(2);
+const mode = process.env.FAKE_GH_MODE || 'runs';
+const repo = { full_name: 'BestNathan/nession', padding: 'x'.repeat(14000) };
+function runsPayload() {
+  const runs = [];
+  for (let i = 0; i < 80; i++) runs.push({ id: 1000 + i, display_title: 'Convergence conflict staging ' + 'a'.repeat(40) + ' ' + 'b'.repeat(40), event: 'workflow_dispatch', head_branch: 'main', created_at: '2026-11-20T00:00:00Z', conclusion: 'success', repository: repo, head_repository: repo });
+  return JSON.stringify({ total_count: 80, workflow_runs: runs });
+}
+function prPayload() {
+  const prs = [];
+  for (let i = 0; i < 100; i++) prs.push({ number: 5000 + i, state: 'open', draft: false, title: 'sync', body: 'Staging Convergence automated proposal ' + i, user: { login: 'nession-publisher[bot]' }, head: { ref: 'chore/staging-sync-staging-aaa', sha: 'c'.repeat(40), repo: repo }, base: { ref: 'staging', sha: 'b'.repeat(40), repo: repo } });
+  return JSON.stringify(prs);
+}
+function searchPayload() {
+  return JSON.stringify({ total_count: 3, items: [
+    { number: 1, state: 'open', title: 'Bug: Agent Convergence repair staging x', body: 'body', labels: [{ name: 'bug' }, { name: 'ci' }], user: { login: 'u', padding: 'z'.repeat(14000) } },
+    { number: 2, state: 'open', title: 'Bug: other', body: 'b', labels: [{ name: 'bug' }], user: { login: 'u' } },
+    { number: 3, state: 'open', title: 'PR', body: 'b', labels: [], pull_request: { url: 'https://api.github.com/repos/BestNathan/nession/pulls/3' }, user: { login: 'u' } }
+  ] });
+}
+const full = mode === 'pr-list' ? prPayload() : mode === 'search' ? searchPayload() : runsPayload();
+let out;
+if (mode === 'truncated') out = '{"total_count":80,"workflow_runs":[{';
+else if (mode === 'oversized-projected') out = JSON.stringify({ total_count: 80, workflow_runs: Array.from({ length: 80 }, (_, i) => ({ id: i, padding: 'y'.repeat(60000) })) });
+else {
+  const jqIdx = args.indexOf('--jq');
+  if (jqIdx >= 0) out = execFileSync('jq', ['-c', args[jqIdx + 1]], { input: full, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  else out = full;
+}
+process.stdout.write(out);
+`;
+
+function selfTestBoundedApi() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-4186-'));
+  try {
+    fs.writeFileSync(path.join(dir, 'gh'), FAKE_GH_SCRIPT, { mode: 0o755 });
+    const env = { ...process.env, PATH: dir + path.delimiter + process.env.PATH };
+    const endpoint = 'repos/BestNathan/nession/actions/workflows/agent-staging-convergence-review.yml/runs?event=workflow_dispatch&per_page=100';
+
+    // SC-01: the OLD unbounded call (default 1 MiB maxBuffer, no projection)
+    // overflowed on a full-metadata runs listing — reproduce that overflow.
+    assert.throws(() => execFileSync('gh', ['api', endpoint], { encoding: 'utf8', cwd: ROOT, env }),
+      (e) => e.code === 'ENOBUFS' || /ENOBUFS/.test(e.message),
+      'oversized full-metadata runs listing must reproduce the old ENOBUFS overflow');
+
+    // SC-01: the repaired bounded+projected call processes the same inventory
+    // without ENOBUFS and keeps exactly the dedup fields (heavy metadata gone).
+    const projectedRaw = ghApi([endpoint], { jq: RUNS_INVENTORY_JQ, env });
+    assert.ok(Buffer.byteLength(projectedRaw) < 1024 * 1024,
+      'projected runs inventory must stay well under the old 1 MiB cap');
+    const projected = JSON.parse(projectedRaw);
+    assert.equal(projected.total_count, 80);
+    assert.equal(projected.workflow_runs.length, 80);
+    const r0 = projected.workflow_runs[0];
+    assert.equal(r0.repository.full_name, 'BestNathan/nession');
+    assert.equal(r0.head_repository.full_name, 'BestNathan/nession');
+    assert.ok(r0.display_title && r0.event === 'workflow_dispatch' && r0.head_branch === 'main');
+    assert.equal(r0.repository.padding, undefined, 'heavy repository metadata must be projected away');
+
+    // SC-02: an oversized response even after projection fails closed (no retry).
+    assert.throws(() => ghApi([endpoint], { jq: RUNS_INVENTORY_JQ, env: { ...env, FAKE_GH_MODE: 'oversized-projected' } }),
+      /bounded GitHub API response overflowed the finite buffer/,
+      'oversized projected response must fail closed, not retry');
+
+    // SC-02: a truncated response fails closed at parse.
+    assert.throws(() => JSON.parse(ghApi([endpoint], { jq: RUNS_INVENTORY_JQ, env: { ...env, FAKE_GH_MODE: 'truncated' } })),
+      'truncated JSON must fail closed');
+
+    // SC-02: PR-list projection keeps scalar identity fields and shrinks repos,
+    // so wrong-base / fork filtering still functions on the projected shape.
+    const prs = JSON.parse(ghApi(['repos/BestNathan/nession/pulls?state=open&per_page=100'],
+      { jq: PR_LIST_JQ, env: { ...env, FAKE_GH_MODE: 'pr-list' } }));
+    assert.equal(prs.length, 100);
+    assert.equal(prs[0].head.repo.full_name, 'BestNathan/nession');
+    assert.equal(prs[0].base.repo.full_name, 'BestNathan/nession');
+    assert.equal(prs[0].head.repo.padding, undefined);
+    assert.equal(prs[0].head.ref, 'chore/staging-sync-staging-aaa');
+    assert.equal(prs[0].base.ref, 'staging');
+    assert.ok(prs[0].body.startsWith('Staging Convergence automated proposal'));
+    assert.equal(prs[0].user.login, 'nession-publisher[bot]');
+    assert.equal(prs.filter(p => p.base?.ref === 'staging' && p.head?.repo?.full_name === 'BestNathan/nession').length, 100);
+
+    // SC-02: search projection keeps labels[].name and pull_request truthiness.
+    const search = JSON.parse(ghApi(['search/issues?q=repo:BestNathan/nession&per_page=50'],
+      { jq: SEARCH_ISSUES_JQ, env: { ...env, FAKE_GH_MODE: 'search' } }));
+    assert.equal(search.total_count, 3);
+    assert.ok(search.items.find(x => !x.pull_request).labels.some(y => y.name === 'bug'));
+    assert.ok(search.items.some(x => x.pull_request), 'PR items keep pull_request truthiness');
+
+    // SC-02: incomplete inventory and foreign/wrong-base/missing-field runs fail
+    // closed (pure helpers consumed by dispatchConflictReview).
+    assert.equal(reviewInventoryBlocked({ total_count: 101, workflow_runs: [] }), true);
+    assert.equal(reviewInventoryBlocked({ total_count: 80, workflow_runs: [] }), false);
+    assert.equal(reviewInventoryBlocked({ total_count: 80 }), true, 'missing array fails closed');
+    assert.equal(reviewInventoryBlocked(null), true);
+    const identity = 'Convergence conflict staging ' + 'a'.repeat(40) + ' ' + 'b'.repeat(40);
+    const good = { display_title: identity, event: 'workflow_dispatch', head_branch: 'main', repository: { full_name: 'BestNathan/nession' }, head_repository: { full_name: 'BestNathan/nession' }, id: 7 };
+    assert.equal(findRecordedConflictRun({ workflow_runs: [good] }, identity, 'BestNathan/nession').id, 7);
+    assert.equal(findRecordedConflictRun({ workflow_runs: [{ ...good, repository: { full_name: 'attacker/fork' } }] }, identity, 'BestNathan/nession'), null, 'foreign repository must not be reused');
+    assert.equal(findRecordedConflictRun({ workflow_runs: [{ ...good, head_repository: { full_name: 'attacker/fork' } }] }, identity, 'BestNathan/nession'), null);
+    assert.equal(findRecordedConflictRun({ workflow_runs: [{ ...good, head_branch: 'staging' }] }, identity, 'BestNathan/nession'), null, 'wrong base branch must not be reused');
+    assert.equal(findRecordedConflictRun({ workflow_runs: [{ ...good, event: 'push' }] }, identity, 'BestNathan/nession'), null);
+    assert.equal(findRecordedConflictRun({ workflow_runs: [{ ...good, display_title: 'other' }] }, identity, 'BestNathan/nession'), null, 'missing identity must not be reused');
+    assert.equal(findRecordedConflictRun({ workflow_runs: [{ ...good, repository: {} }] }, identity, 'BestNathan/nession'), null, 'missing full_name must not be reused');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
 function selfTest() {
+  selfTestBoundedApi();
   const sourceMarker=conflictRepairIssueMarker('staging','a'.repeat(40),'b'.repeat(40));
   assert.match(sourceMarker,/nession-agent-conflict-repair:v1/);
   const repairBody=conflictRepairIssueBody('staging','a'.repeat(40),'b'.repeat(40));
