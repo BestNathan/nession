@@ -878,3 +878,10 @@
 - Categories: agents, instructions, knowledge, skills, design
 - Reason: Record the #4223 task-Skill router contract (nession-web-design routing UI work across canonical owners, optional Impeccable availability states, shadcn selection, and Nession-owned Gates/browser proof) without creating a second design authority
 - Source: https://github.com/BestNathan/nession/issues/4223
+
+## 2026-11-21T04:12:05Z | update | Nession native Toolchain OCI release to GHCR
+- Path: topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md
+- Topic: workflows
+- Categories: architecture, ci, erofs, release, security, toolchain, workflows
+- Reason: Verified source-parent changed-only orphan Merge Commit detection with real jq 1.8.1 multi-platform GHCR Index update and native readback; preserve previous immutable root as historical
+- Source: https://github.com/BestNathan/nession/issues/4160
