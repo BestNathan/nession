@@ -55,6 +55,7 @@ jobs:
         with:
           ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'toolchains' }}
           path: toolchain-catalog
+          fetch-depth: 2 # source HEAD and first parent; merge commits included
           persist-credentials: false
       - id: catalog
         name: Resolve pinned orphan source and catalog candidates
@@ -68,7 +69,7 @@ jobs:
           source_sha="$(git -C toolchain-catalog rev-parse HEAD)"
           if [ "$EVENT" = workflow_run ]; then
             test "$source_sha" = "$EXPECTED_SHA"
-            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" all)"
+            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" changed "$source_sha")"
           else
             matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" one "$TOOL" "$VERSION")"
           fi
