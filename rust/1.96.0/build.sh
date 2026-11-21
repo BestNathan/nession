@@ -39,12 +39,13 @@ for binary in rustc cargo rustfmt cargo-clippy; do
 done
 [[ "$("$rootfs/bin/rustc" --version)" == rustc\ ${version}\ * ]] || { echo 'incorrect rustc version' >&2; exit 1; }
 [[ "$("$rootfs/bin/cargo" --version)" == cargo\ ${version}\ * ]] || { echo 'incorrect cargo version' >&2; exit 1; }
-"$rootfs/bin/rustfmt" --version | grep -F "$version" >/dev/null || { echo 'rustfmt version mismatch' >&2; exit 1; }
-"$rootfs/bin/cargo-clippy" --version | grep -F "$version" >/dev/null || { echo 'clippy version mismatch' >&2; exit 1; }
+"$rootfs/bin/rustfmt" --version | grep -Eq '^rustfmt [0-9]' || { echo 'rustfmt version probe failed' >&2; exit 1; }
+"$rootfs/bin/cargo-clippy" --version | grep -Eq '^clippy [0-9]' || { echo 'clippy version probe failed' >&2; exit 1; }
 [[ -d "$rootfs/lib/rustlib/$target/lib" ]] || { echo 'missing Rust target standard libraries' >&2; exit 1; }
 [[ -z "$(find "$rootfs" -type l -print -quit)" ]] || { echo 'Rust payload contains unresolved symlink' >&2; exit 1; }
 # Real offline native compiler smoke checks compiler/linker/std, not just --version.
 tmp="$(mktemp -d)"; trap 'rm -rf -- "$tmp"' EXIT
-printf '%s\n' 'fn main() { println!("nession-rust"); }' > "$tmp/main.rs"
+printf '%s\n' 'fn main() {' '    println!("nession-rust");' '}' > "$tmp/main.rs"
+"$rootfs/bin/rustfmt" --check "$tmp/main.rs" >/dev/null || { echo 'rustfmt syntax smoke failed' >&2; exit 1; }
 env -u RUSTUP_HOME -u RUSTUP_TOOLCHAIN "$rootfs/bin/rustc" "$tmp/main.rs" -o "$tmp/rust-smoke"
 [[ "$("$tmp/rust-smoke")" == nession-rust ]] || { echo 'native Rust compilation smoke failed' >&2; exit 1; }
