@@ -88,7 +88,10 @@ export const REVIEWER_TOOL_FAILURE_4065=Object.freeze({
   action_id:'320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde',
   run_id:44776788638,
   source_sha:'8d512ec934770944a208c9e1a797bc155a7a46d2',
-  main_sha:'d81b5b0af5b18b3ded368f04b12da9ad8c657f9f',
+  // The actual GitHub Run 44776788638/1 and BOTH original immutable
+  // admission/claim Artifacts point to this exact main-owned workflow SHA,
+  // not the main commit observed when the Issue was first triaged.
+  main_sha:'cef947a7efdeb65bea3272e7797ade607387fe93',
   publisher_run_id:44776472241,
   failure_code:'qwen_reviewer_forbidden_tool_postmodel_failure',
   state_version:19,
