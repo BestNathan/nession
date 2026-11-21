@@ -15,11 +15,18 @@ import {recoverAttestedReviewerToolFailure4065} from './dispatch-store.mjs';
 import {readIssueWorkflowState} from './state-store.mjs';
 
 const repo='BestNathan/nession';
+// This independent literal is the GitHub REST Run.head_sha *and* both original
+// Artifact.workflow_run.head_sha, not derived from the production constant.
+// #4211: the preceding fixture copied an incorrect SHA from the production
+// constant and incorrectly passed despite a real Controller fail-closed.
+const LIVE_MAIN_SHA='cef947a7efdeb65bea3272e7797ade607387fe93';
+assert.equal(F.main_sha,LIVE_MAIN_SHA,
+  'signed failed Reviewer source must match the independently observed original Run');
 const original=JSON.parse(fs.readFileSync(new URL('./fixtures/issue-4065-reviewer-v19.json',
   import.meta.url),'utf8'));
 validateDevelopmentState(original);
 const run={id:F.run_id,run_attempt:1,name:'Agent / Review',
-  path:'.github/workflows/agent-review.yml',head_sha:F.main_sha,
+  path:'.github/workflows/agent-review.yml',head_sha:LIVE_MAIN_SHA,
   head_branch:'main',event:'workflow_dispatch',actor:{login:'github-actions[bot]'},
   status:'completed',conclusion:'failure',
   repository:{full_name:repo},head_repository:{full_name:repo}};
@@ -35,10 +42,10 @@ const jobs={total_count:3,jobs:[
 const artifacts={total_count:2,artifacts:[
   {id:14649063663,name:'review-admission-'+F.run_id+'-1',
     digest:'sha256:ef6672ace1b6533e7a07517c9f16cbfa7dcc9f3747652ddbc774bb4e3790fc32',
-    expired:false,size_in_bytes:1275,workflow_run:{id:F.run_id,head_sha:F.main_sha}},
+    expired:false,size_in_bytes:1275,workflow_run:{id:F.run_id,head_sha:LIVE_MAIN_SHA}},
   {id:14650262447,name:'review-claim-'+F.run_id+'-1',
     digest:'sha256:4ebf9b52b50b1723457d444177360a2d70677ff34983608acd95eb29c621c96a',
-    expired:false,size_in_bytes:847,workflow_run:{id:F.run_id,head_sha:F.main_sha}},
+    expired:false,size_in_bytes:847,workflow_run:{id:F.run_id,head_sha:LIVE_MAIN_SHA}},
 ]};
 const log='Reviewer Slice: write/shell tool observed in a read-only review\n'+
   'Process completed with exit code 1.';
@@ -48,12 +55,16 @@ assert.deepEqual(proof,{verified:true,issue:F.issue,action_id:F.action_id,
 for(const [r,j,a,l] of [
   [{...run,run_attempt:2},jobs,artifacts,log],
   [{...run,head_sha:'f'.repeat(40)},jobs,artifacts,log],
+  [{...run,head_sha:'d81b5b0af5b18b3ded368f04b12da9ad8c657f9f'},jobs,artifacts,log],
   [{...run,actor:{login:'attacker'}},jobs,artifacts,log],
   [{...run,conclusion:'success'},jobs,artifacts,log],
   [run,{...jobs,total_count:4},artifacts,log],
   [run,{...jobs,jobs:jobs.jobs.map(x=>x.name==='review'?
     {...x,steps:[step('Run the read-only Reviewer Slice directly with Node.js','success')]}:x)},
     artifacts,log],
+  [run,jobs,{...artifacts,artifacts:artifacts.artifacts.map(x=>({
+    ...x,workflow_run:{...x.workflow_run,
+      head_sha:'d81b5b0af5b18b3ded368f04b12da9ad8c657f9f'}}))},log],
   [run,jobs,{...artifacts,total_count:3},log],
   [run,jobs,{...artifacts,artifacts:artifacts.artifacts.map(x=>({...x,
     digest:'sha256:'+'f'.repeat(64)}))},log],
