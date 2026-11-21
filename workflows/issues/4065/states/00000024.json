@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "issue": 4065,
+  "version": 24,
+  "phase": "repair",
+  "target_sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+  "repair_attempts": 2,
+  "transitions": [
+    {
+      "key": "cddaa9c1fc8ca0d85221c2bd3e3449b5dd8dc28ee9991daf541cee627fad3464",
+      "kind": "publisher",
+      "run_id": 44744656206,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "published"
+    },
+    {
+      "key": "ce7807f81dbab94a769c7267b1d8d54dad22933ba51f55a1ecd6a805864c168e",
+      "kind": "reviewer",
+      "run_id": 44773349621,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "changes_requested"
+    },
+    {
+      "key": "48a2ecac5ca5af7cadc4d47d654d49843ec30d6caf8b26303fd39e9fa07760fa",
+      "kind": "publisher",
+      "run_id": 44776472241,
+      "attempt": 1,
+      "target_sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+      "outcome": "published"
+    },
+    {
+      "key": "00e7a9f2239476ce5acc44fd29be102318bc59eb75eb264711539285712ed0d9",
+      "kind": "reviewer",
+      "run_id": 44927222686,
+      "attempt": 1,
+      "target_sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+      "outcome": "changes_requested"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "8b7777f48a577d01961fd7d9e75311f75d6d57a1",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+        "source_run_id": 44733719096,
+        "source_attempt": 1,
+        "failure_code": "qwen_tracked_source_gate_rejected"
+      }
+    },
+    {
+      "id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "f79547b0def78418e109aba82673d7f20edbc341",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+        "source_run_id": 44744956936,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_large_base_premodel_failure"
+      }
+    },
+    {
+      "id": "320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde",
+        "source_run_id": 44776788638,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_forbidden_tool_postmodel_failure"
+      }
+    },
+    {
+      "id": "08dbdc61abbe8abd1354500cdb902de4f91661a10a9d0d17f9074137e2e27d4e",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "repair",
+        "sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+        "resume": true,
+        "agent_id": "dev-qwen-01",
+        "repair_checkpoint": {
+          "checkpoint_version": 2,
+          "checkpoint_commit_sha": "bcff3ea6f5e829b4e3774fa4046472d3ee76b3b5",
+          "ciphertext_sha256": "9490e7d0eb723f044af5a3ed0d3c10c883feb8cf5fc40e0d49bbe0334f3a2bd5",
+          "source_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+          "source_run_id": 44775385585
+        }
+      },
+      "status": "pending",
+      "attempts": 0,
+      "receipt": null
+    }
+  ]
+}
