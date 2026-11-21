@@ -21,7 +21,10 @@ import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScro
  *   never win the merge;
  * - the **content** wrapper carries the caller's `className` — the spacing,
  *   flex/grid composition and typography of the rows inside. Padding here
- *   cannot touch the viewport's bottom inset.
+ *   cannot touch the viewport's bottom inset. It is rendered only when there
+ *   are content classes: a layout-sensitive reader (CodeMirror, a virtualized
+ *   body) that passes none keeps its children directly in the viewport, so the
+ *   recipe adds no sizing box that could move scroll ownership.
  *
  * The element publishes `data-workspace-scrollport="bounded"` and the
  * `nession-workspace-bounded-scroll` marker. `useWorkspaceCapsuleClearance`
@@ -73,9 +76,13 @@ export function WorkspaceBoundedScrollport({
         workspaceBoundedScrollClearanceClass,
       )}
     >
-      <div data-workspace-scrollport-content="" className={cn('min-w-0', className)}>
-        {children}
-      </div>
+      {className ? (
+        <div data-workspace-scrollport-content="" className={cn('min-w-0', className)}>
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }

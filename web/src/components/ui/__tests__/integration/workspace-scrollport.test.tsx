@@ -56,6 +56,9 @@ describe('WorkspaceBoundedScrollport', () => {
     );
     expect(clearanceAt).toBeGreaterThan(-1);
     expect(viewport.className.slice(clearanceAt)).toContain('pb-[var(');
-    expect(viewport.querySelector('[data-workspace-scrollport-content]')).not.toBeNull();
+    // No content classes means no extra box: layout-sensitive readers (a
+    // CodeMirror host, a virtualized body) keep rendering directly in the
+    // viewport exactly as before the recipe.
+    expect(viewport.querySelector('[data-workspace-scrollport-content]')).toBeNull();
   });
 });
