@@ -1392,6 +1392,15 @@ async function selfTest() {
     /replacement lacks authenticated/);
 
   assert.equal(resolveAcceptComment(e, 'X/y', 'owner').issueNumber, 19);
+  const replaceEvent={...e,comment:{...e.comment,
+    body:'/accept replace 3919 4121'}};
+  assert.deepEqual(resolveAcceptComment(replaceEvent,'X/y','owner'),{
+    issueNumber:19,commentId:7,targetMainSha:null,targetPrSha:null,
+    replacementOldPr:3919,replacementNewPr:4121},
+    'explicit replacement selector passes only exact Owner comment intent');
+  assert.equal(resolveAcceptComment({...replaceEvent,comment:{...replaceEvent.comment,
+    author_association:'CONTRIBUTOR'}},'X/y','owner'),null,
+    'untrusted replacement comment never schedules an Agent');
   const historicalEvent = {...e,comment:{...e.comment,
     body:'/accept post-merge '+targetMain}};
   assert.equal(resolveAcceptComment(historicalEvent,'X/y','owner')
