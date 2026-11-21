@@ -198,6 +198,112 @@ export function selectManualAgentRuns(issue, prs, {
   return [...planned].map(([stage, sha]) => ({ stage, target_ref: sha }));
 }
 
+// #4253: Independent replacement has NO Git ancestry to a force-pushed
+// historical accepted source. Explicit Owner intent and fresh, independently
+// merged implementing PR evidence permit a NEW evaluation; the previous SC
+// receipts are retained as historical data, never presented as signed by the
+// replacement or inherited as a Pass.
+export function independentReplacementContract(issue, previousPr, replacementPr,
+  repository, sourceComment) {
+  const oldId = previousPr?.number, newId = replacementPr?.number;
+  const command = '/accept replace ' + oldId + ' ' + newId;
+  if (!issue || issue.pull_request || issue.state !== 'open' ||
+      !Number.isSafeInteger(issue.number) || !isAcceptanceIssue(issue) ||
+      !Number.isSafeInteger(oldId) || !Number.isSafeInteger(newId) ||
+      oldId <= 0 || newId <= 0 || oldId === newId ||
+      !/^[\w.-]+\/[\w.-]+$/.test(String(repository ?? '')) ||
+      !sourceComment || sourceComment.body !== command ||
+      !Number.isSafeInteger(sourceComment.id) || sourceComment.id <= 0 ||
+      sourceComment.user?.login !== 'BestNathan' ||
+      sourceComment.user?.type !== 'User' ||
+      sourceComment.author_association !== 'OWNER' ||
+      !sourceComment.created_at ||
+      sourceComment.updated_at !== sourceComment.created_at ||
+      sourceComment.issue_url !== 'https://api.github.com/repos/' +
+        repository + '/issues/' + issue.number)
+    return null;
+  const {owner,name} = repoParts(repository);
+  const eligible = pr => Boolean(pr?.merged_at) &&
+    ['main','staging'].includes(pr.base?.ref) &&
+    pr.head?.repo?.full_name === repository &&
+    pr.base?.repo?.full_name === repository &&
+    SHA.test(String(pr.head?.sha || '')) &&
+    SHA.test(String(pr.merge_commit_sha || '')) &&
+    explicitlyImplementsIssue(pr,issue.number,owner,name);
+  if (!eligible(previousPr) || !eligible(replacementPr) ||
+      String(previousPr.merged_at) >= String(replacementPr.merged_at))
+    return null;
+  const criteria = parseSuccessCriteria(extractSection(issue.body,'Success Criteria'));
+  const report = parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+  const plan = validateAcceptancePlan(issue.body,criteria.criteria.keys(),report.rows);
+  if (criteria.errors.length || report.errors.length || plan.errors.length ||
+      !plan.plan || criteria.criteria.size === 0 || criteria.criteria.size > 16)
+    return null;
+  const oldSources = new Set();
+  const selected = [];
+  for (const [id,sc] of criteria.criteria) {
+    const row = report.rows.get(id);
+    const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source agent(?:-[a-z0-9-]+)?;/i
+      .exec(String(row?.evidence || ''));
+    if (!sc.checked || !row || row.result !== 'Pass' ||
+        planStage(plan.plan.get(id)) !== 'pr' ||
+        plan.plan.get(id)?.method !== 'agent' || !match ||
+        match[1].toLowerCase() === replacementPr.head.sha)
+      return null;
+    oldSources.add(match[1].toLowerCase());
+    selected.push(id);
+  }
+  if (report.rows.size !== selected.length || oldSources.size > 16)
+    return null;
+  return {issue:issue.number, previous_pr:oldId, replacement_pr:newId,
+    target_ref:replacementPr.head.sha, comment_id:sourceComment.id,
+    old_sources:[...oldSources].sort(), criteria:selected.sort()};
+}
+
+// Fetch exact GitHub issue/PR/comment/commit/branch data at EACH trust
+// boundary. A comment is an intent and cannot attest merge, quality, or
+// accepted content. A new model result still must be applied by the canonical
+// Acceptance executor under current exact-HEAD required Quality.
+export async function verifyIndependentReplacement(repository, issue,
+  previousPrNumber, replacementPrNumber, commentId, token,
+  request = githubRequest) {
+  if (!token || !Number.isSafeInteger(previousPrNumber) ||
+      !Number.isSafeInteger(replacementPrNumber) ||
+      !Number.isSafeInteger(commentId) || !Number.isSafeInteger(issue?.number))
+    throw Error('invalid independent replacement request');
+  const {prefix} = repoParts(repository);
+  const [previous, replacement, comment] = await Promise.all([
+    request(prefix+'/pulls/'+previousPrNumber,{token}),
+    request(prefix+'/pulls/'+replacementPrNumber,{token}),
+    request(prefix+'/issues/comments/'+commentId,{token}),
+  ]);
+  const policy = independentReplacementContract(issue,previous,replacement,
+    repository,comment);
+  if (!policy) throw Error('replacement requires original Owner intent, historical accepted SCs and two independently merged implementing PRs');
+  const [associated,branch,merge] = await Promise.all([
+    request(prefix+'/commits/'+policy.target_ref+'/pulls?per_page=100',{token}),
+    request(prefix+'/branches/'+replacement.base.ref,{token}),
+    request(prefix+'/commits/'+replacement.merge_commit_sha,{token}),
+  ]);
+  if (!Array.isArray(associated) || associated.length >= 100 ||
+      !associated.some(p => p.number === replacementPrNumber &&
+        p.merged_at && p.head?.sha === policy.target_ref &&
+        p.head?.repo?.full_name === repository &&
+        p.base?.repo?.full_name === repository &&
+        p.base?.ref === replacement.base.ref) ||
+      merge?.sha !== replacement.merge_commit_sha ||
+      !Array.isArray(merge.parents) || merge.parents.length !== 2 ||
+      merge.parents.some(parent => !SHA.test(String(parent?.sha || ''))) ||
+      !SHA.test(String(branch?.commit?.sha || '')))
+    throw Error('replacement lacks authenticated exact-head PR association or two-parent merge');
+  const compare = await request(prefix+'/compare/'+replacement.merge_commit_sha+
+    '...'+branch.commit.sha,{token});
+  if (!isMainMergeAncestorOfStaging(replacement.merge_commit_sha,
+    branch.commit.sha,compare))
+    throw Error('replacement merge is not contained in its protected destination branch');
+  return policy;
+}
+
 /** Trust-gated re-evaluation of a merged implementation's newer PR head.
  * Every already-Pass PR-stage source must be an actual ancestor of the
  * selected head in the same merged Issue-linked PR, never merely a prose ref.
