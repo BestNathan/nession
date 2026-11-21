@@ -14,7 +14,7 @@ if [[ "$mode" == prepare ]]; then
 else
   [[ -d "$dest" && ! -L "$dest" ]] || exit 2
 fi
-bash "$script" "$mode" --platform "$platform" --arch "$arch" --rootfs "$dest"
+env -u GH_TOKEN -u GITHUB_TOKEN -u GHCR_TOKEN -u GHCR_ACTOR -u NESSION_MCP_INBOUND_TOKEN bash "$script" "$mode" --platform "$platform" --arch "$arch" --rootfs "$dest"
 [[ -d "$dest/bin" && -n "$(find "$dest/bin" -maxdepth 1 -type f -print -quit)" ]] || { echo 'empty bin/' >&2; exit 1; }
 [[ -z "$(find "$dest" -type l -print -quit)" && -z "$(find "$dest" ! -type d ! -type f -print -quit)" ]] || { echo 'unsafe rootfs file type' >&2; exit 1; }
 while IFS= read -r -d '' file; do [[ -x "$file" ]] || { echo "nonexecutable: $file" >&2; exit 1; }; done < <(find "$dest/bin" -maxdepth 1 -type f -print0)

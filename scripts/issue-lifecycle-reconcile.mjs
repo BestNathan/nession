@@ -295,7 +295,10 @@ async function relatedPulls(repository, issueNumber, token, includePr = null, re
   for (const number of numbers) {
     if (!Number.isSafeInteger(number) || number <= 0) throw Error('invalid PR discovery result');
     const pr = await request(prefix + '/pulls/' + number, { token });
-    if (parsePreMergeIssueNumbers(pr.body, owner, name, pr.title).includes(issueNumber)) {
+    // #4160: only explicit implementing/closing PRs may participate in Issue
+    // completion. A `Refs #N` catalog/fixture PR is evidence, not an
+    // implementation relation; it must not block closure by target branch.
+    if (explicitlyImplementsIssue(pr, issueNumber, owner, name)) {
       prs.push(pr);
     }
   }
@@ -796,6 +799,31 @@ async function selfTest() {
     body:'Refs #3528',head:{...pr.head,sha:'06857762ece34cf9cbcd50c21454470ed39456f1'}};
   assert.equal(explicitlyImplementsIssue(actual,3528,'BestNathan','nession'),true);
   assert.equal(explicitlyImplementsIssue(refOnly,3528,'BestNathan','nession'),false);
+  // A reviewed orphan catalog fixture may reference the Requirement without
+  // implementing its main/staging acceptance contract. Search-result
+  // discovery must discard this PR before decideIssueClosure is evaluated.
+  const orphanReference={...refOnly,number:4190,base:{ref:'toolchains'},
+    state:'closed',merged_at:'2026-11-21T04:05:23Z'};
+  const searched=await relatedPulls('BestNathan/nession',3528,
+    'fixture-token',null,async path=>{
+      if(path.startsWith('/search/issues?q='))return {
+        incomplete_results:false,total_count:3,items:[
+          {number:3528},
+          {number:actual.number,pull_request:{}},
+          {number:orphanReference.number,pull_request:{}},
+        ],
+      };
+      if(path.endsWith('/pulls/'+actual.number))return actual;
+      if(path.endsWith('/pulls/'+orphanReference.number))return orphanReference;
+      throw Error('unexpected PR discovery endpoint '+path);
+    });
+  assert.deepEqual(searched.map(p=>p.number),[actual.number],
+    'reference-only orphan source is not an Issue implementation');
+  assert.equal(decideIssueClosure(issue,searched).action,'close',
+    'a completed implementation remains closable despite a reference-only orphan PR');
+  assert.equal(decideIssueClosure(issue,[actual,orphanReference]).action,'pending',
+    'raw unfiltered source would incorrectly block, guarding regression');
+
   const pendingPr = {...issue,number:3528,body:body.replace('| SC-01 | Pass |','| SC-01 | Pending |')};
   assert.deepEqual(selectManualAgentRuns(pendingPr,[actual]),
     [{stage:'pr',target_ref:actual.head.sha}]);
