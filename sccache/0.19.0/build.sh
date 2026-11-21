@@ -15,7 +15,7 @@ esac
 if [[ "$mode" == prepare ]]; then
   [[ -z "$(find "$rootfs" -mindepth 1 -print -quit)" ]] || { echo 'rootfs must be empty' >&2; exit 2; }
   tmp="$(mktemp -d)"; trap 'rm -rf -- "$tmp"' EXIT
-  archive="sccache-${version}-${upstream_arch}-unknown-linux-musl.tar.gz"
+  archive="sccache-v${version}-${upstream_arch}-unknown-linux-musl.tar.gz"
   curl -fLSs --retry 3 --max-time 300 "https://github.com/mozilla/sccache/releases/download/v0.19.0/${archive}" -o "$tmp/archive.tar.gz"
   printf '%s  %s\n' "$digest" "$tmp/archive.tar.gz" | sha256sum --check --status || { echo 'sccache upstream archive SHA256 mismatch' >&2; exit 1; }
   # Extract exactly the expected executable; neither archive metadata nor
