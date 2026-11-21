@@ -109,9 +109,9 @@ pub async fn remove_expired_offline_agent_sessions(
     if !removed.is_empty() {
         // Push the shrunken list so browsers stop showing sessions that are now
         // gone.
-        let project_ids = session_registry.project_ids().await;
+        let project_memberships = session_registry.project_memberships().await;
         web_client_registry
-            .broadcast_sessions_changed(Arc::clone(session_registry), &project_ids)
+            .broadcast_sessions_changed(Arc::clone(session_registry), &project_memberships)
             .await;
     }
 }

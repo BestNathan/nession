@@ -3118,8 +3118,10 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // a direct Agent list answer is the truth here.
                                 metadata: s.metadata,
                                 // Project membership is Server-owned (#3082);
-                                // a direct Agent view has no authority for it.
+                                // a direct Agent view has no authority for it,
+                                // including its revision (#4234).
                                 project_id: None,
+                                project_revision: None,
                                 // Activity is projected by the Server from the
                                 // Agent's dedicated level wire (#3804); this
                                 // direct view has no coordinator snapshot.

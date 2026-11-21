@@ -124,6 +124,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
       projects={projectShell.projects}
       busy={projectBinding.busy}
       error={projectBinding.error}
+      conflict={projectBinding.conflict}
       onSave={(projectId) => {
         void projectBinding.save(projectId);
       }}

@@ -262,20 +262,25 @@ export class SessionsPlugin implements TransportPlugin {
    * Associate, change or remove one Session's Project membership (#3082).
    *
    * Membership is metadata only: the server never changes cwd, ENV, mounts or
-   * the running process. `expectedRevision` is the last revision the caller
-   * observed; omit it for a last-writer-wins first association.
+   * the running process. `expected.revision` is the last revision the caller
+   * observed and `expected.instanceId` the incarnation it read; both come from
+   * the Session read model (#4234). Omit either only for a legacy Server that
+   * does not report the token.
    */
   async setProjectBinding(
     sessionId: string,
     projectId: string | null,
-    expectedRevision?: number,
+    expected: { revision?: number; instanceId?: string | null } = {},
   ): Promise<SessionProjectBindingResponse> {
     return this.requireConnection().request<SessionProjectBindingResponse>(
       SESSION_PROJECT_SET_WIRE,
       {
         session_id: sessionId,
         project_id: projectId,
-        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+        ...(expected.revision === undefined
+          ? {}
+          : { expected_revision: expected.revision }),
+        ...(expected.instanceId ? { expected_instance_id: expected.instanceId } : {}),
       },
     );
   }

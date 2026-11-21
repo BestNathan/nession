@@ -1212,6 +1212,18 @@ pub struct WebSessionInfo {
     /// reuses the same `agent_id:session_name` does not inherit it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
+    /// The membership revision the caller observed (#4234).
+    ///
+    /// Echo it as `expected_revision` on the next association, change or
+    /// removal so a stale editor conflicts instead of silently overwriting a
+    /// newer committed membership. `0` is the unassociated token. It is scoped
+    /// to the current Session incarnation: a same-name replacement whose
+    /// previous binding was invalidated reports `0` for its own absent
+    /// membership. Absent from a Server that predates this field; a caller then
+    /// omits `expected_revision` and keeps the documented last-writer-wins
+    /// compatibility.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project_revision: Option<u64>,
     /// The Agent's current Session Activity level (#3804).
     ///
     /// A fourth, independent dimension; it never rewrites `status`,
@@ -2058,7 +2070,13 @@ pub struct WebSessionMetadataPatchPayload {
 /// last-writer-wins. A revision is never reused after a removal, so a stale
 /// nonzero value is a `conflict` instead of overwriting a newer association
 /// (#3661). A fresh caller learns the token from its own last successful
-/// reply; a caller without one omits `expected_revision`.
+/// reply or from the Session read model's `project_revision`.
+///
+/// `expected_instance_id` is an optional incarnation precondition (#4234).
+/// Present: the write commits only while the public name still names exactly
+/// that durable tmux instance, so an editor that observed incarnation A can
+/// never overwrite a same-name replacement's membership. Absent: the legacy
+/// Web behavior is unchanged.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2068,6 +2086,8 @@ pub struct SessionProjectBindingUpdatePayload {
     pub project_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_instance_id: Option<String>,
 }
 
 /// `server.session.project.set`'s reply.
@@ -2076,7 +2096,8 @@ pub struct SessionProjectBindingUpdatePayload {
 /// `unauthorized`, `conflict`, `not_found` or `unavailable`. `revision` is the
 /// new membership revision on success (0 means unassociated; a later
 /// association continues the stored generation instead of restarting at 1,
-/// #3661).
+/// #3661). On a `conflict`, `revision` carries the current token the caller can
+/// guard an intentional retry with (#4234).
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

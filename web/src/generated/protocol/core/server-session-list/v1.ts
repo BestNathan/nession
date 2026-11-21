@@ -76,6 +76,19 @@ metadata?: SessionMetadataAvailability | null,
  */
 project_id?: string | null, 
 /**
+ * The membership revision the caller observed (#4234).
+ *
+ * Echo it as `expected_revision` on the next association, change or
+ * removal so a stale editor conflicts instead of silently overwriting a
+ * newer committed membership. `0` is the unassociated token. It is scoped
+ * to the current Session incarnation: a same-name replacement whose
+ * previous binding was invalidated reports `0` for its own absent
+ * membership. Absent from a Server that predates this field; a caller then
+ * omits `expected_revision` and keeps the documented last-writer-wins
+ * compatibility.
+ */
+project_revision?: number | null, 
+/**
  * The Agent's current Session Activity level (#3804).
  *
  * A fourth, independent dimension; it never rewrites `status`,
