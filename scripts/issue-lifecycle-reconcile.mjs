@@ -262,6 +262,29 @@ export function independentReplacementContract(issue, previousPr, replacementPr,
     old_sources:[...oldSources].sort(), criteria:selected.sort()};
 }
 
+// Shared pure verifier used by both /accept dispatch and the trusted
+// Acceptance projector. Never treat the caller's claimed target as proof.
+export function independentReplacementSourceEvidence(policy, replacement,
+  associated, branch, merge, compare, repository) {
+  return Boolean(policy && replacement && policy.target_ref === replacement.head?.sha &&
+    replacement.head?.repo?.full_name === repository &&
+    replacement.base?.repo?.full_name === repository &&
+    ['main','staging'].includes(replacement.base?.ref) &&
+    replacement.merged_at &&
+    Array.isArray(associated) && associated.length < 100 &&
+    associated.some(p => p.number === policy.replacement_pr &&
+      p.merged_at && p.head?.sha === policy.target_ref &&
+      p.head?.repo?.full_name === repository &&
+      p.base?.repo?.full_name === repository &&
+      p.base?.ref === replacement.base.ref) &&
+    merge?.sha === replacement.merge_commit_sha &&
+    Array.isArray(merge.parents) && merge.parents.length === 2 &&
+    merge.parents.every(parent => SHA.test(String(parent?.sha || ''))) &&
+    SHA.test(String(branch?.commit?.sha || '')) &&
+    isMainMergeAncestorOfStaging(replacement.merge_commit_sha,
+      branch.commit.sha,compare));
+}
+
 // Fetch exact GitHub issue/PR/comment/commit/branch data at EACH trust
 // boundary. A comment is an intent and cannot attest merge, quality, or
 // accepted content. A new model result still must be applied by the canonical
@@ -287,22 +310,13 @@ export async function verifyIndependentReplacement(repository, issue,
     request(prefix+'/branches/'+replacement.base.ref,{token}),
     request(prefix+'/commits/'+replacement.merge_commit_sha,{token}),
   ]);
-  if (!Array.isArray(associated) || associated.length >= 100 ||
-      !associated.some(p => p.number === replacementPrNumber &&
-        p.merged_at && p.head?.sha === policy.target_ref &&
-        p.head?.repo?.full_name === repository &&
-        p.base?.repo?.full_name === repository &&
-        p.base?.ref === replacement.base.ref) ||
-      merge?.sha !== replacement.merge_commit_sha ||
-      !Array.isArray(merge.parents) || merge.parents.length !== 2 ||
-      merge.parents.some(parent => !SHA.test(String(parent?.sha || ''))) ||
-      !SHA.test(String(branch?.commit?.sha || '')))
-    throw Error('replacement lacks authenticated exact-head PR association or two-parent merge');
+  if (!SHA.test(String(branch?.commit?.sha || '')))
+    throw Error('replacement protected destination branch lacks commit');
   const compare = await request(prefix+'/compare/'+replacement.merge_commit_sha+
     '...'+branch.commit.sha,{token});
-  if (!isMainMergeAncestorOfStaging(replacement.merge_commit_sha,
-    branch.commit.sha,compare))
-    throw Error('replacement merge is not contained in its protected destination branch');
+  if (!independentReplacementSourceEvidence(policy,replacement,
+    associated,branch,merge,compare,repository))
+    throw Error('replacement lacks authenticated exact-head PR, two-parent merge or protected-branch ancestry');
   return policy;
 }
 
