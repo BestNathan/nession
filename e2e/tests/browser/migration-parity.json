@@ -30,7 +30,7 @@
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "eda9c14900c5e6b67388eff7df3908448cad25ca",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png": "797765295b400b535c693a3f73803a4e5d110343",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "0ab097de9407f34ce123ce3d53876698854efa02",
-    "__snapshots__/fixture-visual.spec.ts/app-claude-code-view-tabs-linux.png": "30ce3acdd52cf8e1318b0067e4d0f6213bf96d85",
+    "__snapshots__/fixture-visual.spec.ts/app-claude-code-view-tabs-linux.png": "b5a1cad62ca10ca0a5f43e3a600959f9ddf14804",
     "__snapshots__/fixture-visual.spec.ts/app-env-detail-linux.png": "efd69beea6bff721ca1f5d919c552e3e463ec2dd",
     "__snapshots__/fixture-visual.spec.ts/app-files-list-linux.png": "2eadf71bcf722c1bb4c0f5386cf6909f42b2c9bc",
     "__snapshots__/fixture-visual.spec.ts/app-git-peek-linux.png": "b2278605a1746f15e1e485f86b706d5918a08f3a",
@@ -79,7 +79,7 @@
   },
   "baseline_set_updated": {
     "requirement": 4235,
-    "reason": "Four source-pinned exact main Full Regression Playwright candidate screenshots were individually reviewed for #3451's intentional removal of directory counts and #3600's intentional MCP tab. Generated at pinned cc2660f61 from Linux Chromium run 44904296414; main App Claude retains the pre-#3829 navigation while staging has already migrated. These four PNGs and their Git blob pins are updated together; exact PR-head CI is required to prove the baseline, and no tolerances or assertions are weakened.",
+    "reason": "Five source-pinned main Full Regression Chromium screenshots individually reviewed: removed Files child-count metadata (#3451) and fifth Claude MCP Tab (#3600). Full-page App Claude, standalone App Claude tab region, Files list and two Web tab regions are updated together with Git blob pins, preserving the 50-PNG set and strict visual gate. App Claude remains main's pre-#3829 composition; exact PR-head CI is required.",
     "date": "2026-11-22"
   }
 }
