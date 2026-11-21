@@ -488,9 +488,10 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-list')).toBeVisible();
-    // The directory counts arrive one `listDir` at a time, so the screenshot
-    // waits for the last row's meta rather than racing it.
-    await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
+    // #3451 removed directory child-count enrichment: listing only the current
+    // directory avoids an unbounded listDir fan-out. The completed row is "web"
+    // with no count subtitle; do not wait for metadata the product no longer fetches.
+    await expect(page.getByTestId('file-row-web')).toHaveText('web');
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,
