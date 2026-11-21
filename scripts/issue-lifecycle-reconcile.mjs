@@ -758,6 +758,9 @@ async function selfTest() {
   };
   assert.equal(await verifyHistoricalPrSourceSuccessor('BestNathan/nession',
     sha,assocPr,'fixture-token',readHistoric),true);
+  assert.equal(await verifyHistoricalPrSourceSuccessor('Unrelated/repository',
+    sha,assocPr,'fixture-token',async()=>{throw Error('should not query foreign repo');}),
+    false,'foreign repository cannot confer accepted source authority');
   assert.equal(await verifyHistoricalPrSourceSuccessor('BestNathan/nession',
     sha,assocPr,'fixture-token',async path=>
       path.includes('/compare/') ? {base_commit:{sha},merge_base_commit:{sha},
