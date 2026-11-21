@@ -1,9 +1,13 @@
 name: Agent / Staging Convergence Review
-run-name: Convergence conflict ${{ inputs.branch }} ${{ inputs.main_sha }} ${{ inputs.lane_sha }}
+run-name: ${{ github.event_name == 'push' && 'Agent / Staging Convergence Review' || format('{0} {1} {2} {3}', inputs.repair_issue_number != '' && 'Convergence repair' || 'Convergence conflict', inputs.branch, inputs.main_sha, inputs.lane_sha) }}
 
 # #2926: model-backed but read-only, exact-ref conflict analysis. The scheduler
 # may dispatch this without giving the model any GitHub writer/merge authority.
 on:
+  # #4124: only an explicitly labeled owner main push executes A/B probes.
+  push:
+    branches: [main]
+    paths: ['.github/workflows/agent-staging-convergence-review.yml']
   workflow_dispatch:
     inputs:
       pr_number:
@@ -22,6 +26,15 @@ on:
         type: choice
         options: [sync-main-to-lane, promote-lane-to-main]
         required: true
+      repair_issue_number:
+        type: string
+        required: false
+        default: ''
+      repair_mode:
+        type: choice
+        options: [source-repair, direct-integration]
+        required: false
+        default: source-repair
 
 env:
   NSESSION_AGENT_WORKFLOW_ID: agent-staging-convergence-review
@@ -40,6 +53,7 @@ jobs:
       github.repository == 'BestNathan/nession' &&
       github.ref == 'refs/heads/main' &&
       github.event_name == 'workflow_dispatch' &&
+      inputs.repair_issue_number == '' &&
       (github.actor == 'BestNathan' || github.actor == 'github-actions[bot]')
     runs-on: ubuntu-24.04
     timeout-minutes: 30
@@ -154,6 +168,336 @@ jobs:
           name: staging-convergence-diagnosis-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ runner.temp }}/convergence-agent/diagnosis.json
           if-no-files-found: warn
+          retention-days: 7
+
+
+
+  # #4140: Issue-first production repair runs in a separate credentialless
+  # model job. Only trusted Controller dispatches carry a verified Bug Issue.
+  resolve_production:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      github.run_attempt == 1 &&
+      (github.actor == 'BestNathan' || github.actor == 'github-actions[bot]') &&
+      inputs.direction == 'sync-main-to-lane' &&
+      inputs.repair_issue_number != '' &&
+      (inputs.repair_mode != 'direct-integration' || github.actor == 'BestNathan')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: dev-claude-qwen
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify native conflict source PR and preexisting scoped Bug Issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ inputs.branch }}
+          MAIN_SHA: ${{ inputs.main_sha }}
+          LANE_SHA: ${{ inputs.lane_sha }}
+          SOURCE_PR_NUMBER: ${{ inputs.pr_number }}
+          REPAIR_ISSUE_NUMBER: ${{ inputs.repair_issue_number }}
+          GIT_AUTHOR_NAME: Nession Conflict Repair
+          GIT_AUTHOR_EMAIL: nession-conflict-repair@users.noreply.github.com
+          GIT_COMMITTER_NAME: Nession Conflict Repair
+          GIT_COMMITTER_EMAIL: nession-conflict-repair@users.noreply.github.com
+        run: |
+          set -euo pipefail
+          [[ "$SOURCE_PR_NUMBER" =~ ^[1-9][0-9]*$ && "$REPAIR_ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+          [[ "$MAIN_SHA" =~ ^[a-f0-9]{40}$ && "$LANE_SHA" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,100}$ && "$BRANCH" != main && "$BRANCH" != *..* ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          test "$(git rev-parse refs/remotes/origin/main)" = "$MAIN_SHA"
+          test "$(git rev-parse "refs/remotes/origin/$BRANCH")" = "$LANE_SHA"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$SOURCE_PR_NUMBER" \
+            > "$RUNNER_TEMP/conflict-production-pr.json"
+          jq -e --arg branch "$BRANCH" --arg main "$MAIN_SHA" --arg repo "$GITHUB_REPOSITORY" '
+            .state == "open" and .head.ref == "main" and
+            .head.sha == $main and .base.ref == $branch and
+            .head.repo.full_name == $repo and .base.repo.full_name == $repo and
+            .user.login == "nession-publisher[bot]" and
+            .mergeable_state == "dirty" and
+            (.body | startswith("Staging Convergence automated proposal"))
+          ' "$RUNNER_TEMP/conflict-production-pr.json"
+          marker="<!-- nession-agent-conflict-repair:v1 lane=$BRANCH main=$MAIN_SHA target=$LANE_SHA -->"
+          gh api "repos/$GITHUB_REPOSITORY/issues/$REPAIR_ISSUE_NUMBER" \
+            > "$RUNNER_TEMP/conflict-production-issue.json"
+          jq -e --arg marker "$marker" '
+            .state == "open" and (.pull_request == null) and
+            (.body | contains($marker)) and
+            ([.labels[].name] | index("bug") != null) and
+            ([.labels[].name] | index("status:in-progress") != null)
+          ' "$RUNNER_TEMP/conflict-production-issue.json"
+          node scripts/merge-conflict-resolution-probe.mjs self-test
+          mkdir -p "$RUNNER_TEMP/convergence-repair"
+          node scripts/merge-conflict-resolution-probe.mjs prepare \
+            "$PWD" "$LANE_SHA" "$MAIN_SHA" \
+            "$RUNNER_TEMP/convergence-repair/worktree" \
+            "$RUNNER_TEMP/convergence-repair/context.json"
+
+      - name: Install restricted Coding Agent
+        env:
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+
+      - name: Agent edits conflict worktree without GitHub writer or shell
+        shell: bash
+        env:
+          CONVERGENCE_PRODUCTION: 'true'
+          REPAIR_ISSUE_NUMBER: ${{ inputs.repair_issue_number }}
+          REPAIR_MODE: ${{ inputs.repair_mode }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANALYSIS_CLAUDE_MODEL: ${{ vars.ANTHROPIC_MODEL || vars.ACCEPTANCE_CLAUDE_MODEL }}
+          PATH: ${{ runner.temp }}/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+        run: |
+          set -euo pipefail
+          node scripts/merge-conflict-probe-agent.mjs \
+            "$RUNNER_TEMP/convergence-repair/context.json" "$REPAIR_MODE" \
+            "$RUNNER_TEMP/convergence-repair/agent"
+
+      - name: Independently validate exact Git repair and immutable parent order
+        shell: bash
+        env:
+          REPAIR_MODE: ${{ inputs.repair_mode }}
+        run: |
+          set -euo pipefail
+          node scripts/merge-conflict-resolution-probe.mjs finalize \
+            "$PWD" "$RUNNER_TEMP/convergence-repair/context.json" "$REPAIR_MODE" \
+            "$RUNNER_TEMP/convergence-repair/candidate"
+          echo "Agent has no writer; verified candidate remains nonauthoritative" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload canonical production Agent telemetry and native trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-staging-convergence-repair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/convergence-repair/agent/agent-telemetry.json
+            ${{ runner.temp }}/convergence-repair/agent/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload verified nonauthoritative conflict candidate
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: staging-convergence-repair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/convergence-repair/candidate/
+          if-no-files-found: error
+          retention-days: 30
+
+  # Distinct trusted Publisher. Revalidates the model artifact as untrusted
+  # data before minting any GitHub App writer; creates Draft PR only.
+  publish_production_repair:
+    needs: resolve_production
+    if: >-
+      needs.resolve_production.result == 'success' &&
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: staging-convergence-repair-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/convergence-repair-candidate
+
+      - name: Independently reconstruct candidate and preflight original issue and refs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPAIR_ISSUE_NUMBER: ${{ inputs.repair_issue_number }}
+          SOURCE_PR_NUMBER: ${{ inputs.pr_number }}
+          REPAIR_MODE: ${{ inputs.repair_mode }}
+          BRANCH: ${{ inputs.branch }}
+          MAIN_SHA: ${{ inputs.main_sha }}
+          LANE_SHA: ${{ inputs.lane_sha }}
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main" \
+            "+refs/heads/$BRANCH:refs/remotes/origin/$BRANCH"
+          node scripts/staging-convergence-conflict-publisher.mjs self-test
+          node scripts/staging-convergence-conflict-publisher.mjs preflight \
+            "$RUNNER_TEMP/convergence-repair-candidate"
+
+      - name: Mint scoped independent Publisher App only after trusted preflight
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Publish source-bound Draft PR, never merge or write protected refs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.writer.outputs.token }}
+          REPAIR_ISSUE_NUMBER: ${{ inputs.repair_issue_number }}
+          SOURCE_PR_NUMBER: ${{ inputs.pr_number }}
+          REPAIR_MODE: ${{ inputs.repair_mode }}
+          BRANCH: ${{ inputs.branch }}
+          MAIN_SHA: ${{ inputs.main_sha }}
+          LANE_SHA: ${{ inputs.lane_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$GH_TOKEN"
+          node scripts/staging-convergence-conflict-publisher.mjs publish \
+            "$RUNNER_TEMP/convergence-repair-candidate" \
+            | tee "$RUNNER_TEMP/convergence-repair-published.json"
+          jq -e '.status == "published_draft" and .pr > 0' \
+            "$RUNNER_TEMP/convergence-repair-published.json"
+          echo "Draft repair PR $(jq -r .pr "$RUNNER_TEMP/convergence-repair-published.json"); independent required Gates and review still apply." >> "$GITHUB_STEP_SUMMARY"
+
+  # #4124: opt-in one-shot main-owned proof, not scheduled convergence.
+  pilot:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'push' &&
+      github.actor == 'BestNathan' &&
+      contains(github.event.head_commit.message, '[conflict-probe-4124]')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: dev-claude-qwen
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [source-repair, direct-integration]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify fixed disposable source pair and prepare real conflict
+        shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
+          GIT_AUTHOR_NAME: Nession Conflict Probe
+          GIT_AUTHOR_EMAIL: nession-conflict-probe@users.noreply.github.com
+          GIT_COMMITTER_NAME: Nession Conflict Probe
+          GIT_COMMITTER_EMAIL: nession-conflict-probe@users.noreply.github.com
+          TARGET_SHA: 21d53b583fcefa03cdfbd1873bf3c8af424a0391
+          SOURCE_SHA: ab5b7e4a99402523354e97c04c726b2ec33e5a19
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          git fetch --no-tags origin \
+            '+refs/heads/probe/4124-target:refs/remotes/origin/probe/4124-target' \
+            '+refs/heads/probe/4124-source:refs/remotes/origin/probe/4124-source'
+          test "$(git rev-parse refs/remotes/origin/probe/4124-target)" = "$TARGET_SHA"
+          test "$(git rev-parse refs/remotes/origin/probe/4124-source)" = "$SOURCE_SHA"
+          node scripts/merge-conflict-resolution-probe.mjs self-test
+          mkdir -p "$RUNNER_TEMP/conflict-probe-$MODE"
+          node scripts/merge-conflict-resolution-probe.mjs prepare \
+            "$PWD" "$TARGET_SHA" "$SOURCE_SHA" \
+            "$RUNNER_TEMP/conflict-probe-$MODE/worktree" \
+            "$RUNNER_TEMP/conflict-probe-$MODE/context.json"
+
+      - name: Install model CLI
+        env:
+          CLAUDE_CODE_VERSION: ${{ vars.CLAUDE_CODE_VERSION || 'latest' }}
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/claude-cli" --no-audit --no-fund \
+            "@anthropic-ai/claude-code@$CLAUDE_CODE_VERSION"
+
+      - name: Agent resolves conflicted files without GitHub or shell tools
+        shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
+          ANTHROPIC_BASE_URL: ${{ vars.ANTHROPIC_BASE_URL || secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_AUTH_TOKEN: ${{ secrets.ANTHROPIC_AUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANALYSIS_CLAUDE_MODEL: ${{ vars.ANTHROPIC_MODEL || vars.ACCEPTANCE_CLAUDE_MODEL }}
+          PATH: ${{ runner.temp }}/claude-cli/node_modules/.bin:/usr/local/bin:/usr/bin:/bin
+        run: |
+          set -euo pipefail
+          node scripts/merge-conflict-probe-agent.mjs \
+            "$RUNNER_TEMP/conflict-probe-$MODE/context.json" "$MODE" \
+            "$RUNNER_TEMP/conflict-probe-$MODE/agent"
+
+      - name: Independently validate resolution and candidate commit
+        shell: bash
+        env:
+          MODE: ${{ matrix.mode }}
+        run: |
+          set -euo pipefail
+          node scripts/merge-conflict-resolution-probe.mjs finalize \
+            "$PWD" "$RUNNER_TEMP/conflict-probe-$MODE/context.json" "$MODE" \
+            "$RUNNER_TEMP/conflict-probe-$MODE/candidate"
+          commit="$(jq -r .commit_sha "$RUNNER_TEMP/conflict-probe-$MODE/candidate/candidate.json")"
+          case "$MODE" in
+            source-repair)
+              test "$(git show "$commit:scripts/fixtures/conflict-probe.txt")" = 'policy=source'
+              ;;
+            direct-integration)
+              git show "$commit:scripts/fixtures/conflict-probe.txt" | grep -q target
+              git show "$commit:scripts/fixtures/conflict-probe.txt" | grep -q source
+              test "$(git show "$commit:scripts/fixtures/source-only.txt")" = 'source-only'
+              ;;
+            *) exit 1 ;;
+          esac
+          echo "Verified $MODE candidate $commit; no GitHub write or merge occurred" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload canonical Agent telemetry and native trace
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-staging-convergence-probe-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/conflict-probe-${{ matrix.mode }}/agent/agent-telemetry.json
+            ${{ runner.temp }}/conflict-probe-${{ matrix.mode }}/agent/agent-execution-trace.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload validated nonauthoritative candidate tree and patch
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: merge-conflict-probe-${{ matrix.mode }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/conflict-probe-${{ matrix.mode }}/candidate/
+          if-no-files-found: error
           retention-days: 7
 
   publish:

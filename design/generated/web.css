@@ -127,6 +127,13 @@
   --nession-icon-sm: 14px;
   --nession-icon-md: 16px;
   --nession-panel-padding: 12px;
+  --nession-file-viewer-badge-inset-x: 6px;
+  --nession-file-viewer-badge-inset-y: 2px;
+  --nession-file-viewer-badge-icon-size: 10px;
+  --nession-file-viewer-toolbar-icon-size: 12px;
+  --nession-file-viewer-bar-inset-y: 6px;
+  --nession-file-viewer-action-inset-y: 2px;
+  --nession-file-viewer-progress-width: 256px;
   --nession-rhythm-section-stack: 20px;
   --nession-rhythm-section-content: 8px;
   --nession-rhythm-text-stack: 4px;

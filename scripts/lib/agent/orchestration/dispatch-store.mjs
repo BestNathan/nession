@@ -15,6 +15,7 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   recordAttestedQwenCliFailure,qwenCliSuccessorId,
   recordAttestedQwenRepairTurnsFailure,qwenRepairTurnsSuccessorId,
   recordAttestedQwenToolFailure,qwenToolSuccessorId,
+  recordAttestedQwenTrackedSourceFailure,qwenTrackedSourceSuccessorId,
   recordAttestedNativeResumeFailure,nativeResumeSuccessorId,
   recordControlledReviewerRecoveryIntent,bindVerifiedRepairCheckpoint,
   acceptTaskResult,recordAttestedRepairRuntimeFailure,
@@ -22,7 +23,9 @@ import {reconcileOutbox,recordDispatch,recordAttestedDeveloperFailure,failedDeve
   REVIEWER_PREMODEL_FAILURE_SOURCES,
   reviewerPremodelSuccessorId,recordAttestedReviewerPremodelFailure,
   REVIEWER_JSON_FAILURE_SOURCES,reviewerJsonSuccessorId,
-  recordAttestedReviewerJsonFailure}
+  recordAttestedReviewerJsonFailure,
+  REVIEWER_TOOL_FAILURE_4065,reviewerToolSuccessorId,
+  recordAttestedReviewerToolFailure}
   from './outbox.mjs';
 import {isControlledRepairAction,CONTROLLED_REPAIR_RETRY_ACTION} from './development-resume.mjs';
 import {prepareGitHubDispatch,verifyPersistedDispatchIntent,createGitHubDispatchClient,
@@ -41,6 +44,7 @@ import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
 import {SOURCE as QWEN_REPAIR_TURNS_FAILURE}
   from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_TRACKED_SOURCE_FAILURE} from './qwen-tracked-source-failure.mjs';
 
 const REF='agent-store';
 function fail(message){throw Error('trusted dispatch Store: '+message);}
@@ -169,6 +173,37 @@ export function recoverAttestedReviewerPremodelFailure({remote,source}){
     if(pushed.replayed)fail('ambiguous new Reviewer recovery Store CAS');
     return {status:'recovered',issue:f.issue,action_id:id,
       state_version:next.version,store_commit_sha:pushed.commit_sha};
+  });
+}
+
+// #4211: preserve original failed read-only Model Run; all Writer access
+// remains in this trusted Store owner after independently verified source.
+export function recoverAttestedReviewerToolFailure4065({remote,source}){
+  const f=REVIEWER_TOOL_FAILURE_4065;
+  if(source?.verified!==true||source.issue!==f.issue||
+     source.action_id!==f.action_id||source.run_id!==f.run_id||
+     source.attempt!==1||source.source_sha!==f.source_sha||
+     source.failure_code!==f.failure_code)
+    fail('Reviewer policy denial is not independently authenticated');
+  const id=reviewerToolSuccessorId(f.issue,f.action_id,f.run_id);
+  return withStore(remote,dir=>{
+    const prior=readIssueWorkflowState(dir,f.issue),state=prior.state;
+    if(!state)fail('missing immutable source Reviewer Store');
+    const old=state.outbox.find(o=>o.id===f.action_id);
+    if(state.outbox.some(o=>o.id===id)){
+      const next=state.outbox.find(o=>o.id===id);
+      if(old?.status!=='failed'||old.receipt?.failure_code!==f.failure_code||
+         old.receipt?.source_run_id!==f.run_id||
+         JSON.stringify(next.task)!==JSON.stringify(old.task))
+        fail('conflicting Reviewer policy successor replay');
+      return {status:'replayed',issue:f.issue,action_id:id,
+        state_version:prior.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    const next=recordAttestedReviewerToolFailure(state,prior.version,source);
+    const published=persist(dir,next,prior.version,f.issue);
+    if(published.replayed)fail('ambiguous Reviewer policy recovery Store CAS');
+    return {status:'recovered',issue:f.issue,action_id:id,
+      state_version:next.version,store_commit_sha:published.commit_sha};
   });
 }
 
@@ -775,6 +810,51 @@ export function recoverAttestedQwenToolFailure({remote,source}){
     const published=persist(dir,state,record.version,f.issue);
     if(published.replayed)
       fail('new Qwen readonly-tool recovery unexpectedly replayed Store CAS');
+    return {status:'recovered',issue:f.issue,action_id:successorId,
+      state_version:state.version,store_commit_sha:published.commit_sha};
+  });
+}
+
+// #4174: source-attested single successor for original #4065 failed native
+// tracked-source gate. Only this trusted Store writer can transition state;
+// no untracked bytes or model-provided paths are ingested or published.
+export function recoverAttestedQwenTrackedSourceFailure({remote,source}){
+  const f=QWEN_TRACKED_SOURCE_FAILURE;
+  if(source?.verified!==true||source.issue!==f.issue||
+     source.action_id!==f.action_id||source.run_id!==f.run_id||
+     source.attempt!==1||source.source_sha!==f.source_sha||
+     source.run_head_sha!==f.run_head_sha||
+     source.failure_code!==f.failure_code)
+    fail('independent exact Qwen source-gate failure attestation required');
+  return withStore(remote,dir=>{
+    const record=readIssueWorkflowState(dir,f.issue);
+    if(!record.state)fail('original Qwen tracked-source Store missing');
+    const old=record.state.outbox.find(x=>x.id===f.action_id);
+    const successorId=qwenTrackedSourceSuccessorId(f.issue,f.action_id,f.run_id);
+    if(old?.status==='failed'){
+      const next=record.state.outbox.find(x=>x.id===successorId);
+      if(old.receipt?.source_run_id!==f.run_id||
+         old.receipt?.failure_code!==f.failure_code||
+         !next||JSON.stringify(next.task)!==JSON.stringify(old.task)||
+         !['pending','dispatching','dispatched','yielded'].includes(next.status))
+        fail('conflicting Qwen tracked-source recovery replay');
+      return {status:'replayed',issue:f.issue,action_id:successorId,
+        state_version:record.version,store_commit_sha:git(dir,['rev-parse','HEAD'])};
+    }
+    if(record.version!==3||old?.status!=='dispatched'||
+       old.receipt?.status!=='verified'||
+       old.receipt.source_run_id!==f.run_id||
+       old.task.agent_id!=='dev-qwen-01'||old.task.sha!==f.source_sha)
+      fail('Qwen source-gate Store already advanced or does not match original');
+    const folder=path.join(dir,'roles/developer/dev-qwen-01/issues/'+f.issue);
+    if(fs.existsSync(path.join(folder,'head.json'))||
+       fs.existsSync(path.join(folder,'runs/'+f.run_id+'-1.json'))||
+       fs.existsSync(path.join(folder,'checkpoints')))
+      fail('cannot recover already accepted native patch or checkpoint');
+    const state=recordAttestedQwenTrackedSourceFailure(
+      record.state,record.version,source);
+    const published=persist(dir,state,record.version,f.issue);
+    if(published.replayed)fail('unexpected Qwen source-gate CAS replay');
     return {status:'recovered',issue:f.issue,action_id:successorId,
       state_version:state.version,store_commit_sha:published.commit_sha};
   });

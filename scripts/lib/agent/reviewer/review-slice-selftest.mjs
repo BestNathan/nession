@@ -76,6 +76,9 @@ await deny({runner:async()=>session(verdictText,{tool_calls:[]})},/no read-only 
 await deny({runner:async()=>session(verdictText,{tool_calls:['list']})},/no read-only inspection/);
 await deny({runner:async()=>session(JSON.stringify({outcome:'changes_requested',summary:'x',findings:[]}))},
   /at least one finding/);
+await deny({runner:async()=>session(JSON.stringify({outcome:'approved',summary:'x',
+  findings:[{path:'scripts/lib/agent/example.mjs',evidence:'Unresolved defect'}]}))},
+  /approved verdict must not contain findings/);
 await deny({runner:async()=>session(JSON.stringify({outcome:'approved',summary:'x',findings:[],next_role:'developer'}))},
   /unexpected result fields/);
 await deny({runner:async()=>session(JSON.stringify({outcome:'approved',summary:'x',findings:[],target_sha:'e'.repeat(40)}))},

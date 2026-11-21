@@ -3,7 +3,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EditorView } from '@codemirror/view';
 import { FileViewer } from '@/capabilities/files/components/FileViewer';
-import { FILE_CHANGED_DURING_READ_MESSAGE, type FileOps } from '@/capabilities/files';
+import { FILE_CHANGED_DURING_READ_MESSAGE, type FileData, type FileOps, type FileSaveOutcome } from '@/capabilities/files';
 
 function mockFileOps(overrides: Partial<FileOps> = {}): FileOps {
   return {
@@ -294,7 +294,7 @@ Run the deploy script.
       writeFile,
     });
     const onSavingChange = vi.fn();
-    let handler: (() => Promise<'saved' | 'conflict' | 'failed'>) | null = null;
+    let handler: (() => Promise<FileSaveOutcome>) | null = null;
     render(
       <FileViewer
         fileOps={ops}
@@ -317,7 +317,7 @@ Run the deploy script.
     );
     expect(handler).not.toBeNull();
 
-    let savePromise: Promise<'saved' | 'conflict' | 'failed'> | undefined;
+    let savePromise: Promise<FileSaveOutcome> | undefined;
     await act(async () => {
       savePromise = handler!();
     });
@@ -332,6 +332,77 @@ Run the deploy script.
       { expectedRevision: 'rev-1' },
     );
     expect(onSavingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it('reports saved-dirty from the guarded save when newer edits remain (#3959)', async () => {
+    let finishFirstWrite: ((value: { path: string; written: number; revision: string }) => void) | null = null;
+    const writeFile = vi
+      .fn()
+      .mockImplementationOnce(
+        () => new Promise((resolve) => {
+          finishFirstWrite = resolve;
+        }),
+      )
+      .mockResolvedValueOnce({ path: '/test/notes.txt', written: 7, revision: 'rev-3' });
+    const ops = mockFileOps({
+      readFile: vi.fn().mockResolvedValue({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      }),
+      writeFile,
+    });
+    let handler: (() => Promise<FileSaveOutcome>) | null = null;
+    render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer
+          fileOps={ops}
+          path="/test/notes.txt"
+          filename="notes.txt"
+          onClose={vi.fn()}
+          onSaveHandlerChange={(next) => {
+            handler = next;
+          }}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    expect(view).not.toBeNull();
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'B' } });
+    });
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Save/ })).toBeEnabled(),
+    );
+
+    // The guarded save submits B; the editor moves on to C while it is held.
+    let firstSave: Promise<FileSaveOutcome> | undefined;
+    await act(async () => {
+      firstSave = handler!();
+    });
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: 'C' } });
+    });
+    await act(async () => {
+      finishFirstWrite?.({ path: '/test/notes.txt', written: 6, revision: 'rev-2' });
+    });
+    // Persisted, but not safe to navigate: the outcome must say so.
+    expect(await firstSave).toBe('saved-dirty');
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+
+    // A second guarded save commits the current draft and reports saved.
+    let secondSave: Promise<FileSaveOutcome> | undefined;
+    await act(async () => {
+      secondSave = handler!();
+    });
+    expect(await secondSave).toBe('saved');
+    expect(writeFile.mock.calls[1]?.[1]).toBe('helloBC');
+    expect(writeFile.mock.calls[1]?.[2]).toEqual({ expectedRevision: 'rev-2' });
+    await waitFor(() => expect(screen.queryByTitle('Unsaved changes')).not.toBeInTheDocument());
   });
 
   it('keeps edits made during a pending save dirty after that save completes (#3322)', async () => {
@@ -651,5 +722,134 @@ describe('FileViewer JSON / JSONL integration (#1199)', () => {
     expect(screen.queryByText(FILE_CHANGED_DURING_READ_MESSAGE)).not.toBeInTheDocument();
     expect(document.querySelector('.cm-content')?.textContent).not.toContain('A first');
     expect(document.querySelector('.cm-content')?.textContent).not.toContain('B final');
+  });
+});
+
+describe('FileViewer conflict reload transaction (#3743)', () => {
+  function renderViewer(ops: FileOps, onDirtyChange: (dirty: boolean) => void) {
+    return render(
+      <div style={{ height: 600, display: 'flex', flexDirection: 'column' }}>
+        <FileViewer
+          fileOps={ops}
+          path="/test/notes.txt"
+          filename="notes.txt"
+          onClose={vi.fn()}
+          onDirtyChange={onDirtyChange}
+        />
+      </div>,
+    );
+  }
+
+  async function makeDirtyDraft(): Promise<void> {
+    await waitFor(() => expect(screen.getByText('Edit')).toBeInTheDocument());
+    await userEvent.click(screen.getByText('Edit'));
+    const view = EditorView.findFromDOM(document.querySelector('.cm-editor') as HTMLElement);
+    expect(view).not.toBeNull();
+    act(() => {
+      view?.dispatch({ changes: { from: view.state.doc.length, insert: '!' } });
+    });
+    await waitFor(() => expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument());
+  }
+
+  async function openConflict(): Promise<void> {
+    await userEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByTestId('file-conflict-dialog');
+  }
+
+  it('keeps the draft and its dirty guard when the conflict reload fails (SC-01)', async () => {
+    const readFile = vi
+      .fn()
+      .mockResolvedValueOnce({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      })
+      .mockRejectedValueOnce(new Error('read unavailable'))
+      .mockRejectedValueOnce(new Error('read unavailable again'));
+    const ops = mockFileOps({
+      readFile,
+      writeFile: vi.fn().mockRejectedValueOnce(new Error('conflict: /test/notes.txt changed')),
+    });
+    const onDirtyChange = vi.fn();
+    renderViewer(ops, onDirtyChange);
+
+    await makeDirtyDraft();
+    await openConflict();
+    await userEvent.click(screen.getByText('Reload file'));
+
+    // The replacement read failed: the viewer reports that error, but the
+    // draft is still dirty and the navigation guard was never told otherwise.
+    await waitFor(() => expect(screen.getByText('read unavailable')).toBeInTheDocument());
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+    expect(onDirtyChange.mock.calls.some(([dirty]) => dirty === false)).toBe(false);
+
+    // Retry is another replacement attempt; failing again still keeps the draft.
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(screen.getByText('read unavailable again')).toBeInTheDocument());
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+
+    // Keep editing returns to the retained draft instead of losing it.
+    await userEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
+    const view = await waitFor(() => {
+      const node = document.querySelector('.cm-editor');
+      expect(node).not.toBeNull();
+      return EditorView.findFromDOM(node as HTMLElement)!;
+    });
+    expect(view.state.doc.toString()).toBe('hello!');
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+    expect(screen.queryByText('read unavailable again')).not.toBeInTheDocument();
+  });
+
+  it('clears dirty only after a deferred conflict reload commits (SC-02)', async () => {
+    let finishReload: ((value: FileData) => void) | null = null;
+    const readFile = vi
+      .fn()
+      .mockResolvedValueOnce({
+        path: '/test/notes.txt',
+        content: btoa('hello'),
+        mime_type: 'text/plain',
+        revision: 'rev-1',
+      })
+      .mockImplementationOnce(
+        () =>
+          new Promise<FileData>((resolve) => {
+            finishReload = resolve;
+          }),
+      );
+    const ops = mockFileOps({
+      readFile,
+      writeFile: vi.fn().mockRejectedValueOnce(new Error('conflict: /test/notes.txt changed')),
+    });
+    const onDirtyChange = vi.fn();
+    renderViewer(ops, onDirtyChange);
+
+    await makeDirtyDraft();
+    await openConflict();
+    await userEvent.click(screen.getByText('Reload file'));
+
+    // The replacement read is still in flight: dirty must not have been
+    // cleared before the replacement commits.
+    await waitFor(() => expect(readFile).toHaveBeenCalledTimes(2));
+    expect(screen.getByTitle('Unsaved changes')).toBeInTheDocument();
+    expect(onDirtyChange.mock.calls.some(([dirty]) => dirty === false)).toBe(false);
+
+    await act(async () => {
+      finishReload?.({
+        path: '/test/notes.txt',
+        content: btoa('external'),
+        mime_type: 'text/plain',
+        revision: 'rev-2',
+      });
+    });
+
+    // Content, baseline and revision were replaced together; only now may the
+    // viewer report the document clean.
+    await waitFor(() =>
+      expect(document.querySelector('.cm-content')?.textContent).toContain('external'),
+    );
+    expect(screen.queryByTitle('Unsaved changes')).not.toBeInTheDocument();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
+    expect(document.querySelector('.cm-content')?.textContent).not.toContain('hello!');
   });
 });

@@ -12,11 +12,15 @@ import {executeDurableAgentDispatch,recoverConfirmedFailedDeveloperDispatch,
   recoverAttestedRepairRuntimeFailure,
   recoverAttestedQwenPreflight,recoverAttestedQwenPreflightV2,
   recoverAttestedQwenPreflightV3,recoverAttestedQwenCliFailure,
-  recoverAttestedQwenRepairTurnsFailure,recoverAttestedQwenToolFailure}
+  recoverAttestedQwenRepairTurnsFailure,recoverAttestedQwenToolFailure,
+  recoverAttestedQwenTrackedSourceFailure,
+  recoverAttestedReviewerToolFailure4065}
   from './dispatch-store.mjs';
 import {failedDeveloperRetryActionId,nativeResumeSuccessorId,
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
-  REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784} from './outbox.mjs';
+  REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_FAILURE_4065,
+  REVIEWER_JSON_FAILURE,REVIEWER_JSON_FAILURE_3784,
+  REVIEWER_TOOL_FAILURE_4065} from './outbox.mjs';
 import {bindControlledRepairCheckpoint,bindQwenRepairCheckpoint,
   recoverAttestedReviewerPremodelFailure,recoverAttestedReviewerJsonFailure}
   from './dispatch-store.mjs';
@@ -31,6 +35,8 @@ import {verifyReviewerPremodelFailureLive}
   from './reviewer-premodel-failure.mjs';
 import {verifyReviewerJsonFailureLive}
   from './reviewer-json-failure.mjs';
+import {verifyReviewerToolFailure4065Live}
+  from './reviewer-tool-failure-4065.mjs';
 import {authenticatePublisherReviewerWake}
   from './publisher-reviewer-wake.mjs';
 import {qwenRepairPublishedSource} from './qwen-repair-checkpoint.mjs';
@@ -48,6 +54,9 @@ import {SOURCE as QWEN_REPAIR_TURNS_FAILURE,
   from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE,verifyQwenToolPolicyFailureLive}
   from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_TRACKED_SOURCE_FAILURE,
+  verifyQwenTrackedSourceFailureLive}
+  from './qwen-tracked-source-failure.mjs';
 
 const REPO='BestNathan/nession';
 const WORKFLOW='.github/workflows/agent-controller-dispatch.yml';
@@ -59,9 +68,46 @@ export const REVIEWER_PREMODEL_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3433 run=43667393107';
 export const REVIEWER_PREMODEL_3784_RECOVERY_COMMENT=
   '/nession recover-review-preflight issue=3784 run=44431618028';
+export const REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT=
+  '/nession recover-review-preflight issue=3784 run=44500591865';
+export const REVIEWER_PREMODEL_4065_RECOVERY_COMMENT=
+  '/nession recover-review-preflight issue=4065 run=44744956936';
+export const REVIEWER_TOOL_4065_RECOVERY_COMMENT=
+  '/nession recover-review-tools issue=4065 run=44776788638';
+
+const QWEN_RECOVERY_C_SHA='d80e0827ad2d9f2dd548d20fc92b9462681c3094';
+const QWEN_RECOVERY_BRANCH='agent/3784/qwen-39c01222a8d00fa3';
+// Before any Store CAS, reject the current direct/extra PR-head mutation.
+// An independently green CI run for D cannot authorize Review of Store C.
+export function assertReviewerRecoveryPrLease(source,pr,ref){
+  if([REVIEWER_PREMODEL_FAILURE_4065,REVIEWER_TOOL_FAILURE_4065].includes(source)){
+    const branch='agent/4065/qwen-74024299b457f8c0';
+    if(pr?.number!==4191||pr.state!=='open'||pr.draft!==false||
+       pr.merged_at!=null||pr.head?.sha!==source.source_sha||
+       pr.head?.ref!==branch||pr.head?.repo?.full_name!==REPO||
+       pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
+       ref?.ref!=='refs/heads/'+branch||ref.object?.sha!==source.source_sha)
+      fail('Publisher PR #4191 HEAD no longer matches immutable #4065 Store source');
+    return true;
+  }
+  if(source!==REVIEWER_PREMODEL_FAILURE_3784_C)
+    fail('unexpected Reviewer C PR lease source');
+  if(pr?.number!==3919||pr.state!=='open'||pr.draft!==false||
+     pr.merged_at!=null||pr.head?.sha!==QWEN_RECOVERY_C_SHA||
+     pr.head?.ref!==QWEN_RECOVERY_BRANCH||
+     pr.head?.repo?.full_name!==REPO||
+     pr.base?.ref!=='main'||pr.base?.repo?.full_name!==REPO||
+     ref?.ref!=='refs/heads/'+QWEN_RECOVERY_BRANCH||
+     ref.object?.sha!==QWEN_RECOVERY_C_SHA)
+    fail('Publisher PR HEAD no longer matches immutable #3784 Store v35 C; do not advance recovery CAS');
+  return true;
+}
+
 const REVIEWER_PREMODEL_RECOVERIES=Object.freeze([
   [REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_RECOVERY_COMMENT],
   [REVIEWER_PREMODEL_FAILURE_3784,REVIEWER_PREMODEL_3784_RECOVERY_COMMENT],
+  [REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_3784_C_RECOVERY_COMMENT],
+  [REVIEWER_PREMODEL_FAILURE_4065,REVIEWER_PREMODEL_4065_RECOVERY_COMMENT],
 ]);
 export const REVIEWER_JSON_RECOVERY_COMMENT=
   '/nession recover-review-json issue=3433 run=43681851455';
@@ -77,6 +123,8 @@ export const QWEN_REPAIR_TURNS_RECOVERY_COMMENT=
   '/nession recover-qwen-turns issue=3784 run=44470557905';
 export const QWEN_TOOL_RECOVERY_COMMENT=
   '/nession recover-qwen-tools issue=3784 run=44256663685';
+export const QWEN_TRACKED_SOURCE_RECOVERY_COMMENT=
+  '/nession recover-qwen-source issue=4065 run=44733719096';
 export const CONTROLLED_REPAIR_BIND_COMMENT='/nession bind-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_DISPATCH_COMMENT='/nession dispatch-repair issue=1997 action=d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d';
 export const CONTROLLED_REPAIR_FAILURE_COMMENT='/nession recover-repair issue=1997 failed_run=42020432271';
@@ -135,6 +183,13 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     REVIEWER_JSON_RECOVERIES.some(([source,command])=>
       event.issue.number===source.issue&&event.comment.body===command&&
       issue===source.issue&&actionId===source.action_id);
+  const reviewerToolRecoveryComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===REVIEWER_TOOL_FAILURE_4065.issue&&
+    event?.issue?.state==='open'&&!event?.issue.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&positive(event?.comment?.id)&&
+    event.comment.body===REVIEWER_TOOL_4065_RECOVERY_COMMENT&&
+    issue===REVIEWER_TOOL_FAILURE_4065.issue&&
+    actionId===REVIEWER_TOOL_FAILURE_4065.action_id;
   const toolRecoveryComment=commanded&&event?.action==='created'&&
     event?.issue?.number===QWEN_TOOL_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue.pull_request&&
@@ -142,6 +197,14 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     positive(event?.comment?.id)&&
     event.comment.body===QWEN_TOOL_RECOVERY_COMMENT&&
     issue===QWEN_TOOL_FAILURE.issue&&actionId===QWEN_TOOL_FAILURE.action_id;
+  const trackedSourceComment=commanded&&event?.action==='created'&&
+    event?.issue?.number===QWEN_TRACKED_SOURCE_FAILURE.issue&&
+    event?.issue?.state==='open'&&!event?.issue.pull_request&&
+    event?.comment?.user?.login==='BestNathan'&&
+    positive(event?.comment?.id)&&
+    event.comment.body===QWEN_TRACKED_SOURCE_RECOVERY_COMMENT&&
+    issue===QWEN_TRACKED_SOURCE_FAILURE.issue&&
+    actionId===QWEN_TRACKED_SOURCE_FAILURE.action_id;
   const repairTurnsComment=commanded&&event?.action==='created'&&
     event?.issue?.number===QWEN_REPAIR_TURNS_FAILURE.issue&&
     event?.issue?.state==='open'&&!event?.issue?.pull_request&&
@@ -179,7 +242,8 @@ export function assertDispatchAuthority({environment,event,run,issue,actionId,
     reviewCommand?.[2]===actionId;
   const permitted=publisherWake||ownerReview||ownerRepair||
     recoveryComment||jsonRecovery||cliRecoveryComment||
-    repairTurnsComment||toolRecoveryComment||(commanded
+    repairTurnsComment||toolRecoveryComment||trackedSourceComment||
+     reviewerToolRecoveryComment||(commanded
     ?(qwenV2Comment||(event?.action==='created'&&event?.issue?.number===1997&&
        !event?.issue?.pull_request&&event?.comment?.user?.login==='BestNathan'&&
        ((event?.comment?.body===CONTROLLED_DISPATCH_COMMENT&&actionId===ORIGINAL_ACTION)||
@@ -376,13 +440,19 @@ async function main(){
     ?(REVIEWER_JSON_RECOVERIES.find(([,command])=>
        event?.comment?.body===command)?.[0]??null):null;
   const reviewerJsonRecovery=reviewerJsonSource!==null;
+  const reviewerToolRecovery=commanded&&
+    event?.comment?.body===REVIEWER_TOOL_4065_RECOVERY_COMMENT;
   const recoveringQwenCli=commanded&&
     event?.comment?.body===QWEN_CLI_RECOVERY_COMMENT;
   const recoveringRepairTurns=commanded&&
     event?.comment?.body===QWEN_REPAIR_TURNS_RECOVERY_COMMENT;
   const recoveringQwenTools=commanded&&
     event?.comment?.body===QWEN_TOOL_RECOVERY_COMMENT;
-  const issue=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.issue:
+  const recoveringTrackedSource=commanded&&
+    event?.comment?.body===QWEN_TRACKED_SOURCE_RECOVERY_COMMENT;
+  const issue=commanded?(reviewerToolRecovery?REVIEWER_TOOL_FAILURE_4065.issue:
+    recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.issue:
+    recoveringQwenTools?QWEN_TOOL_FAILURE.issue:
     recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.issue:
     recoveringQwenCli?QWEN_CLI_FAILURE.issue:
     qwenV2CommentAction?3001:
@@ -408,7 +478,9 @@ async function main(){
   const retryingRepair=commanded&&event?.comment?.body===CONTROLLED_REPAIR_RETRY_COMMENT;
   const newReviewAction=ownerReviewCommand?.[2]??null;
   const newRepairAction=ownerRepairCommand?.[2]??null;
-  const actionId=commanded?(recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
+  const actionId=commanded?(reviewerToolRecovery?REVIEWER_TOOL_FAILURE_4065.action_id:
+    recoveringTrackedSource?QWEN_TRACKED_SOURCE_FAILURE.action_id:
+    recoveringQwenTools?QWEN_TOOL_FAILURE.action_id:
     recoveringRepairTurns?QWEN_REPAIR_TURNS_FAILURE.action_id:
     recoveringQwenCli?QWEN_CLI_FAILURE.action_id:
     qwenV2CommentAction??newReviewAction??newRepairAction??
@@ -428,6 +500,27 @@ async function main(){
     await authenticatePublisherReviewerWake({environment:env,event,token}):null;
   assertDispatchAuthority({environment:env,event,run,issue,actionId,
     publisherWakeProof});
+  if(reviewerToolRecovery){
+    const live=await api(token,'/issues/comments/'+event.comment.id);
+    if(live?.id!==event.comment.id||live.body!==REVIEWER_TOOL_4065_RECOVERY_COMMENT||
+       live.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+issue||
+       live.user?.login!=='BestNathan'||live.user?.type!=='User'||
+       live.author_association!=='OWNER'||
+       !live.created_at||live.created_at!==live.updated_at)
+      fail('Reviewer tool recovery requires live unedited Owner command');
+  }
+  if(recoveringTrackedSource){
+    // Unlike historic one-offs, independently bind the CURRENT unedited
+    // owner comment to its canonical Issue URL before any App credential.
+    const live=await api(token,'/issues/comments/'+event.comment.id);
+    if(live?.id!==event.comment.id||
+       live.body!==QWEN_TRACKED_SOURCE_RECOVERY_COMMENT||
+       live.issue_url!=='https://api.github.com/repos/'+REPO+'/issues/'+issue||
+       live.user?.login!=='BestNathan'||live.user?.type!=='User'||
+       live.author_association!=='OWNER'||
+       !live.created_at||live.created_at!==live.updated_at)
+      fail('tracked-source recovery requires live unedited Owner command');
+  }
   const issueRecord=await api(token,'/issues/'+issue);
   if(issueRecord.number!==issue||issueRecord.state!=='open'||issueRecord.pull_request||
       issueRecord.repository_url!=='https://api.github.com/repos/'+REPO)
@@ -443,6 +536,25 @@ async function main(){
   // No additional secret setup; this key and the App private key never enter Worker.
   const key=deriveDispatchKey(env.STORE_WRITER_PRIVATE_KEY);
   try{
+    if(recoveringTrackedSource){
+      // #4174: the old Worker itself has no Store write authority.
+      // Independently fetch the exact failed Run/Job/Artifact/log, and
+      // transition Store by CAS before dispatching a NEW signed ticket.
+      const proof=await verifyQwenTrackedSourceFailureLive(token);
+      const recovered=recoverAttestedQwenTrackedSourceFailure({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
     if(recoveringQwenTools){
       const proof=await verifyQwenToolPolicyFailureLive(token);
       const recovered=recoverAttestedQwenToolFailure({
@@ -501,6 +613,29 @@ async function main(){
         ...(result.state_version?{state_version:result.state_version}:{})}));
       return;
     }
+    if(reviewerToolRecovery){
+      // Attest genuine failed Run/Job, exact signed claim/admission and bounded
+      // log before Store CAS. The old consumed signed Action is never replayed.
+      const proof=await verifyReviewerToolFailure4065Live(token);
+      const [pr,ref]=await Promise.all([
+        api(token,'/pulls/4191'),
+        api(token,'/git/ref/heads/agent/4065/qwen-74024299b457f8c0'),
+      ]);
+      assertReviewerRecoveryPrLease(REVIEWER_TOOL_FAILURE_4065,pr,ref);
+      const recovered=recoverAttestedReviewerToolFailure4065({
+        remote:storeRemote,source:proof});
+      const signer={key,key_id:'main-controller',
+        issuer_run_id:run.id,now:Date.now(),ttl_ms:600000};
+      const result=await executeDurableAgentDispatch({
+        remote:storeRemote,issue:recovered.issue,actionId:recovered.action_id,
+        registry,signer,actionsToken:token,sourceVerifier:sourceStillAllowed,
+      });
+      console.log(JSON.stringify({status:result.status,issue:recovered.issue,
+        action_id:recovered.action_id,
+        ...(result.source_run_id?{run_id:result.source_run_id}:{}),
+        ...(result.state_version?{state_version:result.state_version}:{})}));
+      return;
+    }
     if(reviewerJsonRecovery){
       // Source-attest the exact completed failed native Reviewer Run and
       // absence of any accepted verdict Artifact BEFORE the Store CAS.
@@ -526,6 +661,18 @@ async function main(){
       // CAS-fail the original action, create one successor, and only dispatch
       // the authenticated successor. Replays are reconciled, never re-POSTed.
       const proof=await verifyReviewerPremodelFailureLive(token,reviewerPremodelSource);
+      if([REVIEWER_PREMODEL_FAILURE_3784_C,
+          REVIEWER_PREMODEL_FAILURE_4065].includes(reviewerPremodelSource)){
+        // This is a source-bound pre-CAS read, not permission to trust PR D.
+        const [pr,ref]=await Promise.all([
+          api(token,'/pulls/'+(reviewerPremodelSource===
+            REVIEWER_PREMODEL_FAILURE_4065?4191:3919)),
+          api(token,'/git/ref/heads/'+(reviewerPremodelSource===
+            REVIEWER_PREMODEL_FAILURE_4065
+              ?'agent/4065/qwen-74024299b457f8c0':QWEN_RECOVERY_BRANCH)),
+        ]);
+        assertReviewerRecoveryPrLease(reviewerPremodelSource,pr,ref);
+      }
       const recovered=recoverAttestedReviewerPremodelFailure({
         remote:storeRemote,source:proof});
       const signer={key,key_id:'main-controller',

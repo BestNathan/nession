@@ -128,6 +128,28 @@ function fetchForComparison(ref) {
     '+refs/heads/' + ref + ':refs/remotes/origin/' + ref]);
 }
 
+// #4059: workflow-bearing integration requires a separately approved writer.
+export function workflowFileWriteRequired(paths) {
+  if (!Array.isArray(paths) || paths.some(p =>
+    typeof p !== 'string' || !p.length || p.includes('\0')))
+    reject('invalid workflow source path inventory');
+  return paths.some(p => p.startsWith('.github/workflows/'));
+}
+
+export function workflowPushAuthorization(paths, hasSeparateWriter) {
+  const needsWorkflowWriter = workflowFileWriteRequired(paths);
+  return {needsWorkflowWriter,
+    allowed: !needsWorkflowWriter || hasSeparateWriter === true};
+}
+
+function workflowSourceDiff(laneSha, mainSha) {
+  if (!SHA.test(laneSha) || !SHA.test(mainSha))
+    reject('invalid workflow-diff source SHA');
+  const output = shell('git', ['diff', '--name-only', laneSha, mainSha,
+    '--', '.github/workflows/']);
+  return output ? output.split('\n').filter(Boolean) : [];
+}
+
 export function deriveActions(ahead, behind) {
   if (!Number.isSafeInteger(ahead) || ahead < 0 || !Number.isSafeInteger(behind) || behind < 0) {
     reject('invalid ahead/behind counters');
@@ -153,13 +175,76 @@ function calculatePlan() {
     if (!SHA.test(sha)) reject('invalid lane SHA');
     const ahead = Number(shell('git', ['rev-list', '--count', 'origin/main..origin/' + branch]));
     const behind = Number(shell('git', ['rev-list', '--count', 'origin/' + branch + '..origin/main']));
-    return { branch, sha, ahead, behind, actions: deriveActions(ahead, behind), deployment_workflows };
+    const actions = deriveActions(ahead, behind);
+    const workflow_write_required = actions.includes('sync-main-to-lane') &&
+      workflowFileWriteRequired(workflowSourceDiff(sha, mainSha));
+    return { branch, sha, ahead, behind, actions, workflow_write_required, deployment_workflows };
   });
   return { schema_version: 1, main_sha: mainSha, branches: states };
 }
 
+// #4186: synchronous `gh api` run-inventory fetches must not overflow the
+// default 1 MiB child stdout buffer. Historical convergence-review/audit run
+// lists embed full repository/head_commit/actor objects (~13 KiB per run);
+// 80+ runs exceed the default and crash the controller with ENOBUFS before
+// any pagination guard runs. The bound is the server-side `--jq` projection
+// to ONLY the fields the dedupe consumers read; RUN_INVENTORY_MAX_BUFFER is a
+// documented defensive cap, not the policy — raising it alone must never mask
+// unbounded payload growth. Truncated/oversized/incomplete inventories fail
+// closed with a named denial; no dispatch or branch mutation may follow.
+export const RUN_INVENTORY_MAX_BUFFER = 8 * 1024 * 1024;
+export const RUN_INVENTORY_JQ =
+  '{total_count: .total_count, workflow_runs: [.workflow_runs[] | ' +
+  '{id: .id, display_title: .display_title, event: .event, ' +
+  'head_branch: .head_branch, created_at: .created_at, ' +
+  'repository: {full_name: .repository.full_name}, ' +
+  'head_repository: {full_name: .head_repository.full_name}}]}';
+
+export function parseRunInventory(raw) {
+  let inventory;
+  try { inventory = JSON.parse(raw); }
+  catch { reject('truncated or malformed run inventory JSON'); }
+  if (!inventory || typeof inventory !== 'object' ||
+      !Array.isArray(inventory.workflow_runs))
+    reject('untrusted run inventory: workflow_runs must be an array');
+  if (!Number.isSafeInteger(inventory.total_count) ||
+      inventory.total_count < inventory.workflow_runs.length)
+    reject('untrusted run inventory: inconsistent total_count');
+  return inventory;
+}
+
+export function fetchRunInventory(repo, workflow, execute) {
+  let raw;
+  try {
+    raw = execute(['api', '--jq', RUN_INVENTORY_JQ,
+      'repos/' + repo + '/actions/workflows/' + workflow +
+      '/runs?event=workflow_dispatch&per_page=100'],
+    { maxBuffer: RUN_INVENTORY_MAX_BUFFER });
+  } catch (error) {
+    // ENOBUFS (even past the defensive cap) or a failed gh call is an
+    // explicit bounded-policy denial, never an uncontrolled crash or a
+    // license to dispatch/mutate.
+    reject('bounded run-inventory fetch denied (' +
+      (error?.code ?? 'error') + '); no dispatch performed');
+  }
+  return parseRunInventory(raw);
+}
+
+// One canonical run-identity rule for both dedupe consumers: an exact display
+// title, workflow_dispatch event, main head branch and same-repo head/base.
+// The audit consumer additionally rejects runs older than its Issue.
+export function matchRunIdentity(inventory, { title, repo, createdAfter }) {
+  return inventory.workflow_runs.find(run =>
+    run.display_title === title && run.event === 'workflow_dispatch' &&
+    run.head_branch === 'main' && run.repository?.full_name === repo &&
+    run.head_repository?.full_name === repo &&
+    (createdAfter === undefined ||
+      Date.parse(run.created_at) >= Date.parse(createdAfter)));
+}
+
 function gh(args) {
-  return JSON.parse(shell('gh', ['api', ...args]));
+  return JSON.parse(shell('gh', ['api', ...args],
+    { maxBuffer: RUN_INVENTORY_MAX_BUFFER }));
 }
 
 // The existing Publisher App identity only has Contents/PR write, not Issue
@@ -169,7 +254,8 @@ function ghIssueWrite(args) {
   const token=process.env.ISSUE_GITHUB_TOKEN;
   if(!token)reject('trusted Issue cleanup token unavailable');
   return JSON.parse(shell('gh',['api',...args],{
-    env:{...process.env,GH_TOKEN:token}
+    env:{...process.env,GH_TOKEN:token},
+    maxBuffer:RUN_INVENTORY_MAX_BUFFER
   }));
 }
 export function legacyIssueArchiveRequests(repo,number,prNumber,headSha) {
@@ -199,6 +285,10 @@ function validatePlan(plan) {
       JSON.stringify(lane.actions) !== JSON.stringify(deriveActions(lane.ahead, lane.behind))) {
       reject('plan branch state/actions invalid: ' + lane.branch);
     }
+    const expectedWriter = lane.actions.includes('sync-main-to-lane') &&
+      workflowFileWriteRequired(workflowSourceDiff(lane.sha, plan.main_sha));
+    if (lane.workflow_write_required !== expectedWriter)
+      reject('plan workflow writer requirement changed: ' + lane.branch);
   }
 }
 
@@ -249,6 +339,15 @@ function ensureIntegrationBranch(repo, plan, lane) {
        actualTree!==tree)reject('integration branch already exists with wrong parents/tree');
     return {branch,sha:existing,created:false};
   }
+  // Re-read actual pinned source diff; do not trust webhook or plan claims.
+  const workflowChanges = workflowSourceDiff(lane.sha, plan.main_sha);
+  const workflowToken = process.env.CONVERGENCE_WORKFLOW_PUSH_TOKEN;
+  const authorization = workflowPushAuthorization(workflowChanges, Boolean(workflowToken));
+  const workflowWriterNeeded = authorization.needsWorkflowWriter;
+  if (!authorization.allowed) {
+    return {blocked_workflow_writer:true,branch,
+      workflow_files:workflowChanges};
+  }
   // The App token is used only by this main-owned deterministic controller,
   // never in an Agent's context. GitHub CLI's credential helper avoids placing
   // a token in command arguments or persisting checkout credentials.
@@ -261,9 +360,14 @@ function ensureIntegrationBranch(repo, plan, lane) {
     '-m','chore(release): integrate '+plan.main_sha+' into '+lane.sha],
     {env:ident});
   if(!SHA.test(commit))reject('invalid integration commit SHA');
+  // The separate workflow App token is valid only for this pinned git push.
+  // All PR/qualification calls retain the ordinary Publisher identity.
+  const pushEnv=workflowWriterNeeded
+    ? {...ident,GH_TOKEN:workflowToken}
+    : ident;
   try {
     shell('git',['-c','credential.helper=!gh auth git-credential',
-      'push','origin',commit+':refs/heads/'+branch],{env:ident});
+      'push','origin',commit+':refs/heads/'+branch],{env:pushEnv});
   } catch(error) {
     // Concurrent controllers must not force-push or overwrite a winner. If an
     // identical immutable branch won the race, validate it below.
@@ -427,22 +531,19 @@ function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null, batch=nu
 // Exact-head scoped CI and immutable source qualification are the merge
 // admission boundary. Full regression is a periodic Main diagnostic, not an
 // implicit merge-dispatch or approval dependency (#3465).
-function dispatchBatchAudit(repo,issue){
+function dispatchBatchAudit(repo,issue,inventoryExecute){
   const token=process.env.DISPATCH_GITHUB_TOKEN;
   if(!token)reject('trusted Issue Audit dispatcher token missing');
   const env={...process.env,GH_TOKEN:token};
   // A dispatch can succeed remotely while the Controller loses its reply.
   // Reconcile the immutable Issue identity against actual GitHub runs before
   // spending another model invocation; do not rely on the created flag.
-  const raw=shell('gh',['api','repos/'+repo+
-    '/actions/workflows/agent-issue-audit.yml/runs?event=workflow_dispatch&per_page=100'],{env});
-  const inventory=JSON.parse(raw);
-  if(!Array.isArray(inventory.workflow_runs))reject('untrusted Issue Audit run inventory');
+  // #4186: bounded, projected inventory fetch (never the unbounded default).
+  const inventory=fetchRunInventory(repo,'agent-issue-audit.yml',
+    inventoryExecute ?? ((args,options)=>shell('gh',args,{env,...options})));
   const expected='Issue Audit #'+issue.number;
-  const found=inventory.workflow_runs.find(run=>run.display_title===expected&&
-    run.event==='workflow_dispatch'&&run.head_branch==='main'&&
-    run.repository?.full_name===repo&&run.head_repository?.full_name===repo&&
-    Date.parse(run.created_at)>=Date.parse(issue.created_at));
+  const found=matchRunIdentity(inventory,
+    {title:expected,repo,createdAfter:issue.created_at});
   if(found)return {status:'EXISTING_AUDIT',run_id:found.id};
   if(inventory.workflow_runs.length===100 &&
     Date.parse(inventory.workflow_runs[99].created_at)>Date.parse(issue.created_at))
@@ -453,35 +554,208 @@ function dispatchBatchAudit(repo,issue){
   return {status:'AUDIT_DISPATCHED'};
 }
 
-function dispatchConflictReview(repo, receipt, action, plan, lane) {
+// #4140: an Agent-authored source repair is an implementation PR, not the
+// Controller's synthetic release sync. It must own a real Bug before model edits.
+export function conflictRepairIssueMarker(branch,mainSha,laneSha){
+  branchName(branch);
+  if(!SHA.test(mainSha)||!SHA.test(laneSha))reject('invalid conflict Issue SHA pair');
+  return '<!-- nession-agent-conflict-repair:v1 lane='+branch+
+    ' main='+mainSha+' target='+laneSha+' -->';
+}
+export function conflictRepairIssueBody(branch,mainSha,laneSha){
+  const marker=conflictRepairIssueMarker(branch,mainSha,laneSha);
+  return [
+    '## Description',
+    'Real main → '+branch+' source conflict detected by the trusted Controller (#2926/#4140).',
+    'Only a Draft repair PR is authorized. No protected merge or Acceptance grant.',
+    '',
+    '## Reproduction',
+    '- Pinned main SHA: '+mainSha,
+    '- Pinned target lane SHA: '+laneSha,
+    '- Git merge-tree reports a conflict for exactly this source pair.',
+    '',
+    '## Root Cause',
+    'Concurrent branches changed incompatible content; semantic root cause must be',
+    'examined in the resulting Draft PR, not inferred from GitHub workflow success.',
+    '',
+    '## Requirements: source-pinned conflict repair',
+    'The Agent may edit only ordinary conflict files, preserving both histories.',
+    'A trusted Publisher independently checks the tree, parents and clean replay.',
+    'No workflow, instruction, Gate or credentials files may be changed.',
+    '',
+    '### Success Criteria',
+    '- [ ] SC-01: Real Agent edit on exact pinned Git conflict passes independent',
+    '  conflict-only and one-parent clean-replay Git tree verification.',
+    '- [ ] SC-02: Independently authorized Publisher publishes source-pinned Draft PR',
+    '  and verifies exact HEAD/tree/parent with no protected source mutation.',
+    '- [ ] SC-03: After reviewed protected repair merge and exact-head CI/Acceptance,',
+    '  original Convergence Controller rechecks the updated source refs.',
+    '',
+    '## Acceptance Plan',
+    '```yaml',
+    'acceptance:',
+    '  SC-01:',
+    '    when: pr',
+    '    method: agent',
+    '  SC-02:',
+    '    when: pr',
+    '    method: agent',
+    '  SC-03:',
+    '    when: merged',
+    '    branch: staging',
+    '    method: agent',
+    '```',
+    '',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |',
+    '|---|---|---|',
+    '| SC-01 | Pending | exact Agent Run/Attempt and independent Git tree |',
+    '| SC-02 | Pending | Publisher App/PR and Git readback |',
+    '| SC-03 | Pending | reviewed merge, Quality/Case/E2E and Controller follow-up |',
+    '',
+    '## Product alignment',
+    '- [x] Follows VISION.md continuous AI workspace goal.',
+    '- [x] Preserves PRINCIPLE.md progressive review and one Controller owner.',
+    '',
+    '## E2E Verification',
+    '### New',
+    '- none: Git/CI-only; native Git and GitHub receipts are primary evidence',
+    '### Regression',
+    '- none: source-aligned PR Quality/Case/selected E2E own regression proof',
+    '',
+    '## E2E Report',
+    '| ID | Type | Result | Evidence |',
+    '|---|---|---|---|',
+    '',
+    '### Knowledge Impact',
+    '- Decision: Read',
+    '- Related knowledge: #2926 Staging Convergence; #4140 Agent conflict integration.',
+    '- Reason: transient source conflict, no new architecture.',
+    '- Owner and timing: CI/Convergence owner after protected repair merge.',
+    '- Evidence: exact Run/Artifact/PR/Acceptance provenance.',
+    '',
+    '## Prototype',
+    '- Not needed: Draft PR is the review surface, no new UI.',
+    '',
+    '**Status:** Approved for Draft-only Agent assistance, not protected merge.',
+    marker,'',
+  ].join('\n');
+}
+function ensureConflictRepairIssue(repo,plan,lane){
+  const marker=conflictRepairIssueMarker(lane.branch,plan.main_sha,lane.sha);
+  const title='Bug: Agent Convergence repair '+lane.branch+' '+
+    plan.main_sha.slice(0,12)+' '+lane.sha.slice(0,12);
+  // One outstanding Agent repair per lane. Main may advance repeatedly
+  // while the prior scoped Draft awaits review; do not create new Issues or
+  // invoke a model for every Main push. All matching refs remain immutable.
+  const prefix='Bug: Agent Convergence repair '+lane.branch+' ';
+  const query='repo:'+repo+' is:issue is:open in:title "'+prefix.trim()+'"';
+  const found=ghIssueWrite(['--method','GET','search/issues?q='+
+    encodeURIComponent(query)+'&per_page=50']);
+  if(!Array.isArray(found.items)||found.total_count>=50)
+    reject('incomplete conflict Bug discovery; no duplicate Issue is safe');
+  const active=found.items.filter(x=>x.state==='open'&&
+    x.title?.startsWith(prefix)&&!x.pull_request);
+  if(active.some(x=>!x.body?.includes(
+      '<!-- nession-agent-conflict-repair:v1 lane='+lane.branch+' ')||
+      !x.labels?.some(y=>y.name==='bug')))
+    reject('foreign or malformed open conflict Bug; cannot skip review');
+  const matched=active.filter(x=>x.title===title);
+  if(matched.length>1)reject('duplicate source-pinned conflict Bug');
+  // Existing older pair blocks a newer Agent attempt until the previous
+  // repair is accepted/closed or explicitly superseded by its owner.
+  const older=active.filter(x=>x.title!==title);
+  if(older.length)return {blocked_by:older.map(x=>x.number),action:'awaiting_previous_repair'};
+  if(matched.length){
+    const item=matched[0];
+    if(item.state!=='open'||!item.body?.includes(marker)||
+      !item.labels?.some(x=>x.name==='bug')||
+      !item.labels?.some(x=>x.name==='status:in-progress'))
+      reject('previous conflict Bug is closed or lacks provenance/ownership');
+    return {number:item.number,action:'reused'};
+  }
+  const body=conflictRepairIssueBody(lane.branch,plan.main_sha,lane.sha);
+  const created=ghIssueWrite(['--method','POST','repos/'+repo+'/issues',
+    '-f','title='+title,'-f','body='+body,
+    '-f','labels[]=bug','-f','labels[]=ci',
+    '-f','labels[]=verification:integration','-f','labels[]=status:in-progress']);
+  if(!Number.isSafeInteger(created.number)||created.number<1||
+    created.title!==title||created.body!==body||created.state!=='open')
+    reject('new source-bound conflict Issue write could not be authenticated');
+  return {number:created.number,action:'created'};
+}
+
+function dispatchConflictReview(repo, receipt, action, plan, lane, inventoryExecute) {
   const token = process.env.DISPATCH_GITHUB_TOKEN;
   if (!token) reject('the trusted Controller Actions dispatcher token is missing');
+  const env = { ...process.env, GH_TOKEN: token };
   function api(args) {
-    return shell('gh', ['api', ...args], { env: { ...process.env, GH_TOKEN: token } });
+    return shell('gh', ['api', ...args], { env, maxBuffer: RUN_INVENTORY_MAX_BUFFER });
   }
   const workflow = 'agent-staging-convergence-review.yml';
   // Exact SHA pair is embedded in the trusted Agent Run display title. This
   // keeps a repeatedly discovered conflict from spending tokens every tick.
-  const previous = JSON.parse(api(['repos/' + repo + '/actions/workflows/' + workflow +
-    '/runs?event=workflow_dispatch&per_page=100']));
-  if (!Array.isArray(previous.workflow_runs) || previous.total_count > 100) {
+  // #4186: bounded, projected inventory fetch (never the unbounded default).
+  const previous = fetchRunInventory(repo, workflow,
+    inventoryExecute ?? ((args, options) => shell('gh', args, { env, ...options })));
+  if (previous.total_count > 100) {
     return { status: 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY' };
   }
-  const identity = 'Convergence conflict ' + lane.branch + ' ' + plan.main_sha + ' ' + lane.sha;
-  const recorded = previous.workflow_runs.find(run =>
-    run.display_title === identity && run.event === 'workflow_dispatch' &&
-    run.head_branch === 'main' &&
-    run.repository?.full_name === repo &&
-    run.head_repository?.full_name === repo);
-  if (recorded) return { status: 'EXISTING_ANALYSIS', run_id: recorded.id };
+  const productionRequested=action==='sync-main-to-lane'&&
+    process.env.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED==='true';
+  let repairPaths=null,repairSkip=null;
+  if(productionRequested){
+    // Inspect actual stage-1/2/3 conflicts, not the *entire* branch diff.
+    // A clean workflow file addition needs the separately authorized
+    // Convergence integration writer later, not a workflow-writing repair.
+    try{
+      const content=shell('node',[path.join(ROOT,'scripts',
+        'merge-conflict-resolution-probe.mjs'),'inspect',
+        ROOT,lane.sha,plan.main_sha],{env:{
+          ...process.env,
+          GIT_AUTHOR_NAME:'Nession Conflict Inspection',
+          GIT_AUTHOR_EMAIL:'nession-conflict-inspect@users.noreply.github.com',
+          GIT_COMMITTER_NAME:'Nession Conflict Inspection',
+          GIT_COMMITTER_EMAIL:'nession-conflict-inspect@users.noreply.github.com',
+        }});
+      const proof=JSON.parse(content);
+      if(proof.eligible!==true||proof.target_sha!==lane.sha||
+         proof.source_sha!==plan.main_sha||
+         !Array.isArray(proof.conflict_paths)||!proof.conflict_paths.length)
+        reject('untrusted conflict path inspection result');
+      repairPaths=proof.conflict_paths;
+    }catch(error){
+      // Unsupported, dangerous, mixed or unverifiable conflict file(s)
+      // still get read-only diagnosis, never a writable Coding Agent task.
+      repairSkip='UNSUPPORTED_OR_UNVERIFIED_CONFLICT_PATHS';
+    }
+  }
+  let repairIssue=repairPaths?ensureConflictRepairIssue(repo,plan,lane):null;
+  if(repairIssue?.blocked_by){
+    repairSkip='EXISTING_LANE_REPAIR_AWAITING_REVIEW';
+    repairPaths=null;
+  }
+  const production=Boolean(repairPaths&&repairIssue?.number);
+  const identity=(production?'Convergence repair ':'Convergence conflict ')+
+    lane.branch+' '+plan.main_sha+' '+lane.sha;
+  const recorded=matchRunIdentity(previous,{title:identity,repo});
+  if(recorded)return {status:production?'EXISTING_REPAIR':'EXISTING_ANALYSIS',
+    run_id:recorded.id,
+    ...(repairSkip?{repair_skipped:repairSkip}:{})};
   api(['--method', 'POST', 'repos/' + repo + '/actions/workflows/' + workflow + '/dispatches',
     '-f', 'ref=main',
+    '-f', 'inputs[repair_issue_number]=' + (repairIssue?.number??''),
     '-f', 'inputs[pr_number]=' + receipt.number,
     '-f', 'inputs[branch]=' + lane.branch,
     '-f', 'inputs[main_sha]=' + plan.main_sha,
     '-f', 'inputs[lane_sha]=' + lane.sha,
     '-f', 'inputs[direction]=' + action]);
-  return { status: 'ANALYSIS_DISPATCHED' };
+  return {status:production?'REPAIR_DISPATCHED':'ANALYSIS_DISPATCHED',
+    ...(repairIssue?{repair_issue_number:repairIssue.number,
+      repair_issue_action:repairIssue.action,conflict_paths:repairPaths}:{}),
+    ...(repairSkip?{repair_skipped:repairSkip}:{}),
+    ...(repairIssue?.blocked_by?{previous_repair_issues:repairIssue.blocked_by}:{}),
+  };
 }
 
 // One-time transition: preserve already-approved legacy batches but retire
@@ -526,6 +800,13 @@ function reconcile(plan) {
       const syncMainSha=pinned?.main_sha||plan.main_sha;
       const integration=sync?(pinned||ensureIntegrationBranch(repo,
         {...plan,main_sha:syncMainSha},lane)):null;
+      if(sync&&integration.blocked_workflow_writer) {
+        results.push({branch:lane.branch,direction:action,
+          outcome:'BLOCKED',reason:'WORKFLOW_FILE_WRITER_NOT_CONFIGURED',
+          main_sha:syncMainSha,lane_sha:lane.sha,
+          workflow_files:integration.workflow_files});
+        continue;
+      }
       // On an actual merge-tree conflict, the direct-source PR exists only as
       // an authenticated, SHA-bound read-only Agent analysis surface; it is not
       // qualified for merge under the protected staging rules.
@@ -704,6 +985,11 @@ function reconcile(plan) {
 }
 
 function selfTest() {
+  const sourceMarker=conflictRepairIssueMarker('staging','a'.repeat(40),'b'.repeat(40));
+  assert.match(sourceMarker,/nession-agent-conflict-repair:v1/);
+  const repairBody=conflictRepairIssueBody('staging','a'.repeat(40),'b'.repeat(40));
+  assert.ok(repairBody.includes(sourceMarker)&&repairBody.includes('## Acceptance Plan'));
+  assert.throws(()=>conflictRepairIssueMarker('../evil','a'.repeat(40),'b'.repeat(40)));
   // A YAML comment indented *inside* an `if: >-` block scalar is not a
   // comment: GitHub parses it as part of the job expression and rejects the
   // entire workflow before any job is created (#2953, run 42569835883).
@@ -835,6 +1121,23 @@ function selfTest() {
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['!main']")), /unsupported/);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "['main']")), /unsupported/);
   assert.throws(() => pushBranches(deploy.replace("['staging']", "${{ vars.STAGING_BRANCHES }}")), /unsupported/);
+  // #4059: independent positive/negative workflow-authority fixtures.
+  assert.equal(workflowFileWriteRequired([]), false);
+  assert.equal(workflowFileWriteRequired(['scripts/ci/quality-scope.mjs']), false);
+  assert.equal(workflowFileWriteRequired(['.github/workflows-extra.yml']), false);
+  assert.equal(workflowFileWriteRequired(['.github/workflows/release-staging.yml']), true);
+  assert.deepEqual(workflowPushAuthorization(['src/app.ts'], false),
+    {needsWorkflowWriter:false,allowed:true});
+  assert.deepEqual(workflowPushAuthorization(['.github/workflows/deploy.yml'], false),
+    {needsWorkflowWriter:true,allowed:false});
+  assert.deepEqual(workflowPushAuthorization(['.github/workflows/deploy.yml'], true),
+    {needsWorkflowWriter:true,allowed:true});
+  assert.equal(workflowFileWriteRequired(['docs/README.md',
+    '.github/workflows/acceptance-cases.yaml']), true);
+  assert.throws(()=>workflowFileWriteRequired(['valid', '\0']),
+    /invalid workflow source path inventory/);
+  assert.throws(()=>workflowFileWriteRequired('not-an-array'),
+    /invalid workflow source path inventory/);
   assert.deepEqual(deriveActions(0, 0), []);
   assert.deepEqual(deriveActions(4, 0), ['promote-lane-to-main']);
   assert.deepEqual(deriveActions(0, 5), ['sync-main-to-lane']);
@@ -892,6 +1195,139 @@ function selfTest() {
   assert.throws(()=>legacyIssueArchiveRequests('attacker/repo',0,3168,
     'a'.repeat(40)),/invalid legacy Issue archive provenance/);
     assert.throws(() => deriveActions(-1, 0), /invalid/);
+  // #4186: bounded run-inventory fetch. The historical controller crashed
+  // with `spawnSync gh ENOBUFS` because unprojected run lists (~13 KiB/run)
+  // exceed the default 1 MiB child buffer before any pagination guard runs.
+  const bulkyRun = (i, over = {}) => ({
+    id: 1000 + i,
+    display_title: 'Convergence conflict staging ' + 'a'.repeat(40) + ' ' + 'b'.repeat(40),
+    event: 'workflow_dispatch', head_branch: 'main',
+    created_at: '2026-11-20T00:00:00Z',
+    repository: { full_name: 'BestNathan/nession' },
+    head_repository: { full_name: 'BestNathan/nession' },
+    head_commit: { message: 'x'.repeat(6144) },
+    actor: { login: 'bot', padding: 'y'.repeat(6144) },
+    padding: 'z'.repeat(6144), ...over,
+  });
+  const fullRuns = Array.from({ length: 80 }, (_, i) => bulkyRun(i));
+  const fullPayload = JSON.stringify({ total_count: 80, workflow_runs: fullRuns });
+  assert.ok(fullPayload.length > 1024 * 1024,
+    'oversized fixture must exceed the default 1 MiB buffer');
+  // SC-01: reproduce the OLD overflow with a real child whose stdout exceeds
+  // the default 1 MiB buffer (the run-inventory mechanism), not a mocked error.
+  const emitOversized = ['-e', "process.stdout.write('x'.repeat(2*1024*1024))"];
+  assert.throws(() => execFileSync(process.execPath, emitOversized,
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+    (error) => error.code === 'ENOBUFS',
+    'default 1 MiB buffer must overflow on oversized run-inventory output');
+  // The documented finite defensive cap absorbs the same oversized output.
+  assert.equal(execFileSync(process.execPath, emitOversized,
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: RUN_INVENTORY_MAX_BUFFER }).length, 2 * 1024 * 1024,
+    'finite defensive cap processes oversized output without ENOBUFS');
+  // The repair bounds the payload by projecting ONLY consumed fields.
+  const projectRuns = (payload) => JSON.stringify({
+    total_count: payload.total_count,
+    workflow_runs: payload.workflow_runs.map((run) => ({
+      id: run.id, display_title: run.display_title, event: run.event,
+      head_branch: run.head_branch, created_at: run.created_at,
+      repository: { full_name: run.repository.full_name },
+      head_repository: { full_name: run.head_repository.full_name },
+    })),
+  });
+  const projected = projectRuns(JSON.parse(fullPayload));
+  assert.ok(projected.length < 64 * 1024, 'projection must bound the payload');
+  const fetchCalls = [];
+  const boundedExecute = (args, options) => {
+    fetchCalls.push({ args, options });
+    assert.equal(options.maxBuffer, RUN_INVENTORY_MAX_BUFFER,
+      'a finite defensive maxBuffer is required');
+    assert.ok(args.includes('--jq') && args.includes(RUN_INVENTORY_JQ),
+      'the fetch must request the consumed-field projection');
+    return projected;
+  };
+  const inventory = fetchRunInventory('BestNathan/nession',
+    'agent-staging-convergence-review.yml', boundedExecute);
+  assert.equal(inventory.total_count, 80);
+  assert.equal(inventory.workflow_runs.length, 80);
+  assert.equal(inventory.workflow_runs[0].display_title, fullRuns[0].display_title);
+  assert.equal(fetchCalls.length, 1, 'exactly one bounded inventory fetch');
+  // SC-02: truncated / malformed / missing / inconsistent inventories fail
+  // closed at the parse boundary (no execute, no dispatch, no mutation).
+  assert.throws(() => parseRunInventory(projected.slice(0, projected.length - 5)),
+    /truncated or malformed run inventory/);
+  assert.throws(() => parseRunInventory(''), /truncated or malformed run inventory/);
+  assert.throws(() => parseRunInventory(JSON.stringify({ total_count: 1 })),
+    /workflow_runs must be an array/);
+  assert.throws(() => parseRunInventory(JSON.stringify({ workflow_runs: [] })),
+    /inconsistent total_count/);
+  assert.throws(() => parseRunInventory(JSON.stringify(
+    { total_count: 0, workflow_runs: [bulkyRun(0)] })), /inconsistent total_count/);
+  // SC-02: a child overflow even past the defensive cap is an explicit
+  // bounded-policy denial, never an uncontrolled crash or a dispatch.
+  const denialCalls = [];
+  assert.throws(() => fetchRunInventory('BestNathan/nession',
+    'agent-staging-convergence-review.yml', (args, options) => {
+      denialCalls.push({ args, options });
+      throw Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
+    }), /bounded run-inventory fetch denied/);
+  assert.equal(denialCalls.length, 1, 'denial performs no follow-up call');
+  // SC-01/02: the projected fields retain exactly the authenticated identity
+  // the dedupe needs; wrong repo/base/branch/event/title or stale time never
+  // match (one canonical matcher shared by both consumers).
+  const identity = 'Convergence conflict staging ' + 'a'.repeat(40) + ' ' + 'b'.repeat(40);
+  const matchInventory = parseRunInventory(projected);
+  assert.equal(matchRunIdentity(matchInventory,
+    { title: identity, repo: 'BestNathan/nession' })?.id, 1000);
+  assert.equal(matchRunIdentity(matchInventory,
+    { title: identity, repo: 'attacker/repo' }), undefined, 'wrong repo never matches');
+  assert.equal(matchRunIdentity(matchInventory,
+    { title: 'Convergence conflict staging ' + 'c'.repeat(40) + ' ' + 'b'.repeat(40),
+      repo: 'BestNathan/nession' }), undefined, 'stale SHA pair never matches');
+  const wrongIdentity = parseRunInventory(projectRuns({ total_count: 4, workflow_runs: [
+    bulkyRun(0, { head_repository: { full_name: 'attacker/repo' } }),
+    bulkyRun(1, { head_branch: 'staging' }),
+    bulkyRun(2, { event: 'push' }),
+    bulkyRun(3, { repository: { full_name: 'attacker/repo' } }),
+  ] }));
+  assert.equal(matchRunIdentity(wrongIdentity,
+    { title: identity, repo: 'BestNathan/nession' }), undefined,
+    'wrong head repo/base/branch/event never matches');
+  const auditMatch = parseRunInventory(projectRuns({ total_count: 2, workflow_runs: [
+    bulkyRun(0, { display_title: 'Issue Audit #5', created_at: '2026-11-19T00:00:00Z' }),
+    bulkyRun(1, { display_title: 'Issue Audit #5', created_at: '2026-11-20T01:00:00Z' }),
+  ] }));
+  assert.equal(matchRunIdentity(auditMatch, { title: 'Issue Audit #5',
+    repo: 'BestNathan/nession', createdAfter: '2026-11-20T00:00:00Z' })?.id, 1001,
+    'audit matcher rejects runs older than the Issue');
+  // SC-02: consumer-level fail-closed. An unbounded review inventory blocks
+  // without dispatching; a matching run is reused without a new dispatch.
+  const prevToken = process.env.DISPATCH_GITHUB_TOKEN;
+  process.env.DISPATCH_GITHUB_TOKEN = 'self-test-token';
+  try {
+    const reviewArgs = ['BestNathan/nession', { number: 4077 }, 'analyze',
+      { main_sha: 'a'.repeat(40) }, { branch: 'staging', sha: 'b'.repeat(40) }];
+    const unbounded = dispatchConflictReview(...reviewArgs, () => projectRuns(
+      { total_count: 101, workflow_runs: fullRuns }));
+    assert.equal(unbounded.status, 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY');
+    const reused = dispatchConflictReview(...reviewArgs, () => projectRuns(
+      { total_count: 1, workflow_runs: [bulkyRun(0)] }));
+    assert.equal(reused.status, 'EXISTING_ANALYSIS');
+    assert.equal(reused.run_id, 1000);
+    const auditArgs = ['BestNathan/nession',
+      { number: 5, created_at: '2026-11-20T00:00:00Z' }];
+    const existingAudit = dispatchBatchAudit(...auditArgs, () => projectRuns(
+      { total_count: 1, workflow_runs: [
+        bulkyRun(0, { display_title: 'Issue Audit #5', created_at: '2026-11-20T01:00:00Z' })] }));
+    assert.equal(existingAudit.status, 'EXISTING_AUDIT');
+    const truncatedAudit = dispatchBatchAudit(...auditArgs, () => projectRuns(
+      { total_count: 100, workflow_runs: Array.from({ length: 100 }, (_, i) =>
+        bulkyRun(i, { display_title: 'Issue Audit #999', created_at: '2026-11-21T00:00:00Z' })) }));
+    assert.equal(truncatedAudit.status, 'BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED');
+  } finally {
+    if (prevToken === undefined) delete process.env.DISPATCH_GITHUB_TOKEN;
+    else process.env.DISPATCH_GITHUB_TOKEN = prevToken;
+  }
   process.stdout.write('staging convergence self-test: PASS\n');
 }
 

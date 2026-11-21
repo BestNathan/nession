@@ -12,7 +12,9 @@ import {
   parsePreMergeIssueNumbers,
   parseSuccessCriteria,
 } from './requirement-acceptance.mjs';
-import { planStage, validateAcceptancePlan } from './acceptance-plan.mjs';
+import { planStage, validateAcceptancePlan, canonicalAcceptanceStage } from './acceptance-plan.mjs';
+import {collectPrRequiredQualityAsync, validPrRequiredQualityReceipt}
+  from './acceptance-pr-web-quality-receipt.mjs';
 import { parseCommand } from './github-comment-command.mjs';
 
 const SHA = /^[0-9a-f]{40}$/i;
@@ -60,9 +62,12 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   if (merged.length === 0) {
     return { action: 'pending', reason: 'no verified merged implementation PR' };
   }
+  // GitOps is Nession's reviewed orphan deployment-source branch (#4110).
+  // A merged GitOps PR is a valid implementation relation, never a deployed
+  // runtime attestation. Arbitrary branch names remain rejected.
   if (associatedPrs.some(pr =>
     (pr.state === 'open' && !pr.merged_at) ||
-    (pr.merged_at && !['staging', 'main'].includes(pr.base?.ref)))) {
+    (pr.merged_at && !['staging', 'main', 'gitops'].includes(pr.base?.ref)))) {
     return { action: 'pending', reason: 'associated active PR or invalid merge target' };
   }
   return { action: 'close', reason: 'accepted SCs and merged implementation PRs' };
@@ -110,7 +115,8 @@ export async function verifiedManualSourcePulls(repository, issueNumber, prs, to
 }
 
 export function selectManualAgentRuns(issue, prs, {
-  verifiedStagingSha = null, verifiedMainSha = null, verifiedPrSha = null, diagnostics = [],
+  verifiedStagingSha = null, verifiedMainSha = null, verifiedPrSha = null,
+  verifiedPrAnchors = [], diagnostics = [],
 } = {}) {
   const success = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
@@ -146,13 +152,18 @@ export function selectManualAgentRuns(issue, prs, {
         .filter(Boolean));
       const heads = [...new Set(candidates.map(p => p.head?.sha)
         .filter(sha => SHA.test(String(sha || ''))))];
-      // An authenticated human-selected PR head disambiguates multiple
-      // implementations, but never overwrites an already accepted SC source.
-      // The caller must first prove the SHA belongs to a merged, linked PR.
+      // Previously accepted SCs are immutable. A human-selected current
+      // merged PR head can prove that every old accepted SHA belongs to its
+      // *same* implementing PR ancestry (trusted GitHub compare + commit→PR).
+      // This authorizes evaluating only the Pending SCs at the newer head,
+      // not silently replacing earlier accepted evidence (#4076).
+      const anchorProof = new Set(verifiedPrAnchors);
       const selected = acceptedRefs.size
-        ? (acceptedRefs.size === 1 && heads.includes([...acceptedRefs][0]) &&
-            (!verifiedPrSha || verifiedPrSha === [...acceptedRefs][0])
-          ? [...acceptedRefs][0] : null)
+        ? (verifiedPrSha && heads.includes(verifiedPrSha)
+          ? ([...acceptedRefs].every(ref =>
+              ref === verifiedPrSha || anchorProof.has(ref)) ? verifiedPrSha : null)
+          : (acceptedRefs.size === 1 && heads.includes([...acceptedRefs][0])
+            ? [...acceptedRefs][0] : null))
         : verifiedPrSha
           ? (heads.includes(verifiedPrSha) ? verifiedPrSha : null)
           : (heads.length === 1 ? heads[0] : null);
@@ -187,6 +198,58 @@ export function selectManualAgentRuns(issue, prs, {
   return [...planned].map(([stage, sha]) => ({ stage, target_ref: sha }));
 }
 
+/** Trust-gated re-evaluation of a merged implementation's newer PR head.
+ * Every already-Pass PR-stage source must be an actual ancestor of the
+ * selected head in the same merged Issue-linked PR, never merely a prose ref.
+ * No accepted criterion is mutated by this function (#4076).
+ */
+export async function verifyManualAcceptedPrAnchors(repository, issue, prs,
+  selectedSha, token, request = githubRequest) {
+  if (!SHA.test(String(selectedSha ?? '')) || !token || !Array.isArray(prs))
+    throw Error('invalid manual PR anchor proof request');
+  const selected = prs.filter(pr => pr.merged_at &&
+    pr.head?.sha === selectedSha && ['main','staging'].includes(pr.base?.ref));
+  if (selected.length !== 1)
+    throw Error('ambiguous or missing merged implementing PR for selected SHA');
+  const pr = selected[0];
+  const report = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'));
+  const criteria = parseSuccessCriteria(extractSection(issue.body, 'Success Criteria'));
+  const plan = validateAcceptancePlan(issue.body, criteria.criteria.keys(), report.rows);
+  if (report.errors.length || criteria.errors.length || plan.errors.length || !plan.plan)
+    throw Error('invalid authoritative Issue Acceptance contract');
+  const anchors = new Set();
+  for (const [id, row] of report.rows) {
+    if (planStage(plan.plan.get(id)) !== 'pr' || !criteria.criteria.get(id)?.checked ||
+        !['pass','n/a'].includes(String(row.result).toLowerCase())) continue;
+    const ref = /\bref ([0-9a-f]{40});/i.exec(String(row.evidence ?? ''))?.[1];
+    if (ref) anchors.add(ref);
+  }
+  if (anchors.size > 8) throw Error('too many PR Acceptance source anchors');
+  const { prefix } = repoParts(repository);
+  const verified = [];
+  for (const oldSha of anchors) {
+    if (oldSha === selectedSha) { verified.push(oldSha); continue; }
+    const [comparison, related] = await Promise.all([
+      request(prefix + '/compare/' + oldSha + '...' + selectedSha, { token }),
+      request(prefix + '/commits/' + oldSha + '/pulls?per_page=100', { token }),
+    ]);
+    const ancestral = comparison?.base_commit?.sha === oldSha &&
+      comparison?.merge_base_commit?.sha === oldSha &&
+      comparison?.behind_by === 0 && comparison?.ahead_by > 0 &&
+      comparison?.status === 'ahead';
+    const samePr = Array.isArray(related) && related.length < 100 &&
+      related.some(p => p.number === pr.number && p.merged_at &&
+        p.head?.sha === selectedSha &&
+        p.head?.repo?.full_name === repository &&
+        p.base?.repo?.full_name === repository &&
+        p.base?.ref === pr.base.ref);
+    if (!ancestral || !samePr)
+      throw Error('accepted PR source lacks authenticated same-PR ancestry: ' + oldSha);
+    verified.push(oldSha);
+  }
+  return verified;
+}
+
 async function githubRequest(path, { token, method = 'GET', body } = {}) {
   if (!token) throw Error('GITHUB_TOKEN/GH_TOKEN is required');
   const response = await fetch('https://api.github.com' + path, {
@@ -219,7 +282,14 @@ async function relatedPulls(repository, issueNumber, token, includePr = null, re
   if (found.incomplete_results || found.total_count > 100 || !Array.isArray(found.items)) {
     throw Error('incomplete implementation PR discovery; refusing Issue closure');
   }
-  const numbers = new Set(found.items.map(pr => pr.number));
+  // Search can surface the Issue itself or another non-PR item; only an item
+  // GitHub typed as a pull request whose number is not this Issue's may be
+  // fetched as /pulls/<n> (#4214). A claimed PR that cannot be read still
+  // fails closed below.
+  const numbers = new Set(found.items
+    .filter(item => item && Number.isSafeInteger(item.number) &&
+      item.number !== issueNumber && item.pull_request)
+    .map(item => item.number));
   if (includePr) numbers.add(includePr);
   const prs = [];
   for (const number of numbers) {
@@ -341,8 +411,83 @@ async function humanReopened(repository, issueNumber, token, request = githubReq
   return hasUnrecoveredHumanReopen(events, comments);
 }
 
+// #4146: canonical Issue closure consumes the SAME required-Quality source
+// attestor as PR SC normalization. Historical text Pass and an unrelated
+// merged PR cannot together grant completion of a different source HEAD.
+export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality) {
+  const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
+  const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
+  const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
+  if (criteria.errors.length || report.errors.length || plan.errors.length) {
+    return {qualified:false, reason:'invalid Issue SC/Acceptance contract'};
+  }
+  const heads = new Set();
+  for (const [id, sc] of criteria.criteria) {
+    const row = report.rows.get(id);
+    const stage = plan.plan ? planStage(plan.plan.get(id)) :
+      canonicalAcceptanceStage(row?.stage);
+    if (stage !== 'pr' || row?.result === 'N/A') continue;
+    // decideIssueClosure has already checked all SC states; this method
+    // requires the independent exact-HEAD proof for each PR-stage Pass.
+    if (!sc.checked || row?.result !== 'Pass') {
+      return {qualified:false, reason:id+' is not a qualified PR-stage Pass'};
+    }
+    const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source (?:agent(?:-[a-z0-9-]+)?|case-runner);/i
+      .exec(String(row.evidence ?? ''));
+    if (!match) {
+      return {qualified:false, reason:id+' lacks a canonical exact-source PR receipt'};
+    }
+    const head = match[1].toLowerCase();
+    const authorizedPr = Array.isArray(prs) && prs.some(pr =>
+      Boolean(pr.merged_at) && pr.head?.sha === head &&
+      ['main','staging','gitops'].includes(pr.base?.ref));
+    if (!authorizedPr) {
+      return {qualified:false,
+        reason:id+' accepted source HEAD is not the merged Issue implementation HEAD'};
+    }
+    heads.add(head);
+  }
+  if (heads.size > 16) return {qualified:false, reason:'too many PR Quality sources'};
+  for (const head of heads) {
+    // readQuality is always a trusted GitHub Run/Job/Step reader in production.
+    const evidence = await readQuality(head);
+    if (evidence?.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(evidence.receipt, head)) {
+      return {qualified:false,
+        reason:'accepted PR source '+head+' lacks independently verified required Quality'};
+    }
+  }
+  return {qualified:true, sources:[...heads]};
+}
+
+// Native GitHub PR closing keywords can close an Issue outside our trusted
+// reconcileIssue path. The issues:closed guard must consume the SAME merged
+// implementation+exact-HEAD Quality policy rather than checked rows alone.
+export async function assessNativeCompletedIssueSource(repository, number, token, {
+  request = githubRequest, qualityReader = null,
+} = {}) {
+  const {prefix} = repoParts(repository);
+  if (!Number.isSafeInteger(number) || number <= 0)
+    throw Error('invalid native Issue number');
+  const issue = await request(prefix + '/issues/' + number, {token});
+  if (!issue || issue.number !== number) throw Error('native Issue identity mismatch');
+  if (issue.state !== 'closed' || issue.state_reason === 'not_planned' ||
+      !isAcceptanceIssue(issue) || issue.pull_request)
+    return {qualified:true, reason:'not a completed native Acceptance Issue'};
+  const prs = await relatedPulls(repository, number, token, null, request);
+  const decision = decideIssueClosure({...issue,state:'open'},prs);
+  if (decision.action !== 'close')
+    return {qualified:false,reason:'canonical Issue lifecycle: '+decision.reason};
+  const qualified = await qualifyIssuePrSourceForClosure(issue,prs,
+    qualityReader ?? (sha => collectPrRequiredQualityAsync(sha,
+      path => request(path, {token}))));
+  return qualified.qualified
+    ? {qualified:true,reason:'merged source and Quality verified'}
+    : {qualified:false,reason:'PR source Quality: '+qualified.reason};
+}
+
 async function reconcileIssue(repository, number, token, { includePr = null,
-  request = githubRequest } = {}) {
+  request = githubRequest, qualityReader = null } = {}) {
   const { prefix } = repoParts(repository);
   const issue = await request(prefix + '/issues/' + number, { token });
   if (!issue || issue.number !== number) throw Error('Issue number mismatch');
@@ -353,6 +498,13 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   const manualReopened = await humanReopened(repository, number, token, request);
   const decision = decideIssueClosure(issue, prs, { manualReopened });
   if (decision.action !== 'close') return { ...decision, prs: prs.map(pr => pr.number) };
+  const qualified = await qualifyIssuePrSourceForClosure(issue, prs,
+    qualityReader ?? (head => collectPrRequiredQualityAsync(head,
+      path => request(path, {token}))));
+  if (!qualified.qualified) {
+    return {action:'pending', reason:'PR source Quality: '+qualified.reason,
+      prs:prs.map(pr => pr.number)};
+  }
   // Re-read before mutation: a later Issue edit or reopen must not be raced by
   // a stale evaluation. GitHub's Issues API has no compare-and-set PATCH.
   const fresh = await request(prefix + '/issues/' + number, { token });
@@ -363,6 +515,41 @@ async function reconcileIssue(repository, number, token, { includePr = null,
     token, method: 'PATCH', body: { state: 'closed', state_reason: 'completed' },
   });
   return { action: 'closed', reason: decision.reason, prs: prs.map(pr => pr.number) };
+}
+
+// Owner /accept may request a *new* PR Acceptance only when every locked,
+// already-Pass PR-stage source at the previous SHA had actually failed exact
+// Quality and current HEAD is a verified descendant in the SAME merged PR.
+// verifyManualAcceptedPrAnchors authenticates same-PR ancestry separately;
+// this selector never fabricates a Result or touches accepted Issue rows.
+export async function qualifyManualFailedQualityRecovery(issue, targetSha,
+  acceptedPrAnchors, readQuality) {
+  if (!SHA.test(String(targetSha || '')) ||
+      !Array.isArray(acceptedPrAnchors) ||
+      typeof readQuality !== 'function') return false;
+  const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
+  const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
+  const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
+  if (report.errors.length || criteria.errors.length || plan.errors.length ||
+      !plan.plan) return false;
+  const accepted = [];
+  for (const [id, entry] of plan.plan) {
+    if (planStage(entry) !== 'pr' || entry.method !== 'agent') continue;
+    const row = report.rows.get(id);
+    if (!criteria.criteria.get(id)?.checked || row?.result !== 'Pass') continue;
+    const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source agent(?:-[a-z0-9-]+)?;/i
+      .exec(String(row.evidence ?? ''));
+    if (!match) return false;
+    accepted.push(match[1].toLowerCase());
+  }
+  const previous = [...new Set(accepted)];
+  if (previous.length !== 1 || previous[0] === targetSha ||
+      !acceptedPrAnchors.includes(previous[0])) return false;
+  const oldQuality = await readQuality(previous[0]);
+  if (oldQuality?.status !== 'fail') return false;
+  const currentQuality = await readQuality(targetSha);
+  return currentQuality?.status === 'pass' &&
+    validPrRequiredQualityReceipt(currentQuality.receipt, targetSha);
 }
 
 async function handleManual(event, repository, actor, token, request = githubRequest) {
@@ -400,18 +587,32 @@ async function handleManual(event, repository, actor, token, request = githubReq
   if (command.targetPrSha && !verifiedPrSha) {
     throw Error('unverified or unmerged Issue-linked exact PR head');
   }
+  const verifiedPrAnchors = verifiedPrSha
+    ? await verifyManualAcceptedPrAnchors(repository, issue, sourcePrs,
+      verifiedPrSha, token, request) : [];
   const diagnostics = [];
   if (!sourcePrs.length && prs.length)
     diagnostics.push('reference-only or unverified PR: no source-aligned implementation');
   const directlySelected = selectManualAgentRuns(issue, sourcePrs,
-    { verifiedMainSha, verifiedPrSha, diagnostics });
+    { verifiedMainSha, verifiedPrSha, verifiedPrAnchors, diagnostics });
+  // A historical model Pass from a FAILED exact-HEAD Quality run must not
+  // permanently lock the same merged implementing PR after a green repair.
+  // The trusted evaluator independently selects and re-attests the stale
+  // criteria; no old Reviewer/SC record is promoted by this dispatch.
+  if (verifiedPrSha && !directlySelected.some(x => x.stage === 'pr') &&
+      await qualifyManualFailedQualityRecovery(issue, verifiedPrSha,
+        verifiedPrAnchors, sha => collectPrRequiredQualityAsync(sha,
+          path => request(path, {token})))) {
+    directlySelected.push({stage:'pr',target_ref:verifiedPrSha});
+  }
   // Never invent a staging association. When the source PR was correctly
   // merged to main (e.g. scripts-only), authenticate its actual ancestry in
   // staging before scheduling the pending merged/staging Agent criterion.
   const verifiedStagingSha = directlySelected.some(run => run.stage === 'staging')
     ? null : await verifiedStagingTargetForMainPR(repository, sourcePrs, token, request);
   const runs = verifiedStagingSha
-    ? selectManualAgentRuns(issue, sourcePrs, { verifiedStagingSha, verifiedMainSha, verifiedPrSha, diagnostics })
+    ? selectManualAgentRuns(issue, sourcePrs,
+      { verifiedStagingSha, verifiedMainSha, verifiedPrSha, verifiedPrAnchors, diagnostics })
     : directlySelected;
   for (const run of runs) {
     await request(prefix + '/actions/workflows/agent-sc-acceptance.yml/dispatches', {
@@ -440,7 +641,63 @@ async function selfTest() {
   const issue = { number: 19, state: 'open', labels: [{ name: 'bug' }], body };
   const pr = { number: 21, title: 'fix (#19)', body: 'Fixes #19', head: { sha },
     base: { ref: 'staging' }, merged_at: '2026-11-11T01:00:00Z', merge_commit_sha: sha };
+  // #4146: signed SC Pass alone cannot close an Issue when the exact
+  // implementing PR head failed Quality or no longer matches the merged PR.
+  const qualityReceipt = {
+    kind:'pr_required_quality_v1', repository:'BestNathan/nession',
+    workflow:'.github/workflows/ci-quality.yml', head_sha:sha,
+    result:'success', run_id:101, run_attempt:1, scope_job_id:102,
+    web_check_job_id:103,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  };
+  const fixtureQuality = async head => ({status:'pass',
+    receipt:{...qualityReceipt,head_sha:head}});
+  assert.equal((await qualifyIssuePrSourceForClosure(issue,[pr],fixtureQuality)).qualified,
+    true,'source-aligned qualified PR is eligible for eventual closure');
+  for (const blocked of [
+    {prs:[{...pr,head:{sha:'b'.repeat(40)}}],reader:fixtureQuality},
+    {prs:[pr],reader:async()=>({status:'fail',reason:'#4143 web-check failure'})},
+    {prs:[pr],reader:async()=>({status:'pending',reason:'CI in progress'})},
+    {prs:[pr],reader:async()=>({status:'pass',receipt:{
+      ...qualityReceipt,head_sha:'b'.repeat(40)}})},
+    {prs:[pr],reader:async()=>({status:'pass',receipt:{
+      ...qualityReceipt,run_attempt:0}})},
+    {prs:[{...pr,merged_at:null}],reader:fixtureQuality},
+  ]) assert.equal((await qualifyIssuePrSourceForClosure(issue,blocked.prs,
+    blocked.reader)).qualified,false,
+    'failed/pending/stale Quality or amended/nonmerged head cannot close');
+  const liveNegativeHead='fa04599e1e9bb3f344d9dc43597f477c4063afc2';
+  const originalIssue={...issue,body:body.replaceAll(sha,liveNegativeHead)};
+  const failedPr={...pr,head:{sha:liveNegativeHead}};
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,[failedPr],
+    async()=>({status:'fail',reason:'Quality run 44694739296'}))).qualified,false,
+    'real #4143 source was not Quality qualified despite approved Reviewer');
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,
+    [{...pr,head:{sha:'b'.repeat(40)}}],fixtureQuality)).qualified,false,
+    'Owner #4145 merged patch cannot retroactively qualify source #4143');
+  assert.equal((await qualifyIssuePrSourceForClosure(originalIssue,
+    [{...failedPr,head:{sha:'c'.repeat(40)}}],fixtureQuality)).qualified,false,
+    'amended PR head invalidates previously accepted source');
   assert.equal(decideIssueClosure(issue, [pr]).action, 'close');
+  const gitopsPr = { ...pr, number: 22, state: 'closed',
+    base: { ref: 'gitops' }, merged_at: '2026-11-18T09:49:12Z' };
+  assert.equal(decideIssueClosure(issue, [pr, gitopsPr]).action, 'close',
+    'merged GitOps and main/staging implementations are valid closure targets');
+  assert.equal(decideIssueClosure(issue, [gitopsPr]).action, 'close',
+    'a GitOps-only implementation may close only when all SCs are accepted');
+  assert.equal(decideIssueClosure(issue,
+    [pr, { ...gitopsPr, state: 'open', merged_at: null }]).action, 'pending',
+    'an active unmerged GitOps implementation still blocks closure');
+  assert.equal(decideIssueClosure(issue,
+    [pr, { ...gitopsPr, base: { ref: 'prototype' } }]).action, 'pending',
+    'unapproved merged orphan branches still block closure');
+  assert.equal(decideIssueClosure({
+    ...issue, body: body.replace('| SC-01 | Pass |', '| SC-01 | Pending |'),
+  }, [pr, gitopsPr]).action, 'pending',
+    'GitOps merge never substitutes for required SC Acceptance');
   // Regression #3491: a main merge with unchecked/unevaluated main-stage SC
   // must remain open for the merged-SHA Acceptance selector to discover it.
   const mainPendingBody = body.replace('- [x] SC-01', '- [ ] SC-01')
@@ -505,6 +762,33 @@ async function selfTest() {
     { ...issue, body: body.replace('| Pass |', '| Pending |') }, [pr]),
     [{ stage: 'pr', target_ref: sha }]);
   assert.deepEqual(selectManualAgentRuns(issue, [pr]), []);
+  // #4146: owner recovery is not a text override. It requires the existing
+  // independently authenticated same-PR anchor and exact current Quality.
+  const qualityFixture={status:'pass',receipt:{
+    kind:'pr_required_quality_v1',repository:'BestNathan/nession',
+    workflow:'.github/workflows/ci-quality.yml',
+    head_sha:'b'.repeat(40),result:'success',run_id:100,run_attempt:1,
+    scope_job_id:101,web_check_job_id:102,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  }};
+  const qualityReader=async ref=>ref===sha
+    ? {status:'fail',reason:'real failed Quality source'}
+    : qualityFixture;
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[sha],qualityReader),true);
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[],qualityReader),false);
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[sha],async()=>qualityFixture),false,
+    'a formerly green old accepted source remains immutable');
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'b'.repeat(40),[sha],async()=>({status:'pending'})),false);
+  assert.equal(await qualifyManualFailedQualityRecovery(issue,
+    'c'.repeat(40),[sha],qualityReader),false,
+    'wrong target SHA cannot borrow another PR Quality run');
   // #3545: PR #3529 implements the Issue, while later #3540 only mentions it.
   const actual = {...pr,number:3529,title:'fix Hosting test (#3528)',
     body:'Refs #3528',head:{...pr.head,sha:'7c7d36f9456d901d252abcfbbe5d2a991f202ba7'}};
@@ -577,6 +861,78 @@ async function selfTest() {
   assert.deepEqual(selectManualAgentRuns(unknownSource,[actual,ambiguous],
     {diagnostics:ambiguousReasons}),[]);
   assert.match(ambiguousReasons.join(' '),/conflicting/);
+  // #4076: prior Pass source is an authenticated ancestor of this very
+  // merged implementing PR; select the newest head for Pending criteria only.
+  const updatedHead = 'd'.repeat(40);
+  const mergedSamePr = {...nativeActual, merged_at:'2026-11-19T10:00:00Z',
+    state:'closed', head:{...nativeActual.head,sha:updatedHead}};
+  const sourceAnchor = nativeActual.head.sha;
+  const verifiedCompare = {base_commit:{sha:sourceAnchor},
+    merge_base_commit:{sha:sourceAnchor},behind_by:0,ahead_by:5,status:'ahead'};
+  const samePrWitness = [{number:mergedSamePr.number, merged_at:mergedSamePr.merged_at,
+    head:mergedSamePr.head,base:mergedSamePr.base}];
+  const ancestryRead = async path => {
+    if (path.includes('/compare/')) return verifiedCompare;
+    if (path.endsWith('/pulls?per_page=100')) return samePrWitness;
+    throw Error('unexpected PR ancestry fetch: '+path);
+  };
+  assert.deepEqual(await verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',ancestryRead),
+    [sourceAnchor]);
+  assert.deepEqual(selectManualAgentRuns(anchored,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor]}),
+    [{stage:'pr',target_ref:updatedHead}]);
+  assert.deepEqual(selectManualAgentRuns(anchored,[mergedSamePr],
+    {verifiedPrSha:updatedHead}),[],
+    'a newer head without authenticated original ancestry must fail closed');
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/')
+      ? {...verifiedCompare,behind_by:1,status:'diverged'} : samePrWitness),
+  /lacks authenticated same-PR ancestry/);
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/') ? verifiedCompare
+      : [{...samePrWitness[0],number:9999}]),
+  /lacks authenticated same-PR ancestry/);
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[mergedSamePr],updatedHead,'fixture-token',
+    async path => path.includes('/compare/') ? verifiedCompare
+      : [{...samePrWitness[0],head:{...samePrWitness[0].head,
+          repo:{full_name:'attacker/fork'}}}]),
+  /lacks authenticated same-PR ancestry/,
+  'forked or spoofed PR association may not attest an accepted old head');
+  await assert.rejects(verifyManualAcceptedPrAnchors('BestNathan/nession',
+    anchored,[{...mergedSamePr,merged_at:null}],updatedHead,
+    'fixture-token',ancestryRead),
+  /ambiguous or missing merged implementing PR/,
+  'an unmerged implementing PR never authorizes historic source recovery');
+  const secondAnchor = 'c'.repeat(40);
+  const multiAnchorBody = twoScBody
+    .replace('- [ ] SC-02 exact-head Quality receipt',
+      '- [x] SC-02 earlier accepted + third Pending\n- [ ] SC-03 exact-head Quality receipt')
+    .replace('  SC-02:\n    when: pr\n    method: agent\n',
+      '  SC-02:\n    when: pr\n    method: agent\n'+
+      '  SC-03:\n    when: pr\n    method: agent\n')
+    .replace('| SC-02 | Pending | awaiting independently authenticated Web Quality |',
+      '| SC-02 | Pass | run 101; ref '+secondAnchor+
+      '; source agent-qwen; test: second source |\n'+
+      '| SC-03 | Pending | awaiting independently authenticated Web Quality |');
+  const multiAnchorIssue = {...anchored,body:multiAnchorBody};
+  const multiAnchorRead = async path => path.includes('/compare/')
+    ? {base_commit:{sha:path.split('/compare/')[1].split('...')[0]},
+      merge_base_commit:{sha:path.split('/compare/')[1].split('...')[0]},
+      behind_by:0,ahead_by:5,status:'ahead'}
+    : samePrWitness;
+  assert.deepEqual(await verifyManualAcceptedPrAnchors('BestNathan/nession',
+    multiAnchorIssue,[mergedSamePr],updatedHead,'fixture-token',multiAnchorRead),
+    [sourceAnchor,secondAnchor]);
+  assert.deepEqual(selectManualAgentRuns(multiAnchorIssue,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor,secondAnchor]}),
+    [{stage:'pr',target_ref:updatedHead}]);
+  assert.deepEqual(selectManualAgentRuns(multiAnchorIssue,[mergedSamePr],
+    {verifiedPrSha:updatedHead,verifiedPrAnchors:[sourceAnchor]}),[],
+    'partial ancestor proof must not authorize a mixed-source acceptance');
   const stagedBody = body.replace('when: pr\n',
     'when: merged\n    branch: staging\n').replace('| Pass |', '| Pending |');
   const mainPr = { ...pr, base: { ref: 'main' } };
@@ -705,7 +1061,7 @@ async function selfTest() {
     base:{...pr.base,repo:{full_name:'X/y'}}};
   const mock = async (path, options = {}) => {
     if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
-      items: [{ number: 21 }] };
+      items: [{ number: 21, pull_request: {} }] };
     if (path.endsWith('/pulls/21')) return effectivePr;
     if (path.endsWith('/commits/'+sha+'/pulls?per_page=100'))
       return [{number:21,head:effectivePr.head,base:effectivePr.base}];
@@ -727,37 +1083,71 @@ async function selfTest() {
     }
     throw Error('unexpected fixture API path ' + path);
   };
-  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock });
+  // GitHub-native completion must not bypass exact-source qualification.
+  const nativeCloseFixtureRead=async(path,opts={}) =>
+    path.endsWith('/issues/19') && opts.method!=='PATCH'
+      ? {...live,state:'closed',state_reason:'completed'} : mock(path,opts);
+  assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
+    request:nativeCloseFixtureRead,qualityReader:fixtureQuality})).qualified,true);
+  assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
+    request:nativeCloseFixtureRead,qualityReader:async()=>({status:'fail'})})).qualified,false);
+  assert.equal((await assessNativeCompletedIssueSource('X/y',19,'fixture-token',{
+    request:async(path,opts)=>{
+      if(path.endsWith('/pulls/21'))return {...effectivePr,merged_at:null};
+      return nativeCloseFixtureRead(path,opts);
+    },qualityReader:fixtureQuality})).qualified,false);
+  // A search result may include the Issue itself (a non-PR item). It must
+  // never be fetched as /pulls/<issue-number>; the real merged PR still
+  // qualifies (#4214).
+  const searchWithIssue = async (path, opts = {}) =>
+    path.startsWith('/search/issues?')
+      ? { incomplete_results: false, total_count: 2,
+          items: [{ number: 19 }, { number: 21, pull_request: {} }] }
+      : nativeCloseFixtureRead(path, opts);
+  assert.equal((await assessNativeCompletedIssueSource('X/y', 19, 'fixture-token', {
+    request: searchWithIssue, qualityReader: fixtureQuality })).qualified, true);
+  // A search item that claims to be a PR but cannot be read still fails
+  // closed; the filter must not silently drop a real PR.
+  const unreadableClaimedPr = async (path, opts = {}) => {
+    if (path.startsWith('/search/issues?'))
+      return { incomplete_results: false, total_count: 2,
+        items: [{ number: 21, pull_request: {} }, { number: 22, pull_request: {} }] };
+    if (path.endsWith('/pulls/22')) throw Error('GitHub GET /repos/X/y/pulls/22: 404');
+    return nativeCloseFixtureRead(path, opts);
+  };
+  await assert.rejects(() => assessNativeCompletedIssueSource('X/y', 19, 'fixture-token', {
+    request: unreadableClaimedPr, qualityReader: fixtureQuality }), /404/);
+  const once = await reconcileIssue('X/y', 19, 'fixture-token', { request: mock, qualityReader: fixtureQuality });
   assert.equal(once.action, 'closed');
   assert.equal(writes, 1);
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'skip');
+    { request: mock, qualityReader: fixtureQuality })).action, 'skip');
   assert.equal(writes, 1, 'repeat delivery must never write another closure');
   // Acceptance-first: a trusted Pass arriving before merge cannot close;
   // the subsequent merge event converges using the already projected proof.
   live = { ...issue, updated_at: '2026-11-11T01:00:01Z' };
   effectivePr = { ...effectivePr, merged_at: null };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'pending');
+    { request: mock, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 1);
   effectivePr = {...pr, head:{...pr.head,repo:{full_name:'X/y'}},
     base:{...pr.base,repo:{full_name:'X/y'}}};
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'closed');
+    { request: mock, qualityReader: fixtureQuality })).action, 'closed');
   assert.equal(writes, 2);
   // Merge-first: missing SC proof keeps Issue Open until the later
   // authorized Acceptance projection causes another reconciliation.
   live = { ...issue, updated_at: '2026-11-11T01:00:02Z',
     body: body.replace('| Pass |', '| Pending |') };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'pending');
+    { request: mock, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 2);
   live = { ...issue, updated_at: '2026-11-11T01:00:03Z' };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'closed');
+    { request: mock, qualityReader: fixtureQuality })).action, 'closed');
   assert.equal(writes, 3);
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: mock })).action, 'skip');
+    { request: mock, qualityReader: fixtureQuality })).action, 'skip');
   assert.equal(writes, 3, 'both event orders must converge exactly once');
   // Restore an open pending Issue to exercise explicitly requested recovery.
   live = { ...issue, updated_at: '2026-11-11T01:01:00Z',
@@ -807,7 +1197,7 @@ async function selfTest() {
     return mock(path, options);
   };
   assert.equal((await reconcileIssue('X/y', 19, 'fixture-token',
-    { request: race })).action, 'pending');
+    { request: race, qualityReader: fixtureQuality })).action, 'pending');
   assert.equal(writes, 3, 'racing edits must not close the Issue');
   await assert.rejects(reconcileIssue('X/y', 19, 'fixture-token', {
     request: async (path, options) => path.endsWith('/events?per_page=100')

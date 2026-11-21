@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { FileRef, FileSaveHandler } from '@/capabilities/files';
+import type { FileRef, FileSaveHandler, FileSaveOutcome } from '@/capabilities/files';
 
 export interface FilesWebSelection {
   ref: FileRef;
@@ -21,6 +21,33 @@ export interface FilesWebSwitchState {
 
 function sameFile(a: FilesWebSelection | null, b: FilesWebSelection): boolean {
   return a !== null && a.ref.sourceId === b.ref.sourceId && a.ref.path === b.ref.path;
+}
+
+/**
+ * Apply the viewer's guarded-save outcome to the pending decision (#3171,
+ * #3959). Only a save that committed the current draft may open the target;
+ * a successful write of an older snapshot while newer edits remain keeps A
+ * and the one open decision, so a later save of the current draft or an
+ * explicit discard is still required before the switch.
+ */
+function applyGuardedSaveOutcome(
+  outcome: FileSaveOutcome,
+  actions: {
+    commitPending: () => void;
+    clearPending: () => void;
+    setError: (message: string) => void;
+  },
+): void {
+  if (outcome === 'saved') {
+    actions.commitPending();
+  } else if (outcome === 'saved-dirty') {
+    // Persisted, but not safe to navigate: keep A and the open decision.
+  } else if (outcome === 'conflict') {
+    // The viewer's conflict decision now owns the next step; keep A.
+    actions.clearPending();
+  } else {
+    actions.setError('The file could not be saved. Your draft is still here.');
+  }
 }
 
 /**
@@ -49,7 +76,8 @@ export function useFilesWebSwitchGuard(resetKey: unknown) {
     setError(null);
   }, []);
 
-  const activate = useCallback((next: FilesWebSelection) => {
+  /** Adopt a selection (or none), resetting the prior file's dirty/save state. */
+  const activate = useCallback((next: FilesWebSelection | null) => {
     dirtyRef.current = false;
     savingRef.current = false;
     setSaving(false);
@@ -71,7 +99,18 @@ export function useFilesWebSwitchGuard(resetKey: unknown) {
   const onSavingChange = useCallback((next: boolean) => {
     savingRef.current = next;
     setSaving(next);
-    if (!next && pendingRef.current !== null && !guardSaveRef.current) {
+    if (next) {
+      return;
+    }
+    if (guardSaveRef.current) {
+      // This completion report belongs to the guard's own save, whose outcome
+      // already decided the transition. Consume it without re-deciding: the
+      // report can arrive after the save settled, and a newer draft must keep
+      // the open decision rather than collect a stale failure message (#3959).
+      guardSaveRef.current = false;
+      return;
+    }
+    if (pendingRef.current !== null) {
       if (!dirtyRef.current) {
         commitPending();
       } else {
@@ -101,12 +140,7 @@ export function useFilesWebSwitchGuard(resetKey: unknown) {
     return false;
   }, [activate, selected]);
 
-  const closeFile = useCallback(() => {
-    dirtyRef.current = false;
-    savingRef.current = false;
-    setSaving(false);
-    setSelected(null);
-  }, []);
+  const closeFile = useCallback(() => activate(null), [activate]);
 
   const cancel = useCallback(() => {
     if (!guardSaving) {
@@ -134,17 +168,15 @@ export function useFilesWebSwitchGuard(resetKey: unknown) {
     setError(null);
     try {
       const outcome = await handler();
-      if (outcome === 'saved') {
-        commitPending();
-      } else if (outcome === 'conflict') {
-        // The viewer's conflict decision now owns the next step; keep A.
-        clearPending();
-      } else {
-        setError('The file could not be saved. Your draft is still here.');
-      }
+      applyGuardedSaveOutcome(outcome, { commitPending, clearPending, setError });
     } finally {
-      guardSaveRef.current = false;
       setGuardSaving(false);
+      // The viewer's completion report usually arrives after this continuation
+      // and consumes the ref itself. If it already ran (or the handler never
+      // reports), nothing is left to consume, so close the window here.
+      if (!savingRef.current) {
+        guardSaveRef.current = false;
+      }
     }
   }, [clearPending, commitPending, guardSaving]);
 
@@ -153,6 +185,7 @@ export function useFilesWebSwitchGuard(resetKey: unknown) {
     clearPending();
     dirtyRef.current = false;
     savingRef.current = false;
+    guardSaveRef.current = false;
     setSaving(false);
   }, [resetKey, clearPending]);
 

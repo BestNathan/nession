@@ -47,6 +47,7 @@ export const CATALOG = [
   ['acceptance-manual-request', 'acceptance-manual-request.yml', 'Acceptance / Manual Request', 'acceptance-manual-request.yml', 'Acceptance / Manual Request', 'acceptance'],
   ['acceptance-orchestrator-background', 'acceptance-orchestrator-background.yml', 'Acceptance / Orchestrator Background', 'acceptance-orchestrator-background.yml', 'Acceptance / Orchestrator Background', 'acceptance'],
   ['acceptance-postrun-waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance-postrun-waker.yml', 'Acceptance / Post-Run Waker', 'acceptance'],
+  ['acceptance-pr-quality-waker', 'acceptance-pr-quality-waker.yml', 'Acceptance / PR Quality Waker', 'acceptance-pr-quality-waker.yml', 'Acceptance / PR Quality Waker', 'acceptance'],
   ['acceptance-event-consumer', 'acceptance-event-consumer.yml', 'Acceptance / Event Consumer', 'acceptance-event-consumer.yml', 'Acceptance / Event Consumer', 'acceptance'],
   ['acceptance-e2e-failure-bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance-e2e-failure-bug.yml', 'Acceptance / E2E Failure Bug', 'acceptance'],
   ['acceptance-verified-stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance-verified-stage.yml', 'Acceptance / Verified Issue Stage', 'acceptance'],
@@ -75,6 +76,8 @@ export const CATALOG = [
   ['release-staging', 'staging.yml', 'Staging', 'release-staging.yml', 'Release / Staging Artifacts', 'delivery'],
   ['release-staging-convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'release-staging-convergence.yml', 'Release / Staging Convergence', 'delivery'],
   ['release-production', 'release.yml', 'Release', 'release-production.yml', 'Release / Production', 'delivery'],
+  ['release-toolchains', 'release-toolchains.yml', 'Release / Toolchains', 'release-toolchains.yml', 'Release / Toolchains', 'delivery'],
+  ['release-toolchain-single', 'release-toolchain-one.yml', 'Release / Toolchain Single', 'release-toolchain-one.yml', 'Release / Toolchain Single', 'delivery'],
   ['deploy-manual', 'deploy.yml', 'Deploy', 'deploy-manual.yml', 'Deploy / Manual', 'delivery'],
   ['deploy-configure-site', 'deploy-configure-site.yml', 'Deploy / Configure Site', 'deploy-configure-site.yml', 'Deploy / Configure Site', 'delivery'],
   ['deploy-seal-gitops-secret', 'deploy-seal-gitops-secret.yml', 'Deploy / Seal GitOps Secret', 'deploy-seal-gitops-secret.yml', 'Deploy / Seal GitOps Secret', 'delivery'],
@@ -82,6 +85,7 @@ export const CATALOG = [
   ['deploy-staging-acr', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'deploy-staging-acr.yml', 'Deploy / Staging ACR', 'delivery'],
   ['deploy-staging-ghcr', 'deploy-staging-ghcr.yml', 'Deploy / Staging GHCR', 'deploy-staging-ghcr.yml', 'Deploy / Staging GHCR', 'delivery'],
   ['deploy-acr-macos-mirror', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'deploy-acr-macos-mirror.yml', 'Deploy / ACR Mirror (hs-mac)', 'delivery'],
+  ['deploy-erofs-ghcr-smoke', 'deploy-erofs-ghcr-smoke.yml', 'Deploy / EROFS GHCR Smoke', 'deploy-erofs-ghcr-smoke.yml', 'Deploy / EROFS GHCR Smoke', 'delivery'],
   ['deploy-oci-pull-readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'deploy-oci-pull-readback.yml', 'Deploy / OCI Pull Readback', 'delivery'],
   ['deploy-staging-rollout-readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'deploy-staging-rollout-readback.yml', 'Deploy / Staging Rollout Readback', 'delivery'],
   ['deploy-mcp-secret-preflight', 'deploy-mcp-secret-preflight.yml', 'Deploy / MCP Secret Preflight', 'deploy-mcp-secret-preflight.yml', 'Deploy / MCP Secret Preflight', 'delivery'],
@@ -153,6 +157,24 @@ export const EXTERNAL_WORKFLOW_RUN_SOURCE = EXTERNAL_WORKFLOW_RUN_SOURCES[0];
 // permissive OR clauses, unrelated consumers, or altered event conditions.
 const EXTERNAL_PAGES_RUN_GUARD = ["${{","  github.event_name != 'workflow_run' || (","    github.event.workflow_run.event == 'push' &&","    github.event.workflow_run.conclusion == 'success' &&","    github.event.workflow_run.head_repository.full_name == github.repository &&","    (","      (github.event.workflow_run.name == 'Prototype / Change Signal' &&","       github.event.workflow_run.head_branch == 'prototype') ||","      (github.event.workflow_run.name == 'Knowledge / Change Signal' &&","       github.event.workflow_run.head_branch == 'knowledge')","    )","  )","}}"].join(' ').replace(/\s+/g, ' ').trim();
 export function approvedExternalWorkflowRunSource(consumerFile, content, displayName) {
+  // #4160: this third independent orphan signal is permitted ONLY for Toolchain
+  // Release, bound to the owned source, successful push and exact branch.
+  if (consumerFile === 'release-toolchains.yml' && displayName === 'Toolchains / Catalog Change') {
+    const exactHeader = /^  workflow_run:\s*$/m.test(content) &&
+      /^    workflows: \['Toolchains \/ Catalog Change'\]\s*$/m.test(content) &&
+      /^    types: \[completed\]\s*$/m.test(content) &&
+      /^    branches: \[toolchains\]\s*$/m.test(content);
+    const required = [
+      "github.repository == 'BestNathan/nession' &&",
+      "github.event_name == 'workflow_run' &&",
+      "github.event.workflow_run.conclusion == 'success' &&",
+      "github.event.workflow_run.event == 'push' &&",
+      "github.event.workflow_run.head_branch == 'toolchains' &&",
+      "github.event.workflow_run.name == 'Toolchains / Catalog Change' &&",
+      "github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'",
+    ];
+    return exactHeader && required.every(item => content.includes(item));
+  }
   if (consumerFile !== 'deploy-pages.yml' ||
       !EXTERNAL_WORKFLOW_RUN_SOURCES.some(source => source.displayName === displayName)) return false;
   if (!/^  workflow_run:\s*$/m.test(content) ||
@@ -399,6 +421,36 @@ function selfTest() {
     assert.equal(approvedExternalWorkflowRunSource('ci-quality.yml',signalConsumer,source.displayName),false);
   }
   assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml',signalConsumer,'Fake / Signal'),false);
+  const toolchainSignal = [
+    'name: Release / Toolchains',
+    'on:',
+    '  workflow_run:',
+    "    workflows: ['Toolchains / Catalog Change']",
+    '    types: [completed]',
+    '    branches: [toolchains]',
+    'jobs:',
+    '  plan:',
+    '    if: >-',
+    "      github.repository == 'BestNathan/nession' &&",
+    "      (github.event_name == 'workflow_dispatch' ||",
+    "       (github.event_name == 'workflow_run' &&",
+    "        github.event.workflow_run.conclusion == 'success' &&",
+    "        github.event.workflow_run.event == 'push' &&",
+    "        github.event.workflow_run.head_branch == 'toolchains' &&",
+    "        github.event.workflow_run.name == 'Toolchains / Catalog Change' &&",
+    "        github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'))",
+  ].join('\n')+'\n';
+  assert.equal(approvedExternalWorkflowRunSource('release-toolchains.yml',toolchainSignal,'Toolchains / Catalog Change'),true);
+  for(const [from,to] of [
+    ['branches: [toolchains]','branches: [main]'],
+    ["head_branch == 'toolchains'","head_branch == 'main'"],
+    ["head_repository.full_name == 'BestNathan/nession'","head_repository.full_name == 'other/repo'"],
+    ["conclusion == 'success'","conclusion == 'failure'"],
+    ["event == 'push'","event == 'workflow_dispatch'"],
+    ["'Toolchains / Catalog Change'","'Fake / Change'"],
+  ]) assert.equal(approvedExternalWorkflowRunSource('release-toolchains.yml',toolchainSignal.replace(from,to),'Toolchains / Catalog Change'),false);
+  assert.equal(approvedExternalWorkflowRunSource('deploy-pages.yml',toolchainSignal,'Toolchains / Catalog Change'),false);
+
   for (const [from,to] of [
     ['branches: [prototype, knowledge]','branches: [main]'],
     ["'Knowledge / Change Signal']","'Other / Signal']"],

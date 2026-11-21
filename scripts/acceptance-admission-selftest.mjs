@@ -50,17 +50,24 @@ for(const fragment of [
   '      needs.prepare-pr.outputs.admission ==',
 ])assert.throws(()=>verify(source+'\n'+fragment),/obsolete PR dependency\/gate/);
 assert.match(background,/\n  acceptance-close-guard:/);
+const closeGuardJob = background.split('\n  acceptance-close-guard:')[1]
+  .split(/\n  [a-z][a-z0-9-]*:/)[0];
+for (const permission of ['pull-requests: read', 'issues: write', 'contents: read']) {
+  assert.match(closeGuardJob, new RegExp('^      ' + permission + '$', 'm'),
+    'the close guard must declare ' + permission + ' to discover and read implementation PRs');
+}
 assert.match(background,/\n  merged-agent-acceptance:/);
 assert.match(background,/\n  post-merge-provider-evidence-acceptance:/);
-assert.ok(acceptor.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195'))"),
-  'only the three narrowly approved per-Issue collectors may receive PR CI evidence');
+assert.ok(acceptor.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117'))"),
+  'only the four narrowly approved per-Issue collectors may receive PR CI evidence');
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-quality/);
 assert.match(acceptor,/node scripts\/acceptance-ci-evidence\.mjs collect-pr-fixture/);
 assert.match(acceptor,/3195\) node scripts\/acceptance-pr-pages-e2e-evidence\.mjs collect/);
+assert.match(acceptor,/4117\) node scripts\/acceptance-4117-pr-evidence\.mjs collect/);
 assert.match(acceptor,/\*\) echo "Unsupported PR-stage collector Issue:/,
   'unknown PR-stage Issues must still fail closed before receiving CI evidence');
 assert.match(acceptor,/ci_evidence_file="-"/);
-assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 ]]; then'),
+assert.ok(acceptor.includes('if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 4117 ]]; then'),
   'all other PR contexts must still omit CI evidence');
 assert.match(executor,/ciEvidenceFile === '-' \? null/);
 assert.match(acceptor,/name: Apply Acceptance Report and checkbox projection/);
