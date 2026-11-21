@@ -123,18 +123,18 @@ describe('useWorkspaceCapsuleClearance', () => {
       shell.appendChild(element);
       return element;
     };
-    // Two scrollers ending at different coordinates, plus a declared marker
-    // that is not itself overflowed. A single inherited shell number would be
-    // wrong for both split readers; an auto-height marker must not add a tail.
+    // Two owners ending at different coordinates, plus one already above the
+    // bar. A single inherited shell number would be wrong for both split
+    // readers; a constrained owner that already clears the bar takes zero.
     const upper = scrollport(300, true, 'upper');
     const lower = scrollport(380, true, 'lower');
-    const staticMarker = scrollport(395, false, 'static');
+    const aboveBar = scrollport(330, false, 'above-bar');
 
     renderHook(() => useWorkspaceCapsuleClearance({ current: shell }));
 
     expect(upper.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
     expect(lower.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('40px');
-    expect(staticMarker.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
+    expect(aboveBar.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
     // The document surface's shell-wide value is unchanged.
     expect(shell.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('60px');
   });

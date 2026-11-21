@@ -38,8 +38,10 @@ const APP_WORKSPACE_SURFACE_SELECTOR = '[data-workspace-app-surface]';
  * - **per-scrollport inset** — the same value is written on every element
  *   carrying the bounded marker, measured from *that* element's own visible
  *   bottom. Split surfaces (a list above a warnings footer, an editor above a
- *   feedback pane) therefore do not share one number, and a marker that is not
- *   itself overflowing gets zero instead of a phantom tail (#4222 SC-02).
+ *   feedback pane) therefore do not share one number. The marked element is
+ *   the owning viewport even when an inner renderer currently carries the
+ *   scroll (CodeMirror, a virtualized body); an owner already above the bar
+ *   naturally measures zero (#4222 SC-02).
  * - **actions inset** — the full band, spent by the Host-owned actions slot so
  *   its controls sit above the Capsule at every overlay height.
  *
@@ -134,15 +136,15 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
       shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, `${scrollInset}px`);
       shell.style.setProperty(WORKSPACE_ACTIONS_BOTTOM_INSET, `${contentBand}px`);
 
-      // Measured per element, not inherited from the shell: an auto-height
-      // marker that is not itself a scroll owner gets zero, so it cannot add a
-      // blank tail that nobody scrolls past.
+      // Measured per element, not inherited from the shell. The owning
+      // *element* is the scrolling viewport even when an inner renderer (the
+      // CodeMirror host, a virtualized body) currently carries the scroll:
+      // requiring the outer element's own `scrollHeight` to exceed its
+      // `clientHeight` would zero the inset for exactly those adapters. A
+      // constrained element already above the bar yields zero naturally.
       for (const element of scrollports) {
         observe(element);
-        const scrollable = element.scrollHeight > element.clientHeight + 1;
-        const inset = scrollable
-          ? Math.max(0, element.getBoundingClientRect().bottom - floatingTop)
-          : 0;
+        const inset = Math.max(0, element.getBoundingClientRect().bottom - floatingTop);
         if (measuredInsets.get(element) === inset) {
           continue;
         }
