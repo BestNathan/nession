@@ -871,3 +871,10 @@
 - Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox, registry
 - Reason: Record #4086 peer-capable OCI Distribution Registry topology (shared CAS contracts #4087, mountable /v2/ service #4088, host-independent Client SDK #4089, host adapters #4090, bounded peer discovery and same-digest fallback #4091); reconcile the superseded Server-authoritative-only distribution and P2P-distribution non-goal claims
 - Source: https://github.com/BestNathan/nession/issues/4086
+
+## 2026-11-21T03:48:00Z | update | Nession instruction architecture and knowledge ownership
+- Path: topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md
+- Topic: engineering
+- Categories: agents, instructions, knowledge, skills, design
+- Reason: Record the #4223 task-Skill router contract (nession-web-design routing UI work across canonical owners, optional Impeccable availability states, shadcn selection, and Nession-owned Gates/browser proof) without creating a second design authority
+- Source: https://github.com/BestNathan/nession/issues/4223

@@ -99,16 +99,17 @@
       },
       {
         "title": "Nession instruction architecture and knowledge ownership",
-        "description": "Root/scoped/Skill instructions and a separate sourced project knowledge ledger",
+        "description": "Root/scoped/Skill instructions, task-Skill routers with optional external capabilities, and a separate sourced project knowledge ledger",
         "path": "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
         "status": "verified",
         "categories": [
           "agents",
           "instructions",
           "knowledge",
-          "skills"
+          "skills",
+          "design"
         ],
-        "updated_at": "2026-11-03T09:34:15Z"
+        "updated_at": "2026-11-21T03:48:00Z"
       },
       {
         "title": "Nession MCP access layer semantic tool ownership and protocol versions",
@@ -490,6 +491,7 @@
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "design": [
+      "topics/engineering/nession-instruction-architecture-and-knowledge-ownership.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/web/shared-content-region-visual-recipes.md",
       "topics/web/unified-overlay-and-operation-surface-system.md",
