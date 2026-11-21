@@ -32,7 +32,9 @@ export function resolveAcceptComment(event, repo, actor) {
       !TRUSTED_ASSOCIATIONS.has(comment.author_association) ||
       !Number.isSafeInteger(comment.id) || comment.id <= 0) return null;
   return { issueNumber: event.issue.number, commentId: comment.id,
-    targetMainSha: kind.target_sha ?? null, targetPrSha: kind.target_pr_sha ?? null };
+    targetMainSha: kind.target_sha ?? null, targetPrSha: kind.target_pr_sha ?? null,
+    replacementOldPr: kind.replacement_old_pr ?? null,
+    replacementNewPr: kind.replacement_new_pr ?? null };
 }
 
 export function decideIssueClosure(issue, associatedPrs, options = {}) {
@@ -741,6 +743,21 @@ async function handleManual(event, repository, actor, token, request = githubReq
   if (command.targetPrSha && !verifiedPrSha) {
     throw Error('unverified or unmerged Issue-linked exact PR head');
   }
+  // Explicit independent replacement never infers old source ancestry.
+  // Re-attest the exact historical and new merged PRs from GitHub; only a
+  // separately trusted Agent may re-evaluate each checked old SC at new HEAD.
+  const replacement = command.replacementOldPr != null &&
+    command.replacementNewPr != null
+    ? await verifyIndependentReplacement(repository, issue,
+        command.replacementOldPr, command.replacementNewPr,
+        command.commentId, token, request) : null;
+  if (replacement) {
+    const quality = await collectPrRequiredQualityAsync(replacement.target_ref,
+      path => request(path, {token}));
+    if (quality?.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(quality.receipt,replacement.target_ref))
+      return {action:'pending',reason:'replacement exact-HEAD required Quality is not independently green'};
+  }
   const verifiedPrAnchors = verifiedPrSha
     ? await verifyManualAcceptedPrAnchors(repository, issue, sourcePrs,
       verifiedPrSha, token, request) : [];
@@ -768,17 +785,21 @@ async function handleManual(event, repository, actor, token, request = githubReq
     ? selectManualAgentRuns(issue, sourcePrs,
       { verifiedStagingSha, verifiedMainSha, verifiedPrSha, verifiedPrAnchors, diagnostics })
     : directlySelected;
-  for (const run of runs) {
+  const finalRuns = replacement
+    ? [{stage:'pr',target_ref:replacement.target_ref}] : runs;
+  for (const run of finalRuns) {
     await request(prefix + '/actions/workflows/agent-sc-acceptance.yml/dispatches', {
       token, method: 'POST',
       body: { ref: 'main', inputs: {
         issue_number: String(command.issueNumber), stage: run.stage,
         target_ref: run.target_ref, provider: '', deployment: '',
+        ...(replacement ? {source_replacement_comment_id:String(replacement.comment_id)} : {}),
       }},
     });
   }
-  return { action: runs.length ? 'dispatched' : 'pending', reason: result.reason,
-    agent_runs: runs, diagnostics, note: 'Case/deployed proof remains with its existing trusted runner' };
+  return { action: finalRuns.length ? 'dispatched' : 'pending', reason: result.reason,
+    agent_runs: finalRuns, diagnostics,
+    note: 'Case/deployed proof remains with its existing trusted runner' };
 }
 
 async function selfTest() {
