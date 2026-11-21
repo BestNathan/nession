@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitBranchesView } from '../../GitBranchesView';
 import { gitApi } from '../../../GitPlugin';
+import { WORKSPACE_BOUNDED_SCROLL_MARKER } from '@/shared/lib/workspaceScrollClearance';
 import type { GitBranch, GitBranchesResponse } from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
@@ -68,6 +69,21 @@ describe('GitBranchesView', () => {
 
     expect(await screen.findByTestId('git-branch-list')).toBeInTheDocument();
     expect(mockedBranches).toHaveBeenCalledWith({ agent_id: 'a1', session: 'a1:work' });
+  });
+
+  it('is the section’s internal scroll owner on the declared bounded App surface (#4188)', async () => {
+    // GitWorkspace is `appScroll: 'bounded'`, so the host provides no page
+    // scroller. A long ref listing must scroll here and spend the host's
+    // measured inset, or its final rows are clipped by the bounded region.
+    mockedBranches.mockResolvedValue(
+      ok(Array.from({ length: 40 }, (_, index) => branch({ name: `branch-${index}` }))),
+    );
+
+    render(<GitBranchesView ctx={ctx()} />);
+
+    const list = await screen.findByTestId('git-branch-list');
+    expect(list.className).toContain('overflow-y-auto');
+    expect(list.className).toContain(WORKSPACE_BOUNDED_SCROLL_MARKER);
   });
 
   it('marks the current branch, and marks only it', async () => {

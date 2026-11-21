@@ -32,7 +32,7 @@ async fn main() -> Result<()> {
     let value = args.get(3).context("probe action value is required")?;
 
     let mut config = if config_path == "-" {
-        ServerConfig::default()
+        synthetic_config()
     } else {
         toml::from_str(&std::fs::read_to_string(config_path)?)
             .with_context(|| format!("failed to parse {config_path}"))?
@@ -46,7 +46,7 @@ async fn main() -> Result<()> {
         .context("failed to create the configured Nession component directories")?;
 
     let db = Arc::new(Database::new(&config.db_path).await?);
-    let blobs = nession_erofs::BlobStore::new(&config.image_blob_dir)
+    let blobs = nession_erofs::FsBlobStore::new(&config.image_blob_dir)
         .context("failed to open the image blob store")?;
     let builder = nession_erofs::ErofsBuilder::new(
         Arc::new(nession_erofs::ProcessGitRunner::default()),
@@ -62,6 +62,8 @@ async fn main() -> Result<()> {
         ImageManagerOptions {
             max_concurrent_builds: config.image_max_concurrent_builds,
             build_root: std::path::PathBuf::from(&config.image_build_dir),
+            source_root: (!config.image_source_root.trim().is_empty())
+                .then(|| std::path::PathBuf::from(config.image_source_root.trim())),
             build_stage_timeout: (config.image_build_stage_timeout_secs > 0)
                 .then(|| std::time::Duration::from_secs(config.image_build_stage_timeout_secs)),
             build_log_max_bytes: config.image_build_log_max_bytes,
@@ -115,6 +117,20 @@ fn emit(config: &ServerConfig, image: &ImageDescriptor) -> Result<()> {
     Ok(())
 }
 
+/// The config a probe started without a file uses.
+///
+/// The probe never listens; it is a verification binary that opens the
+/// canonical Server paths and the image manager. The synthetic config still
+/// goes through `ServerConfig::validate`, so it names a loopback listener
+/// rather than the runtime's wildcard default, which the #4066 exposure rule
+/// correctly refuses with no token.
+fn synthetic_config() -> ServerConfig {
+    ServerConfig {
+        listen_address: "127.0.0.1:0".to_string(),
+        ..Default::default()
+    }
+}
+
 fn sha256_file(path: &Path) -> Result<String> {
     let mut file =
         std::fs::File::open(path).with_context(|| format!("cannot open {}", path.display()))?;
@@ -135,4 +151,20 @@ fn sha256_file(path: &Path) -> Result<String> {
         hex.push_str(&format!("{byte:02x}"));
     }
     Ok(hex)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The probe never listens, but it runs the Server's canonical
+    /// `ServerConfig::validate`; its synthetic config must therefore satisfy
+    /// the #4066 exposure rule.
+    #[test]
+    fn the_synthetic_probe_config_is_startable() {
+        let config = synthetic_config();
+        config
+            .validate()
+            .expect("the no-config probe mode must pass Server validation");
+    }
 }

@@ -945,7 +945,72 @@ async fn read_line<R: tokio::io::AsyncBufRead + Unpin>(
 mod tests {
     use super::*;
     use crate::protocol::mcp_servers::v1::{McpApprovalV1, McpScopeV1};
+    use crate::session_context::SessionClaudeConfig;
+    use async_trait::async_trait;
     use serde_json::json;
+
+    /// SC-03 (#4080): probe variables resolve through the Session's observed
+    /// environment. "Observed unset" and "cannot ask" are both absent from the
+    /// expansion map — they differ from each other, but neither is an Agent
+    /// value invented for the Session.
+    #[tokio::test]
+    async fn probe_variables_resolve_from_the_session_and_never_invent_agent_values() {
+        struct SessionOnly;
+
+        #[async_trait]
+        impl SessionContext for SessionOnly {
+            async fn session_cwd(&self, _session_id: &str) -> Option<String> {
+                None
+            }
+
+            async fn session_claude_config(
+                &self,
+                _session_id: &str,
+            ) -> Option<SessionClaudeConfig> {
+                None
+            }
+
+            async fn session_claude_active(&self, _session_id: &str) -> Option<bool> {
+                None
+            }
+
+            async fn session_claude_binding(
+                &self,
+                _session_id: &str,
+            ) -> Option<crate::binding::Binding> {
+                None
+            }
+
+            async fn session_environment_variable(
+                &self,
+                _session_id: &str,
+                name: &str,
+            ) -> Option<Option<String>> {
+                match name {
+                    "MCP_TOKEN" => Some(Some("session-value".to_string())),
+                    "UNSET" => Some(None),
+                    _ => None,
+                }
+            }
+        }
+
+        let resolved = resolve_environment(
+            &SessionOnly,
+            "agent:s",
+            &[
+                "MCP_TOKEN".to_string(),
+                "UNSET".to_string(),
+                "UNOBSERVED".to_string(),
+            ],
+        )
+        .await;
+        assert_eq!(
+            resolved.get("MCP_TOKEN").map(String::as_str),
+            Some("session-value")
+        );
+        assert!(!resolved.contains_key("UNSET"));
+        assert!(!resolved.contains_key("UNOBSERVED"));
+    }
 
     #[test]
     fn sse_frames_are_parsed_and_empty_events_are_ignored() {

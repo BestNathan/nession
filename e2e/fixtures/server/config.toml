@@ -8,6 +8,11 @@ tls_cert_path = ""
 tls_key_path = ""
 auth_token = ""
 
+# Browser clients present an Origin; the runtime harness rewrites these
+# placeholder ports to the preview origin it actually serves (#4066).
+# CLI/Agent clients present no Origin and need no entry.
+allowed_origins = ["http://localhost:4173", "http://127.0.0.1:4173"]
+
 # Isolated database — must NOT touch ~/.nession.
 db_path = "/tmp/nession-e2e/nession.db"
 

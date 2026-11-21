@@ -54,7 +54,39 @@ working_dir?: string | null,
  * Session metadata (#2789) key on it. Absent only for a legacy Session
  * that has not been asked yet.
  */
-instance_id?: string | null, };
+instance_id?: string | null, 
+/**
+ * Bounded work-context summary (#4007).
+ *
+ * `available` is the Agent's answer at list time (revision 0 = confirmed
+ * empty); `unavailable` means the Agent could not read the metadata.
+ * Omitted by a legacy Agent that does not report summaries.
+ */
+metadata?: SessionMetadataAvailability | null, };
+export type SessionMetadataAvailability = { 
+/**
+ * `available` when the Agent read the metadata; `unavailable` when the
+ * lookup failed. Never render `unavailable` as an empty task.
+ */
+state: SessionMetadataState, 
+/**
+ * The bounded summary. Present only when `state` is `available`.
+ */
+summary?: SessionMetadataSummary | null, };
+export type SessionMetadataState = "available" | "unavailable";
+export type SessionMetadataSummary = { 
+/**
+ * 0 means confirmed-empty (a legacy Session), not unavailable.
+ */
+revision: number, 
+/**
+ * The display title; absent falls back to the tmux Session name.
+ */
+title?: string | null, 
+/**
+ * The Session's labels, in their stored order.
+ */
+tags: Array<string>, };
 
 // ── Operations ──
 

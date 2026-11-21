@@ -23,8 +23,9 @@ use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use nession_protocol::contracts::image::v1::{
-    is_valid_image_build_id, ImageBuildDescriptor, ImageBuildProgress, ImageBuildStage,
-    ImageBuildStatus, ImageComposeRepresentation, ImagePackaging, ImageSource,
+    is_valid_image_build_id, ImageBuildAttempt, ImageBuildDescriptor, ImageBuildProgress,
+    ImageBuildSourceKind, ImageBuildStage, ImageBuildStatus, ImageComposeRepresentation,
+    ImagePackaging, ImageSource,
 };
 
 /// The state file format this Server writes and reads.
@@ -48,6 +49,9 @@ pub struct BuildAttempt {
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stage: Option<String>,
+    /// The last bounded diagnostic observed for this attempt (#3798).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diagnostic: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     pub started_at: u64,
@@ -165,8 +169,79 @@ impl BuildState {
             size_bytes: self.size_bytes,
             alias: self.alias.clone(),
             deduplicated: self.deduplicated,
+            attempts: self
+                .attempts
+                .iter()
+                .map(|attempt| ImageBuildAttempt {
+                    attempt: attempt.attempt,
+                    status: attempt.status.clone(),
+                    stage: attempt.stage.clone(),
+                    diagnostic: attempt.diagnostic.clone(),
+                    error: attempt.error.clone(),
+                    started_at: attempt.started_at,
+                    finished_at: attempt.finished_at,
+                })
+                .collect(),
             created_at: self.created_at,
             updated_at: self.updated_at,
+        }
+    }
+}
+
+/// The source adapter family of one durable build record.
+pub fn source_kind(source: &ImageSource) -> ImageBuildSourceKind {
+    match source {
+        ImageSource::GitHub { .. } => ImageBuildSourceKind::Github,
+        ImageSource::LocalDirectory { .. } => ImageBuildSourceKind::LocalDirectory,
+        ImageSource::Compose { .. } => ImageBuildSourceKind::Compose,
+    }
+}
+
+/// One bounded build-history selection (#3798).
+///
+/// Filtering happens before pagination, so `total` and `next_offset` describe
+/// the filtered history rather than the unfiltered inventory.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct BuildListFilter {
+    pub statuses: Vec<ImageBuildStatus>,
+    pub sources: Vec<ImageBuildSourceKind>,
+    pub query: String,
+}
+
+impl BuildListFilter {
+    fn matches(&self, state: &BuildState) -> bool {
+        if !self.statuses.is_empty() && !self.statuses.contains(&state.status) {
+            return false;
+        }
+        if !self.sources.is_empty() && !self.sources.contains(&source_kind(&state.source)) {
+            return false;
+        }
+        let query = self.query.trim();
+        if query.is_empty() {
+            return true;
+        }
+        if state.build_id.contains(query)
+            || state.image_id.contains(query)
+            || state
+                .alias
+                .as_deref()
+                .is_some_and(|alias| alias.contains(query))
+            || state
+                .digest
+                .as_deref()
+                .is_some_and(|digest| digest.contains(query))
+        {
+            return true;
+        }
+        match &state.source {
+            ImageSource::GitHub {
+                repository_url,
+                reference,
+            } => repository_url.contains(query) || reference.contains(query),
+            ImageSource::LocalDirectory { path } => path.contains(query),
+            ImageSource::Compose { sources, .. } => sources.iter().any(|source| {
+                source.repository.contains(query) || source.reference.contains(query)
+            }),
         }
     }
 }
@@ -401,9 +476,18 @@ impl BuildStore {
         Ok(builds)
     }
 
-    /// One page of the durable build inventory, newest first.
-    pub fn list_page(&self, offset: u32, limit: u32) -> Result<(Vec<BuildState>, u64)> {
-        let builds = self.scan()?;
+    /// One filtered page of the durable build inventory, newest first.
+    pub fn list_page(
+        &self,
+        offset: u32,
+        limit: u32,
+        filter: &BuildListFilter,
+    ) -> Result<(Vec<BuildState>, u64)> {
+        let builds = self
+            .scan()?
+            .into_iter()
+            .filter(|state| filter.matches(state))
+            .collect::<Vec<_>>();
         let total = builds.len() as u64;
         let start = usize::try_from(offset)
             .unwrap_or(usize::MAX)
@@ -521,5 +605,147 @@ impl BuildStore {
 fn sync_directory(path: &Path) {
     if let Ok(directory) = File::open(path) {
         let _ = directory.sync_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use nession_protocol::contracts::image::v1::{ImageBuildStatus, ImagePackaging};
+
+    fn state(
+        build_id: &str,
+        sequence: u64,
+        status: ImageBuildStatus,
+        source: ImageSource,
+    ) -> BuildState {
+        BuildState {
+            version: BUILD_STATE_VERSION,
+            build_id: build_id.to_string(),
+            image_id: format!("image-{build_id}"),
+            attempt: 1,
+            sequence,
+            client_request_id: None,
+            source,
+            alias: None,
+            packaging: ImagePackaging::default(),
+            compose: None,
+            status,
+            stage: None,
+            pinned_sha: None,
+            progress: ImageBuildProgress::default(),
+            diagnostic: None,
+            error: None,
+            digest: None,
+            size_bytes: 0,
+            deduplicated: false,
+            created_at: 1,
+            updated_at: 2,
+            started_at: None,
+            finished_at: None,
+            attempts: Vec::new(),
+            recovered: false,
+        }
+    }
+
+    fn github(ref_name: &str) -> ImageSource {
+        ImageSource::GitHub {
+            repository_url: "https://github.com/BestNathan/nession".to_string(),
+            reference: ref_name.to_string(),
+        }
+    }
+
+    #[test]
+    fn history_filters_apply_before_pagination_and_search_source_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = BuildStore::open(dir.path(), DEFAULT_BUILD_LOG_MAX_BYTES).unwrap();
+        store
+            .create(&state(
+                "build-a",
+                1,
+                ImageBuildStatus::Failed,
+                github("main"),
+            ))
+            .unwrap();
+        store
+            .create(&state(
+                "build-b",
+                2,
+                ImageBuildStatus::Succeeded,
+                ImageSource::LocalDirectory {
+                    path: "/srv/toolchain".to_string(),
+                },
+            ))
+            .unwrap();
+        store
+            .create(&state(
+                "build-c",
+                3,
+                ImageBuildStatus::Failed,
+                ImageSource::LocalDirectory {
+                    path: "/srv/app".to_string(),
+                },
+            ))
+            .unwrap();
+
+        let failed = BuildListFilter {
+            statuses: vec![ImageBuildStatus::Failed],
+            ..BuildListFilter::default()
+        };
+        let (page, total) = store.list_page(0, 1, &failed).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(page.len(), 1);
+        assert_eq!(page[0].build_id, "build-c");
+        let (page, total) = store.list_page(1, 1, &failed).unwrap();
+        assert_eq!(total, 2);
+        assert_eq!(page[0].build_id, "build-a");
+
+        let local = BuildListFilter {
+            sources: vec![ImageBuildSourceKind::LocalDirectory],
+            ..BuildListFilter::default()
+        };
+        assert_eq!(store.list_page(0, 10, &local).unwrap().1, 2);
+
+        let source_search = BuildListFilter {
+            query: "github.com/BestNathan".to_string(),
+            ..BuildListFilter::default()
+        };
+        let (page, total) = store.list_page(0, 10, &source_search).unwrap();
+        assert_eq!(total, 1);
+        assert_eq!(page[0].build_id, "build-a");
+
+        let path_search = BuildListFilter {
+            query: "/srv/toolchain".to_string(),
+            ..BuildListFilter::default()
+        };
+        assert_eq!(store.list_page(0, 10, &path_search).unwrap().1, 1);
+    }
+
+    #[test]
+    fn a_descriptor_exposes_the_bounded_attempt_history_with_diagnostics() {
+        let mut record = state(
+            "build-retried",
+            1,
+            ImageBuildStatus::Running,
+            github("main"),
+        );
+        record.attempt = 2;
+        record.attempts = vec![BuildAttempt {
+            attempt: 1,
+            status: "failed".to_string(),
+            stage: Some("packaging".to_string()),
+            diagnostic: Some("mkfs.erofs failed: disk full".to_string()),
+            error: Some("mkfs.erofs failed: disk full".to_string()),
+            started_at: 10,
+            finished_at: 20,
+        }];
+        let descriptor = record.descriptor(30);
+        assert_eq!(descriptor.attempt, 2);
+        assert_eq!(descriptor.attempts.len(), 1);
+        assert_eq!(descriptor.attempts[0].attempt, 1);
+        assert_eq!(
+            descriptor.attempts[0].diagnostic.as_deref(),
+            Some("mkfs.erofs failed: disk full")
+        );
     }
 }

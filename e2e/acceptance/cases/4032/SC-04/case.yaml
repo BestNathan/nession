@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 4032
+criterion: SC-04
+# "when: deployed" uses a post-merge compatibility Case manifest.
+# The trusted Acceptance executor requires an immutable staging deployment
+# binding before this Case can be selected; ordinary push runs cannot select it.
+stage: post-merge
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

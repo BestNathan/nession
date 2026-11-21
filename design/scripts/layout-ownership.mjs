@@ -2,6 +2,8 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { formatViolation } from './design-gate.mjs';
+import { LAYOUT_RECIPE_OWNER, isTokenOwnedRecipe } from './recipe-style-owners.mjs';
+export { LAYOUT_RECIPE_OWNER };
 
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIR, '..', '..');
@@ -26,7 +28,6 @@ const ROOT = resolve(SCRIPT_DIR, '..', '..');
  * the expected owner and the repair.
  */
 
-export const LAYOUT_RECIPE_OWNER = 'web/src/app/workspace/layout/workspaceLayout.tsx';
 export const MASTER_DETAIL_MARKER =
   'grid-cols-[var(--nession-workspace-tree-width)_minmax(0,1fr)]';
 export const SCROLL_OWNER_MARKER = 'data-workspace-scroll-owner';
@@ -54,17 +55,87 @@ export const APP_VIEWPORT_OWNER_ROOT = 'web/src/platform/viewport/';
 export const VISUAL_VIEWPORT_READ_RE = /\bwindow\.visualViewport\b|\bvisualViewport\b/g;
 
 const CONTENT_ROOTS = ['web/src/capabilities/', 'web/src/product/'];
+/**
+ * The retired capability-level Capsule clearance (#4115).
+ *
+ * Before the App host owned the page scroll, every capability that could reach
+ * the pane bottom opted in with this trailing padding. The host now spends its
+ * own measured inset; a capability reintroducing either the class or the raw
+ * variable is restoring a second owner.
+ */
+const RETIRED_CLEARANCE_RE =
+  /\bworkspaceScrollClearanceClass\b|pb-\[var\(--nession-local-workspace-content-bottom-inset/g;
+/**
+ * A capability scroll owner hardcoding a fixed Capsule-sized bottom band
+ * (#4188).
+ *
+ * `pb-16` on a nested list/reader was the concrete regression: a number chosen
+ * for the overlay cannot track a dynamic Capsule or viewport, and it competes
+ * with the host's measured inset. The check is deliberately narrow — it only
+ * looks at one element that is itself a vertical scroll owner and only rejects
+ * a band large enough to stand in for overlay clearance; small paddings remain
+ * ordinary content spacing.
+ */
+const JSX_TAG_RE = /<[A-Za-z][^<>]*>/g;
+const VERTICAL_SCROLL_OVERFLOW_RE = /\boverflow-(?:y-)?(?:auto|scroll)\b/;
+const FIXED_BOTTOM_BAND_RE = /\bpb-(?:1[0-9]|[2-9]\d|\d{3,})\b/g;
+/**
+ * A capability-owned App page scroll (#4115).
+ *
+ * The App host owns the default page scroll owner. An element whose testid
+ * names an App layout/workspace root and that carries a vertical scroll is the
+ * pattern the host contract removes — a declared bounded view uses the shared
+ * bounded class and a non-root marker instead.
+ */
+const APP_PAGE_SCROLL_RE =
+  /data-testid=(?:"[^"]*-(?:app-layout|app-workspace|app-workspace-scroll)"|\{`[^`]*-(?:app-layout|app-workspace)`\})[^>]*overflow-(?:y-)?auto|overflow-(?:y-)?auto[^>]*data-testid=(?:"[^"]*-(?:app-layout|app-workspace|app-workspace-scroll)"|\{`[^`]*-(?:app-layout|app-workspace)`\})/g;
+/**
+ * The host's App surface marker is published by the layout recipe alone. A
+ * capability that writes it is claiming to be the App scroll surface rather
+ * than contributing content to it.
+ */
+const APP_SURFACE_MARKER = 'data-workspace-app-surface';
 const FRAME_UTILITY_RE =
-  /\b(?:h-screen|min-h-screen|w-screen|h-\[100dvh\]|min-h-\[100dvh\]|fixed\s+inset-0|fixed\s+inset-x-0)\b/g;
-const HEADER_MARKER_RE = /\bAppPageHeader\b|data-testid="app-page-header"/g;
+  /\b(?:h-screen|min-h-screen|w-screen|h-dvh|min-h-dvh|h-svh|min-h-svh|h-lvh|min-h-lvh|w-dvw|h-\[100dvh\]|min-h-\[100dvh\]|h-\[100svh\]|min-h-\[100svh\]|h-\[100lvh\]|min-h-\[100lvh\]|w-\[100dvw\]|fixed\s+inset-0|fixed\s+inset-x-0|fixed\s+inset-y-0)(?![\w-])/g;
+const HEADER_MARKER_RE =
+  /\bAppPageHeader\b|\bAppBackButton\b|\bAppHeaderActions\b|\bAppStackSheet\b|data-testid="(?:app-page-header|app-page-back|app-page-titleblock|app-page-subtitle|app-page-actions|app-page-more|app-page-action-[^"]*|app-header-workspace|app-tool-header|app-tool-back|files-app-nav|files-app-back)"/g;
+/**
+ * The App experience's gesture coordinator and its observable contract (#3971).
+ *
+ * `Sessions ← Terminal → Workspace` plus the Workspace inner stack is one
+ * arbitration: platform guard → interactive/work surface → Workspace stack →
+ * outer pager. A capability contributes destinations and leave guards; it must
+ * not install a second mark or import the pager's engine, because that is how
+ * one contact acquires two owners. `data-swipe-owner` is the explicit
+ * capability-side escape hatch and stays legal.
+ */
+export const APP_GESTURE_OWNER_ROOT = 'web/src/app/experiences/app/';
+export const APP_GESTURE_IMPORT_RE =
+  /from\s+['"]@\/app\/experiences\/app\/(?:edgeBand|gesture|swipeGesture|swipeTouchBinding|useSwipePager|useSwipeSettle|workSurface|appLayerPositions)['"]/g;
+export const GESTURE_MARKER_RE =
+  /\bdata-(?:swipe-phase|swipe-destination(?:-label)?|swipe-inner|swipe-reason|swipe-guard-px|workspace-stack-(?:pop|forward))\b/g;
 const HOST_CHROME_MARKERS = [
   'workspace-shell',
   'workspace-tool-bar',
   'workspace-tool-content',
   'workspace-surface-navigation',
 ];
-const RAW_SPACING_RE =
-  /(?<![\w-])(?:gap|gap-x|gap-y|space-x|space-y|p|px|py|pt|pr|pb|pl|m|mx|my|mt|mr|mb|ml)-\d+(?:\.\d+)?(?![\w-])/g;
+/** Token-only spacing applies to Nession-owned shared recipes, not the upstream
+ * internals of every shadcn primitive or the glyphs of a third-party renderer.
+ * This is the same owner as the existing no-recipe-raw-spacing check (#3194).
+ * A broader legacy product/capability migration must be explicitly audited.
+ */
+const SPACING_PREFIX = '(?:gap(?:-[xy])?|space-[xy]|p[trblxy]?|m[trblxy]?|w|h|size)';
+const RAW_SPACING_RE = new RegExp(
+  `(?<![\\w-])-?${SPACING_PREFIX}-(?:(?:-?\\d+(?:\\.\\d+)?|px)(?![\\w.-])|\\[-?\\d+(?:\\.\\d+)?(?:px|rem|em|vh|vw|%|ch|dvh)?\\])`,
+  'g',
+);
+const RAW_CALC_LENGTH_RE = new RegExp(
+  `(?<![\\w-])${SPACING_PREFIX}-\\[(?:calc|clamp|min|max)\\([^\\]\\n]*?\\d+(?:\\.\\d+)?(?:px|rem|em|vh|vw|dvh|%)[^\\]\\n]*?\\]`,
+  'g',
+);
+const RAW_INLINE_VISUAL_RE =
+  /(?<![\w-])(?:padding(?:Top|Bottom|Left|Right|Inline|Block)?|margin(?:Top|Bottom|Left|Right|Inline|Block)?|gap|rowGap|columnGap|width|height|fontSize|borderRadius)\s*:\s*['"]?-?\d+(?:\.\d+)?(?:px|rem|em|vh|vw|%)?/g;
 
 const RULES = {
   'no-capability-frame-geometry': {
@@ -86,6 +157,14 @@ const RULES = {
     repair:
       'render the capability content only; the Workspace host publishes its shell, tool bar and surface navigation',
   },
+  'no-capability-gesture-ownership': {
+    expected:
+      'one App gesture coordinator routes each contact through platform guard → work surface → Workspace inner stack → outer pager',
+    owner:
+      'web/src/app/experiences/app/{useSwipePager,swipeGesture,useSwipeSettle,swipeTouchBinding,workSurface,edgeBand}.ts + web/src/app/workspace/appInnerStackMotion.ts',
+    repair:
+      'contribute destinations through WorkspaceDepthControl (setPush/setForward) and declare a surface with data-swipe-owner; never publish the shell swipe markers or import the pager engine from capability/product content',
+  },
   'no-duplicated-master-detail': {
     expected: 'the stable master/detail grid is owned by WorkspaceMasterDetail',
     owner: LAYOUT_RECIPE_OWNER,
@@ -101,9 +180,9 @@ const RULES = {
   'no-recipe-raw-spacing': {
     expected:
       'the shared layout recipes use token-backed spacing or no spacing at all; stable spacing belongs to a semantic token',
-    owner: LAYOUT_RECIPE_OWNER,
+    owner: 'design/tokens/experience/{web,app}.json + the shared recipe owner',
     repair:
-      'replace the numeric spacing with a token-backed arbitrary value (var(--nession-*)) or leave spacing to the local consumer',
+      'replace the raw visual metric with an existing --nession-* token; if no semantic metric exists, add it to the canonical Experience token graph and regenerate projections',
   },
   'no-foreign-keyboard-scroll-owner': {
     expected:
@@ -111,6 +190,34 @@ const RULES = {
     owner: KEYBOARD_SCROLL_OWNER_FILE + ' + docs/design/composition.md §14',
     repair:
       'remove the keyboard scroll-owner marker from capability/product code; let AppLayout/ShellMain host the one Experience scrollport',
+  },
+  'no-capability-capsule-clearance-opt-in': {
+    expected:
+      'the App host owns the page scrollport and spends its measured Capsule clearance; a bounded capability surface spends workspaceBoundedScrollClearanceClass inside a declared adapter',
+    owner: 'web/src/app/workspace/layout/workspaceLayout.tsx + web/src/shared/lib/workspaceScrollClearance.ts',
+    repair:
+      'remove the capability-level clearance padding; contribute content to the App host scrollport, or declare appScroll: "bounded" and use the bounded surface class at your own internal scroller',
+  },
+  'no-capability-fixed-scroll-clearance': {
+    expected:
+      'a capability scroll owner spends the host-measured bounded inset; it does not hardcode a Capsule-sized bottom band',
+    owner:
+      'web/src/shared/lib/workspaceScrollClearance.ts + web/src/app/workspace/layout/workspaceLayout.tsx',
+    repair:
+      'remove the fixed pb-* band; use workspaceBoundedScrollClearanceClass on the declared bounded scroll owner',
+  },
+  'no-capability-app-page-scroll': {
+    expected:
+      'one App primary vertical scroll owner, rendered by the host (AppWorkspaceScrollRegion) or by a declared bounded adapter',
+    owner: LAYOUT_RECIPE_OWNER + ' + docs/design/composition.md §14',
+    repair:
+      'remove the page-level scroll from the App layout root; let the host scroll the page, or declare the view appScroll: "bounded" and put a marked internal scroller inside it',
+  },
+  'no-capability-app-surface-owner': {
+    expected: 'the App Workspace surface marker is published by the host layout recipe',
+    owner: LAYOUT_RECIPE_OWNER,
+    repair:
+      'remove the host surface marker from capability content; the host decides whether this view scrolls as a document or a bounded surface',
   },
   'no-foreign-visual-viewport': {
     expected:
@@ -147,6 +254,9 @@ function isContentSource(file) {
 
 function pushOccurrences(violations, masked, regex, { file, rule, actualOf }) {
   for (const match of masked.matchAll(regex)) {
+    // An explicit zero gap/inset is a valid structural relationship (e.g. a
+    // continuous list). Only non-zero visual decisions need a design token.
+    if (rule === 'no-recipe-raw-spacing' && (/-0$/.test(match[0]) || /:\s*['"]?0$/.test(match[0]))) continue;
     violations.push({
       file,
       line: lineNumber(masked, match.index),
@@ -187,6 +297,49 @@ export function scanLayoutSource(source, file = '<fixture>') {
         ...RULES['no-capability-host-chrome'],
       });
     }
+    // #4115: the host owns the App page scroll and its Capsule clearance.
+    pushOccurrences(violations, masked, RETIRED_CLEARANCE_RE, {
+      file,
+      rule: 'no-capability-capsule-clearance-opt-in',
+    });
+    // #4188: a scroll owner that hardcodes a Capsule-sized band is a second
+    // clearance owner. Checked per element so a small padding elsewhere or on
+    // a non-scrolling box stays legal.
+    for (const tag of masked.matchAll(JSX_TAG_RE)) {
+      if (!VERTICAL_SCROLL_OVERFLOW_RE.test(tag[0])) continue;
+      const band = tag[0].match(FIXED_BOTTOM_BAND_RE);
+      if (!band) continue;
+      violations.push({
+        file,
+        line: lineNumber(masked, tag.index),
+        kind: 'no-capability-fixed-scroll-clearance',
+        actual: band[0],
+        ...RULES['no-capability-fixed-scroll-clearance'],
+      });
+    }
+    pushOccurrences(violations, masked, APP_PAGE_SCROLL_RE, {
+      file,
+      rule: 'no-capability-app-page-scroll',
+    });
+    if (masked.includes(APP_SURFACE_MARKER)) {
+      violations.push({
+        file,
+        line: lineNumber(masked, masked.indexOf(APP_SURFACE_MARKER)),
+        kind: 'no-capability-app-surface-owner',
+        actual: APP_SURFACE_MARKER,
+        ...RULES['no-capability-app-surface-owner'],
+      });
+    }
+    if (!file.startsWith(APP_GESTURE_OWNER_ROOT)) {
+      pushOccurrences(violations, masked, APP_GESTURE_IMPORT_RE, {
+        file,
+        rule: 'no-capability-gesture-ownership',
+      });
+      pushOccurrences(violations, masked, GESTURE_MARKER_RE, {
+        file,
+        rule: 'no-capability-gesture-ownership',
+      });
+    }
   }
 
   if (file !== LAYOUT_RECIPE_OWNER) {
@@ -208,11 +361,15 @@ export function scanLayoutSource(source, file = '<fixture>') {
         ...RULES['no-duplicated-scroll-owner'],
       });
     }
-  } else {
-    pushOccurrences(violations, masked, RAW_SPACING_RE, {
-      file,
-      rule: 'no-recipe-raw-spacing',
-    });
+  }
+
+  if (isTokenOwnedRecipe(file)) {
+    for (const regex of [RAW_SPACING_RE, RAW_CALC_LENGTH_RE, RAW_INLINE_VISUAL_RE]) {
+      pushOccurrences(violations, masked, regex, {
+        file,
+        rule: 'no-recipe-raw-spacing',
+      });
+    }
   }
 
   // Keyboard avoidance has one Experience owner and one viewport reader

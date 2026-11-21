@@ -30,6 +30,7 @@ fn an_agent_register_rides_in_the_envelope_and_comes_back_intact() {
             connect_url: None,
             addresses: vec![],
             protocol_manifest: None,
+            mcp_tool_manifest: None,
         },
     };
 
@@ -106,6 +107,7 @@ fn test_agent_register_payload_serde() {
         connect_url: None,
         addresses: vec![],
         protocol_manifest: None,
+        mcp_tool_manifest: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let deserialized: AgentRegisterPayload = serde_json::from_str(&json).unwrap();
@@ -164,6 +166,7 @@ fn test_agent_register_payload_serialization() {
         connect_url: Some("wss://agent.example.com/ws".to_string()),
         addresses: vec![],
         protocol_manifest: None,
+        mcp_tool_manifest: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -234,6 +237,7 @@ fn an_absent_manifest_is_omitted_from_the_wire_rather_than_null() {
         connect_url: None,
         addresses: vec![],
         protocol_manifest: None,
+        mcp_tool_manifest: None,
     };
 
     let json = serde_json::to_value(&payload).unwrap();
@@ -271,6 +275,7 @@ fn a_manifest_rides_along_in_the_register_payload() {
         connect_url: None,
         addresses: vec![],
         protocol_manifest: Some(manifest),
+        mcp_tool_manifest: None,
     };
 
     let json = serde_json::to_value(&payload).unwrap();
@@ -322,6 +327,7 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
             },
         ],
         protocol_manifest: None,
+        mcp_tool_manifest: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();
@@ -392,6 +398,7 @@ fn test_agent_register_payload_without_connect_url() {
         connect_url: None,
         addresses: vec![],
         protocol_manifest: None,
+        mcp_tool_manifest: None,
     };
 
     let json = serde_json::to_string(&payload).unwrap();

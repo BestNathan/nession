@@ -1,0 +1,15 @@
+schema_version: 1
+issue: 4115
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify-files-git.spec.js
+  - type: browser
+    entry: verify-env-sandbox.spec.js
+  - type: browser
+    entry: verify-claude.spec.js
+  - type: browser
+    entry: verify-dynamic.spec.js
+result_policy: all-pass

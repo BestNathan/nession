@@ -44,6 +44,23 @@ Current Case manifests use `stage: pr` for PR-head smoke and retain exact old st
 
 **Method-specific Case Coverage:** the trusted `scripts/select-acceptance-cases.mjs` script is the canonical selector shared by the `Acceptance / Cases` workflow; workflow YAML must not independently compute SC eligibility. A Requirement declaring `## Acceptance Plan` requires an executable Case for **every eligible `method: case` SC** at the exact target stage; missing source Case is a blocking error rather than a warning. `method: agent` criteria do not require Cases. Historical Issues without a Plan retain only their already-present source-aligned Cases and are not retroactively required to provide Cases for every legacy Agent-accepted SC. Explicit `when: deployed` criteria are not eligible on a plain `main` push.
 
+## Execution lanes
+
+A manifest may declare `runner: standard | live-cli`; omission means `standard`.
+`standard` Cases run in the ordinary batch and never receive a provider
+credential. `live-cli` Cases need a real, authenticated external agent CLI and
+run in a separate `Acceptance / Cases` step whose environment alone carries the
+test gateway credential; that step fails closed when the gateway is absent.
+The trusted selector routes each lane to its own selection, so the standard
+lane neither selects nor reports a live Case missing, and PR Case Smoke is
+pinned to `standard`. The CLI version under test is a workflow variable
+(`CLAUDE_CODE_VERSION`), installed and resolved by the Case verifier and
+recorded in its evidence; no product code admits or rejects a version.
+
+Target-SHA Case code still executes in the credentialed step, so a live Case is
+only as trustworthy as the reviewed merge that carries it. Use a disposable
+test gateway credential, never a production secret.
+
 ## Runtime contract
 
 `e2e/runner/runtime/full-stack.js` owns the real local full stack and `e2e/runner/drivers/` owns Browser/Protocol/Runtime verifier execution (including Playwright assertion reporting). Workflow callers dispatch via `./e2e/run acceptance` and the source Case evaluator is `e2e/acceptance/evaluator/run-case.mjs`; neither `acceptance/runtime` nor `acceptance/run-case.mjs` remains a public entrypoint:

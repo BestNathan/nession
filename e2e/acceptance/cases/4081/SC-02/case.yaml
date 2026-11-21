@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 4081
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: owner.cjs
+  - type: runtime
+    entry: hosts.cjs
+result_policy: all-pass

@@ -9,6 +9,7 @@ import type {
 import type { ImageCacheObservation } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
+import { agentDisplayName } from '@/shared/lib/format';
 import { useSandboxContext, type SandboxContextState } from '../hooks/useSandboxContext';
 import { useSandboxDraft, type SandboxDraftState } from '../hooks/useSandboxDraft';
 import { useImageCacheObservations } from '../hooks/useImageCacheObservations';
@@ -52,7 +53,16 @@ function useConfirmDepth(
       return;
     }
     if (confirming) {
-      depth.setPush({ title: 'Enter Sandbox', onLeave });
+      depth.setPush({
+        title: 'Enter Sandbox',
+        subtitle: 'Sandbox',
+        backLabel: 'Back to Sandbox',
+        onLeave,
+        ancestors: [{ id: 'sandbox-root', title: 'Sandbox' }],
+        // The confirmation is the only pushed depth, and cancelling it is the
+        // same guarded action as Back (#3971).
+        onJumpToAncestor: () => onLeave(),
+      });
     } else {
       depth.setPush(null);
     }
@@ -70,6 +80,7 @@ interface SandboxContentProps {
   workingDir: string;
   onWorkingDirChange: (value: string) => void;
   sessionId: string | null;
+  targetPlatform: string | null;
   observations: Map<string, ImageCacheObservation>;
   activeSection: SandboxSectionId;
   activePolicy: SandboxPolicyId;
@@ -124,6 +135,7 @@ function SandboxContent({
   workingDir,
   onWorkingDirChange,
   sessionId,
+  targetPlatform,
   observations,
   activeSection,
   activePolicy,
@@ -168,7 +180,12 @@ function SandboxContent({
     return <SandboxImagesPanel experience={ctx.experience} sessionId={sessionId} />;
   }
   if (activeSection === 'workspaces') {
-    return <SandboxWorkspacesPanel sessionId={sessionId} />;
+    return (
+      <SandboxWorkspacesPanel
+        sessionId={sessionId}
+        agentLabel={ctx.agent ? agentDisplayName(ctx.agent) : 'This Session’s Agent'}
+      />
+    );
   }
   if (context.status === 'inside') {
     if (activeSection === 'policies') {
@@ -208,6 +225,7 @@ function SandboxContent({
     workingDir,
     onWorkingDirChange,
     sessionId,
+    targetPlatform,
     observations,
     onPreflight: () => preflightState.runPreflight(draft.draft),
     onRequestEnter: transitions.requestEnter,
@@ -239,6 +257,10 @@ export function SandboxWorkspace({
   depth?: WorkspaceDepthControl;
 }) {
   const sessionId = ctx.session?.session_id ?? null;
+  const targetPlatform =
+    ctx.agent?.metadata?.os && ctx.agent.metadata.architecture
+      ? `${ctx.agent.metadata.os}/${ctx.agent.metadata.architecture}`
+      : null;
   const [activeSection, setActiveSection] = useState<SandboxSectionId>('overview');
   const [activePolicy, setActivePolicy] = useState<SandboxPolicyId>('filesystem');
   const sandbox = useSandboxContext(sessionId);
@@ -265,13 +287,20 @@ export function SandboxWorkspace({
     setActivePolicy(policy);
     setActiveSection('policies');
   };
+  // The editable policy form is the App page's secondary region (#3971): a
+  // single named surface inside the primary Sandbox page, not a card per field.
+  const appSecondary = ctx.experience === 'app' && activeSection === 'policies';
 
   return (
     <div
       data-testid="sandbox-workspace"
+      /* The App's Configuration content sits on one primary surface (#3971);
+         its fields/groups are the secondary regions the recipe already owns.
+         Web keeps its existing pane treatment. */
+      data-workspace-surface={ctx.experience === 'app' ? 'primary' : undefined}
       className={cn(
         'flex min-w-0 flex-col gap-3',
-        ctx.experience === 'app' ? 'p-3' : 'h-full min-h-0 p-4',
+        ctx.experience === 'app' ? 'bg-card p-3' : 'h-full min-h-0 p-4',
       )}
     >
       <div
@@ -313,9 +342,12 @@ export function SandboxWorkspace({
         </p>
       ) : null}
       <div
+        data-workspace-section={ctx.experience === 'app' ? '' : undefined}
+        data-workspace-surface={appSecondary ? 'secondary' : undefined}
         className={cn(
           'flex min-w-0 flex-col',
           ctx.experience === 'web' && 'min-h-0 flex-1',
+          appSecondary && 'rounded-[var(--nession-radius-surface)] bg-muted/40 p-[var(--nession-shell-space-3)]',
         )}
       >
         <SandboxContent
@@ -328,6 +360,7 @@ export function SandboxWorkspace({
           workingDir={workingDir}
           onWorkingDirChange={setWorkingDir}
           sessionId={sessionId}
+          targetPlatform={targetPlatform}
           observations={observations.observations}
           activeSection={activeSection}
           activePolicy={activePolicy}

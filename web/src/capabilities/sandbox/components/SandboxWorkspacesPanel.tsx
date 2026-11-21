@@ -22,6 +22,11 @@ import type { AgentWorkspaceDescriptor } from '../WorkspacePlugin';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { cn } from '@/shared/lib/utils';
 import { useAgentWorkspaces } from '../hooks/useAgentWorkspaces';
+import {
+  workspaceDeleteBlockReason,
+  workspaceStatusLabel,
+} from '../model';
+import { SandboxWorkspaceDetail } from './SandboxWorkspaceDetail';
 
 function statusVariant(
   status: AgentWorkspaceDescriptor['status'],
@@ -44,50 +49,93 @@ function timeLabel(seconds: number): string {
 
 function WorkspaceRow({
   workspace,
+  agentLabel,
+  expanded,
+  busy,
+  onToggle,
   onDelete,
 }: {
   workspace: AgentWorkspaceDescriptor;
+  agentLabel: string;
+  expanded: boolean;
+  busy: boolean;
+  onToggle: () => void;
   onDelete: () => void;
 }) {
+  const projectLocation = workspace.kind === 'project_location';
+  const deleteBlock = workspaceDeleteBlockReason(workspace);
   return (
     <li
       data-testid="sandbox-workspace-row"
-      className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-border px-3 py-2 last:border-b-0"
+      data-workspace-kind={workspace.kind}
+      className="flex min-w-0 flex-col border-b border-border last:border-b-0"
     >
-      <div className="min-w-0">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <span className={cn('truncate', chromeSansRole('primary'))}>{workspace.name}</span>
-          <Badge variant={statusVariant(workspace.status)} data-testid="sandbox-workspace-status">
-            {workspace.status}
-          </Badge>
-          {workspace.auto_created ? (
-            <Badge variant="outline" data-testid="sandbox-workspace-auto-created">
-              auto-created
+      <div className="flex min-w-0 flex-wrap items-start justify-between gap-2 px-3 py-2">
+        <button
+          type="button"
+          data-testid="sandbox-workspace-row-select"
+          aria-expanded={expanded}
+          className="min-w-0 flex-1 text-left"
+          onClick={onToggle}
+        >
+          <span className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className={cn('truncate', chromeSansRole('primary'))}>{workspace.name}</span>
+            <Badge
+              variant={statusVariant(workspace.status)}
+              data-testid="sandbox-workspace-status"
+            >
+              {workspaceStatusLabel(workspace.status)}
             </Badge>
+            {projectLocation ? (
+              <Badge variant="outline" data-testid="sandbox-workspace-user-owned">
+                user-owned
+              </Badge>
+            ) : null}
+            {workspace.auto_created ? (
+              <Badge variant="outline" data-testid="sandbox-workspace-auto-created">
+                auto-created
+              </Badge>
+            ) : null}
+          </span>
+          <span className="block truncate text-muted-foreground">
+            <span className={chromeMonoRole('code')}>
+              {projectLocation ? workspace.path : workspace.workspace_id} · {workspace.namespace}
+            </span>
+          </span>
+          <span className={cn('block text-muted-foreground', chromeSansRole('caption'))}>
+            Last used {timeLabel(workspace.last_used_at)}
+          </span>
+          {workspace.detail ? (
+            <span className={cn('block text-muted-foreground', chromeSansRole('caption'))}>
+              {workspace.detail}
+            </span>
           ) : null}
-        </div>
-        <p className={cn('truncate text-muted-foreground', chromeMonoRole('code'))}>
-          {workspace.workspace_id} · {workspace.namespace}
-        </p>
-        <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-          Last used {timeLabel(workspace.last_used_at)}
-        </p>
-        {workspace.detail ? (
-          <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-            {workspace.detail}
-          </p>
-        ) : null}
+        </button>
+        {projectLocation ? (
+          <span
+            className={cn('text-muted-foreground', chromeSansRole('caption'))}
+            data-testid="sandbox-workspace-no-delete"
+          >
+            No delete
+          </span>
+        ) : (
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            aria-label={`Delete Workspace ${workspace.name}`}
+            title={deleteBlock ?? undefined}
+            data-testid="sandbox-workspace-delete"
+            disabled={busy || deleteBlock !== null}
+            onClick={onDelete}
+          >
+            <Trash2 aria-hidden="true" />
+          </Button>
+        )}
       </div>
-      <Button
-        type="button"
-        size="icon"
-        variant="ghost"
-        aria-label={`Delete Workspace ${workspace.name}`}
-        data-testid="sandbox-workspace-delete"
-        onClick={onDelete}
-      >
-        <Trash2 aria-hidden="true" />
-      </Button>
+      {expanded ? (
+        <SandboxWorkspaceDetail workspace={workspace} agentLabel={agentLabel} />
+      ) : null}
     </li>
   );
 }
@@ -149,9 +197,17 @@ function DeleteWorkspaceDialog({
  * a deletion is confirmed and refused by the Agent while the Workspace is
  * attached.
  */
-export function SandboxWorkspacesPanel({ sessionId }: { sessionId: string | null }) {
+export function SandboxWorkspacesPanel({
+  sessionId,
+  agentLabel = 'This Session’s Agent',
+}: {
+  sessionId: string | null;
+  /** The Agent identity shown in every expanded Workspace detail (#3797). */
+  agentLabel?: string;
+}) {
   const inventory = useAgentWorkspaces(sessionId);
   const [name, setName] = useState('');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AgentWorkspaceDescriptor | null>(null);
 
   const create = async () => {
@@ -173,7 +229,7 @@ export function SandboxWorkspacesPanel({ sessionId }: { sessionId: string | null
       <DetailHeader
         level="h2"
         title="Workspaces"
-        description="Agent-owned reusable Workspaces for this Session's Agent. The Filesystem policy selects one; bytes outlive the execution and cleanup releases only the lease."
+        description="Agent-owned reusable Workspaces for this Session's Agent. Select a row for its durable store, source image lowers, measured bytes, lease/mount state and linked Sessions. Project Existing Locations are user-owned references and have no delete action."
         actions={
           <Button
             type="button"
@@ -237,6 +293,14 @@ export function SandboxWorkspacesPanel({ sessionId }: { sessionId: string | null
             <WorkspaceRow
               key={workspace.workspace_id}
               workspace={workspace}
+              agentLabel={agentLabel}
+              expanded={expandedId === workspace.workspace_id}
+              busy={inventory.busy}
+              onToggle={() =>
+                setExpandedId((current) =>
+                  current === workspace.workspace_id ? null : workspace.workspace_id,
+                )
+              }
               onDelete={() => setPendingDelete(workspace)}
             />
           ))}

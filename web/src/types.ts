@@ -19,6 +19,10 @@ export interface Agent {
     os_version: string;
     nession_version: string;
     image_tag?: string;
+    /** OCI architecture and OS the Agent executes on (#3499). */
+    architecture?: string;
+    os?: string;
+    variant?: string | null;
   };
   /** Candidate P2P endpoints with server probe status (issue #51). Empty for
    *  legacy servers that don't yet send them in agents.list. */
@@ -64,7 +68,26 @@ export interface Session {
   instance_id?: string | null;
   /** Server-owned explicit Project membership (#3082); absent when unbound. */
   project_id?: string | null;
+  /**
+   * The Agent's current Session Activity (#3804): a fourth, independent
+   * dimension. Absent means the Agent has not reported a level (legacy or not
+   * reconciled yet) and must render as `unknown` — never `idle`. A level is
+   * only currently verified while its Agent is online; offline/stale Agents
+   * render `unknown` regardless of the last reported value.
+   */
+  activity?: SessionActivity | null;
   last_activity: string; // ISO 8601 timestamp
+}
+
+/** The capability-reported work dimension of a Session (#3804). */
+export interface SessionActivity {
+  state: 'working' | 'idle' | 'unknown';
+  /** Orthogonal to `state`; `working` + input required is one reading. */
+  attention?: 'input_required' | null;
+  /** The capability that contributed the aggregate level, when known. */
+  capability_id?: string | null;
+  /** When the Agent observed this level (Unix milliseconds). */
+  observed_at_ms: number;
 }
 
 /**

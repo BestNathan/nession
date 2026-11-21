@@ -3,6 +3,11 @@
 //! It is test-only: no network, no external credentials, a loopback ephemeral
 //! port and explicit state injection for each failure mode.
 
+// The module is declared with bare `cfg(test)` (so clippy's allow-in-tests
+// recognizes its helpers); this inner gate keeps the client mock out of a
+// service-only build that does not compile the `registry` client.
+#![cfg(feature = "registry")]
+
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 

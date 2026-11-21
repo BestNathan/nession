@@ -23,32 +23,31 @@ test('SC-05: Workspace inventory, safe actions and Filesystem selection (Web/App
   // ── Inventory: auto-created, available and leased entries ──
   await page.getByTestId('sandbox-section-workspaces').click();
   await expect(page.getByTestId('sandbox-workspaces')).toBeVisible();
-  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
   const available = page
     .getByTestId('sandbox-workspace-row')
     .filter({ hasText: 'fixture-workspace' });
   const leased = page
     .getByTestId('sandbox-workspace-row')
     .filter({ hasText: 'fixture-session-auto' });
-  await expect(available.getByTestId('sandbox-workspace-status')).toHaveText('available');
-  await expect(leased.getByTestId('sandbox-workspace-status')).toHaveText('in_use');
+  await expect(available.getByTestId('sandbox-workspace-status')).toHaveText('Available');
+  await expect(leased.getByTestId('sandbox-workspace-status')).toHaveText('In use');
   await expect(leased.getByTestId('sandbox-workspace-auto-created')).toBeVisible();
 
   // ── Create and delete with a confirmation; a lease refuses deletion ──
   await page.getByTestId('sandbox-workspaces-create-name').fill('acceptance-ws');
   await page.getByTestId('sandbox-workspaces-create').click();
-  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
+  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(4);
   const created = page
     .getByTestId('sandbox-workspace-row')
     .filter({ hasText: 'acceptance-ws' });
   await created.getByTestId('sandbox-workspace-delete').click();
   await page.getByTestId('sandbox-workspace-delete-confirm').click();
-  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
 
-  await leased.getByTestId('sandbox-workspace-delete').click();
-  await page.getByTestId('sandbox-workspace-delete-confirm').click();
-  await expect(page.getByTestId('sandbox-workspaces-action-error')).toContainText('leased');
-  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+  await expect(leased.getByTestId('sandbox-workspace-delete')).toBeDisabled();
+  await expect(page.getByTestId('sandbox-workspace-delete-confirm')).toHaveCount(0);
+  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
 
   // ── Filesystem selects the same registry entry; no second registry ──
   await page.getByTestId('sandbox-section-policies').click();
@@ -64,7 +63,7 @@ test('SC-05: Workspace inventory, safe actions and Filesystem selection (Web/App
     'Managed',
   );
   await page.getByTestId('sandbox-section-workspaces').click();
-  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
 
   // ── App: one host header, compact sections, same inventory ──
   await page.setViewportSize({ width: 390, height: 844 });
@@ -76,7 +75,7 @@ test('SC-05: Workspace inventory, safe actions and Filesystem selection (Web/App
   await page.getByTestId('workspace-tool-sandbox').click();
   await expect(page.getByTestId('sandbox-workspace')).toBeVisible();
   await page.getByTestId('sandbox-section-workspaces').click();
-  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(2);
+  await expect(page.getByTestId('sandbox-workspace-row')).toHaveCount(3);
   await expect(page.getByTestId('app-page-back')).toHaveCount(1);
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,
@@ -87,8 +86,8 @@ test('SC-05: Workspace inventory, safe actions and Filesystem selection (Web/App
     type: 'evidence',
     description:
       'exact SHA ' + sha + ': the Session Sandbox listed the current Agent inventory (available, ' +
-      'in_use and auto-created), created and confirmed deletion of an unleased Workspace, showed ' +
-      'the leased deletion refusal, selected the same stable id in Filesystem without a second ' +
+      'in_use and auto-created), created and confirmed deletion of an unleased Workspace, disabled ' +
+      'deletion while leased, selected the same stable id in Filesystem without a second ' +
       'registry, and exposed no global Images entry on Web or App',
   });
 });

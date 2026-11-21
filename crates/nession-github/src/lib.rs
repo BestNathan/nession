@@ -10,6 +10,9 @@ pub mod agent;
 pub mod protocol;
 pub mod runtime;
 
+#[cfg(test)]
+mod test_support;
+
 pub use agent::GithubAgentExtension;
 pub use nession_git::WorkdirResolver;
 pub use runtime::client::{GithubClient, GithubError};

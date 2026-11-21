@@ -22,15 +22,20 @@
 use anyhow::{Context, Result};
 use nession_claude_code::agent::ClaudeCodeAgentExtension;
 use nession_claude_code::session_context::{McpHostContext, McpHostEndpoint};
+use nession_claude_code::tools::ClaudeCodeToolProvider;
+use nession_claude_code::workspace_trust::WorkspaceTrust;
 use nession_common::extension::AgentExtension;
 use nession_common::readiness::Readiness;
+use nession_common::session_activity::SessionActivityProvider;
 use nession_common::system;
 use nession_git::GitAgentExtension;
 use nession_github::{GithubAgentExtension, GithubClient};
+use nession_mcp::provider::McpToolProvider;
 use nession_protocol::contracts::agent::v1::AgentMetadata;
 use std::sync::Arc;
 use tracing::{error, info, warn};
 
+use crate::claude_control::AgentClaudeControl;
 use crate::claude_session_context::TmuxSessionContext;
 use crate::config::AgentConfig;
 use crate::connection::ServerClient;
@@ -41,6 +46,10 @@ use crate::netdetect::build_advertised_addresses;
 use crate::netwatch;
 use crate::protocol::served_descriptors;
 use crate::server::AgentServer;
+use crate::session::activity::{
+    ClaudeActivityProvider, SessionActivityCoordinator, ShellActivityProvider,
+};
+use crate::session_env::AgentSessionEnvironment;
 use crate::sync::git_invalidation::GitInvalidationWatcher;
 use crate::sync::heartbeat::HeartbeatLoop;
 use crate::sync::session_watcher::SessionWatcher;
@@ -283,11 +292,55 @@ pub async fn run(
         },
     )
     .context("failed to create agent server")?;
+    // #4073: one post-create preparation hook, shared by the P2P listener and
+    // the central connection so a direct and a relayed create prepare the
+    // Session identically. It reads the Session's own live environment; the
+    // Agent daemon's environment is never used.
+    let session_created: crate::session_created::SharedSessionCreatedHook = Arc::new(
+        crate::claude_workspace_trust::ClaudeWorkspaceTrustHook::new(Arc::new(
+            TmuxSessionContext::new(Arc::clone(&tmux_for_client)),
+        )),
+    );
+    agent_server = agent_server.with_session_created_hook(Arc::clone(&session_created));
     // Mount MCP on the P2P listener when `[mcp] enabled = true` (#565). A
     // fail-closed configuration error stops the start here, before `ready`.
     agent_server
-        .mount_mcp(&config, agent_token.as_str())
+        .mount_mcp(
+            &config,
+            agent_token.as_str(),
+            compose_mcp_tool_providers(&agent_id, Arc::clone(&tmux_for_client)),
+        )
         .context("failed to mount the MCP endpoint")?;
+    // Mount the opt-in read-only OCI Registry on the P2P listener when
+    // `[registry] enabled = true` (#4090). It is backed by the same verified
+    // cache the Managed creation path uses and honours the Agent's own inbound
+    // token. Without a cache the capability is refused rather than exposing an
+    // empty or private CAS; the projection starts empty so nothing is advertised
+    // until the preparation path registers an authorized tag.
+    if config.registry.enabled {
+        match erofs_cache.clone() {
+            Some(cache) => {
+                let registry =
+                    crate::registry::build_read_only_registry(cache, Arc::clone(&p2p_auth))
+                        .context("failed to mount the Agent read-only OCI Registry")?;
+                agent_server.mount_registry(Arc::new(registry));
+            }
+            None => {
+                tracing::warn!(
+                    "Agent Registry enabled but no EROFS cache is available; \
+                     the read-only /v2/ endpoint is not mounted"
+                );
+            }
+        }
+    }
+    // The composed contribution catalog and the context its handlers receive
+    // (#3778). The central connection advertises the manifest on registration
+    // and executes Server-relayed contributed calls through the same catalog
+    // and owner state as the embedded endpoint.
+    let mcp_tools = match (agent_server.mcp_catalog(), agent_server.mcp_tool_context()) {
+        (Some(catalog), Some(context)) => Some((catalog, context)),
+        _ => None,
+    };
     let (server_handle, listen_addr) = agent_server
         .start()
         .await
@@ -342,18 +395,28 @@ pub async fn run(
     // Skip server connection if server_url is empty (standalone mode).
     // The supervisor reconnects on its own, so we capture the handle and the
     // server-advertised heartbeat interval (falling back to the local config).
-    let (client_handle, heartbeat_interval_secs) = if config.server_url.trim().is_empty() {
+    let (client_handle, heartbeat_interval_secs, activity) = if config.server_url.trim().is_empty()
+    {
         info!("No server_url configured — running in standalone mode");
-        // Serving: the P2P socket is bound and the tmux socket is pinned. There
-        // is no provider set to compose on this path, and no remote to reach.
+        // Serving: the P2P socket is bound and the tmux socket is pinned.
+        // There is no provider set to compose on this path, and no remote
+        // to reach.
         ready.announce();
-        (None, config.heartbeat_interval_secs)
+        (None, config.heartbeat_interval_secs, None)
     } else {
         let ext_registry = compose_providers(
             &agent_id,
             Arc::clone(&tmux_for_client),
             claude_mcp_host(&config, listen_addr),
         )?;
+        // Activity providers come from the same composition that serves
+        // the protocol routes (#3800), so a capability cannot contribute
+        // observations without being part of this Agent's provider set.
+        let activity = SessionActivityCoordinator::new(
+            agent_id.clone(),
+            compose_activity_providers(&agent_id, Arc::clone(&tmux_for_client), &ext_registry),
+        )
+        .context("cannot compose this agent's Session Activity providers")?;
 
         // Serving: the socket is bound and the provider set composed. Announced
         // *before* the central-server connection on purpose — that one is
@@ -378,7 +441,12 @@ pub async fn run(
             agent_token.clone(),
             Arc::clone(&mutation_lane),
         )
-        .with_session_metadata(session_metadata);
+        .with_session_metadata(session_metadata)
+        .with_session_created_hook(session_created);
+        let server_client = match mcp_tools {
+            Some((catalog, context)) => server_client.with_mcp_tools(catalog, context),
+            None => server_client,
+        };
 
         // Attempt to connect with a timeout so the agent can still serve
         // local clients even if the central server is unreachable. The
@@ -389,17 +457,17 @@ pub async fn run(
                     Ok((handle, server_interval)) => {
                         let interval = server_interval.unwrap_or(config.heartbeat_interval_secs);
                         info!("Connected to central server (heartbeat interval: {}s)", interval);
-                        (Some(handle), interval)
+                        (Some(handle), interval, Some(activity.clone()))
                     }
                     Err(e) => {
                         error!("Failed to connect to central server: {:#}", e);
-                        (None, config.heartbeat_interval_secs)
+                        (None, config.heartbeat_interval_secs, Some(activity.clone()))
                     }
                 }
             }
             _ = tokio::time::sleep(std::time::Duration::from_secs(30)) => {
                 warn!("Timed out connecting to central server after 30s, continuing without sync");
-                (None, config.heartbeat_interval_secs)
+                (None, config.heartbeat_interval_secs, Some(activity.clone()))
             }
         }
     };
@@ -459,6 +527,10 @@ pub async fn run(
             Arc::clone(&tmux_for_client),
             config.session_poll_interval_secs,
         );
+        let watcher = match activity.clone() {
+            Some(activity) => watcher.with_activity(activity),
+            None => watcher,
+        };
         let shutdown_handle = watcher.shutdown_handle();
         tokio::spawn(async move {
             if let Err(e) = watcher.run().await {
@@ -551,6 +623,11 @@ pub fn compose_providers(
     // path. Both providers share the one injected resolver.
     let workdir: Arc<dyn nession_git::WorkdirResolver> =
         Arc::new(TmuxWorkdirResolver::new(Arc::clone(&tmux)));
+    // #4080. Session-addressed providers resolve values through the Session's
+    // Environment Binding (explicit overrides) before the Agent baseline. The
+    // Agent owns both halves, so it supplies the one boundary they share.
+    let session_env: Arc<dyn nession_common::session_env::SessionEnvironment> =
+        Arc::new(AgentSessionEnvironment::new(Arc::clone(&tmux)));
     let extensions: Vec<Box<dyn AgentExtension>> = vec![
         // #1005. The context is what lets this provider resolve a Session's cwd
         // and whether Claude is running in it — the agent owns session
@@ -559,15 +636,22 @@ pub fn compose_providers(
         Box::new(ClaudeCodeAgentExtension::new(Arc::new(
             TmuxSessionContext::new(Arc::clone(&tmux)).with_mcp_host(claude_mcp_host),
         ))),
-        Box::new(GitAgentExtension::new("git", Arc::clone(&workdir))),
+        Box::new(GitAgentExtension::new(
+            "git",
+            Arc::clone(&workdir),
+            Arc::clone(&session_env),
+        )),
         // #1290. One Git capability, two providers: local Git and the
-        // read-only GitHub hosting context. The client reads its token from
-        // the Agent's environment; an absent token is an honest unavailable
-        // state, not a startup failure.
+        // read-only GitHub hosting context. The transport is credential-free
+        // at composition; each Session-addressed request selects the
+        // credential its Session binding (or the Agent baseline) provides
+        // (#4080). An absent credential is an honest unavailable state, not a
+        // startup failure.
         Box::new(GithubAgentExtension::new(
             "git",
             workdir,
-            Arc::new(GithubClient::from_env()),
+            Arc::new(GithubClient::api_transport()),
+            session_env,
         )),
     ];
     // The third argument is the other half of what this runtime serves: the
@@ -580,6 +664,58 @@ pub fn compose_providers(
         ExtensionRegistry::new(agent_id.to_string(), extensions, served_descriptors()?)
             .context("cannot compose this agent's protocol providers")?,
     ))
+}
+
+/// The Session Activity providers this Agent composes (#3800/#3802).
+///
+/// Capability providers come from the same Extension set that serves the
+/// Protocol routes; the generic Shell provider belongs to the Agent itself
+/// because it interprets tmux Pane foreground work, not a capability workload.
+/// Extracted so the composition can be asserted without starting an Agent —
+/// a provider dropped here would disappear from every entrypoint at once.
+pub fn compose_activity_providers(
+    agent_id: &str,
+    tmux: Arc<SessionManager>,
+    registry: &ExtensionRegistry,
+) -> Vec<Arc<dyn SessionActivityProvider>> {
+    let mut providers = registry.activity_providers();
+    // The Claude adapter consumes #3779's source-owned status reader and owns
+    // a Pane only when it can bind a verified Claude process to it.
+    providers.push(Arc::new(ClaudeActivityProvider::new(
+        agent_id,
+        Arc::clone(&tmux),
+    )));
+    providers.push(Arc::new(ShellActivityProvider::new()));
+    providers
+}
+
+/// Every MCP Tool contribution this Agent composes into its shared endpoint
+/// (`#3778`).
+///
+/// An Extension reaches the MCP catalog only by being constructed here and
+/// handed to the mount — there is no side-effect registration. The baseline
+/// catalog is always present and unchanged. The Claude Code Extension is the
+/// first consumer (`#3779`): its Tools execute through this Agent's own tmux
+/// Session state, process membership and on-demand CLI observation.
+pub fn compose_mcp_tool_providers(
+    agent_id: &str,
+    tmux: Arc<SessionManager>,
+) -> Vec<Arc<dyn McpToolProvider>> {
+    // The read Tools execute this Agent's **existing** conversation/transcript
+    // Protocol Units through the same stateless extension the protocol routes
+    // use, over the same tmux Session truth (`#3779` P3). There is no second
+    // discovery or transcript parser behind the MCP surface.
+    let context = Arc::new(TmuxSessionContext::new(Arc::clone(&tmux)));
+    let reader = Arc::new(ClaudeCodeAgentExtension::new(context.clone()));
+    // #4073: `claude.enter` prepares Claude's own Workspace Trust immediately
+    // before launch, resolved from this same live Session view.
+    let trust = Arc::new(WorkspaceTrust::new(context));
+    vec![Arc::new(ClaudeCodeToolProvider::new(
+        agent_id,
+        Arc::new(AgentClaudeControl::new(agent_id, tmux)),
+        reader,
+        trust,
+    ))]
 }
 
 /// What this Agent can tell the Claude MCP view about its own hosting (#3600).
@@ -777,6 +913,60 @@ mod tests {
         assert!(
             !manifest.is_empty(),
             "the runtime must advertise at least the units it routes itself"
+        );
+    }
+
+    /// The Claude and Shell Activity providers are part of the Agent product
+    /// (#3801/#3802), and one capability id cannot be composed twice.
+    #[test]
+    fn the_runtime_composes_the_session_activity_providers() {
+        let registry = compose_providers(
+            "agent-test",
+            Arc::new(SessionManager::new()),
+            McpHostContext::default(),
+        )
+        .expect("the runtime's own providers must compose");
+        let providers =
+            compose_activity_providers("agent-test", Arc::new(SessionManager::new()), &registry);
+        let ids: Vec<&'static str> = providers.iter().map(|provider| provider.id()).collect();
+
+        for expected in ["claude-code", "shell"] {
+            assert_eq!(
+                ids.iter().filter(|id| **id == expected).count(),
+                1,
+                "the {expected} provider is part of the Agent product: {ids:?}"
+            );
+        }
+        for id in &ids {
+            let id = *id;
+            assert_eq!(
+                ids.iter().filter(|other| **other == id).count(),
+                1,
+                "capability id `{id}` must be composed exactly once: {ids:?}"
+            );
+        }
+    }
+
+    /// The Claude control Tools reach the shared MCP catalog only through this
+    /// explicit composition (`#3779`).
+    #[test]
+    fn the_runtime_composes_the_claude_control_tools() {
+        let providers = compose_mcp_tool_providers("agent-test", Arc::new(SessionManager::new()));
+        let names: Vec<String> = providers
+            .iter()
+            .flat_map(|provider| provider.tools().expect("provider tools"))
+            .map(|tool| tool.name().to_string())
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "nession_claude_status",
+                "nession_claude_enter",
+                "nession_claude_submit",
+                "nession_claude_list_conversations",
+                "nession_claude_get_conversation",
+                "nession_claude_get_transcript"
+            ]
         );
     }
 }

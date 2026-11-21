@@ -192,6 +192,40 @@ Session's Agent, alongside the legacy `cache_statuses` projection.
   scheduler or storage format is introduced, and a snapshot always wins over
   any later event.
 
+## Explicit prepare/resume/retry (#3796)
+
+A cache observation is read-only: asking for it never downloads, repairs or
+mints a grant. Preparation is a separate, explicit, user-authorized action
+against one current Session Agent and one Image identity:
+
+- `server.session.sandbox.image-prepare` authenticates the browser, resolves
+  the Session's registered Agent, authorizes the exact digest through the same
+  Session-scoped catalog rules as Sandbox Enter, and forwards one scoped
+  `ManagedImageGrant` to `agent.session.sandbox.image-prepare`. The Server
+  never starts a transfer on its own and never treats a read as a request.
+- The Agent proves the named Session is still one it owns, checks the grant
+  names the requested identity, and validates the explicit intent against its
+  own observation: `prepare` fetches an absent/resumable/failed identity (a
+  verified identity is a no-op, an active transfer is observed rather than
+  duplicated), `resume` requires a durable partial, and `retry` requires a
+  failed state. An ineligible intent is refused with a bounded explanation.
+- The fetch reuses the accepted single-flight transfer engine. Concurrent
+  prepares of one digest share one transfer, every object is verified against
+  its authorized descriptor, and a corrupt published blob is refetched rather
+  than trusted. Preparation writes no Session draft and creates no mount or
+  lease.
+- **Closure aggregation.** For a locally verified OCI Manifest, the identity's
+  observation aggregates the blobs the image actually mounts: its EROFS layer,
+  or a Composite descriptor plus its metadata and ordered devices. A Manifest
+  whose small metadata document arrived before its layer is never reported as
+  mount-ready; the aggregate reports the least-ready required blob and sums
+  measured bytes only when every total is known.
+- The reply carries the aggregate observation and every observed closure
+  digest. It contains no local path, token or arbitrary-digest access right.
+  An Agent without an EROFS cache, an unauthorized identity or a failed
+  transfer is reported as a typed refusal with its observation intact, so the
+  UI keeps a recoverable explanation and a Retry action.
+
 ## Failure semantics
 
 - Missing, non-writable, wrongly owned or (for an explicit path) ephemeral

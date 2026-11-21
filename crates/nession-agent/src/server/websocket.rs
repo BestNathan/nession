@@ -33,7 +33,7 @@ use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
 use crate::server::issued_credit::SubscriberIssuedFlow;
-use crate::session::metadata::SessionMetadataStore;
+use crate::session::metadata::{attach_session_summaries, SessionMetadataStore};
 use crate::session::registry::{
     ControlAcquireRejected, InputRejected, InvalidStreamIdentity, NotAttached, ResizeRejected,
     SessionRegistry, SubscribeRejected,
@@ -48,7 +48,7 @@ use crate::session::terminal::state::InputSequence;
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
 use crate::tmux::env::profiles_from_snapshots;
-use crate::tmux::manager::{SessionBindingInput, SessionManager};
+use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use axum::extract::{FromRequestParts, State, WebSocketUpgrade};
@@ -59,6 +59,7 @@ use axum::Router;
 use futures_util::StreamExt;
 use nession_mcp::McpService;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
+use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_runtime::frame::WsFrame;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 use nession_runtime::lane::{KeyedLane, Work};
@@ -216,6 +217,10 @@ pub mod msg_types {
     pub const SESSION_CAPTURE_PREVIEW: &str = "agent.session.capture-preview";
     pub const SESSION_METADATA_GET: &str = "agent.session.metadata.get";
     pub const SESSION_METADATA_UPDATE: &str = "agent.session.metadata.update";
+    pub const SESSION_METADATA_PATCH: &str = "agent.session.metadata.patch";
+    /// One Extension-contributed MCP Tool call on the direct P2P surface
+    /// (`#3778`).
+    pub const MCP_TOOL_CALL: &str = "agent.mcp.tool.call";
     pub const CLIENT_ATTACH: &str = "agent.attach";
     pub const CLIENT_DETACH: &str = "agent.detach";
     pub const TERMINAL_INPUT: &str = "agent.terminal.input";
@@ -328,10 +333,10 @@ pub use nession_protocol::contracts::session::v1::{
     ClientAttachPayload, ClientAttachResponse, ClientDetachPayload, ClientDetachResponse,
     SessionCapturePreviewPayload, SessionCapturePreviewResponse, SessionCreatePayload,
     SessionCreateResponse, SessionInfo, SessionKillPayload, SessionKillResponse,
-    SessionListResponse, SessionMetadata, SessionMetadataGetPayload, SessionMetadataResponse,
-    SessionMetadataUpdatePayload, WebAttachInfo, WebSessionAttachPayload, WebSessionCreatePayload,
-    WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload, WebSessionKillResponse,
-    WebSessionsListResponse,
+    SessionListResponse, SessionMetadata, SessionMetadataGetPayload, SessionMetadataPatchPayload,
+    SessionMetadataResponse, SessionMetadataUpdatePayload, WebAttachInfo, WebSessionAttachPayload,
+    WebSessionCreatePayload, WebSessionCreateResponse, WebSessionInfo, WebSessionKillPayload,
+    WebSessionKillResponse, WebSessionsListResponse,
 };
 
 // --- Wire shapes, re-exported from the Protocol Kernel (#678) ---
@@ -1025,6 +1030,14 @@ pub struct AgentServer {
     handshake_policy: P2pHandshakePolicy,
     /// The MCP endpoint (`#565`) mounted on this listener, when enabled.
     mcp: Option<Arc<McpService>>,
+    /// The opt-in read-only OCI Registry capability (`#4090`) mounted on this
+    /// listener when `[registry] enabled = true`. `None` exposes no `/v2/`
+    /// endpoint and advertises nothing of the private local CAS.
+    registry: Option<Arc<crate::registry::AgentReadOnlyRegistry>>,
+    /// The post-create preparation hook composed by `runtime.rs` (`#4073`).
+    /// `None` for a directly constructed server (tests), which must not write
+    /// external capability state.
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 /// Translate a legacy attach-time `env_snapshots` list into the binding model.
@@ -1209,6 +1222,14 @@ struct AgentIngress {
     agent_id: String,
     attach_mode: AttachMode,
     resize: ResizeReporter,
+    /// The composed contribution catalog and its Tool context (`#3778`).
+    /// `None` when MCP is disabled; the direct P2P contribution route then
+    /// refuses with a truthful unavailable answer.
+    mcp_catalog: Option<Arc<nession_mcp::McpCatalog>>,
+    mcp_tool_context: Option<Arc<nession_mcp::ToolContext>>,
+    /// Capability preparation after a Session is created (`#4073`). `None`
+    /// when the runtime did not compose one (direct test constructions).
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 /// Router state for one accepted P2P connection.
@@ -1222,6 +1243,8 @@ struct P2pHttpState {
     auth: Arc<P2pAuth>,
     /// The optional MCP endpoint mounted on the same listener (`#565`).
     mcp: Option<Arc<McpService>>,
+    /// The opt-in read-only OCI Registry capability (`#4090`), when enabled.
+    registry: Option<Arc<crate::registry::AgentReadOnlyRegistry>>,
     /// The pre-authentication deadline for this connection (#2653).
     deadline: Duration,
     /// The listener's budget for upgraded-but-unauthenticated sockets
@@ -1331,18 +1354,23 @@ impl Drop for ClosedOnDrop {
 /// carry any path.
 fn p2p_router(state: P2pHttpState) -> Router {
     let mcp_path = state.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    // The opt-in read-only `/v2/` Registry router (#4090), when enabled. It is
+    // stateless once built and merged below so its requests share the same
+    // admission-slot backstop as the P2P upgrade and MCP routes.
+    let registry_router = state.registry.as_ref().map(|registry| registry.router());
     let slot = state.slot.clone();
     let mut router = Router::new();
     if let Some(path) = mcp_path.as_deref() {
         router = router.route(path, any(mcp_http));
     }
-    router
-        .fallback(p2p_upgrade_or_not_found)
-        .layer(axum::middleware::from_fn_with_state(
-            slot,
-            ingress::release_after_response,
-        ))
-        .with_state(state)
+    let mut router = router.fallback(p2p_upgrade_or_not_found).with_state(state);
+    if let Some(registry_router) = registry_router {
+        router = router.merge(registry_router);
+    }
+    router.layer(axum::middleware::from_fn_with_state(
+        slot,
+        ingress::release_after_response,
+    ))
 }
 
 /// The P2P upgrade route, for any path the MCP endpoint did not claim.
@@ -1465,6 +1493,11 @@ pub(crate) struct P2pRequest<'a> {
     /// channel's size changes into (`#961-D`; `crate::tmux::control` says which
     /// notification those actually are). See [`crate::server::resize`].
     resize: &'a ResizeReporter,
+    /// The composed contribution catalog and its Tool context (`#3778`).
+    mcp_catalog: Option<&'a Arc<nession_mcp::McpCatalog>>,
+    mcp_tool_context: Option<&'a Arc<nession_mcp::ToolContext>>,
+    /// Capability preparation after a Session is created (`#4073`).
+    session_created: Option<&'a crate::session_created::SharedSessionCreatedHook>,
 }
 
 impl P2pRequest<'_> {
@@ -1517,6 +1550,11 @@ struct Connection {
     /// `client.auth`. `None` is "the upgrade happened, the peer is not a peer
     /// yet" — every business frame is refused in that state.
     authority: Arc<StdMutex<Option<AuthContext>>>,
+    /// The composed contribution catalog and its context (`#3778`).
+    mcp_catalog: Option<Arc<nession_mcp::McpCatalog>>,
+    mcp_tool_context: Option<Arc<nession_mcp::ToolContext>>,
+    /// Capability preparation after a Session is created (`#4073`).
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 impl Connection {
@@ -1779,6 +1817,9 @@ impl Frame {
             agent_id: &connection.agent_id,
             attach_mode: &connection.attach_mode,
             resize: &connection.resize,
+            mcp_catalog: connection.mcp_catalog.as_ref(),
+            mcp_tool_context: connection.mcp_tool_context.as_ref(),
+            session_created: connection.session_created.as_ref(),
         };
 
         let reply = dispatch_p2p(ctx, &msg_type, payload).await;
@@ -1934,16 +1975,11 @@ fn session_named(payload_value: &serde_json::Value) -> ResourceKey {
 ///
 /// The scope column's counterpart to [`session_named`], and deliberately not
 /// One successful metadata answer, on either operation.
-fn metadata_ok_reply(id: &str, metadata: SessionMetadata) -> String {
+fn metadata_ok_reply(id: &str, instance_id: String, metadata: SessionMetadata) -> String {
     serde_json::to_string(&make_response(
         id,
         msg_types::OK,
-        SessionMetadataResponse {
-            success: true,
-            error: None,
-            error_kind: None,
-            metadata: Some(metadata),
-        },
+        SessionMetadataResponse::success_for(instance_id, metadata),
     ))
     .unwrap_or_default()
 }
@@ -1960,6 +1996,7 @@ fn metadata_error_reply(id: &str, error: &anyhow::Error) -> String {
             error: Some(detail),
             error_kind: Some(kind.to_string()),
             metadata: None,
+            instance_id: None,
         },
     ))
     .unwrap_or_default()
@@ -2006,7 +2043,8 @@ fn session_by_id(payload_value: &serde_json::Value) -> ResourceKey {
 // the `Key` policies are written in terms of.
 p2p_routes! { ctx, msg_type, payload_value;
             "agent.session.list" => "agent.session.list" => 1 => P2pAccess::Authenticated => Query => { match ctx.tmux.list_sessions().await {
-                Ok(sessions_list) => {
+                Ok(mut sessions_list) => {
+                    attach_session_summaries(ctx.session_metadata, &mut sessions_list).await;
                     let payload = SessionListResponse {
                         sessions: sessions_list,
                         // The agent answers from its own tmux, so nothing is
@@ -2023,6 +2061,20 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
+                // Initial metadata is validated before any Session side effect
+                // (#4081): the same shared normalization and bounds as the
+                // update surfaces, never a second validator.
+                let initial_metadata = match payload.initial_metadata.as_ref() {
+                    Some(metadata) => match metadata.normalized() {
+                        Ok(metadata) => Some(metadata),
+                        Err(error) => return ctx.err("invalid_metadata", &error.to_string()),
+                    },
+                    None => None,
+                };
+                let initial = initial_metadata.as_ref().map(|metadata| InitialSessionMetadata {
+                    store: ctx.session_metadata.as_ref(),
+                    metadata,
+                });
                 let working_dir = match payload.working_dir.as_deref() {
                     Some(wd) => match SessionManager::validate_initial_working_dir(wd) {
                         Ok(path) => path,
@@ -2109,6 +2161,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                             crate::managed_session::MANAGED_WORKING_DIR,
                             binding,
                             &prepared.policy,
+                            initial.as_ref(),
                         )
                         .await
                 } else {
@@ -2120,18 +2173,33 @@ p2p_routes! { ctx, msg_type, payload_value;
                             &working_dir,
                             binding,
                             payload.sandbox.as_ref(),
+                            initial.as_ref(),
                         )
                         .await
                 };
                 match outcome {
                     Ok(outcome) => {
+                        // #4073: the Session and its environment binding now
+                        // exist. The capability prepares its own state here and
+                        // contributes only a warning on failure; the Session
+                        // stays created for every consumer.
+                        let mut warnings = outcome.warnings;
+                        if let Some(hook) = ctx.session_created {
+                            if let Some(warning) =
+                                hook.session_created(ctx.agent_id, &payload.name).await
+                            {
+                                warnings.push(warning);
+                            }
+                        }
                         let resp = SessionCreateResponse {
                             name: payload.name,
-                            warnings: outcome.warnings,
+                            warnings,
                             sandbox: outcome.sandbox,
                             workspace: managed
                                 .as_ref()
                                 .map(|prepared| prepared.workspace.display().to_string()),
+                            instance_id: outcome.instance_id,
+                            metadata: outcome.metadata,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -2174,8 +2242,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                         Ok(p) => p,
                         Err(e) => return ctx.err("parse_error", &e.to_string()),
                     };
-                match ctx.session_metadata.get(&payload.name).await {
-                    Ok(metadata) => metadata_ok_reply(ctx.id, metadata),
+                match ctx.session_metadata.read_current(&payload.name).await {
+                    Ok(snapshot) => metadata_ok_reply(ctx.id, snapshot.instance_id, snapshot.metadata),
                     Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
@@ -2187,8 +2255,9 @@ p2p_routes! { ctx, msg_type, payload_value;
                     };
                 match ctx
                     .session_metadata
-                    .update(
+                    .update_guarded(
                         &payload.name,
+                        payload.expected_instance_id.as_deref(),
                         payload.title.as_deref(),
                         payload.description.as_deref(),
                         &payload.tags,
@@ -2196,7 +2265,27 @@ p2p_routes! { ctx, msg_type, payload_value;
                     )
                     .await
                 {
-                    Ok(metadata) => metadata_ok_reply(ctx.id, metadata),
+                    Ok(snapshot) => metadata_ok_reply(ctx.id, snapshot.instance_id, snapshot.metadata),
+                    Err(error) => metadata_error_reply(ctx.id, &error),
+                }
+            }
+            "agent.session.metadata.patch" => "agent.session.metadata.patch" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
+                let payload: SessionMetadataPatchPayload =
+                    match serde_json::from_value(payload_value) {
+                        Ok(p) => p,
+                        Err(e) => return ctx.err("parse_error", &e.to_string()),
+                    };
+                match ctx
+                    .session_metadata
+                    .patch(
+                        &payload.name,
+                        &payload.expected_instance_id,
+                        payload.expected_revision,
+                        &payload.patch,
+                    )
+                    .await
+                {
+                    Ok(snapshot) => metadata_ok_reply(ctx.id, snapshot.instance_id, snapshot.metadata),
                     Err(error) => metadata_error_reply(ctx.id, &error),
                 }
             }
@@ -3002,7 +3091,8 @@ p2p_routes! { ctx, msg_type, payload_value;
             }
 
             "client.sessions.list" => "client.sessions.list" => 1 => P2pAccess::Authenticated => Query => { match ctx.tmux.list_sessions().await {
-                Ok(sessions_list) => {
+                Ok(mut sessions_list) => {
+                    attach_session_summaries(ctx.session_metadata, &mut sessions_list).await;
                     let sessions: Vec<WebSessionInfo> = sessions_list
                         .into_iter()
                         .map(|s| {
@@ -3024,9 +3114,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 foreground_command: None,
                                 working_dir: None,
                                 instance_id: s.instance_id,
+                                // The Agent owns the metadata summary (#4007);
+                                // a direct Agent list answer is the truth here.
+                                metadata: s.metadata,
                                 // Project membership is Server-owned (#3082);
                                 // a direct Agent view has no authority for it.
                                 project_id: None,
+                                // Activity is projected by the Server from the
+                                // Agent's dedicated level wire (#3804); this
+                                // direct view has no coordinator snapshot.
+                                activity: None,
                                 last_activity: chrono::Utc::now().to_rfc3339(),
                             }
                         })
@@ -3066,11 +3163,37 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_id: None,
                             error: Some(e.to_string()),
                             sandbox: None,
+                            instance_id: None,
+                            metadata: None,
                         };
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default();
                     }
                 };
+                // Validate initial metadata before any Session side effect
+                // (#4081), through the one shared contract validator.
+                let initial_metadata = match payload.initial_metadata.as_ref() {
+                    Some(metadata) => match metadata.normalized() {
+                        Ok(metadata) => Some(metadata),
+                        Err(error) => {
+                            let resp = WebSessionCreateResponse {
+                                success: false,
+                                session_id: None,
+                                error: Some(error.to_string()),
+                                sandbox: None,
+                                instance_id: None,
+                                metadata: None,
+                            };
+                            return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
+                                .unwrap_or_default();
+                        }
+                    },
+                    None => None,
+                };
+                let initial = initial_metadata.as_ref().map(|metadata| InitialSessionMetadata {
+                    store: ctx.session_metadata.as_ref(),
+                    metadata,
+                });
                 let working_dir = match payload.working_dir.as_deref() {
                     Some(wd) => match SessionManager::validate_initial_working_dir(wd) {
                         Ok(path) => path,
@@ -3080,6 +3203,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 session_id: None,
                                 error: Some(e.to_string()),
                                 sandbox: None,
+                                instance_id: None,
+                                metadata: None,
                             };
                             return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                                 .unwrap_or_default();
@@ -3101,16 +3226,31 @@ p2p_routes! { ctx, msg_type, payload_value;
                         &working_dir,
                         None,
                         payload.sandbox.as_ref(),
+                        initial.as_ref(),
                     )
                     .await
                 {
                     Ok(outcome) => {
+                        // #4073: this Agent-local create entrypoint offers the
+                        // same preparation point. Its response contract has no
+                        // `warnings` member, so a failed preparation is logged
+                        // here; `claude.enter` re-resolves and refuses before
+                        // launch when it still cannot prepare.
+                        if let Some(hook) = ctx.session_created {
+                            if let Some(warning) =
+                                hook.session_created(ctx.agent_id, &payload.name).await
+                            {
+                                warn!("{warning}");
+                            }
+                        }
                         let session_id = format!("{}:{}", ctx.agent_id, payload.name);
                         let resp = WebSessionCreateResponse {
                             success: true,
                             session_id: Some(session_id),
                             error: None,
                             sandbox: outcome.sandbox,
+                            instance_id: outcome.instance_id,
+                            metadata: outcome.metadata,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -3121,6 +3261,8 @@ p2p_routes! { ctx, msg_type, payload_value;
                             session_id: None,
                             error: Some(e.to_string()),
                             sandbox: None,
+                            instance_id: None,
+                            metadata: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -3343,6 +3485,67 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(e) => ctx.err("cwd_failed", &e.to_string()),
                 }
             }
+            // One Extension-contributed MCP Tool call on the direct P2P
+            // surface (#3778). Same owner rules as the Server-relayed route:
+            // the named Agent must be this one, the Tool must be advertised by
+            // this Agent's composed catalog, and execution uses the same
+            // context its embedded MCP endpoint uses.
+            "agent.mcp.tool.call" => "agent.mcp.tool.call" => 1 => P2pAccess::Authenticated => Query => {
+                let call: McpToolCallPayload = match serde_json::from_value(payload_value) {
+                    Ok(call) => call,
+                    Err(e) => return ctx.err("parse_error", &e.to_string()),
+                };
+                let reply = match (ctx.mcp_catalog, ctx.mcp_tool_context) {
+                    (Some(catalog), Some(context)) => {
+                        if call.agent_id != ctx.agent_id {
+                            McpToolCallReply::failure(
+                                "invalid_argument",
+                                format!(
+                                    "this Agent is '{}', not '{}'",
+                                    ctx.agent_id, call.agent_id
+                                ),
+                            )
+                        } else {
+                            let snapshot = catalog.snapshot();
+                            if !snapshot
+                                .contributions()
+                                .iter()
+                                .any(|tool| tool.name == call.tool)
+                            {
+                                McpToolCallReply::failure(
+                                    "not_found",
+                                    format!(
+                                        "this Agent does not advertise contributed Tool `{}`",
+                                        call.tool
+                                    ),
+                                )
+                            } else {
+                                match call.arguments.as_object().cloned() {
+                                    Some(arguments) => {
+                                        match snapshot.call(context, &call.tool, Some(arguments)).await {
+                                            Ok(value) => McpToolCallReply::success(value),
+                                            Err(error) => McpToolCallReply::failure(
+                                                error.kind.as_str(),
+                                                error.message,
+                                            ),
+                                        }
+                                    }
+                                    None => McpToolCallReply::failure(
+                                        "invalid_argument",
+                                        "`arguments` must be an object",
+                                    ),
+                                }
+                            }
+                        }
+                    }
+                    _ => McpToolCallReply::failure(
+                        "unavailable",
+                        "this Agent has no composed contribution catalog",
+                    ),
+                };
+                serde_json::to_string(&make_response(ctx.id, msg_types::OK, reply))
+                    .unwrap_or_default()
+            }
 }
 
 impl AgentServer {
@@ -3410,7 +3613,22 @@ impl AgentServer {
             auth: context.auth,
             handshake_policy: context.handshake_policy,
             mcp: None,
+            registry: None,
+            session_created: None,
         })
+    }
+
+    /// Attach the post-create preparation hook (`#4073`).
+    ///
+    /// Composed only by `runtime.rs`: the hook performs capability-owned side
+    /// effects, so a test harness must opt in explicitly rather than inherit
+    /// them from the production graph.
+    pub fn with_session_created_hook(
+        mut self,
+        hook: crate::session_created::SharedSessionCreatedHook,
+    ) -> Self {
+        self.session_created = Some(hook);
+        self
     }
 
     /// Mount the MCP endpoint on this listener (`#565`).
@@ -3420,10 +3638,15 @@ impl AgentServer {
     /// a second path to tmux. The cluster backend reuses the Server this Agent
     /// reports to, or reports a structured "no Server" error in standalone
     /// mode.
+    ///
+    /// `tool_providers` is the Agent runtime's explicit Extension composition
+    /// (`#3778`). The catalog validates it before this returns; an invalid
+    /// contribution fails the mount.
     pub fn mount_mcp(
         &mut self,
         config: &crate::config::AgentConfig,
         agent_token: &str,
+        tool_providers: Vec<Arc<dyn nession_mcp::provider::McpToolProvider>>,
     ) -> Result<()> {
         self.mcp = crate::server::mcp::build(
             crate::server::mcp::McpHost {
@@ -3436,8 +3659,37 @@ impl AgentServer {
             Arc::clone(&self.tmux_manager),
             Arc::clone(&self.sessions),
             Arc::clone(&self.mutations),
+            Arc::clone(&self.session_metadata),
+            tool_providers,
+            self.session_created.clone(),
         )?;
         Ok(())
+    }
+
+    /// Mount the opt-in read-only OCI Registry capability (`#4090`).
+    ///
+    /// Called by `runtime.rs` only when `[registry] enabled = true` and a
+    /// verified cache is present. The handle's reachability projection starts
+    /// empty; the Image preparation path registers authorized tags against it.
+    pub fn mount_registry(&mut self, registry: Arc<crate::registry::AgentReadOnlyRegistry>) {
+        self.registry = Some(registry);
+    }
+
+    /// The mounted read-only Registry handle, when enabled (`#4090`).
+    pub fn registry(&self) -> Option<Arc<crate::registry::AgentReadOnlyRegistry>> {
+        self.registry.clone()
+    }
+
+    /// The composed MCP catalog this Agent serves, when MCP is enabled
+    /// (`#3778`). The runtime advertises its manifest on registration and
+    /// executes Server-relayed contribution calls through it.
+    pub fn mcp_catalog(&self) -> Option<Arc<nession_mcp::McpCatalog>> {
+        self.mcp.as_ref().map(|service| service.catalog())
+    }
+
+    /// The Tool context the composed catalog's handlers receive.
+    pub fn mcp_tool_context(&self) -> Option<Arc<nession_mcp::ToolContext>> {
+        self.mcp.as_ref().map(|service| service.tool_context())
     }
 
     /// Start accepting connections. Returns a [`ServerHandle`] that can be
@@ -3499,10 +3751,14 @@ impl AgentServer {
             agent_id: self.agent_id.clone(),
             attach_mode: self.attach_mode.clone(),
             resize: self.resize.clone(),
+            mcp_catalog: self.mcp.as_ref().map(|mcp| mcp.catalog()),
+            mcp_tool_context: self.mcp.as_ref().map(|mcp| mcp.tool_context()),
+            session_created: self.session_created.clone(),
         };
         let tls_acceptor = self.tls_acceptor;
         let auth = Arc::clone(&self.auth);
         let mcp = self.mcp.clone();
+        let registry = self.registry.clone();
         let handshake_policy = self.handshake_policy;
         // Used by the accept loop itself: the log line and the shutdown path's
         // backend close.
@@ -3561,6 +3817,7 @@ impl AgentServer {
                                     ingress: ingress_context.clone(),
                                     auth: Arc::clone(&auth),
                                     mcp: mcp.clone(),
+                                    registry: registry.clone(),
                                     deadline: handshake_policy.timeout,
                                     pending_auth: Arc::clone(&pending_auth_slots),
                                     auth_timeout: handshake_policy.auth_timeout,
@@ -3694,6 +3951,9 @@ impl AgentServer {
             agent_id,
             attach_mode,
             resize,
+            mcp_catalog,
+            mcp_tool_context,
+            session_created,
         } = context;
 
         // Everything a frame of this connection needs, owned once and shared by
@@ -3717,6 +3977,9 @@ impl AgentServer {
             addr,
             auth,
             authority: Arc::new(StdMutex::new(None)),
+            mcp_catalog,
+            mcp_tool_context,
+            session_created,
         });
 
         // The loop owns the connection; keep the outbound handle so the writer
@@ -6091,6 +6354,7 @@ mod tests {
             terminal_cols: None,
             sandbox: None,
             managed: None,
+            initial_metadata: None,
         };
         let create_req = new_message(msg_types::SESSION_CREATE, create_payload);
         let create_resp: Message<SessionCreateResponse> =
@@ -7171,6 +7435,7 @@ mod tests {
             working_dir: None,
             terminal_cols: None,
             sandbox: None,
+            initial_metadata: None,
         };
         let create_req = new_message(msg_types::CLIENT_SESSION_CREATE, create_payload);
         let create_resp: Message<WebSessionCreateResponse> =
@@ -7429,6 +7694,9 @@ mod tests {
                 agent_id: "test-agent",
                 attach_mode: &attach_mode,
                 resize: &resize,
+                mcp_catalog: None,
+                mcp_tool_context: None,
+                session_created: None,
             };
             dispatch_p2p(ctx, msg_types::TERMINAL_RESIZE, payload).await
         });
@@ -7550,6 +7818,7 @@ mod tests {
         msg_types::SESSION_CAPTURE_PREVIEW,
         msg_types::SESSION_METADATA_GET,
         msg_types::SESSION_METADATA_UPDATE,
+        msg_types::SESSION_METADATA_PATCH,
         msg_types::CLIENT_ATTACH,
         msg_types::CLIENT_DETACH,
         msg_types::TERMINAL_INPUT,
@@ -7568,6 +7837,9 @@ mod tests {
         msg_types::FILE_CREATE_DIR,
         msg_types::FILE_RENAME,
         msg_types::FILE_CWD,
+        // #3778: an Extension-contributed MCP Tool call, on both the direct P2P
+        // surface and the Server-relayed control channel.
+        msg_types::MCP_TOOL_CALL,
     ];
 
     #[test]

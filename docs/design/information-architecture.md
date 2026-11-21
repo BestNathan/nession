@@ -37,7 +37,7 @@ This is not a permanent feature tree. Workspace content and Session capability p
 
 Users should be able to return directly to work without navigating through Agent → directory → tool hierarchies first.
 
-The primary Session list therefore remains flat by default. Agent, location, workload, and recency may appear as compact metadata, but they are not required navigation parents.
+The primary Session list therefore remains flat by default. Agent, location, workload, recency, and the capability-reported Activity reading may appear as compact metadata, but they are not required navigation parents. Activity is a fourth independent dimension (`working`/`idle`/`unknown` plus an orthogonal `input_required`), presented as one fixed-size quiet glyph on the existing row — never as a new navigation level, badge parade, or recency replacement. [`design-system/patterns/session-item.md`](design-system/patterns/session-item.md) and [`../architecture/session-activity.md`](../architecture/session-activity.md) own the contract.
 
 Projects are also first-class selectable resources in the navigation layer (Web Sidebar and App Sessions): selecting a Project opens a standalone detail independent of any selected Session, and create/row-menu actions belong to [#3025](https://github.com/BestNathan/nession/issues/3025). A Project is not a mandatory parent of Session navigation, and a Session with no Project remains valid. See [project.md](project.md).
 
@@ -100,7 +100,12 @@ Sandbox is discovered only inside a selected Session. Its capability-local
 sections are Overview, Images, Workspaces and Policies. The Server Images
 registry remains global and is rendered inside this Session context rather than
 as a separate Workspace capability; Images exposes Library, Builds and the
-current Agent's Distribution observations. Agent-owned Workspaces are a
+current Agent's Distribution observations. The Library is a managed Server
+Catalog surface: it searches and pages Repository revisions, expands one
+row-local ResourceDetail, and performs authorized CAS-guarded Tag create,
+move and logical unlink with a reference-impact review. Tag management changes
+only the mutable reference; it never rebinds a pinned Session/Project revision,
+deletes CAS bytes or evicts Agent cache. Agent-owned Workspaces are a
 resource section with list/create/delete, not the logical Nession Workspace;
 Policies owns the five native/portable entries (Filesystem, Network, Linux
 Namespace, Cgroup v2, Seccomp), and the Filesystem editor always presents

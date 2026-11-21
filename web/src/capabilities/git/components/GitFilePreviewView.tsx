@@ -1,6 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { FileContentViewer } from '@/shared/file-viewer';
 import { CodeMirrorEditor } from '@/platform/editor';
 import { formatBytes } from '../state';
@@ -197,7 +197,7 @@ export function GitFilePreviewView({
       </div>
       <div
         data-testid="git-file-preview-body"
-        className={cn('min-h-0 flex-1 overflow-auto', workspaceScrollClearanceClass)}
+        className={cn('min-h-0 flex-1 overflow-auto', workspaceBoundedScrollClearanceClass)}
       >
         <PreviewBody
           path={path}

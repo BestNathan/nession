@@ -4,6 +4,7 @@ import {
   fixtureSessionBindings,
   fixtureSessions,
 } from './fixtureSessions';
+import { applySessionActivity, fixtureSessionActivity } from './fixtureSessionActivity';
 import { useFixtureSessionMetadata } from './fixtureSessionMetadata';
 
 /**
@@ -20,8 +21,12 @@ export function useFixtureSessions(search: string) {
     setBindings((current) => ({ ...current, [sessionId]: projectId }));
   }, []);
   useFixtureSessionMetadata(search, { initialBindings, onProjectSet });
+  const activity = useMemo(() => fixtureSessionActivity(search), [search]);
   return useMemo(
-    () => applySessionProjectBindings(fixtureSessions(search), bindings),
-    [search, bindings],
+    () => applySessionActivity(
+      applySessionProjectBindings(fixtureSessions(search), bindings),
+      activity,
+    ),
+    [search, bindings, activity],
   );
 }

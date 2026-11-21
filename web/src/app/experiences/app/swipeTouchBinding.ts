@@ -6,7 +6,12 @@ export interface SwipeTouchBindingOptions {
   publish: () => void;
   standDown: (reason: string) => void;
   complete: (end: SwipeEndResult, before: SwipeSnapshot) => void;
-  isSettling: () => boolean;
+  /**
+   * Finish the active settle immediately and apply its pending commit. A new
+   * contact is never silently dropped while an animation runs; catching up
+   * gives the new contact the committed state to work from (#4185).
+   */
+  catchUpSettle: () => void;
 }
 
 function touchFrom(event: TouchEvent): SwipeTouch | null {
@@ -74,7 +79,7 @@ function findTouch(list: TouchList | undefined, identifier: number): SwipeTouch 
  */
 export function bindSwipeTouchListeners(
   root: HTMLElement,
-  { engine, publish, standDown, complete, isSettling }: SwipeTouchBindingOptions,
+  { engine, publish, standDown, complete, catchUpSettle }: SwipeTouchBindingOptions,
 ): () => void {
   const onTouchStart = (event: TouchEvent) => {
     if (event.touches.length !== 1) {
@@ -83,9 +88,11 @@ export function bindSwipeTouchListeners(
       }
       return;
     }
-    if (isSettling()) {
-      return;
-    }
+    // A contact that arrives during a settle is the user continuing, not an
+    // error. Settle first — applying any pending commit — so this contact
+    // works from the state the user can see, instead of being ignored for the
+    // animation's remaining time (#4185).
+    catchUpSettle();
     // A new single-finger contact means the previous one lost its end. Retire
     // it rather than letting two contacts share one state machine.
     if (engine.trackedIdentifier() !== null) {

@@ -31,6 +31,7 @@ async fn main() -> anyhow::Result<()> {
                 "db_path": config.db_path,
                 "image_blob_dir": config.image_blob_dir,
                 "image_build_dir": config.image_build_dir,
+                "image_source_root": config.image_source_root,
                 "image_gc_interval_secs": config.image_gc_interval_secs,
                 "image_gc_max_candidates": config.image_gc_max_candidates,
                 "terminal_cols": config.terminal_cols,

@@ -1,6 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { formatBytes } from '../state';
 import type { GitCommit } from '../types';
 
@@ -32,7 +32,7 @@ export function GitHistoryCommitList({
   onRefresh: () => void;
 }) {
   return (
-    <aside className={cn('max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r', workspaceScrollClearanceClass)}>
+    <aside className={cn('max-h-[50%] min-h-0 shrink-0 overflow-y-auto border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r', workspaceBoundedScrollClearanceClass)}>
       <div data-testid="git-commit-list" className="flex flex-col p-[var(--nession-shell-space-1)]">
         {commits.map((commit) => (
           <CommitRow

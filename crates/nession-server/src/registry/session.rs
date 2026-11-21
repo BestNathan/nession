@@ -1,5 +1,6 @@
 use crate::db::Database;
 use chrono::{DateTime, Utc};
+use nession_protocol::contracts::session::v1::{SessionActivityView, SessionMetadataAvailability};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, RwLock};
@@ -22,6 +23,25 @@ pub struct SessionInfo {
     /// Durable tmux Session instance identity. `None` for a legacy Session or
     /// before the Agent's first report.
     pub instance_id: Option<String>,
+    /// Bounded work-context summary the owning Agent reported with the current
+    /// incarnation (#4007). In memory only, like `foreground_command`: the
+    /// Agent re-reports it on the next inventory, and `unavailable` is a
+    /// distinct state from a confirmed-empty revision 0.
+    pub metadata: Option<SessionMetadataAvailability>,
+    /// Capability-reported Session Activity (#3804).
+    ///
+    /// In memory only, like `foreground_command`: the Agent re-reports it after
+    /// a reconnect, so persisting it would add write churn for a fact that is
+    /// only meaningful while the Agent is connected. Absence means unknown, not
+    /// idle.
+    pub activity: Option<SessionActivityView>,
+    /// The Agent process epoch that produced `activity`.
+    ///
+    /// A fence only: a restarted Agent has a new epoch and may restart its
+    /// generation at 1 without being read as stale.
+    pub activity_epoch: Option<String>,
+    /// Monotonic generation of `activity` within `activity_epoch`.
+    pub activity_generation: u64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -216,7 +236,7 @@ impl SessionRegistry {
         self.project_ids_for(&sessions).await
     }
 
-    pub async fn update_session(&self, session: SessionInfo) {
+    pub async fn update_session(&self, mut session: SessionInfo) {
         // Ordered before the per-Session guard: a force-refresh holds this
         // Agent guard for its whole projection, so a live report either
         // commits before the refresh captures its generation (and invalidates
@@ -233,6 +253,17 @@ impl SessionRegistry {
         // failed write must not delay or block visibility of the session.
         {
             let mut sessions = self.sessions.write().await;
+            if let Some(previous) = sessions.get(&session.session_id) {
+                // An inventory update carries no Activity. A same-incarnation
+                // replacement must not erase a level a newer Activity report
+                // already committed (#3804).
+                preserve_activity(previous, &mut session);
+                // The same rule for the metadata summary (#4007): an inventory
+                // frame that carries no summary (a legacy Agent, or one that
+                // does not report it) must not erase the last answer for the
+                // same incarnation.
+                preserve_metadata(previous, &mut session);
+            }
             sessions.insert(session.session_id.clone(), session.clone());
         }
         self.bump_agent_generation(&session.agent_id);
@@ -258,6 +289,48 @@ impl SessionRegistry {
                 session.session_id
             );
         }
+    }
+
+    /// Apply one Session Activity level from the authoritative Agent connection.
+    ///
+    /// Returns `true` only when the level became the current projection.
+    /// Refusals are the fence, not errors: a level for another incarnation, or
+    /// one that is not newer than the stored `(epoch, generation)`, is silently
+    /// ignored so a stale socket or a retried frame cannot resurrect Activity.
+    ///
+    /// Activity is **not** Session interaction recency: `last_activity` and the
+    /// Agent's session-state generation are deliberately untouched.
+    pub async fn update_activity(
+        &self,
+        agent_id: &str,
+        session_name: &str,
+        instance_id: &str,
+        epoch: &str,
+        generation: u64,
+        activity: SessionActivityView,
+    ) -> bool {
+        let session_id = format!("{agent_id}:{session_name}");
+        // Serialized with the inventory replacement for this Agent and this
+        // Session, so a force-refresh cannot interleave with the commit.
+        let _agent = self.agent_guard(agent_id).await;
+        let _lifecycle = self.lifecycle_guard(&session_id).await;
+
+        let mut sessions = self.sessions.write().await;
+        let Some(session) = sessions.get_mut(&session_id) else {
+            return false;
+        };
+        if session.instance_id.as_deref() != Some(instance_id) {
+            return false;
+        }
+        if session.activity_epoch.as_deref() == Some(epoch)
+            && generation <= session.activity_generation
+        {
+            return false;
+        }
+        session.activity = Some(activity);
+        session.activity_epoch = Some(epoch.to_string());
+        session.activity_generation = generation;
+        true
     }
 
     /// Register only the create-time placeholder, without overwriting an
@@ -492,7 +565,7 @@ impl SessionRegistry {
     pub async fn replace_agent_sessions(
         &self,
         agent_id: &str,
-        incoming: Vec<SessionInfo>,
+        mut incoming: Vec<SessionInfo>,
         observed_generation: u64,
     ) -> Vec<String> {
         let _agent = self.agent_guard(agent_id).await;
@@ -512,6 +585,15 @@ impl SessionRegistry {
         // delay visibility.
         let removed: Vec<String> = {
             let mut sessions = self.sessions.write().await;
+            // The force-refresh reply carries the Session inventory, not its
+            // ephemeral Activity. Carry forward the level already committed for
+            // the same incarnation, so a refresh cannot clear a newer
+            // observation (#3804).
+            for session in &mut incoming {
+                if let Some(previous) = sessions.get(&session.session_id) {
+                    preserve_activity(previous, session);
+                }
+            }
             let incoming_ids: std::collections::HashSet<&str> =
                 incoming.iter().map(|s| s.session_id.as_str()).collect();
             let removed = sessions
@@ -587,8 +669,41 @@ fn session_info_from_row(row: crate::db::SessionRow) -> SessionInfo {
         foreground_command: None,
         working_dir: None,
         instance_id: row.instance_id,
+        // Summaries are live Agent answers and are re-reported; a recovered
+        // row is unknown rather than a guessed empty task (#4007).
+        metadata: None,
+        // Ephemeral Activity is not persisted either; the Agent re-reports it
+        // from its own coordinator after a restart or reconnect.
+        activity: None,
+        activity_epoch: None,
+        activity_generation: 0,
         created_at,
         last_activity,
+    }
+}
+
+/// Carry an ephemeral Activity level onto a same-incarnation inventory row.
+///
+/// A different incarnation is a different Session and must inherit nothing; a
+/// missing previous instance id is a legacy row and cannot be proven the same.
+fn preserve_activity(previous: &SessionInfo, next: &mut SessionInfo) {
+    if previous.instance_id.is_some() && previous.instance_id == next.instance_id {
+        next.activity = previous.activity.clone();
+        next.activity_epoch = previous.activity_epoch.clone();
+        next.activity_generation = previous.activity_generation;
+    }
+}
+
+/// Keep the last metadata summary for the same incarnation.
+///
+/// A summary is only meaningful for the instance it described, so a
+/// same-name replacement never inherits it; the successor reports its own.
+fn preserve_metadata(previous: &SessionInfo, next: &mut SessionInfo) {
+    if next.metadata.is_none()
+        && previous.instance_id.is_some()
+        && previous.instance_id == next.instance_id
+    {
+        next.metadata = previous.metadata.clone();
     }
 }
 
@@ -625,9 +740,108 @@ mod tests {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            metadata: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
             created_at: Utc::now(),
             last_activity: Utc::now(),
         }
+    }
+
+    fn activity(state: &str) -> SessionActivityView {
+        SessionActivityView {
+            state: state.to_string(),
+            attention: None,
+            capability_id: Some("shell".to_string()),
+            observed_at_ms: 1_700_000_000_000,
+        }
+    }
+
+    async fn session_with_instance(reg: &SessionRegistry, instance: &str) -> SessionInfo {
+        let mut session = make_session("a1", "dev");
+        session.instance_id = Some(instance.to_string());
+        reg.update_session(session.clone()).await;
+        session
+    }
+
+    #[tokio::test]
+    async fn activity_is_fenced_by_incarnation_epoch_and_generation() {
+        let reg = new_registry().await;
+        session_with_instance(&reg, "inc-1").await;
+        let before = reg.get("a1:dev").await.unwrap().last_activity;
+
+        assert!(
+            reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+        // A duplicate level and an older generation are refused in the same
+        // epoch; a new Agent process epoch may restart the counter.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("idle"))
+                .await
+        );
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 0, activity("idle"))
+                .await
+        );
+        assert!(
+            reg.update_activity("a1", "dev", "inc-1", "epoch-1", 2, activity("idle"))
+                .await
+        );
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 2, activity("working"))
+                .await
+        );
+        assert!(
+            reg.update_activity("a1", "dev", "inc-1", "epoch-2", 1, activity("working"))
+                .await
+        );
+        // Another incarnation of the same name inherits nothing.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-2", "epoch-2", 9, activity("idle"))
+                .await
+        );
+
+        let stored = reg.get("a1:dev").await.unwrap();
+        assert_eq!(stored.activity.unwrap().state, "working");
+        assert_eq!(stored.activity_epoch.as_deref(), Some("epoch-2"));
+        assert_eq!(
+            stored.last_activity, before,
+            "activity is not Session interaction recency"
+        );
+    }
+
+    #[tokio::test]
+    async fn inventory_updates_and_force_refresh_preserve_same_incarnation_activity() {
+        let reg = new_registry().await;
+        let first = session_with_instance(&reg, "inc-1").await;
+        assert!(
+            reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+
+        // A normal inventory update (which never carries activity).
+        reg.update_session(first.clone()).await;
+        assert_eq!(
+            reg.get("a1:dev").await.unwrap().activity.unwrap().state,
+            "working"
+        );
+
+        // A force refresh replaces the whole Agent set from the inventory.
+        replace(&reg, "a1", vec![first]).await;
+        assert_eq!(
+            reg.get("a1:dev").await.unwrap().activity.unwrap().state,
+            "working"
+        );
+
+        // A recreated same-name Session starts with no activity.
+        let mut replacement = make_session("a1", "dev");
+        replacement.instance_id = Some("inc-2".to_string());
+        reg.update_session(replacement.clone()).await;
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
+        replace(&reg, "a1", vec![replacement]).await;
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
     }
 
     /// Capture the generation, then replace — the same sequence the

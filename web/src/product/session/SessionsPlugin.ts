@@ -6,6 +6,7 @@ import {
 } from '@/generated/protocol/core/server-session-processes/v1';
 import {
   WIRE as SESSION_CREATE_WIRE,
+  type ClientManagedCreate,
   type EnvSelectionMode,
 } from '@/generated/protocol/core/server-session-create/v1';
 import { WIRE as SESSION_KILL_WIRE } from '@/generated/protocol/core/server-session-kill/v1';
@@ -237,6 +238,11 @@ export class SessionsPlugin implements TransportPlugin {
        * Absent keeps the legacy inherit-on-empty behavior.
        */
       envSelectionMode?: EnvSelectionMode;
+      /**
+       * Managed EROFS creation (#3794). The Server resolves and authorizes
+       * every named digest; the Web never sends a host path or a grant.
+       */
+      managed?: ClientManagedCreate;
     } = {},
   ): Promise<CreateSessionResponse> {
     return this.requireConnection().request<CreateSessionResponse>(SESSION_CREATE_WIRE, {
@@ -248,6 +254,7 @@ export class SessionsPlugin implements TransportPlugin {
       ...(options.envSelectionMode
         ? { env_selection_mode: options.envSelectionMode }
         : {}),
+      ...(options.managed ? { managed: options.managed } : {}),
     });
   }
 

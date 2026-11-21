@@ -322,3 +322,182 @@ describe('Session metadata incarnation invalidation', () => {
     expect(sessionsApiMock.getMetadata).toHaveBeenCalledTimes(1);
   });
 });
+
+// #3748 — a save's successful answer is not automatically the cache's answer.
+// If an authoritative list replaced the durable instance while the write was in
+// flight, the response was committed by the previous incarnation; publishing it
+// would restore its title/tags into the replacement and fence the replacement's
+// own read. Both settlement orders must leave the replacement authoritative,
+// while an unchanged incarnation keeps the #3319 publication and read fence.
+describe('Session metadata save publication across incarnations', () => {
+  beforeEach(() => {
+    resetSessionMetadataCache();
+    sessionsApiMock.getMetadata.mockReset();
+    sessionsApiMock.updateMetadata.mockReset();
+  });
+
+  function instance(id: string, instanceId: string) {
+    return [{ session_id: id, instance_id: instanceId }];
+  }
+
+  it('discards a held save answer when the replacement read settled first', async () => {
+    sessionsApiMock.getMetadata
+      .mockResolvedValueOnce(loaded(4, 'Old project'))
+      .mockResolvedValueOnce(legacy());
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+
+    const heldSave = deferred<SessionMetadataResponse>();
+    sessionsApiMock.updateMetadata.mockReturnValueOnce(heldSave.promise);
+    const saving = saveSessionMetadata(SESSION_A, {
+      title: 'Old project saved',
+      description: null,
+      tags: [],
+      expectedRevision: 4,
+    });
+
+    // The tmux Session is recreated under the same public id and the new
+    // instance's empty metadata arrives before the old save's answer.
+    observeSessionIncarnations(instance(SESSION_A, 'instance-b'));
+    await vi.waitFor(() => {
+      expect(getSessionMetadataEntry(SESSION_A).status).toBe('loaded');
+    });
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 0,
+      title: null,
+    });
+
+    heldSave.resolve(loaded(5, 'Old project saved'));
+    const saved = await saving;
+    expect(saved.success).toBe(true);
+
+    // The previous incarnation's committed revision must not restore itself.
+    expect(getSessionMetadataEntry(SESSION_A)).toMatchObject({
+      status: 'loaded',
+      metadata: { revision: 0, title: null },
+    });
+  });
+
+  it('discards a held save answer before the replacement read settles, without fencing it', async () => {
+    const newRead = deferred<SessionMetadataResponse>();
+    sessionsApiMock.getMetadata
+      .mockResolvedValueOnce(loaded(4, 'Old project'))
+      .mockReturnValueOnce(newRead.promise);
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+
+    const heldSave = deferred<SessionMetadataResponse>();
+    sessionsApiMock.updateMetadata.mockReturnValueOnce(heldSave.promise);
+    const saving = saveSessionMetadata(SESSION_A, {
+      title: 'Old project saved',
+      description: null,
+      tags: [],
+      expectedRevision: 4,
+    });
+
+    observeSessionIncarnations(instance(SESSION_A, 'instance-b'));
+    expect(getSessionMetadataEntry(SESSION_A)).toMatchObject({
+      status: 'loading',
+      metadata: null,
+    });
+
+    // The old answer settles first. It owns neither the cache nor the order.
+    heldSave.resolve(loaded(5, 'Old project saved'));
+    await saving;
+    expect(getSessionMetadataEntry(SESSION_A)).toMatchObject({
+      status: 'loading',
+      metadata: null,
+    });
+
+    // The replacement's read still publishes its own answer.
+    newRead.resolve(legacy());
+    await vi.waitFor(() => {
+      expect(getSessionMetadataEntry(SESSION_A).status).toBe('loaded');
+    });
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 0,
+      title: null,
+    });
+  });
+
+  it('publishes and fences for the unchanged incarnation', async () => {
+    sessionsApiMock.getMetadata.mockResolvedValueOnce(loaded(4, 'Before'));
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+    // Ordinary list refreshes report the same instance; they are not changes.
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+
+    const heldRead = deferred<SessionMetadataResponse>();
+    sessionsApiMock.getMetadata.mockReturnValueOnce(heldRead.promise);
+    const pendingRead = loadSessionMetadata(SESSION_A, { force: true });
+
+    sessionsApiMock.updateMetadata.mockResolvedValueOnce(loaded(5, 'After'));
+    await saveSessionMetadata(SESSION_A, {
+      title: 'After',
+      description: null,
+      tags: [],
+      expectedRevision: 4,
+    });
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 5,
+      title: 'After',
+    });
+
+    // The pre-save read is still fenced (#3319).
+    heldRead.resolve(loaded(4, 'Before'));
+    await pendingRead;
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 5,
+      title: 'After',
+    });
+  });
+
+  it('publishes a save that began before the first incarnation report', async () => {
+    sessionsApiMock.getMetadata.mockResolvedValueOnce(loaded(4, 'Before'));
+    await loadSessionMetadata(SESSION_A);
+
+    const heldSave = deferred<SessionMetadataResponse>();
+    sessionsApiMock.updateMetadata.mockReturnValueOnce(heldSave.promise);
+    const saving = saveSessionMetadata(SESSION_A, {
+      title: 'After',
+      description: null,
+      tags: [],
+      expectedRevision: 4,
+    });
+
+    // The Agent identifies its current instance for the first time. That is a
+    // report, not a replacement (#3424), so the in-flight save still owns the
+    // cache answer.
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    heldSave.resolve(loaded(5, 'After'));
+    await saving;
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 5,
+      title: 'After',
+    });
+  });
+
+  it('publishes a save made against the replacement itself', async () => {
+    sessionsApiMock.getMetadata
+      .mockResolvedValueOnce(loaded(4, 'Old project'))
+      .mockResolvedValueOnce(legacy());
+    observeSessionIncarnations(instance(SESSION_A, 'instance-a'));
+    await loadSessionMetadata(SESSION_A);
+    observeSessionIncarnations(instance(SESSION_A, 'instance-b'));
+    await vi.waitFor(() => {
+      expect(getSessionMetadataEntry(SESSION_A).status).toBe('loaded');
+    });
+
+    sessionsApiMock.updateMetadata.mockResolvedValueOnce(loaded(1, 'New instance saved'));
+    await saveSessionMetadata(SESSION_A, {
+      title: 'New instance saved',
+      description: null,
+      tags: [],
+      expectedRevision: 0,
+    });
+    expect(getSessionMetadataEntry(SESSION_A).metadata).toMatchObject({
+      revision: 1,
+      title: 'New instance saved',
+    });
+  });
+});

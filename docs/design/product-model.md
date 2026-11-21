@@ -129,7 +129,7 @@ This summary is intentionally downstream from the root Vision and Principles. If
 
 ## Domain state dimensions
 
-Infrastructure connectivity, Session lifecycle, and client attachment are independent dimensions. Do not collapse them into a single `session.running` / `session.failed` state.
+Infrastructure connectivity, Session lifecycle, client attachment, and Session activity are independent dimensions. Do not collapse them into a single `session.running` / `session.failed` state.
 
 ```text
 Agent / location connectivity
@@ -149,11 +149,19 @@ Attachment state
 ├── attaching
 ├── detached
 └── failed
+
+Session activity (capability-reported work, #3800)
+├── working
+├── idle
+└── unknown
+   attention (orthogonal): input_required
 ```
 
 For example, an Agent may be offline while a tmux Session still exists remotely. The product should present an infrastructure reachability problem without falsely claiming that the work itself has disappeared.
 
 The same independence applies in the other direction: a Session can be exited while an Agent remains online, and a client can be detached from an active Session without implying infrastructure failure.
+
+Activity is likewise not derived from those dimensions: a detached browser, a quiet terminal, or a foreground process name does not make work `working`, and absent evidence is `unknown`, never `idle`. The capability that owns the workload interprets it; `attention: input_required` is an orthogonal signal, not a fourth activity value. [`../architecture/session-activity.md`](../architecture/session-activity.md) owns the runtime rules.
 
 ## AI and tool semantics
 

@@ -1,6 +1,10 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde_json::Value;
+
+use crate::session_activity::SessionActivityProvider;
 
 /// How a provider asks the runtime to schedule one of its Protocol Units
 /// (#974).
@@ -65,4 +69,19 @@ pub trait AgentExtension: Send + Sync {
     /// wire *is* the protocol id, so there is no namespace left to strip and
     /// the registry passes `msg_type` through unchanged.
     async fn handle_command(&self, command: &str, payload: Value) -> anyhow::Result<Value>;
+
+    /// This extension's optional Session Activity contribution (#3800).
+    ///
+    /// Activity is deliberately **not** a Protocol Unit and not a
+    /// `handle_command` arm: it is an Agent-local observation the coordinator
+    /// aggregates, not a caller-triggered request. Returning `None` (the
+    /// default) says this capability interprets no workload; it is not an
+    /// obligation to implement a no-op probe.
+    ///
+    /// The returned provider is cheap to clone (an `Arc` to the extension's
+    /// own observation source) so the Agent can compose it beside the routing
+    /// registry without splitting ownership of the extension.
+    fn session_activity_provider(&self) -> Option<Arc<dyn SessionActivityProvider>> {
+        None
+    }
 }

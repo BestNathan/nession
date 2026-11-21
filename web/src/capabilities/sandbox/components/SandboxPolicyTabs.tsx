@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 /**
  * The five native/portable policy entries (#3408, superseding #3143's six
@@ -99,7 +99,7 @@ export function SandboxPolicyTabs({
         data-testid="sandbox-tab-content"
         className={
           vertical
-            ? cn('min-h-0 min-w-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)
+            ? cn('min-h-0 min-w-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)
             : 'min-w-0'
         }
       >

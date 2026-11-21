@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { canOpenWorktreeAsSession } from '../worktreeGate';
 import { useGitWorktrees } from '../hooks/useGitWorktrees';
 import { basename, describeUnavailable, formatBytes } from '../state';
@@ -75,7 +76,15 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      <div data-testid="git-worktree-list" className="flex flex-col p-1">
+      {/* #4188: same declared-bounded contract as Branches — the listing is the
+          section's internal scroll owner and spends the host-measured inset. */}
+      <div
+        data-testid="git-worktree-list"
+        className={cn(
+          'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-1',
+          workspaceBoundedScrollClearanceClass,
+        )}
+      >
         {rows.map((worktree) => (
           <WorktreeRow key={worktree.path} worktree={worktree} ctx={ctx} />
         ))}

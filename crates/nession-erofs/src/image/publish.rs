@@ -4,7 +4,7 @@ use anyhow::{Context, Result};
 use sea_orm::DatabaseConnection;
 use std::collections::HashMap;
 
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::reference::{record_object, record_reference, ObjectKind, StoredObject};
 use crate::catalog::tag::{set_tag, TagExpectation};
 use crate::oci::annotation::{MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST};
@@ -71,7 +71,7 @@ pub struct IndexPublishOutcome {
 /// never a Tag pointing at an incomplete object.
 pub async fn publish_manifest(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     publication: &ManifestPublication,
     now: i64,
 ) -> Result<PublishOutcome> {
@@ -108,7 +108,7 @@ pub async fn publish_manifest(
 /// pins it.
 pub async fn publish_manifest_untagged(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     layer: Descriptor,
     config: RawDocument,
     manifest_document: RawDocument,
@@ -131,7 +131,7 @@ pub async fn publish_manifest_untagged(
 }
 
 fn validate_publication(
-    store: &BlobStore,
+    store: &FsBlobStore,
     layer: &Descriptor,
     config_document: &RawDocument,
     manifest_document: &RawDocument,
@@ -171,7 +171,7 @@ struct VerifiedPublication<'a> {
 
 async fn publish_verified(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     publication: VerifiedPublication<'_>,
 ) -> Result<PublishOutcome> {
     let config_blob = store.put_bytes(publication.config.bytes())?;
@@ -276,7 +276,7 @@ async fn publish_verified(
 /// Publish a multi-platform Index over already-described child Manifests.
 pub async fn publish_index(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     publication: &IndexPublication,
     now: i64,
 ) -> Result<IndexPublishOutcome> {
@@ -441,7 +441,7 @@ pub async fn publish_index(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::blob::store::BlobStore;
+    use crate::blob::store::FsBlobStore;
     use crate::catalog::sqlite::tests::memory_connection;
     use crate::catalog::tag;
     use crate::oci::annotation::{MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS};
@@ -452,7 +452,7 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     pub(crate) fn manifest_and_config(
-        store: &BlobStore,
+        store: &FsBlobStore,
         layer: &Descriptor,
         architecture: &str,
         annotation: Option<(&str, &str)>,
@@ -509,7 +509,7 @@ pub(crate) mod tests {
         (manifest_document, config_document)
     }
 
-    pub(crate) fn layer(store: &BlobStore, bytes: &[u8]) -> Descriptor {
+    pub(crate) fn layer(store: &FsBlobStore, bytes: &[u8]) -> Descriptor {
         let stored = store.put_bytes(bytes).unwrap();
         Descriptor {
             media_type: MEDIA_TYPE_EROFS.to_string(),
@@ -527,7 +527,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn two_manifests_can_share_one_physical_erofs_blob() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let layer = layer(&store, b"one shared erofs payload");
@@ -592,7 +592,7 @@ pub(crate) mod tests {
         let dir = tempdir().unwrap();
         let store_path = dir.path().join("store");
         let database_path = dir.path().join("catalog.db");
-        let store = BlobStore::new(&store_path).unwrap();
+        let store = FsBlobStore::new(&store_path).unwrap();
         let conn = crate::catalog::sqlite::tests::file_connection(&database_path).await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let layer = layer(&store, b"one physical EROFS");
@@ -639,7 +639,7 @@ pub(crate) mod tests {
         drop(conn);
 
         let conn = crate::catalog::sqlite::tests::file_connection(&database_path).await;
-        let store = BlobStore::new(&store_path).unwrap();
+        let store = FsBlobStore::new(&store_path).unwrap();
         assert_eq!(
             tag::get_tag(&conn, "nession/reopen", "a").await.unwrap(),
             Some(first.manifest_digest.clone())
@@ -662,7 +662,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn a_conflicting_tag_move_fails_and_keeps_the_old_resolution() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let layer = layer(&store, b"layer");
@@ -709,7 +709,7 @@ pub(crate) mod tests {
         );
     }
 
-    fn platform_index_entry(store: &BlobStore, architecture: &str, payload: &[u8]) -> IndexEntry {
+    fn platform_index_entry(store: &FsBlobStore, architecture: &str, payload: &[u8]) -> IndexEntry {
         let layer = layer(store, payload);
         let (manifest, config) = manifest_and_config(store, &layer, architecture, None, None);
         IndexEntry {
@@ -722,7 +722,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn an_index_publishes_platform_children_and_selects_exactly() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let amd64 = platform_index_entry(&store, "amd64", b"amd64 payload");

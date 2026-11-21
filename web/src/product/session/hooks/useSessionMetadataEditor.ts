@@ -260,8 +260,9 @@ export function useSessionMetadataEditor(
     state.setSaving(true);
     const outcome = await performSave(sessionId, state.draft, state.tagInput, state.baseRevision);
     // The Session may have changed (or a newer save may own this editor)
-    // while the Agent answered. The cache write is already keyed to the
-    // request's Session; only the editor state belongs to this generation.
+    // while the Agent answered. The cache owner already decided whether the
+    // answer still belongs to the requested Session's incarnation; only the
+    // editor state belongs to this generation.
     if (state.sessionIdRef.current !== requestSessionId ||
       state.generationRef.current !== generation) {
       return;

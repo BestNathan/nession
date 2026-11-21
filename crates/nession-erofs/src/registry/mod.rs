@@ -1,50 +1,77 @@
-//! External OCI Distribution client for EROFS artifacts (#3498).
+//! OCI Distribution registry mechanics for EROFS artifacts (#3498, #4088).
 //!
-//! This module transports standard OCI Distribution objects; it does not
-//! implement a `/v2/` registry server, unpack container layers, convert an
-//! upstream image to EROFS, or own image authorization.
+//! Two host-independent surfaces live here:
 //!
-//! Boundaries that matter here:
+//! - the external OCI Distribution **client** (feature `registry`, #3498):
+//!   pull/push against an authorized remote registry. Credentials enter only
+//!   through a [`RegistryCredentialProvider`] supplied by the host's secret
+//!   source; every pull is approved by a [`RegistryImportAuthorizer`] before
+//!   any network request or catalog write; imported JSON keeps its exact
+//!   source bytes; redirects/hosts/bodies are bounded.
+//! - the mountable **`/v2/` Registry service** (feature `registry-service`,
+//!   #4088): a reusable Axum router over a supplied `BlobStore`,
+//!   `RepositoryStore` and `RegistryAuthorizer`, with an explicit read-only
+//!   mode and push behind an injected publisher.
 //!
-//! - Registry credentials enter only through a [`RegistryCredentialProvider`]
-//!   supplied by the Server's secret source. They are never embedded in a
-//!   Config, an EROFS blob, a grant, a log line or an error string.
-//! - Every pull is approved by a caller-supplied
-//!   [`RegistryImportAuthorizer`] before any network request or catalog write.
-//!   The Server owns Project/Session/tenant policy; the crate only enforces
-//!   that the decision happens first.
-//! - Imported JSON is stored as its exact source bytes. A tag resolves to an
-//!   immutable digest and the import fetches by that digest.
-//! - Requests are scoped to one registry authority and repository, redirects
-//!   are bounded and checked against explicitly allowed origins, response
-//!   bodies are bounded, and a partial upload/download never becomes Ready.
+//! Neither surface unpacks container layers, converts an upstream image to
+//! EROFS, or owns host identity/authorization policy. The two features are
+//! independent so an Agent can mount the service without compiling the
+//! external client's credential machinery.
 
+#[cfg(feature = "registry")]
 use std::fmt;
+#[cfg(feature = "registry")]
 use std::time::Duration;
 
+#[cfg(feature = "registry")]
 use reqwest::Url;
 
+#[cfg(feature = "registry")]
 pub mod auth;
+#[cfg(feature = "registry")]
 pub mod client;
+#[cfg(feature = "registry")]
 pub mod pull;
+#[cfg(feature = "registry")]
 pub mod push;
+#[cfg(feature = "registry")]
+pub mod sdk;
+#[cfg(feature = "registry-service")]
+pub mod service;
 
+// Bare `cfg(test)` so clippy's allow-in-tests recognizes the module; the file
+// itself is gated on the `registry` client feature via an inner attribute so a
+// service-only build does not compile the client mock.
 #[cfg(test)]
 mod test_registry;
 
+#[cfg(feature = "registry")]
 pub use auth::{
     AllowAllImports, DenyAllImports, ImportScope, NoCredentials, RegistryCredential,
     RegistryCredentialProvider, RegistryImportAuthorizer,
 };
+#[cfg(feature = "registry")]
 pub use client::{FetchedManifest, RegistryClient, RegistryConfig};
+#[cfg(feature = "registry")]
 pub use pull::{pull_image, ImportOutcome, ImportRequest, RegistryDigestGrant};
+#[cfg(feature = "registry")]
 pub use push::{export_layout, push_image, push_tag, LayoutExport, PushOutcome};
+#[cfg(feature = "registry")]
+pub use sdk::{ingest_image, ingest_pinned, ImageReference, VerifiedImage};
+#[cfg(feature = "registry-service")]
+pub use service::{
+    AllowAllAuthorizer, Authorization, DenyAllAuthorizer, NoPublisher, RegistryAction,
+    RegistryAuthorizer, RegistryMode, RegistryService, RepositoryPublisher,
+};
 
 /// Default bound for Manifest/Index/Config JSON responses.
+#[cfg(feature = "registry")]
 pub const DEFAULT_MAX_JSON_BYTES: u64 = 4 * 1024 * 1024;
 /// Default bound for authentication token responses.
+#[cfg(feature = "registry")]
 pub const DEFAULT_MAX_TOKEN_BYTES: u64 = 1024 * 1024;
 /// Default redirect bound for one logical request.
+#[cfg(feature = "registry")]
 pub const DEFAULT_MAX_REDIRECTS: usize = 5;
 /// The OCI Distribution version prefix.
 pub const DISTRIBUTION_PREFIX: &str = "v2";
@@ -58,6 +85,7 @@ pub const OCTET_STREAM: &str = "application/octet-stream";
 ///
 /// Variants carry only resource names, digests, hosts and numeric status. No
 /// variant carries an authorization header, token, password or credential.
+#[cfg(feature = "registry")]
 #[derive(Debug, thiserror::Error)]
 pub enum RegistryError {
     #[error("invalid OCI registry endpoint: {0}")]
@@ -125,19 +153,22 @@ pub enum RegistryError {
     Local(String),
 }
 
+#[cfg(feature = "registry")]
 impl From<anyhow::Error> for RegistryError {
-    fn from(error: anyhow::Error) -> Self {
-        Self::Local(format!("{error:#}"))
+    fn from(error: anyhow::Error) -> RegistryError {
+        RegistryError::Local(format!("{error:#}"))
     }
 }
 
-/// The result type used by registry operations.
+/// The result type used by registry client operations.
+#[cfg(feature = "registry")]
 pub type RegistryResult<T> = std::result::Result<T, RegistryError>;
 
 /// The normalized authority of one registry endpoint.
 ///
 /// This is the scope passed to a credential provider. It contains no
 /// credential and cannot name a second registry by accident.
+#[cfg(feature = "registry")]
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct RegistryAuthority {
     pub scheme: String,
@@ -145,6 +176,7 @@ pub struct RegistryAuthority {
     pub port: u16,
 }
 
+#[cfg(feature = "registry")]
 impl RegistryAuthority {
     fn from_url(url: &Url) -> RegistryResult<Self> {
         let scheme = url.scheme().to_string();
@@ -191,12 +223,14 @@ impl RegistryAuthority {
     }
 }
 
+#[cfg(feature = "registry")]
 impl fmt::Display for RegistryAuthority {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(formatter, "{}://{}:{}", self.scheme, self.host, self.port)
     }
 }
 
+#[cfg(feature = "registry")]
 pub(crate) fn is_loopback_host(host: &str) -> bool {
     host.eq_ignore_ascii_case("localhost")
         || host == "127.0.0.1"
@@ -213,19 +247,15 @@ pub enum RemoteReference {
 
 impl RemoteReference {
     /// Parse an OCI Distribution tag or sha256 digest reference.
-    pub fn parse(value: &str) -> RegistryResult<Self> {
+    pub fn parse(value: &str) -> Result<Self, String> {
         if value.starts_with(crate::digest::DIGEST_PREFIX) {
             if !crate::digest::is_valid_digest(value) {
-                return Err(RegistryError::InvalidReference(
-                    "digest must be sha256:<64 lowercase hex>".to_string(),
-                ));
+                return Err("digest must be sha256:<64 lowercase hex>".to_string());
             }
             return Ok(Self::Digest(value.to_string()));
         }
         if value.contains(':') {
-            return Err(RegistryError::InvalidReference(
-                "only sha256 digest references are supported".to_string(),
-            ));
+            return Err("only sha256 digest references are supported".to_string());
         }
         validate_remote_tag(value)?;
         Ok(Self::Tag(value.to_string()))
@@ -246,22 +276,18 @@ impl RemoteReference {
 }
 
 /// Validate the OCI Distribution tag grammar (`[A-Za-z0-9_][A-Za-z0-9._-]{0,127}`).
-pub fn validate_remote_tag(tag: &str) -> RegistryResult<()> {
+pub fn validate_remote_tag(tag: &str) -> Result<(), String> {
     if tag.is_empty() || tag.len() > 128 {
-        return Err(RegistryError::InvalidReference(
-            "tag must be 1..=128 bytes".to_string(),
-        ));
+        return Err("tag must be 1..=128 bytes".to_string());
     }
     let mut characters = tag.chars();
     let Some(first) = characters.next() else {
-        return Err(RegistryError::InvalidReference(
-            "tag must not be empty".to_string(),
-        ));
+        return Err("tag must not be empty".to_string());
     };
     if !first.is_ascii_alphanumeric() && first != '_' {
-        return Err(RegistryError::InvalidReference(format!(
+        return Err(format!(
             "tag {tag:?} must start with an alphanumeric character or underscore"
-        )));
+        ));
     }
     if let Some(character) = characters.find(|character| {
         !(character.is_ascii_alphanumeric()
@@ -269,9 +295,9 @@ pub fn validate_remote_tag(tag: &str) -> RegistryResult<()> {
             || *character == '_'
             || *character == '-')
     }) {
-        return Err(RegistryError::InvalidReference(format!(
+        return Err(format!(
             "tag {tag:?} contains an unsupported character {character:?}"
-        )));
+        ));
     }
     Ok(())
 }
@@ -281,12 +307,14 @@ pub fn validate_remote_tag(tag: &str) -> RegistryResult<()> {
 /// The remote name is deliberately held to the same lowercase segment grammar
 /// as the local repository, so a remote name can never be used to build a
 /// surprising URL or a second catalog identity.
+#[cfg(feature = "registry")]
 pub fn validate_remote_repository(repository: &str) -> RegistryResult<()> {
     crate::catalog::validate_repository_name(repository)
         .map_err(|error| RegistryError::InvalidReference(format!("{error:#}")))
 }
 
 /// Whether an authority is exactly the configured registry authority.
+#[cfg(feature = "registry")]
 pub(crate) fn same_authority(left: &RegistryAuthority, right: &RegistryAuthority) -> bool {
     left.scheme.eq_ignore_ascii_case(&right.scheme)
         && left.host.eq_ignore_ascii_case(&right.host)
@@ -294,6 +322,7 @@ pub(crate) fn same_authority(left: &RegistryAuthority, right: &RegistryAuthority
 }
 
 /// Whether `url` matches an explicitly allowed `host` or `host:port` entry.
+#[cfg(feature = "registry")]
 pub(crate) fn host_entry_matches(url: &Url, entries: &[String]) -> bool {
     let Some(host) = url.host_str() else {
         return false;
@@ -310,6 +339,7 @@ pub(crate) fn host_entry_matches(url: &Url, entries: &[String]) -> bool {
     })
 }
 
+#[cfg(feature = "registry")]
 fn split_host_entry(entry: &str) -> (&str, Option<u16>) {
     if entry.starts_with('[') {
         if let Some(end) = entry.find(']') {
@@ -325,18 +355,20 @@ fn split_host_entry(entry: &str) -> (&str, Option<u16>) {
     match entry.rsplit_once(':') {
         Some((host, port)) if !host.contains(':') => match port.parse::<u16>() {
             Ok(port) => (host, Some(port)),
-            Err(_) => (entry, None),
+            _ => (host, None),
         },
         _ => (entry, None),
     }
 }
 
 /// The default timeout for a complete registry request.
+#[cfg(feature = "registry")]
 pub const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 /// The default connection timeout for a registry request.
+#[cfg(feature = "registry")]
 pub const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 
-#[cfg(test)]
+#[cfg(all(test, feature = "registry"))]
 mod tests {
     use super::*;
 

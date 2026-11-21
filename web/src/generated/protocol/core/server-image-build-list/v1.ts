@@ -21,7 +21,20 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ImageBuildListPayload = { offset: number, limit: number, };
+export type ImageBuildListPayload = { offset: number, limit: number, 
+/**
+ * Exact lifecycle states to include; empty means every state.
+ */
+statuses: Array<ImageBuildStatus>, 
+/**
+ * Exact source adapters to include; empty means every adapter.
+ */
+sources: Array<ImageBuildSourceKind>, 
+/**
+ * Case-sensitive substring filter over build id, image id, alias, digest
+ * and persisted source. Empty returns the unfiltered page.
+ */
+query: string, };
 export type ImageBuildListResponsePayload = { builds: Array<ImageBuildDescriptor>, total: number, next_offset?: number | null, error?: string | null, };
 export type ImageBuildDescriptor = { build_id: string, 
 /**
@@ -47,7 +60,16 @@ digest?: string | null, size_bytes: number, alias?: string | null,
 /**
  * Whether this build reused bytes that were already published.
  */
-deduplicated: boolean, created_at: number, updated_at: number, };
+deduplicated: boolean, 
+/**
+ * Bounded terminal attempt history, oldest first (#3798).
+ */
+attempts?: Array<ImageBuildAttempt>, created_at: number, updated_at: number, };
+export type ImageBuildAttempt = { attempt: number, status: string, stage?: string | null, 
+/**
+ * The last bounded diagnostic observed for this attempt.
+ */
+diagnostic?: string | null, error?: string | null, started_at: number, finished_at: number, };
 export type ImageBuildProgress = { files?: number | null, bytes?: number | null, 
 /**
  * Time since this attempt started, in milliseconds.
@@ -55,6 +77,7 @@ export type ImageBuildProgress = { files?: number | null, bytes?: number | null,
 elapsed_ms: number, };
 export type ImageBuildStage = "fetching" | "snapshotting" | "validating" | "packaging" | "publishing";
 export type ImageBuildStatus = "queued" | "running" | "succeeded" | "failed" | "canceled";
+export type ImageBuildSourceKind = "github" | "local_directory" | "compose";
 export type ImageSource = { "kind": "github", repository_url: string, ref: string, } | { "kind": "local_directory", path: string, } | { "kind": "compose", sources: Array<ImageComposeSource>, 
 /**
  * How the result is represented; defaults to a flattened image.
@@ -80,7 +103,20 @@ export type ImagePackaging = { compression: string, block_size: number, fixed_ti
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ImageBuildListCall = { offset: number, limit: number, };
+export type ImageBuildListCall = { offset: number, limit: number, 
+/**
+ * Exact lifecycle states to include; empty means every state.
+ */
+statuses: Array<ImageBuildStatus>, 
+/**
+ * Exact source adapters to include; empty means every adapter.
+ */
+sources: Array<ImageBuildSourceKind>, 
+/**
+ * Case-sensitive substring filter over build id, image id, alias, digest
+ * and persisted source. Empty returns the unfiltered page.
+ */
+query: string, };
 
 /** The payload the provider answers with. */
 export type ImageBuildListReply = { builds: Array<ImageBuildDescriptor>, total: number, next_offset?: number | null, error?: string | null, };
