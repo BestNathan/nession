@@ -29,10 +29,10 @@
     "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "9e5ac075285d286d05335b97c3bcdab6f4828af1",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "eda9c14900c5e6b67388eff7df3908448cad25ca",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png": "797765295b400b535c693a3f73803a4e5d110343",
-    "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "c8d2d844928672bb1e64dd184def15e2dc3ee2ad",
+    "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "0ab097de9407f34ce123ce3d53876698854efa02",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-view-tabs-linux.png": "30ce3acdd52cf8e1318b0067e4d0f6213bf96d85",
     "__snapshots__/fixture-visual.spec.ts/app-env-detail-linux.png": "efd69beea6bff721ca1f5d919c552e3e463ec2dd",
-    "__snapshots__/fixture-visual.spec.ts/app-files-list-linux.png": "b58ed33757eaa1e1c978c1b877c68acbc48f5c4c",
+    "__snapshots__/fixture-visual.spec.ts/app-files-list-linux.png": "2eadf71bcf722c1bb4c0f5386cf6909f42b2c9bc",
     "__snapshots__/fixture-visual.spec.ts/app-git-peek-linux.png": "b2278605a1746f15e1e485f86b706d5918a08f3a",
     "__snapshots__/fixture-visual.spec.ts/app-home-375-linux.png": "8cdeb1caeb7604777736d6649cafae02891cfef5",
     "__snapshots__/fixture-visual.spec.ts/app-home-linux.png": "e13c6923b680dc23f1957a55c4fa83c8def9266a",
@@ -58,8 +58,8 @@
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-configuration-linux.png": "4dbc79c6bdbd5a3d6a962474d1b2846ec8986de1",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-conversation-linux.png": "4775bed141ad30191a184a55ae0695a93473e8b2",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-conversations-linux.png": "b3f3b9473635e383600070143312ba4447ecdffe",
-    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-configuration-linux.png": "837384141f756523fbca326117295c503ded69b4",
-    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-linux.png": "593003fe477b580b81d4d78d60196480f077c60b",
+    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-configuration-linux.png": "364525f0c9081ed2d680804797e46ddbc35d36b6",
+    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-linux.png": "e4f4821421e09be2318c768e40dcaab681dd1061",
     "__snapshots__/fixture-visual.spec.ts/web-compact-terminal-linux.png": "574965b4e16c783c5ad47c9445b51dc48b44dd9a",
     "__snapshots__/fixture-visual.spec.ts/web-compact-workspace-linux.png": "d6cdc88abeed05de3bab1aa595565f65705a35da",
     "__snapshots__/fixture-visual.spec.ts/web-env-edit-dirty-linux.png": "f6103d894cb8b4fd22efbe1652d8ddb33fddd714",
@@ -79,7 +79,7 @@
   },
   "baseline_set_updated": {
     "requirement": 4235,
-    "reason": "Main Full Regression repair: the App Files list no longer enumerates child-directory counts (#3451), and the Claude Web tabs now include MCP (#3600). Reused source-reviewed approved staging PNG blobs (same 390×844/426×32 geometry) from #4231's canonical regeneration; the separate main App Claude conversation image remains pending exact-main baseline review.",
+    "reason": "Four source-pinned exact main Full Regression Playwright candidate screenshots were individually reviewed for #3451's intentional removal of directory counts and #3600's intentional MCP tab. Generated at pinned cc2660f61 from Linux Chromium run 44904296414; main App Claude retains the pre-#3829 navigation while staging has already migrated. These four PNGs and their Git blob pins are updated together; exact PR-head CI is required to prove the baseline, and no tolerances or assertions are weakened.",
     "date": "2026-11-22"
   }
 }
