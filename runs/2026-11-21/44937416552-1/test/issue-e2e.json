@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "921f028576da6db161b8e0f991544f805bcb1bc0",
+  "run_id": 44937416552,
+  "run_attempt": 1,
+  "plan_digest": "6e1c8a959a43f90dbda77ba4fa083fb047f7b7efb93cb63446771cb900640236",
+  "artifact_digest": "sha256:d57129a0d040db2965f44926da271ab58bf686b5df2a5fb5fbb45ca89197f70e",
+  "results": [
+    {
+      "id": "project-session-binding",
+      "result": "Pass",
+      "discovered": 5,
+      "passed": 5,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 44
+    }
+  ]
+}
