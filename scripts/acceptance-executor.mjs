@@ -1179,6 +1179,54 @@ function selfTest() {
   assert.match(passedBody, /Keep this paragraph exactly\./);
   assert.equal(validateRequirementBody(passedBody, { mode: 'merge' }).ok, true);
 
+  // #4253: a force-pushed/orphaned historical SC can be re-evaluated only
+  // after an independently validated replacement. Preserve exact old receipt
+  // in history; NEVER copy old "Pass" into a new unsigned result.
+  const oldPrSha='a'.repeat(40), newPrSha='b'.repeat(40);
+  const replacementBody=[
+    '## Success Criteria',
+    '- [x] SC-01 original behavior must be proved again',
+    '',
+    '## Acceptance Plan',
+    '```yaml','acceptance:','  SC-01:','    when: pr',
+    '    method: agent','```','',
+    '## Acceptance Report','| Criterion | Result | Evidence |',
+    '|---|---|---',
+    '| SC-01 | Pass | run 100; ref '+oldPrSha+
+      '; source agent-qwen; test: historical source |',
+  ].join('\n');
+  const replaceIssue={number:19,title:'historical',body:replacementBody};
+  const replaceContext=buildAcceptanceContext(replaceIssue,'pr',{
+    targetRef:newPrSha,runId:207,skipAcceptedPrCriteria:false,method:'agent'});
+  const replacementProof={issue:19,previous_pr:31,replacement_pr:32,
+    target_ref:newPrSha,comment_id:501,
+    old_sources:[oldPrSha],criteria:['SC-01']};
+  const replacementRaw=normalizeAcceptanceResult(replaceContext,{
+    criteria:[{criterion:'SC-01',result:'Pass',
+      evidence:[{type:'test',value:'new independent source fixture'}],
+      summary:'independently re-run at replacement head'}]},
+    'agent-qwen');
+  const replacementResult={...replacementRaw,pr_source_replacement:replacementProof};
+  assert.throws(()=>applyAcceptanceResultToBody(replacementBody,replacementResult),
+    /cannot be overwritten by unrelated exact head/);
+  assert.throws(()=>applyAcceptanceResultToBody(replacementBody,replacementResult,
+    {prSourceReplacement:{...replacementProof,comment_id:502}}),
+    /cannot be overwritten by unrelated exact head/);
+  const replaced=applyAcceptanceResultToBody(replacementBody,replacementResult,
+    {prSourceReplacement:replacementProof});
+  assert.match(replaced,/\| SC-01 \| Pass \| run 207; ref b{40}; source agent-qwen;/);
+  assert.match(replaced,/independent-replacement:31:32:207/);
+  assert.match(replaced,/run 100; ref a{40}; source agent-qwen; test: historical source/);
+  assert.equal(validateRequirementBody(replaced,{mode:'closure'}).ok,true);
+  assert.throws(()=>applyAcceptanceResultToBody(replacementBody,
+    {...replacementResult,pr_source_replacement:{...replacementProof,
+      criteria:[]}},
+    {prSourceReplacement:replacementProof}),/cannot be overwritten/);
+  assert.equal(buildAcceptanceContext(replaceIssue,'pr',{
+    targetRef:newPrSha,runId:207,method:'agent',
+    skipAcceptedPrCriteria:true}).criteria.length,0,
+    'normal acceptance never overwrites accepted sources without explicit recovery');
+
   // #3857: a later PR addressing only a pending post-merge criterion
   // must not redispatch already accepted PR-head SCs on a foreign SHA.
   const exactA='a'.repeat(40),exactB='b'.repeat(40);
