@@ -85,6 +85,22 @@ fn annotations(r:&Release)->BTreeMap<String,String> {
 fn expected_platform_names(r:&Release)->BTreeSet<String> {
     r.targets.iter().map(|p| format!("{}/{}",p.os,p.architecture)).collect()
 }
+// The one authoritative local classification for a candidate Index. Missing,
+// incomplete or stale closure schedules new work; byte/digest corruption
+// remains fail-closed in Registry readback rather than an unsafe tag overwrite.
+fn index_matches_release(index:&Index,r:&Release)->bool {
+    if index.annotations.as_ref().and_then(|a|a.get(FINGERPRINT_KEY))!=Some(&r.fingerprint) {
+        return false;
+    }
+    if index.manifests.len()!=r.targets.len() {return false}
+    if index.manifests.iter().any(|d|
+        d.media_type!=MEDIA_TYPE_MANIFEST || d.platform.is_none()) {return false}
+    let observed=index.manifests.iter().map(|m| {
+        let p=m.platform.as_ref().expect("checked above");
+        format!("{}/{}",p.os,p.architecture)
+    }).collect::<BTreeSet<_>>();
+    observed==expected_platform_names(r)
+}
 fn target_dir(p:&Platform)->String {format!("{}-{}",p.os,p.architecture)}
 fn write_output(name:&str,value:&str)->Result<()> {
     if let Ok(path)=env::var("GITHUB_OUTPUT") {
@@ -131,21 +147,25 @@ async fn fetch_root(c:&RegistryClient,r:&Release)->Result<Option<(String,Index)>
 }
 async fn check_remote(c:&RegistryClient,r:&Release,download:Option<&Path>)->Result<Option<String>> {
     let Some((root_digest,index))=fetch_root(c,r).await? else {return Ok(None)};
-    if index.annotations.as_ref().and_then(|a|a.get(FINGERPRINT_KEY))!=Some(&r.fingerprint) {return Ok(None)}
-    let observed=index.manifests.iter().map(|m| {
-        m.platform.as_ref().map(|p|format!("{}/{}",p.os,p.architecture)).unwrap_or_default()
-    }).collect::<BTreeSet<_>>();
-    if observed!=expected_platform_names(r) {return Ok(None)}
+    if !index_matches_release(&index,r) {return Ok(None)}
     for descriptor in &index.manifests {
         let platform=descriptor.platform.as_ref().context("child has no platform")?;
-        let remote=c.fetch_manifest(REMOTE_REPOSITORY,&RemoteReference::Digest(descriptor.digest.clone())).await?;
+        let remote=match c.fetch_manifest(REMOTE_REPOSITORY,&RemoteReference::Digest(descriptor.digest.clone())).await {
+            Ok(remote)=>remote,
+            Err(RegistryError::NotFound(_))=>return Ok(None),
+            Err(error)=>return Err(error.into()),
+        };
         ensure!(remote.digest==descriptor.digest && remote.media_type==MEDIA_TYPE_MANIFEST,"child Manifest identity mismatch");
         ensure!(remote.document.bytes().len() as u64 == descriptor.size,"child Manifest size mismatch");
         let (_,manifest)=parse_manifest(remote.document.bytes())?;
         ensure!(manifest.annotations.as_ref().and_then(|a|a.get(FINGERPRINT_KEY))==Some(&r.fingerprint),"child recipe fingerprint mismatch");
         ensure!(manifest.layers.len()==1 && manifest.layers[0].media_type==MEDIA_TYPE_EROFS,"unexpected EROFS layer");
         ensure!(manifest.config.media_type==MEDIA_TYPE_CONFIG,"invalid config");
-        let config=c.fetch_config(REMOTE_REPOSITORY,&manifest.config).await?;
+        let config=match c.fetch_config(REMOTE_REPOSITORY,&manifest.config).await {
+            Ok(config)=>config,
+            Err(RegistryError::NotFound(_))=>return Ok(None),
+            Err(error)=>return Err(error.into()),
+        };
         ensure!(config.digest()==manifest.config.digest,"config hash mismatch");
         if let Some(out)=download {
             let store=BlobStore::new(out.join(format!("cas-{}",target_dir(platform))))?;
@@ -245,4 +265,55 @@ async fn main()->Result<()> {
             r.image_ref(),result.digest,r.fingerprint,r.source_sha,env::var("GITHUB_RUN_ID").unwrap_or_default(),env::var("GITHUB_RUN_ATTEMPT").unwrap_or_default())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn fixture()->(Release,Index) {
+        let r=Release{
+            tool:"jq".to_string(),version:"1.8.1".to_string(),
+            fingerprint:"sha256:".to_string()+&"a".repeat(64),
+            source_sha:"b".repeat(40),
+            targets:vec![Platform::for_consumer("linux","amd64",None),
+                         Platform::for_consumer("linux","arm64",None)],
+        };
+        let children=r.targets.iter().map(|p|Descriptor{
+            media_type:MEDIA_TYPE_MANIFEST.to_string(),
+            digest:"sha256:".to_string()+&"c".repeat(64),
+            size:123,
+            urls:None,annotations:None,platform:Some(p.clone()),
+            artifact_type:None,data:None,extra:serde_json::Map::new(),
+        }).collect();
+        let index=Index{schema_version:2,media_type:Some(MEDIA_TYPE_INDEX.to_string()),
+            manifests:children,annotations:Some(annotations(&r)),
+            extra:serde_json::Map::new()};
+        (r,index)
+    }
+    #[test]
+    fn exact_fingerprint_and_complete_two_platform_index_only() {
+        let (r,mut index)=fixture();
+        assert!(index_matches_release(&index,&r));
+        index.annotations.as_mut().unwrap().insert(FINGERPRINT_KEY.to_string(),
+            "sha256:".to_string()+&"d".repeat(64));
+        assert!(!index_matches_release(&index,&r),"stale fingerprint must rebuild");
+        index.annotations=Some(annotations(&r));
+        index.manifests.pop();
+        assert!(!index_matches_release(&index,&r),"missing ARM64 must rebuild");
+        let (_,full)=fixture();
+        index.manifests=full.manifests;
+        index.manifests.push(index.manifests[0].clone());
+        assert!(!index_matches_release(&index,&r),"duplicate children must not qualify");
+        index.manifests.pop();
+        index.manifests[0].media_type="application/not-oci".to_string();
+        assert!(!index_matches_release(&index,&r),"non-OCI child must not qualify");
+    }
+    #[test]
+    fn nonmatching_platform_is_not_reused() {
+        let (r,mut index)=fixture();
+        index.manifests[1].platform=Some(Platform::for_consumer("linux","amd64",None));
+        assert!(!index_matches_release(&index,&r),"duplicate amd64 is not two-platform closure");
+        index.manifests[1].platform=None;
+        assert!(!index_matches_release(&index,&r),"unspecified architecture cannot qualify");
+    }
 }
