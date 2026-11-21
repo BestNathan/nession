@@ -77,6 +77,8 @@ deny({outcome:'approved',summary:'x'.repeat(2001),findings:[]},/invalid summary/
 deny({outcome:'approved',summary:'x',findings:'none'},/invalid findings/);
 deny({outcome:'approved',summary:'x',findings:Array.from({length:51},()=>finding)},/invalid findings/);
 deny({outcome:'changes_requested',summary:'x',findings:[]},/at least one finding/);
+deny({outcome:'approved',summary:'no blocking defect',findings:[finding]},
+  /approved verdict must not contain findings/);
 deny({outcome:'changes_requested',summary:'x',findings:[{path:'a',evidence:'b',line:4}]},/unexpected finding fields/);
 for(const path of ['/etc/passwd','../escape','a\\b','','x'.repeat(401),'a\nb'])
   deny({outcome:'changes_requested',summary:'x',findings:[{path,evidence:'b'}]},/invalid finding path/);

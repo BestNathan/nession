@@ -19,12 +19,20 @@ export async function resolveCaseTarget(plan, issue, read) {
     throw Error('Case comment requires an open native Requirement/Bug Issue');
   }
   const entry = acceptancePlan(issue.body)?.get(plan.criterion);
-  if (entry?.method !== 'case' || entry.when !== 'merged' ||
-      !['staging', 'main'].includes(entry.branch)) {
-    throw Error(plan.criterion + ' requires a merged staging/main method: case Acceptance Plan');
+  const merged = entry?.method === 'case' && entry.when === 'merged' &&
+    ['staging', 'main'].includes(entry.branch);
+  // Deployed Case requests are explicit, authenticated Staging intents.
+  // The deployed SHA comes from the current Staging branch, never a comment
+  // payload or an unrelated Issue merge. The executor independently requires
+  // an immutable, matching environment/SHA deployment binding.
+  const deployed = entry?.method === 'case' && entry.when === 'deployed' &&
+    entry.environment === 'staging' && !entry.branch;
+  if (!merged && !deployed) {
+    throw Error(plan.criterion +
+      ' requires a merged staging/main or deployed staging method: case Acceptance Plan');
   }
-  const stage = planStage(entry);
-  const branch = entry.branch;
+  const manifestStage = planStage(entry);
+  const branch = deployed ? 'staging' : entry.branch;
   const tip = await read(PREFIX + '/git/ref/heads/' + branch);
   const tipSha = tip?.object?.sha;
   if (!SHA.test(tipSha ?? '')) throw Error('unable to authenticate ' + branch + ' exact branch head');
@@ -41,18 +49,18 @@ export async function resolveCaseTarget(plan, issue, read) {
         .includes(plan.issue_number)).sort((a,b) =>
           Date.parse(b.merged_at) - Date.parse(a.merged_at));
     for (const pr of matches) {
-      const targetSha = pr.merge_commit_sha;
-      const ancestry = targetSha === tipSha ? 'exact' :
-        await read(PREFIX + '/compare/' + targetSha + '...' + tipSha);
+      const sourceMerge = pr.merge_commit_sha;
+      const ancestry = sourceMerge === tipSha ? 'exact' :
+        await read(PREFIX + '/compare/' + sourceMerge + '...' + tipSha);
       if (ancestry !== 'exact' && !(ancestry?.status === 'ahead' &&
-          ancestry?.base_commit?.sha === targetSha &&
-          ancestry?.merge_base_commit?.sha === targetSha &&
+          ancestry?.base_commit?.sha === sourceMerge &&
+          ancestry?.merge_base_commit?.sha === sourceMerge &&
           ancestry?.behind_by === 0 && ancestry?.ahead_by >= 1)) continue;
       const manifestPath = 'e2e/acceptance/cases/' + plan.issue_number + '/' +
         plan.criterion + '/case.yaml';
       let file;
       try {
-        file = await read(PREFIX + '/contents/' + manifestPath + '?ref=' + targetSha);
+        file = await read(PREFIX + '/contents/' + manifestPath + '?ref=' + sourceMerge);
       } catch (error) {
         if (/HTTP 404|status: 404/i.test(String(error))) continue;
         throw error;
@@ -62,14 +70,21 @@ export async function resolveCaseTarget(plan, issue, read) {
       const raw = Buffer.from(file.content.replace(/\s/g, ''), 'base64').toString('utf8');
       const manifest = validateCaseManifest(parseCaseYaml(raw, manifestPath));
       if (manifest.issue !== plan.issue_number ||
-          manifest.criterion !== plan.criterion || manifest.stage !== stage) {
+          manifest.criterion !== plan.criterion || manifest.stage !== manifestStage) {
         throw Error('source Case manifest disagrees with Issue/SC/Acceptance stage');
       }
       // Both-platform Cases need independent native executions; selecting Linux
       // here never claims macOS proof or overrides the native combiner.
       return {
-        ...plan, target_sha: targetSha, target_ref: '',
-        stage, platform: manifest.platform === 'macos' ? 'macos' : 'linux',
+        ...plan,
+        // For deployed proof, a historical Case merge authorizes its *code*,
+        // while the current exact Staging SHA selects the deployed runtime.
+        // Authentication of that SHA's actual ready release belongs to the
+        // independent deployed Case runner and its trusted Store receipt.
+        target_sha: deployed ? tipSha : sourceMerge, target_ref: '',
+        stage: deployed ? 'deployed' : manifestStage,
+        environment: deployed ? entry.environment : '',
+        platform: manifest.platform === 'macos' ? 'macos' : 'linux',
         runtime_profile: manifest.runtime,
       };
     }
@@ -83,7 +98,7 @@ export async function resolveCaseTarget(plan, issue, read) {
 // inherit permission from the bot. Re-read the original human comment and
 // recompute the immutable target using trusted Main, before target checkout.
 export async function verifyCaseComment({ issue_number, criterion, target_sha, stage,
-  platform, runtime_profile, source_comment_id }, read) {
+  environment = '', platform, runtime_profile, source_comment_id }, read) {
   const number = Number(issue_number), commentId = Number(source_comment_id);
   if (!Number.isSafeInteger(number) || number <= 0 ||
       !Number.isSafeInteger(commentId) || commentId <= 0 ||
@@ -106,7 +121,8 @@ export async function verifyCaseComment({ issue_number, criterion, target_sha, s
     handler: 'case', issue_number: number, criterion, comment_id: commentId,
   }, issue, read);
   if (plan.target_sha !== target_sha || plan.stage !== stage ||
-      plan.platform !== platform || plan.runtime_profile !== runtime_profile) {
+      plan.environment !== environment || plan.platform !== platform ||
+      plan.runtime_profile !== runtime_profile) {
     throw Error('Case dispatch inputs differ from reauthenticated original Issue/SC/merge SHA');
   }
   return plan;
@@ -195,18 +211,49 @@ async function selfTest() {
     : reader(p)), /manifest disagrees/);
   await denied(() => resolveCaseTarget(base, issue, async p => p.includes('/contents/')
     ? Promise.reject(Error('GitHub GET missing: HTTP 404')) : reader(p)), /no associated merged/);
-  console.log('github-comment-case-request: exact merged-source selection, reauth and negatives passed');
+  // #4032: an Issue-linked historical Case merge authenticates the Case
+  // implementation; the *current exact staging tip* is the deployment target.
+  // No human comment may supply either source SHA or the environment.
+  const deployedIssue = { ...issue, body: issue.body.replace(
+    'when: merged\n    branch: staging', 'when: deployed\n    environment: staging') };
+  const deployedManifest = manifest.replace('stage: staging','stage: post-merge');
+  const deployedRead = async p => p.includes('/contents/') ? {
+    type:'file',encoding:'base64',
+    content:Buffer.from(deployedManifest).toString('base64'),
+  } : p.endsWith('/issues/42') ? deployedIssue : reader(p);
+  const deployed = await resolveCaseTarget(base,deployedIssue,deployedRead);
+  assert.deepEqual({
+    sha:deployed.target_sha,stage:deployed.stage,environment:deployed.environment,
+    platform:deployed.platform,profile:deployed.runtime_profile,
+  },{sha:tipSha,stage:'deployed',environment:'staging',platform:'linux',
+    profile:'full-stack-local'});
+  const deployedInputs={...inputs,target_sha:tipSha,stage:'deployed',environment:'staging'};
+  assert.equal((await verifyCaseComment(deployedInputs,deployedRead)).target_sha,tipSha);
+  await denied(()=>verifyCaseComment({...deployedInputs,environment:'production'},deployedRead),/differ/);
+  await denied(()=>verifyCaseComment({...deployedInputs,environment:''},deployedRead),/differ/);
+  await denied(()=>verifyCaseComment({...deployedInputs,target_sha:sha},deployedRead),/differ/);
+  await denied(()=>verifyCaseComment({...deployedInputs,stage:'post-merge'},deployedRead),/differ/);
+  await denied(()=>resolveCaseTarget(base,{
+    ...deployedIssue,body:deployedIssue.body.replace('environment: staging','environment: production'),
+  },deployedRead),/requires a merged/);
+  await denied(()=>resolveCaseTarget(base,deployedIssue,async p=>p.includes('/compare/')
+    ? {status:'diverged'}:deployedRead(p)),/no associated merged/);
+  await denied(()=>resolveCaseTarget(base,deployedIssue,async p=>p.includes('/contents/')
+    ? {type:'file',encoding:'base64',content:Buffer.from(manifest).toString('base64')}
+    :deployedRead(p)),/manifest disagrees/);
+  console.log('github-comment-case-request: exact merged/deployed exact-source selection, reauth and negatives passed');
 }
 
 const command = process.argv[2];
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   if (command === 'self-test') await selfTest();
   else if (command === 'verify') {
-    if (process.argv.length !== 10) throw Error('usage: verify ISSUE CRITERION SHA STAGE RUNTIME PLATFORM COMMENT_ID');
+    if (![10, 11].includes(process.argv.length))
+      throw Error('usage: verify ISSUE CRITERION SHA STAGE RUNTIME PLATFORM COMMENT_ID [ENVIRONMENT]');
     const [issue_number, criterion, target_sha, stage, runtime_profile, platform,
-      source_comment_id] = process.argv.slice(3);
+      source_comment_id, environment = ''] = process.argv.slice(3);
     await verifyCaseComment({ issue_number, criterion, target_sha, stage,
-      runtime_profile, platform, source_comment_id }, api);
+      environment, runtime_profile, platform, source_comment_id }, api);
     console.log('authenticated original Case comment and exact merged source: verified');
   } else throw Error('usage: github-comment-case-request.mjs <self-test|verify ...>');
 }

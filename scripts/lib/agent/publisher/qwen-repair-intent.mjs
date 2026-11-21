@@ -12,7 +12,8 @@ import {qwenCommittedPublisherIntent,qwenCommittedReviewIntent}
 import {verifyCommittedCheckpoint} from '../store/remote.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
-import {SOURCE as QWEN_PREWRITE_FAILURE}
+import {SOURCE as QWEN_PREWRITE_FAILURE,
+  SECOND_SOURCE as SECOND_QWEN_PREWRITE_FAILURE}
   from './qwen-repair-prewrite-failure.mjs';
 
 const REPO='BestNathan/nession';
@@ -370,4 +371,153 @@ export function commitQwenRepairPrewriteRecovery({
         wal_commit_sha:committedAuthor,
         marker_path:location,marker_store_commit_sha:saved.commit_sha})};
   }finally{fs.rmSync(temp,{recursive:true,force:true});}
+}
+
+// #4046 second exact failure: the first recovery marker has already been
+// consumed by Run 44495243036, but that main-owned script rejected the grant
+// during local read-only materialization, before any GitHub POST. Never
+// authorize a retry from the first marker: a distinct source-attested second
+// CAS is the only route, and is permanently spent after the next attempt.
+export function qwenRepairSecondPrewriteRecoveryPath(){
+  const f=SECOND_QWEN_PREWRITE_FAILURE;
+  const digest=sha256(JSON.stringify([f.issue,f.run_id,f.action_id,
+    f.previous_marker_store_sha,'second-prewrite-recovery-v1']));
+  return 'workflows/issues/'+f.issue+'/results/'+f.run_id+'-1-'+digest+'.json';
+}
+export function commitQwenRepairSecondPrewriteRecovery({
+  remote,intent,source,second_source,recovery_run_id,
+  publishStore=publish,
+}){
+  const f=QWEN_PREWRITE_FAILURE,g=SECOND_QWEN_PREWRITE_FAILURE;
+  const record=validateQwenRepairPublisherIntent(intent?.record);
+  if(intent?.status!=='reconcile'||intent.may_publish!==false||
+     !SHA.test(intent.store_commit_sha??'')||
+     !Number.isSafeInteger(recovery_run_id)||recovery_run_id<=g.run_id||
+     record.issue!==f.issue||record.publisher_run_id!==f.run_id||
+     record.action_id!==f.action_id||
+     record.worker_run_id!==f.worker_run_id||
+     record.source_sha!==f.source_sha||
+     record.checkpoint_version!==f.checkpoint_version||
+     source?.verified!==true||source.issue!==f.issue||
+     source.run_id!==f.run_id||source.attempt!==1||
+     source.run_head_sha!==f.head_sha||
+     source.source_ingest_run_id!==f.source_ingest_run_id||
+     source.worker_run_id!==f.worker_run_id||
+     source.action_id!==f.action_id||
+     source.source_sha!==f.source_sha||
+     source.failure_code!==f.failure_code||
+     second_source?.verified!==true||second_source.issue!==g.issue||
+     second_source.run_id!==g.run_id||second_source.attempt!==1||
+     second_source.run_head_sha!==g.head_sha||
+     second_source.source_ingest_run_id!==g.source_ingest_run_id||
+     second_source.worker_run_id!==g.worker_run_id||
+     second_source.action_id!==g.action_id||
+     second_source.source_sha!==g.source_sha||
+     second_source.failure_code!==g.failure_code||
+     second_source.previous_marker_path!==g.previous_marker_path||
+     second_source.previous_recovery_run_id!==g.previous_recovery_run_id||
+     typeof remote!=='string'||!remote||remote.length>2000||
+     /\s/.test(remote)||
+     (process.env.NODE_ENV!=='test'&&!remote.startsWith('https://x-access-token:')))
+    fail('second pre-write recovery requires both immutable source proofs');
+  const tmp=fs.mkdtempSync(path.join(os.tmpdir(),'qwen-prewrite-v2-'));
+  const root=path.join(tmp,'agent-store');
+  try{
+    try{
+      execFileSync('git',['clone','--quiet','--no-tags','--single-branch',
+        '--branch','agent-store','--',remote,root],{
+        timeout:45000,stdio:['ignore','pipe','pipe'],
+        env:{...process.env,GIT_TERMINAL_PROMPT:'0',
+          GIT_NO_REPLACE_OBJECTS:'1'}});
+    }catch{fail('second pre-write Store unavailable');}
+    if(git(root,'symbolic-ref','--short','HEAD')!=='agent-store')
+      fail('second recovery not on canonical Store branch');
+    const originalPath=qwenRepairPublisherIntentPath(record);
+    const original=read(root,originalPath);
+    const originalAuthor=git(root,'log','-1','--format=%H','HEAD',
+      '--',originalPath);
+    if(JSON.stringify(original)!==JSON.stringify(record)||
+       originalAuthor!==intent.store_commit_sha)
+      fail('second recovery immutable original WAL rewritten');
+    const first=read(root,g.previous_marker_path);
+    const firstAuthor=git(root,'log','-1','--format=%H','HEAD',
+      '--',g.previous_marker_path);
+    if(firstAuthor!==g.previous_marker_store_sha||
+       first?.kind!=='trusted_qwen_repair_prewrite_recovery_grant'||
+       first.schema_version!==1||first.repository!==REPO||
+       first.issue!==f.issue||
+       first.original_publisher_run_id!==f.run_id||
+       first.original_wal_commit_sha!==originalAuthor||
+       first.source_ingest_run_id!==f.source_ingest_run_id||
+       first.worker_run_id!==f.worker_run_id||
+       first.action_id!==f.action_id||
+       first.source_sha!==f.source_sha||
+       first.checkpoint_version!==f.checkpoint_version||
+       first.source_run_head_sha!==f.head_sha||
+       first.failure_code!==f.failure_code||
+       first.recovery_run_id!==g.run_id||
+       first.publication!=='one_new_write_attempt_not_yet_verified')
+      fail('first consumed pre-write marker or immutable Git author altered');
+    const location=qwenRepairSecondPrewriteRecoveryPath();
+    const prior=read(root,location);
+    const claimed={
+      schema_version:1,kind:'trusted_qwen_repair_second_prewrite_recovery_grant',
+      repository:REPO,issue:f.issue,
+      original_publisher_run_id:f.run_id,
+      original_wal_commit_sha:originalAuthor,
+      first_recovery_run_id:g.run_id,
+      first_recovery_marker_sha:firstAuthor,
+      worker_run_id:f.worker_run_id,action_id:f.action_id,
+      source_sha:f.source_sha,checkpoint_version:f.checkpoint_version,
+      source_run_head_sha:g.head_sha,
+      failure_code:g.failure_code,
+      recovery_run_id,
+      publication:'one_second_write_attempt_not_yet_verified',
+    };
+    if(prior){
+      if(prior.kind!==claimed.kind||
+         prior.original_publisher_run_id!==f.run_id||
+         prior.original_wal_commit_sha!==originalAuthor||
+         prior.first_recovery_run_id!==g.run_id||
+         prior.first_recovery_marker_sha!==firstAuthor||
+         prior.worker_run_id!==f.worker_run_id||
+         prior.action_id!==f.action_id||
+         prior.source_sha!==f.source_sha||
+         !Number.isSafeInteger(prior.recovery_run_id)||
+         prior.recovery_run_id<=g.run_id)
+        fail('conflicting second pre-write recovery');
+      return {status:'replayed',may_publish:false,
+        record,store_commit_sha:git(root,'log','-1','--format=%H',
+          'HEAD','--',location)};
+    }
+    const state=confirmStore(root,record);
+    if(state.version!==f.state_version)
+      fail('second pre-write recovery Store has changed phase or version');
+    verifyCommittedCheckpoint({remote,identity:{
+      role:'developer',agent_id:'dev-qwen-01',issue:f.issue},
+      commit_sha:record.checkpoint_commit_sha,
+      version:record.checkpoint_version,
+      ciphertext_sha256:record.checkpoint_ciphertext_sha256});
+    const full=path.join(root,location);
+    fs.mkdirSync(path.dirname(full),{recursive:true});
+    fs.writeFileSync(full,JSON.stringify(claimed,null,2)+'\n',
+      {flag:'wx',mode:0o600});
+    git(root,'add','--',location);
+    if(auditStagedRunStore(root,'agent-store').checked_changes!==1)
+      fail('second recovery edited unauthorized Store paths');
+    git(root,'-c','user.name=nession-agent-publisher',
+      '-c','user.email=nession-agent-publisher@users.noreply.github.com',
+      'commit','-m','agent-store: second source-attested Qwen prewrite recovery');
+    const saved=publishStore('agent-store',root,4);
+    if(saved.replayed)
+      fail('ambiguous second pre-write CAS; deny GitHub POST');
+    return {status:'prewrite_recovery',may_publish:true,
+      store_commit_sha:saved.commit_sha,record,
+      recovery:Object.freeze({verified:true,
+        failed_run_id:f.run_id,run_id:recovery_run_id,
+        wal_commit_sha:originalAuthor,
+        marker_path:location,marker_store_commit_sha:saved.commit_sha,
+        second_attested:true,second_failed_run_id:g.run_id,
+        first_marker_store_sha:firstAuthor})};
+  }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 }

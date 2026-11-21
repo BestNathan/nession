@@ -10,6 +10,7 @@ This Skill owns **workflow taxonomy, naming, orchestration boundaries, cross-wor
 Load this before modifying `.github/workflows/` or introducing a new workflow family. Also load:
 
 - `nession-cicd`: branch/PR policy, CI, release, staging and deploy behavior.
+- `nession-toolchain-release`: the scoped **Release / Toolchains** shell-recipe → EROFS OCI → GHCR publish/readback contract; retain its Delivery naming and credential boundaries when modifying that workflow.
 - `nession-acceptance`: **currently implemented** Issue/SC acceptance contracts and results.
 - `nession-agent-workflow-metrics`: mandatory telemetry and trusted ingestion for real model invocations.
 - `nession-gates`: stable executable invariants and Gate routing.

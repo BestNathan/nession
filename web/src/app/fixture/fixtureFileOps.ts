@@ -36,6 +36,13 @@ let nextWriteError: string | null = null;
  * the loading state is otherwise a microtask-long window in the fixture.
  */
 let listDirDelayMs = 0;
+/** Test-only held-write control for the guarded Save & Switch Case (#3959). */
+let nextWriteHold = false;
+let heldWrite: { release: () => void; fail: (message: string) => void } | null = null;
+/** Test-only read controls for the conflict-reload transaction Case (#3743). */
+let nextReadError: string | null = null;
+let nextReadHold = false;
+let heldRead: { release: () => void; fail: (message: string) => void } | null = null;
 
 function parentOf(path: string): string {
   const slash = path.lastIndexOf('/');
@@ -217,7 +224,7 @@ function mimeTypeFor(path: string): string {
   return path.endsWith('.md') ? 'text/markdown' : 'text/plain';
 }
 
-function readFile(
+function readNow(
   path: string,
   options?: { offset?: number; limit?: number },
 ): Promise<FileData> {
@@ -244,21 +251,52 @@ function readFile(
   });
 }
 
-async function writeFile(
+/**
+ * Whole-file reads pass through the Case controls; chunked requests always
+ * carry offset/limit, so a held or failed read is exactly the viewer's
+ * replacement read rather than one chunk of a large-file stream.
+ */
+function readFile(
+  path: string,
+  options?: { offset?: number; limit?: number },
+): Promise<FileData> {
+  if (options !== undefined) {
+    return readNow(path, options);
+  }
+  const failure = nextReadError;
+  const hold = nextReadHold;
+  nextReadError = null;
+  nextReadHold = false;
+  if (failure !== null) {
+    return reject(failure);
+  }
+  if (!hold) {
+    return readNow(path);
+  }
+  return new Promise<FileData>((resolveRead, rejectRead) => {
+    heldRead = {
+      release: () => {
+        heldRead = null;
+        resolveRead(readNow(path));
+      },
+      fail: (message) => {
+        heldRead = null;
+        rejectRead(new Error(message));
+      },
+    };
+  });
+}
+
+/**
+ * Commit one write against the fixture's current state. A held write applies
+ * its captured snapshot and options here at release time, so revision CAS is
+ * checked against whatever the fixture holds then (#3959).
+ */
+async function writeNow(
   path: string,
   content: string,
   options?: WriteFileOptions,
 ): Promise<{ path: string; written: number; revision: string }> {
-  const delay = nextWriteDelayMs;
-  const failure = nextWriteError;
-  nextWriteDelayMs = 0;
-  nextWriteError = null;
-  if (delay > 0) {
-    await new Promise((resolve) => setTimeout(resolve, delay));
-  }
-  if (failure !== null) {
-    return reject(failure);
-  }
   const target = current();
   if (options?.createOnly && target.entries.has(path)) {
     return reject(`already_exists: ${path}`);
@@ -282,6 +320,40 @@ async function writeFile(
   target.contents.set(path, content);
   const revision = nextRevision(target, path);
   return { path, written: byteLength(content), revision };
+}
+
+async function writeFile(
+  path: string,
+  content: string,
+  options?: WriteFileOptions,
+): Promise<{ path: string; written: number; revision: string }> {
+  const delay = nextWriteDelayMs;
+  const failure = nextWriteError;
+  const hold = nextWriteHold;
+  nextWriteDelayMs = 0;
+  nextWriteError = null;
+  nextWriteHold = false;
+  if (delay > 0) {
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+  if (failure !== null) {
+    return reject(failure);
+  }
+  if (hold) {
+    return new Promise((resolveWrite, rejectWrite) => {
+      heldWrite = {
+        release: () => {
+          heldWrite = null;
+          resolveWrite(writeNow(path, content, options));
+        },
+        fail: (message) => {
+          heldWrite = null;
+          rejectWrite(new Error(message));
+        },
+      };
+    });
+  }
+  return writeNow(path, content, options);
 }
 
 async function deleteFile(
@@ -411,6 +483,20 @@ export interface FixtureFilesControl {
   delayNextWrite: (milliseconds: number) => void;
   /** Reject exactly the next write with a non-conflict failure. */
   failNextWrite: (message?: string) => void;
+  /** Hold exactly the next write until released or failed (#3959). */
+  holdNextWrite: () => void;
+  /** Release a held write, applying its captured snapshot and options. */
+  releaseHeldWrite: () => void;
+  /** Reject a held write. */
+  failHeldWrite: (message?: string) => void;
+  /** Reject exactly the next whole-file read (a viewer's replacement read). */
+  failNextRead: (message?: string) => void;
+  /** Hold exactly the next whole-file read until released or failed. */
+  holdNextRead: () => void;
+  /** Release a held read with the file's current stored content. */
+  releaseHeldRead: () => void;
+  /** Reject a held read. */
+  failHeldRead: (message?: string) => void;
   /** Replace the tree with the deterministic Search-scale forest (#3738). */
   seedSearchForest: (options?: FixtureSearchForestOptions) => void;
   /** Delay every subsequent `listDir`, so App Search loading is observable. */
@@ -424,6 +510,11 @@ export function fixtureFilesControl(): FixtureFilesControl {
       nextWriteDelayMs = 0;
       nextWriteError = null;
       listDirDelayMs = 0;
+      nextWriteHold = false;
+      heldWrite = null;
+      nextReadError = null;
+      nextReadHold = false;
+      heldRead = null;
     },
     revisionOf: (path: string) => knownRevision(current(), path),
     contentsOf: (path: string) => current().contents.get(path) ?? null,
@@ -432,6 +523,39 @@ export function fixtureFilesControl(): FixtureFilesControl {
     },
     failNextWrite: (message = 'fixture: the next write failed') => {
       nextWriteError = message;
+    },
+    holdNextWrite: () => {
+      nextWriteHold = true;
+    },
+    releaseHeldWrite: () => {
+      if (heldWrite === null) {
+        throw new Error('fixture: no write is held');
+      }
+      heldWrite.release();
+    },
+    failHeldWrite: (message = 'fixture: the held write failed') => {
+      if (heldWrite === null) {
+        throw new Error('fixture: no write is held');
+      }
+      heldWrite.fail(message);
+    },
+    failNextRead: (message = 'fixture: the next read failed') => {
+      nextReadError = message;
+    },
+    holdNextRead: () => {
+      nextReadHold = true;
+    },
+    releaseHeldRead: () => {
+      if (heldRead === null) {
+        throw new Error('fixture: no read is held');
+      }
+      heldRead.release();
+    },
+    failHeldRead: (message = 'fixture: the held read failed') => {
+      if (heldRead === null) {
+        throw new Error('fixture: no read is held');
+      }
+      heldRead.fail(message);
     },
     seedSearchForest: (options = {}) => {
       state = searchForestState(options);

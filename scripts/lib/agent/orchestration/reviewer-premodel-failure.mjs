@@ -1,11 +1,12 @@
 // #3574: independently authenticate one already completed pre-model
 // Qwen Reviewer failure before mutating trusted Store or dispatching a successor.
 import {REVIEWER_PREMODEL_FAILURE as F,
+  REVIEWER_PREMODEL_FAILURE_4065 as F4065,
   REVIEWER_PREMODEL_FAILURE_SOURCES} from './outbox.mjs';
 
 const REPO='BestNathan/nession';
 function deny(s){throw Error('trusted Reviewer pre-model failure: '+s);}
-export function attestReviewerPremodelFailure(run,listing,source=F){
+export function attestReviewerPremodelFailure(run,listing,source=F,artifacts=null){
   if(!REVIEWER_PREMODEL_FAILURE_SOURCES.includes(source))
     deny('unknown source-bound failure identity');
   if(run?.id!==source.run_id||run.run_attempt!==1||
@@ -37,6 +38,12 @@ export function attestReviewerPremodelFailure(run,listing,source=F){
      failure[0].name!=='Prepare the reviewer admission'||
      failure[0].status!=='completed')
     deny('failed step is not bounded trusted pre-model admission');
+  // #4192: independently prove the new pre-model Run emitted NO result,
+  // verdict, telemetry or partial admission Artifacts before Store recovery.
+  if(source===F4065&&(
+    artifacts?.total_count!==0||!Array.isArray(artifacts.artifacts)||
+    artifacts.artifacts.length!==0))
+    deny('unexpected Artifact for failed #4065 pre-model Reviewer');
   return Object.freeze({verified:true,issue:source.issue,action_id:source.action_id,
     run_id:source.run_id,attempt:1,source_sha:source.source_sha,
     failure_code:source.failure_code});
@@ -54,5 +61,8 @@ export async function verifyReviewerPremodelFailureLive(token,source=F){
     deny('unknown live failure identity');
   const run=await api(token,'/actions/runs/'+source.run_id);
   const jobs=await api(token,'/actions/runs/'+source.run_id+'/jobs?per_page=100');
-  return attestReviewerPremodelFailure(run,jobs,source);
+  const artifacts=source===F4065
+    ?await api(token,'/actions/runs/'+source.run_id+'/artifacts?per_page=100')
+    :null;
+  return attestReviewerPremodelFailure(run,jobs,source,artifacts);
 }

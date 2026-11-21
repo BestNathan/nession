@@ -3,6 +3,9 @@
 // GitHub IDs are discovery pins only: they cannot confer trust without exact
 // native Run/Attempt/Jobs, admitted source receipt and deployed HTTPS proof.
 import assert from 'node:assert/strict';
+import {TOOLCHAIN_KNOWLEDGE_WITNESS,TOOLCHAIN_KNOWLEDGE_PATHS,
+  attestToolchainKnowledgeReadback,selfTestToolchainKnowledgeReadback}
+  from './acceptance-knowledge-toolchain-4113.mjs';
 
 const REPO='BestNathan/nession';
 const IMPLEMENTED='549384893535bf574a4acc5d33de0c8a7b5ad3ec';
@@ -74,16 +77,22 @@ export function mainAncestry(compare,base,tip){
     ['ahead','identical'].includes(compare.status)&&
     compare.base_commit?.sha===base);
 }
+// #4118's own post-merge verification consumes the *same* independently
+// authenticated #4113 publication, not a new Issue/Run-selected witness.
+// The historical #3156 witness and strict source identities remain unchanged.
+function usesToolchainWitness(issue){return ['4113','4118'].includes(String(issue));}
 export function shouldCollectKnowledgePublication(stage,issue){
-  return stage==='post-merge'&&['2358','3156','3224'].includes(String(issue));
+  return stage==='post-merge'&&['2358','3156','3224','4113','4118'].includes(String(issue));
 }
 export function attestKnowledgePublication({
   targetSha,comment,publisher,signal,pages,proposalCommit,
   publisherJobs,signalJobs,pagesJobs,verifyLog,publishLog,pagesLog,
   implementedToTarget,implementedToPublisher,targetToPublisher,publisherToTarget,
+  issue=3156,knowledgeReadback=null,
 }){
-  const pins=KNOWLEDGE_WITNESS;
-  deny(SHA.test(targetSha)&&mainAncestry(implementedToTarget,IMPLEMENTED,targetSha),
+  const pins=usesToolchainWitness(issue)?TOOLCHAIN_KNOWLEDGE_WITNESS:KNOWLEDGE_WITNESS;
+  const implemented=pins.implemented??IMPLEMENTED;
+  deny(SHA.test(targetSha)&&mainAncestry(implementedToTarget,implemented,targetSha),
     'Acceptance target does not include implementing fix');
   deny(comment?.id===pins.comment&&comment.user?.login==='BestNathan'&&
     comment.author_association==='OWNER'&&
@@ -99,12 +108,14 @@ export function attestKnowledgePublication({
   const ref=lines[1].slice('proposal_ref='.length);
   const source=lines[2].slice('proposal_sha='.length);
   const previous=lines[3].slice('expected_head='.length);
+  if(usesToolchainWitness(issue))deny(source===pins.published&&previous===pins.previous,
+    'unrecognized #4113 proposal and previous Knowledge SHA');
   deny(source!==previous&&proposalCommit?.sha===source&&
     proposalCommit.parents?.length===1&&proposalCommit.parents[0].sha===previous,
     'proposal not exactly one direct child');
   deny(SHA.test(publisher?.head_sha),'missing publisher main source');
   const main=publisher.head_sha;
-  deny(mainAncestry(implementedToPublisher,IMPLEMENTED,main)&&
+  deny(mainAncestry(implementedToPublisher,implemented,main)&&
     (mainAncestry(targetToPublisher,targetSha,main)||
       mainAncestry(publisherToTarget,main,targetSha)),
     'Publisher main source unrelated to accepted implementation');
@@ -150,9 +161,15 @@ export function attestKnowledgePublication({
   const publish=oneJob(pagesJobs,pages,'Publish independent Pages',[
     'Deploy GitHub Pages','Verify public site URL and exact deployed main SHA']);
   const publicSource=parsePages(pagesLog,source);
+  const contentProof=usesToolchainWitness(issue)
+    ?attestToolchainKnowledgeReadback({
+      ...knowledgeReadback,commit:proposalCommit,publishedSha:source,
+      previousSha:previous,publicDigest:publicSource.digest,
+      publicArticles:publicSource.articles})
+    :{};
   return Object.freeze({
     schema_version:1,kind:'verified_knowledge_publisher_publication',
-    acceptance_target_sha:targetSha,implemented_sha:IMPLEMENTED,
+    acceptance_target_sha:targetSha,implemented_sha:implemented,
     publisher_main_sha:main,owner_issue_number:pins.issue,
     owner_comment_id:pins.comment,
     proposal_ref:ref,previous_knowledge_sha:previous,
@@ -167,6 +184,7 @@ export function attestKnowledgePublication({
     evidence_url:'https://github.com/'+REPO+'/actions/runs/'+publisher.id,
     public_url:'https://bestnathan.github.io/nession/data/knowledge.json',
     verified_by:'GitHub exact Run/Attempt/Jobs and main ancestry; immutable admission, protected App and HTTPS publisher logs',
+    ...contentProof,
     establishes_sc_verdict:false,
   });
 }
@@ -174,7 +192,8 @@ export function attestKnowledgePublication({
 export async function collectKnowledgePublication({repo,targetSha,stage,issue,get,getLog}){
   if(!shouldCollectKnowledgePublication(stage,issue))return [];
   deny(repo===REPO&&SHA.test(targetSha),'invalid evidence collection scope');
-  const p=KNOWLEDGE_WITNESS;
+  const p=usesToolchainWitness(issue)?TOOLCHAIN_KNOWLEDGE_WITNESS:KNOWLEDGE_WITNESS;
+  const implemented=p.implemented??IMPLEMENTED;
   const path='/repos/'+REPO;
   const [comment,publisher,signal,pages]=await Promise.all([
     get(path+'/issues/comments/'+p.comment),
@@ -189,8 +208,8 @@ export async function collectKnowledgePublication({repo,targetSha,stage,issue,ge
     get(path+'/actions/runs/'+p.publisher+'/attempts/'+publisher.run_attempt+'/jobs?per_page=100'),
     get(path+'/actions/runs/'+p.signal+'/attempts/'+signal.run_attempt+'/jobs?per_page=100'),
     get(path+'/actions/runs/'+p.pages+'/attempts/'+pages.run_attempt+'/jobs?per_page=100'),
-    get(path+'/compare/'+IMPLEMENTED+'...'+targetSha),
-    get(path+'/compare/'+IMPLEMENTED+'...'+main)]);
+    get(path+'/compare/'+implemented+'...'+targetSha),
+    get(path+'/compare/'+implemented+'...'+main)]);
   const find=(jobs,name)=>{const a=jobs?.jobs?.filter(j=>j.name===name);
     deny(a?.length===1&&positive(a[0].id),'missing exact log producer '+name);
     return a[0].id;};
@@ -202,10 +221,27 @@ export async function collectKnowledgePublication({repo,targetSha,stage,issue,ge
     await get(path+'/compare/'+targetSha+'...'+main);
   const publisherToTarget=targetSha===main?null:
     await get(path+'/compare/'+main+'...'+targetSha);
+  let knowledgeReadback=null;
+  if(usesToolchainWitness(issue)){
+    // GitHub returns immutable committed-content blobs by exact Knowledge SHA.
+    // The live protected ref is an additional CAS witness, not an arbitrary
+    // mutable Issue/PR URL supplied to the collector.
+    const [ref,...items]=await Promise.all([
+      get(path+'/git/ref/heads/knowledge'),
+      ...TOOLCHAIN_KNOWLEDGE_PATHS.map(pth=>
+        get(path+'/contents/'+pth+'?ref='+p.published)),
+    ]);
+    const files=Object.fromEntries(TOOLCHAIN_KNOWLEDGE_PATHS.map((pth,i)=>[pth,items[i]]));
+    const sourceToCurrent=ref.object?.sha!==p.published
+      ?await get(path+'/compare/'+p.published+'...'+ref.object?.sha)
+      :null;
+    knowledgeReadback={ref,sourceToCurrent,files};
+  }
   return [attestKnowledgePublication({
-    targetSha,comment,publisher,signal,pages,proposalCommit,
+    issue,targetSha,comment,publisher,signal,pages,proposalCommit,
     publisherJobs,signalJobs,pagesJobs,verifyLog,publishLog,pagesLog,
     implementedToTarget,implementedToPublisher,targetToPublisher,publisherToTarget,
+    knowledgeReadback,
   })];
 }
 
@@ -278,6 +314,11 @@ export function selfTestKnowledgePublication(){
   assert.equal(shouldCollectKnowledgePublication('pre-merge',3156),false);
   assert.equal(shouldCollectKnowledgePublication('post-merge',3224),true);
   assert.equal(shouldCollectKnowledgePublication('post-merge',2358),true);
+  assert.equal(shouldCollectKnowledgePublication('post-merge',4113),true);
+  assert.equal(shouldCollectKnowledgePublication('post-merge',4118),true);
+  assert.equal(shouldCollectKnowledgePublication('pr',4113),false);
+  assert.equal(shouldCollectKnowledgePublication('pr',4118),false);
+  selfTestToolchainKnowledgeReadback();
   const bad=[
     {comment:{...original.comment,author_association:'MEMBER'}},
     {comment:{...original.comment,updated_at:'2026-11-10T10:00:01Z'}},

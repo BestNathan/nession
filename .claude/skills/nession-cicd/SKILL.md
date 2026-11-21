@@ -9,6 +9,8 @@ This Skill owns **CI, staging, release, and deployment execution**. Workflows ar
 
 For **cross-workflow taxonomy, `Agent /` vs `Acceptance /` naming, Metrics/Task classification, orchestration boundaries, and rename compatibility**, load `nession-workflows` first. Its taxonomy is implemented in checked-in Actions and `scripts/workflow-conventions.mjs`; use the checked-in per-SC plan/validator. Staging lanes have authenticated deployment identity (read-only, via `Deploy / Identity` + trusted ingest); a `when: deployed` criterion is proven only by an explicit deployed run and never inferred from a main merge. Production access remains future (#1616).
 
+For version-pinned **Toolchain** filesystem recipes and their native EROFS-backed OCI publishing to GHCR, load [nession-toolchain-release](../nession-toolchain-release/SKILL.md); the generic [Release / Toolchains Workflow](../../../.github/workflows/release-toolchains.yml) delegates payload preparation to [scripts/toolchains](../../../scripts/toolchains/README.md). The normal Docker/GitOps release path below is a separate pipeline.
+
 Read `.github/AGENTS.md` before editing workflows and `nession-gates` when changing Gate routing. If a workflow invokes an AI/Agent runtime, also load `nession-agent-workflow-metrics`; canonical execution telemetry is mandatory for Agent workflows.
 
 ## 1. First classify the problem

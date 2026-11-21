@@ -17,9 +17,11 @@ import {
   enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
   requiresPrToolingEvidence, requiresPrRustQualityEvidence,
   requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
+  collectPrRequiredQuality, validPrRequiredQualityReceipt, enforcePrRequiredQuality,
 } from './acceptance-pr-web-quality-receipt.mjs';
 
-import {collectPrCiTriad, requiresPrCiTriad, enforcePrCiTriad, selfTestPrCiTriad}
+import {collectPrCiTriad, requiresPrCiTriad, requiresPrVisualEvidenceCriterion,
+  validPrCiTriadReceipt, enforcePrCiTriad, selfTestPrCiTriad}
   from './acceptance-pr-ci-triad.mjs';
 
 export { normalizeAcceptanceResult };
@@ -321,6 +323,180 @@ export function verifiedPrSourceSupersession(issueNumber, previous, next, proof)
       .test(String(current.body || ''))));
 }
 
+// #4146: a checked PR-stage Pass at a *failed* Quality source is historical
+// evidence, not a permanent lock against correcting the SAME implementing PR.
+// Every input here is independently fetched from GitHub on trusted main.
+// A different implementing PR, newer Run ID alone, PR prose or a green status
+// on a different SHA cannot authorize replacement.
+export function verifiedFailedPrQualityRecovery(issueNumber, previous, next, {
+  previousQuality, nextQuality, sourceProof,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next || previousQuality?.status !== 'fail' ||
+      nextQuality?.status !== 'pass' ||
+      !validPrRequiredQualityReceipt(nextQuality.receipt, next) ||
+      !verifiedPrSourceSupersession(issueNumber, previous, next, sourceProof)) return null;
+  const from = sourceProof.previous_pulls;
+  const to = sourceProof.next_pulls;
+  const matches = from.filter(old => to.some(current =>
+    old.number === current.number &&
+    current.head?.sha === next &&
+    current.base?.ref === old.base?.ref &&
+    current.base?.repo?.full_name === sourceProof.repo &&
+    current.head?.repo?.full_name === sourceProof.repo &&
+    // Both merged and still-open implementing PRs may be re-evaluated, but
+    // abandoned closed-unmerged PRs cannot reopen their accepted evidence.
+    (current.state === undefined || current.state === 'open' ||
+      Boolean(current.merged_at))));
+  if (matches.length !== 1) return null;
+  return Object.freeze({
+    issue: Number(issueNumber), previous, next, pr_number: matches[0].number,
+    qualified_quality_run_id: nextQuality.receipt.run_id,
+    qualified_quality_attempt: nextQuality.receipt.run_attempt,
+    reason: 'prior accepted PR-stage source has failed exact-HEAD Quality',
+  });
+}
+
+export function liveFailedPrQualityRecovery(issueNumber, previous, next, {
+  qualityReader = collectPrRequiredQuality, sourceReader = livePrSourceSupersession,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next) return null;
+  const previousQuality = qualityReader(previous);
+  // Fail-closed when the original Run is missing/unknown rather than
+  // rewriting an authenticated positive source.
+  if (previousQuality?.status !== 'fail') return null;
+  const nextQuality = qualityReader(next);
+  if (nextQuality?.status !== 'pass') return null;
+  const proof = sourceReader(issueNumber, previous, next);
+  return verifiedFailedPrQualityRecovery(issueNumber, previous, next,
+    {previousQuality, nextQuality, sourceProof: proof});
+}
+
+// This is only a *selection* adapter. It never edits an Issue or claims
+// a reviewer result. The updater re-attests the exact same recovery later.
+export function recoverFailedQualityPrCriteria(issue, context, {
+  recoveryReader = liveFailedPrQualityRecovery,
+} = {}) {
+  if (context.stage !== 'pr' || !SHA.test(context.target_ref)) return context;
+  const complete = buildAcceptanceContext(issue, 'pr', {
+    targetRef: context.target_ref, runId: context.run_id, method: 'agent',
+    skipAcceptedPrCriteria: false,
+  });
+  const contract = parseContract(issue.body);
+  const already = new Set(context.criteria.map(x => x.criterion));
+  const locked = complete.criteria.filter(x =>
+    !already.has(x.criterion) &&
+    contract.rows.get(x.criterion)?.result === 'Pass' &&
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion)));
+  const previous = [...new Set(locked.map(x =>
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion))))];
+  if (previous.length !== 1 || previous[0] === context.target_ref ||
+      locked.length > 16) return context;
+  const recovery = recoveryReader(Number(issue.number), previous[0], context.target_ref);
+  if (!recovery) return context;
+  const restore = new Set(locked.map(x => x.criterion));
+  return {
+    ...context,
+    criteria: complete.criteria.filter(x => already.has(x.criterion) ||
+      restore.has(x.criterion)),
+    pr_quality_recovery: {
+      ...recovery, criteria: locked.map(x => x.criterion),
+    },
+  };
+}
+
+// A PR-stage Pass is normally pinned to its accepted source. When the SAME
+// implementing PR advances to a descendant head after acceptance, the merged
+// head is what the close guard must verify; re-evaluate the locked criteria
+// there instead of leaving the Issue permanently blocked (#4204). A different
+// PR, a non-descendant head or missing/failed Quality still selects nothing.
+export function verifiedSamePrHeadAdvance(issueNumber, previous, next, {
+  previousQuality, nextQuality, sourceProof,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next ||
+      previousQuality?.status !== 'pass' ||
+      nextQuality?.status !== 'pass' ||
+      !validPrRequiredQualityReceipt(nextQuality.receipt, next) ||
+      !verifiedPrSourceSupersession(issueNumber, previous, next, sourceProof)) {
+    return null;
+  }
+  const from = sourceProof.previous_pulls;
+  const to = sourceProof.next_pulls;
+  // The exact accepted commit must belong to the one implementing PR whose
+  // current head is `next`; same PR number, same base, no unrelated successor.
+  const matches = from.filter(old => to.some(current =>
+    old.number === current.number &&
+    current.head?.sha === next &&
+    current.base?.ref === old.base?.ref &&
+    current.base?.repo?.full_name === sourceProof.repo &&
+    current.head?.repo?.full_name === sourceProof.repo &&
+    // Both merged and still-open implementing PRs may advance; an abandoned
+    // closed-unmerged PR cannot reopen its accepted evidence.
+    (current.state === undefined || current.state === 'open' ||
+      Boolean(current.merged_at))));
+  if (matches.length !== 1) return null;
+  return Object.freeze({
+    issue: Number(issueNumber), previous, next, pr_number: matches[0].number,
+    qualified_quality_run_id: nextQuality.receipt.run_id,
+    qualified_quality_attempt: nextQuality.receipt.run_attempt,
+    reason: 'same implementing PR advanced its accepted source head',
+  });
+}
+
+export function liveSamePrHeadAdvance(issueNumber, previous, next, {
+  qualityReader = collectPrRequiredQuality, sourceReader = livePrSourceSupersession,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next) return null;
+  // The accepted source must have been green when accepted; a failed source
+  // stays on the #4146 failed-Quality recovery path below.
+  if (qualityReader(previous)?.status !== 'pass') return null;
+  const nextQuality = qualityReader(next);
+  if (nextQuality?.status !== 'pass') return null;
+  const proof = sourceReader(issueNumber, previous, next);
+  return verifiedSamePrHeadAdvance(issueNumber, previous, next,
+    {previousQuality: {status: 'pass'}, nextQuality, sourceProof: proof});
+}
+
+// Selection adapter only; the deterministic updater re-attests the same
+// same-PR lineage from independent GitHub data before projecting.
+export function recoverAdvancedGreenPrCriteria(issue, context, {
+  recoveryReader = liveSamePrHeadAdvance,
+} = {}) {
+  if (context.stage !== 'pr' || !SHA.test(context.target_ref)) return context;
+  const complete = buildAcceptanceContext(issue, 'pr', {
+    targetRef: context.target_ref, runId: context.run_id, method: 'agent',
+    skipAcceptedPrCriteria: false,
+  });
+  const contract = parseContract(issue.body);
+  const already = new Set(context.criteria.map(x => x.criterion));
+  const locked = complete.criteria.filter(x =>
+    !already.has(x.criterion) &&
+    contract.rows.get(x.criterion)?.result === 'Pass' &&
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion)));
+  const previous = [...new Set(locked.map(x =>
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion))))];
+  if (previous.length !== 1 || previous[0] === context.target_ref ||
+      locked.length > 16) return context;
+  const recovery = recoveryReader(Number(issue.number), previous[0], context.target_ref);
+  if (!recovery) return context;
+  const restore = new Set(locked.map(x => x.criterion));
+  return {
+    ...context,
+    criteria: complete.criteria.filter(x => already.has(x.criterion) ||
+      restore.has(x.criterion)),
+    pr_head_advance: {
+      ...recovery, criteria: locked.map(x => x.criterion),
+    },
+  };
+}
+
 function priorAcceptedPrRefs(body, normalized) {
   if (stageOf(normalized.stage) !== 'pr') return [];
   const contract = parseContract(body);
@@ -341,7 +517,7 @@ const COMPARE_EVIDENCE_JQ =
   'base_commit: {sha: .base_commit.sha}, ' +
   'merge_base_commit: {sha: .merge_base_commit.sha}}';
 const PULLS_EVIDENCE_JQ =
-  '[.[] | {number: .number, body: .body, title: .title, ' +
+  '[.[] | {number: .number, body: .body, title: .title, state: .state, merged_at: .merged_at, ' +
   'head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}, ' +
   'base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}}]';
 
@@ -545,6 +721,57 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
 
   let updated = updateCheckboxes(body, resultMap);
   updated = updateReport(updated, contract, resultMap, { ...normalized, run_id: runId });
+  // Preserve the prior accepted SC row verbatim in a separate non-authority
+  // history section; current Acceptance Report remains the only active row.
+  // Without a trusted same-PR failed-Quality recovery selector, retain the
+  // existing ordinary supersession behavior and do not add recovery history.
+  const recovery = normalized.pr_quality_recovery;
+  if (stage === 'pr' && recovery && Array.isArray(recovery.criteria) &&
+      recovery.issue === normalized.issue && recovery.next === normalized.target_ref) {
+    const replaced = recovery.criteria.filter(id =>
+      resultMap.has(id) &&
+      acceptedPrSourceRef(contract.criteria.get(id),contract.rows.get(id)) === recovery.previous);
+    if (replaced.length) {
+      const heading = '## Acceptance Source Recovery History';
+      const marker = 'quality-recovery:'+recovery.previous+':'+normalized.target_ref+
+        ':'+runId;
+      if (!updated.includes(marker)) {
+        const rows = replaced.map(id => {
+          const row = contract.rows.get(id);
+          return '- '+id+' prior '+row.result+' at '+recovery.previous+
+            ' (evidence: '+escapeCell(row.evidence)+'); superseded by '+
+            normalized.target_ref+' at acceptance run '+runId;
+        });
+        updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
+          '<!-- '+marker+' -->\n'+rows.join('\n');
+      }
+    }
+  }
+  // A green accepted source that the same PR advanced past keeps its prior
+  // authenticated row in the same non-authority history section (#4204).
+  const advance = normalized.pr_head_advance;
+  if (stage === 'pr' && advance && Array.isArray(advance.criteria) &&
+      advance.issue === normalized.issue && advance.next === normalized.target_ref) {
+    const replaced = advance.criteria.filter(id =>
+      resultMap.has(id) &&
+      acceptedPrSourceRef(contract.criteria.get(id),contract.rows.get(id)) === advance.previous);
+    if (replaced.length) {
+      const heading = '## Acceptance Source Recovery History';
+      const marker = 'head-advance:'+advance.previous+':'+normalized.target_ref+
+        ':'+runId;
+      if (!updated.includes(marker)) {
+        const rows = replaced.map(id => {
+          const row = contract.rows.get(id);
+          return '- '+id+' prior '+row.result+' at '+advance.previous+
+            ' (evidence: '+escapeCell(row.evidence)+'); superseded by '+
+            normalized.target_ref+' at acceptance run '+runId+
+            ' after the same implementing PR advanced its head';
+        });
+        updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
+          '<!-- '+marker+' -->\n'+rows.join('\n');
+      }
+    }
+  }
   return updated;
 }
 
@@ -612,7 +839,7 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   const ciEvidence = evidencePath
     ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
     : null;
-  const context = buildAcceptanceContext(issue, stage, {
+  let context = buildAcceptanceContext(issue, stage, {
     targetRef,
     deployment,
     ciEvidence,
@@ -622,6 +849,15 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     skipAcceptedPrCriteria: true,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
+  context = recoverFailedQualityPrCriteria(issue, context);
+  // A green accepted source whose SAME PR advanced is re-evaluated at the
+  // merged head; the updater re-attests the lineage before projecting (#4204).
+  context = recoverAdvancedGreenPrCriteria(issue, context);
+  // Every PR-stage model Pass must be independently Quality-qualified even
+  // when the SC text does not explicitly name test execution (#4146).
+  if (context.stage === 'pr' && context.criteria.length > 0) {
+    context.pr_required_quality = collectPrRequiredQuality(context.target_ref);
+  }
   // The trusted prepare step has read-only Actions credentials. Read the
   // required Web Gate only for executable Web integration SCs, not every PR.
   if (context.stage === 'pr' && context.criteria.some(item =>
@@ -637,7 +873,19 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     context.pr_rust_quality = collectPrRustQuality(context.target_ref);
   }
   if (requiresPrCiTriad(context)) {
-    context.pr_ci_triad = collectPrCiTriad(context.target_ref);
+    const visual = context.criteria.some(requiresPrVisualEvidenceCriterion);
+    context.pr_ci_triad = collectPrCiTriad(context.target_ref, undefined, {visual});
+    if (visual && context.pr_ci_triad?.status === 'pass' &&
+        context.pr_ci_triad?.receipt?.variant === 'visual' &&
+        validPrCiTriadReceipt(context.pr_ci_triad.receipt, context.target_ref)) {
+      // Trusted-main verifier, never model/PR code, supplies these five
+      // GitHub-bound Quality + browser evidence receipts to the Agent.
+      context.ci_evidence = {
+        kind: 'verified_pr_visual_ci_v1',
+        target_sha: context.target_ref,
+        receipt: context.pr_ci_triad.receipt,
+      };
+    }
   }
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
@@ -650,10 +898,20 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
     context, normalizeAcceptanceResult(context, raw, source)));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
-  const gated = enforceLiveFullFailure(context,
-    enforcePrRustQuality(context, enforcePrWebQuality(context,
-      enforcePrCiTriad(context, normalized))));
-  fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
+  const gated = enforcePrRequiredQuality(context,
+    enforceLiveFullFailure(context,
+      enforcePrRustQuality(context, enforcePrWebQuality(context,
+        enforcePrCiTriad(context, normalized)))));
+  // Trusted prepare-time source lineage is retained only as a locator;
+  // the Issue writer re-authenticates it from independent GitHub REST.
+  const frozen = {
+    ...gated,
+    ...(context.pr_quality_recovery
+      ? {pr_quality_recovery: context.pr_quality_recovery} : {}),
+    ...(context.pr_head_advance
+      ? {pr_head_advance: context.pr_head_advance} : {}),
+  };
+  fs.writeFileSync(outFile, JSON.stringify(frozen, null, 2) + '\n');
 }
 
 function isSupersededRunError(error) {
@@ -665,6 +923,61 @@ function applyCommand(issueNumber, resultFile) {
   if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
+  // A downloadable normalized result is not permission to project Pass. The
+  // trusted Issue writer MUST independently re-read the latest exact-run
+  // Quality status and compare its identity with the prepare-time receipt.
+  // A rerun/new attempt invalidates the old normalization (#4146).
+  if (stageOf(normalized.stage) === 'pr' &&
+      (normalized.criteria ?? []).some(item => item.result === 'Pass')) {
+    const actual = collectPrRequiredQuality(normalized.target_ref);
+    const claimed = normalized.pr_required_quality_receipt;
+    if (actual.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(claimed, normalized.target_ref) ||
+        !validPrRequiredQualityReceipt(actual.receipt, normalized.target_ref) ||
+        claimed.run_id !== actual.receipt.run_id ||
+        claimed.run_attempt !== actual.receipt.run_attempt ||
+        claimed.scope_job_id !== actual.receipt.scope_job_id ||
+        claimed.web_check_job_id !== actual.receipt.web_check_job_id ||
+        JSON.stringify(claimed.job_outcomes) !== JSON.stringify(actual.receipt.job_outcomes)) {
+      throw new Error('PR Acceptance Pass lacks current independent exact-HEAD required Quality qualification');
+    }
+  }
+  // An old accepted source can be re-evaluated only after independent proof
+  // that its Quality failed and a SAME-PR descendant now passes Quality.
+  // Never trust a prepared Artifact's claimed recovery selector by itself.
+  if (normalized.pr_quality_recovery) {
+    const recovery = normalized.pr_quality_recovery;
+    const readback = liveFailedPrQualityRecovery(issueNumber,
+      recovery.previous, normalized.target_ref);
+    if (!readback || readback.pr_number !== recovery.pr_number ||
+        recovery.next !== normalized.target_ref ||
+        recovery.issue !== issueNumber ||
+        !Array.isArray(recovery.criteria) ||
+        recovery.criteria.length === 0 || recovery.criteria.length > 16 ||
+        recovery.criteria.some(id => !normalized.selected_criteria.includes(id)) ||
+        recovery.qualified_quality_run_id !== readback.qualified_quality_run_id ||
+        recovery.qualified_quality_attempt !== readback.qualified_quality_attempt) {
+      throw new Error('PR Quality recovery lacks current authenticated same-PR source lineage');
+    }
+  }
+  // The same implementing PR may advance a green accepted source to its merged
+  // head. Re-attest same-PR ancestry and exact-HEAD Quality; never trust the
+  // prepared Artifact's claimed advance by itself (#4204).
+  if (normalized.pr_head_advance) {
+    const advance = normalized.pr_head_advance;
+    const readback = liveSamePrHeadAdvance(issueNumber,
+      advance.previous, normalized.target_ref);
+    if (!readback || readback.pr_number !== advance.pr_number ||
+        advance.next !== normalized.target_ref ||
+        advance.issue !== issueNumber ||
+        !Array.isArray(advance.criteria) ||
+        advance.criteria.length === 0 || advance.criteria.length > 16 ||
+        advance.criteria.some(id => !normalized.selected_criteria.includes(id)) ||
+        advance.qualified_quality_run_id !== readback.qualified_quality_run_id ||
+        advance.qualified_quality_attempt !== readback.qualified_quality_attempt) {
+      throw new Error('PR head advance lacks current authenticated same-PR green Quality lineage');
+    }
+  }
   // Concurrent Acceptance runs may finish out of order. Never project older
   // evidence over a newer run, but treat the superseded updater as a no-op.
   // All other contract, provenance and result validation errors still fail.
@@ -825,6 +1138,130 @@ function selfTest() {
     targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   }).criteria.map(x=>x.criterion),['SC-04']);
 
+  // #4146: old model Pass at failing PR Quality is neither immutable success
+  // nor a reason to borrow a newer, unrelated PR's green CI. The same
+  // implementing PR can be re-evaluated only with actual GitHub ancestry,
+  // exact-head Quality success and fully retained historical row evidence.
+  const recoveryPr={number:4188,title:'fix (#3843)',body:'Refs #3843',
+    state:'closed',merged_at:'2026-11-20T10:17:54Z',
+    head:{sha:exactB,repo:{full_name:'BestNathan/nession'}},
+    base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
+  const recoveryProof={
+    issue:3843,previous:exactA,next:exactB,repo:'BestNathan/nession',
+    comparison:{status:'ahead',ahead_by:2,behind_by:0,
+      base_commit:{sha:exactA},merge_base_commit:{sha:exactA}},
+    previous_pulls:[recoveryPr],next_pulls:[recoveryPr],
+  };
+  const qualitySucceeded={status:'pass',receipt:{
+    kind:'pr_required_quality_v1',
+    repository:'BestNathan/nession',workflow:'.github/workflows/ci-quality.yml',
+    head_sha:exactB,result:'success',run_id:99,run_attempt:1,
+    scope_job_id:98,web_check_job_id:97,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  }};
+  const qualityRecover=verifiedFailedPrQualityRecovery(3843,exactA,exactB,{
+    previousQuality:{status:'fail',reason:'old web-check failed'},
+    nextQuality:qualitySucceeded,sourceProof:recoveryProof});
+  assert.equal(qualityRecover.pr_number,4188);
+  for (const bad of [
+    {previousQuality:{status:'pass'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'pending'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:{status:'pending'},sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:{...qualitySucceeded,
+      receipt:{...qualitySucceeded.receipt,head_sha:exactA}},sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,comparison:{...recoveryProof.comparison,behind_by:1}}},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,number:4189,
+        body:'Supersedes #4188'}]}},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,
+        merged_at:null,state:'closed'}]}},
+  ])assert.equal(verifiedFailedPrQualityRecovery(3843,exactA,exactB,bad),null);
+  const recoverContext=recoverFailedQualityPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>qualityRecover});
+  assert.deepEqual(recoverContext.criteria.map(x=>x.criterion),
+    ['SC-01','SC-02','SC-04']);
+  const recoveredResult=normalizeAcceptanceResult(recoverContext,{
+    criteria:recoverContext.criteria.map(c=>({criterion:c.criterion,result:'Pass',
+      evidence:'test: independent Quality and same-PR source proof'})),
+  },'agent-qwen');
+  const recoveredBody=applyAcceptanceResultToBody(anchoredBody,{
+    ...recoveredResult,pr_quality_recovery:{...qualityRecover,criteria:['SC-01','SC-02','SC-04']}},
+    {prSourceSupersession:recoveryProof});
+  assert.match(recoveredBody,/Acceptance Source Recovery History/);
+  assert.match(recoveredBody,/SC-01 prior Pass at a{40}/);
+  assert.match(recoveredBody,/SC-04 prior Pass at a{40}/);
+  assert.match(recoveredBody,/SC-01 \| Pass \| run 200; ref b{40};/);
+  assert.equal(validateRequirementBody(recoveredBody,{mode:'closure'}).ok,false,
+    'merged-stage SC-03 remains independently Pending after PR recovery');
+  const stillLocked=recoverFailedQualityPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>null});
+  assert.deepEqual(stillLocked.criteria,[]);
+  // #4204: a GREEN accepted source may advance to its same implementing PR's
+  // descendant merged head. Selection restores the locked criteria and the
+  // updater rebinds them while preserving the prior row. A different PR,
+  // non-descendant head, closed-unmerged PR or failed/pending Quality at
+  // either end selects nothing.
+  const previousGreen={status:'pass',receipt:{...qualitySucceeded.receipt,
+    head_sha:exactA}};
+  const advance=verifiedSamePrHeadAdvance(3843,exactA,exactB,{
+    previousQuality:previousGreen,nextQuality:qualitySucceeded,
+    sourceProof:recoveryProof});
+  assert.equal(advance.pr_number,4188);
+  assert.equal(advance.qualified_quality_run_id,99);
+  for (const bad of [
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'pending'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:previousGreen,nextQuality:{status:'pending'},sourceProof:recoveryProof},
+    {previousQuality:previousGreen,nextQuality:{...qualitySucceeded,
+      receipt:{...qualitySucceeded.receipt,head_sha:exactA}},sourceProof:recoveryProof},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,comparison:{...recoveryProof.comparison,behind_by:1}}},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,number:4189,
+        body:'Supersedes #4188'}]}},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,
+        merged_at:null,state:'closed'}]}},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,head:{...recoveryPr.head,
+        sha:exactA}}]}},
+  ])assert.equal(verifiedSamePrHeadAdvance(3843,exactA,exactB,bad),null,
+    'only the same PR, descendant, green-Quality advance may re-select');
+  const advancedContext=recoverAdvancedGreenPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:300,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>advance});
+  assert.deepEqual(advancedContext.criteria.map(x=>x.criterion),
+    ['SC-01','SC-02','SC-04']);
+  assert.equal(advancedContext.pr_head_advance.pr_number,4188);
+  const noAdvance=recoverAdvancedGreenPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:300,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>null});
+  assert.deepEqual(noAdvance.criteria,[]);
+  const advancedResult=normalizeAcceptanceResult(advancedContext,{
+    criteria:advancedContext.criteria.map(c=>({criterion:c.criterion,result:'Pass',
+      evidence:'test: source-aligned tests at the advanced head'})),
+  },'agent-qwen');
+  const advancedBody=applyAcceptanceResultToBody(anchoredBody,{
+    ...advancedResult,
+    pr_head_advance:{...advance,criteria:['SC-01','SC-02','SC-04']}},
+    {prSourceSupersession:recoveryProof});
+  assert.match(advancedBody,/SC-01 prior Pass at a{40}/);
+  assert.match(advancedBody,/same implementing PR advanced its head/);
+  assert.match(advancedBody,/SC-01 \| Pass \| run 300; ref b{40};/);
+  assert.equal(validateRequirementBody(advancedBody,{mode:'closure'}).ok,false,
+    'merged-stage SC-03 remains independently Pending after the head advance');
+  // The old Issue is never silently accepted just because a new Run exists.
   const post = buildAcceptanceContext({ ...issue, body: passedBody }, 'post-merge', {
     targetRef: 'def456', deployment: 'production', runId: 101,
   });
@@ -1365,6 +1802,9 @@ function selfTest() {
     {stdio:'inherit'});
   execFileSync(process.execPath,
     [fileURLToPath(new URL('./acceptance-staging-batch-pr-evidence.mjs',import.meta.url)),'self-test'],
+    {stdio:'inherit'});
+  execFileSync(process.execPath,
+    [fileURLToPath(new URL('./acceptance-pr-quality-waker.mjs',import.meta.url)),'self-test'],
     {stdio:'inherit'});
   console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }

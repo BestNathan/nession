@@ -9,6 +9,9 @@ tmux-socket-isolation
 protocol-integrity
 server-handler-locality
 protocol-codegen-drift
+rust-test-route-contract
+rust-test-unit
+rust-test-integration
 rust-coverage
 coverage-classification-selftest
 instruction-contract

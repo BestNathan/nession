@@ -1,22 +1,51 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
 import {qwenWorkerAuthority,qwenDeveloperPrompt,classifyQwenCliFailure,
-  qwenDeveloperTurnBudget} from './qwen-development-worker.mjs';
+  qwenDeveloperExecutionTimeoutMs,qwenDeveloperCliArgs,
+  qwenDeveloperCliEnvironment} from './qwen-development-worker.mjs';
 import {attestQwenRepairIssueReview} from './qwen-review-context.mjs';
 import {formatReviewerIssueReceipt}
   from './reviewer-result-ingest.mjs';
 
-// A real native second-cycle Repair hit error_max_turns at the old
-// 10-turn limit. Only an authenticated Repair Resume receives a bounded
-// 24-turn budget; plain/initial Developer remains 10 with unchanged policy.
-assert.equal(qwenDeveloperTurnBudget('implement',false),10);
-assert.equal(qwenDeveloperTurnBudget('implement',true),10);
-assert.equal(qwenDeveloperTurnBudget('repair',true),24);
+// Execution policy is wall-clock bounded, not turn bounded. Check the
+// actual CLI argv for fresh and signed Repair/Resume, not only its budget.
+for(const [task,resuming] of [['implement',false],['implement',true],['repair',true]]){
+  assert.equal(qwenDeveloperExecutionTimeoutMs(task,resuming),30*60*1000);
+  const argv=qwenDeveloperCliArgs({prompt:'single focused fix',sessionId:'s-123',
+    task,resuming,plan:{model:'qwen-pinned',tools:['Read','Grep','Glob','Edit','Write']}});
+  assert.ok(!argv.includes('--max-turns'),'no CLI turn cap even for Repair');
+  assert.ok(argv.includes('--strict-mcp-config'),'keep strict MCP config');
+  assert.ok(argv.includes('--restricted'),'keep restricted tools');
+  assert.ok(argv.includes('--disallowedTools'),'keep MCP tool denial');
+  for (const flag of ['--tools','--allowedTools']) {
+    const i=argv.indexOf(flag);
+    assert.ok(i>=0,'native tool flag missing: '+flag);
+    assert.deepEqual(argv[i+1].split(','),['Edit','Glob','Grep','Read'],
+      'native Qwen may not receive file-creating Write tool');
+  }
+  assert.ok(argv.includes(resuming?'--resume':'--session-id'),
+    'native Session identity/Resume mode must remain explicit');
+}
 for(const [task,resuming] of [
   ['repair',false],['review',true],['evil',false],
   ['repair','true'],['implement',null],
-])assert.throws(()=>qwenDeveloperTurnBudget(task,resuming),
-  /Qwen Developer/);
+]){
+  assert.throws(()=>qwenDeveloperExecutionTimeoutMs(task,resuming),
+    /Qwen Developer/);
+  assert.throws(()=>qwenDeveloperCliArgs({prompt:'x',sessionId:'s',
+    task,resuming,plan:{model:'qwen-pinned',tools:['Read']}}),
+    /Qwen Developer/);
+}
+
+// The runner may export Claude Code's implicit turns limit. It must not
+// survive into the provider environment even when no --max-turns is passed.
+const inherited={CLAUDE_CODE_MAX_TURNS:'1',KEEP_ME:'present'};
+const child=qwenDeveloperCliEnvironment(inherited,'/tmp/qwen-native','pinned-qwen');
+assert.ok(!Object.hasOwn(child,'CLAUDE_CODE_MAX_TURNS'));
+assert.equal(inherited.CLAUDE_CODE_MAX_TURNS,'1','parent environment unchanged');
+assert.equal(child.KEEP_ME,'present');
+assert.equal(child.CLAUDE_CONFIG_DIR,'/tmp/qwen-native');
+assert.equal(child.ANTHROPIC_MODEL,'pinned-qwen');
 
 // A real Provider failure must be classifiable without exposing raw model
 // output, prompts, stderr or Gateway credentials to public Actions logs.
@@ -59,9 +88,12 @@ const issue={number:2274,state:'open',title:'Fix tracked application source',
   body:'Accept a bounded patch after reading code'};
 const prompt=qwenDeveloperPrompt(issue,admission);
 assert.match(prompt,/Fix tracked application source/);
-assert.match(prompt,/Read\/Grep\/Glob\/Edit\/Write/);
+assert.match(prompt,/Read\/Grep\/Glob\/Edit tools/);
+assert.match(prompt,/Write tool is disabled/);
 assert.match(prompt,/Grep\/Glob are read-only discovery/);
 assert.match(prompt,/No Bash, shell, MCP/);
+assert.match(prompt,/do not perform broad repository exploration/);
+assert.match(prompt,/stop and report the scope blocker/);
 assert.match(prompt,/The trusted Publisher/);
 for(const extra of [
   {GITHUB_TOKEN:'leaked'}, {STORE_APP_TOKEN:'unsafe'},
@@ -166,7 +198,6 @@ for(const bad of [
     'changes_requested','approved')}]},
   {comments:[{...comment,id:0}]},
   {verdict:{...verdict,summary:'tampered Reviewer body'}},
-  {verdict:{...verdict,outcome:'approved'}},
   {verdict:null},
   {readReceipt:()=>({...receipt,result:{...result,target_sha:'f'.repeat(40)}})},
   {readCommitState:()=>({...state,transitions:[{...latest,
@@ -175,6 +206,14 @@ for(const bad of [
   assert.throws(()=>attestQwenRepairIssueReview({...context,...bad}),
     /Qwen Reviewer Issue context|untrusted authenticated|untrusted original Reviewer findings source/);
 }
+// An approved verdict with unresolved findings fails at the shared canonical
+// Reviewer validator; approval without findings still conflicts with signed Store.
+assert.throws(()=>attestQwenRepairIssueReview({
+  ...context,verdict:{...verdict,outcome:'approved'},
+}),/approved verdict must not contain findings/);
+assert.throws(()=>attestQwenRepairIssueReview({
+  ...context,verdict:{...verdict,outcome:'approved',findings:[]},
+}),/untrusted original Reviewer findings source/);
 console.log('Qwen Reviewer Issue-thread repair: signed Store transition, exact bot projection, native prompt synchronization and forgery denials pass');
 
 console.log('Qwen isolated Developer: signed Run admission, absent Store credentials, exact issue context and defensive prompt passed');

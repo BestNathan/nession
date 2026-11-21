@@ -18,6 +18,10 @@ jobs:
     permissions:
       contents: read
       issues: write
+      # The guard discovers and reads the merged implementation PRs; a
+      # job-scoped permissions block replaces the top-level default, so
+      # without this the PR association is empty (#4214).
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
         with:

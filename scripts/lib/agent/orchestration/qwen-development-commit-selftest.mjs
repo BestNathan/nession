@@ -1148,6 +1148,80 @@ try {
   }
   assert.equal(secondCalls.filter(x=>!x.startsWith('GET:')).length,writes,
     'rewritten/foreign/merged historical commits cannot create writes');
+  // #4057: REAL second-cycle Publisher reconciliation → THIRD Reviewer.
+  // The initial published A and the immediate predecessor B are distinct
+  // SHA owners. The old Reviewer loader accidentally demanded A == B.
+  // This fixture uses three successive committed Publisher transitions and
+  // separate immutable initial/Repair/second-Repair WALs in one Git Store.
+  const thirdPublisherRun=secondRecord.publisher_run_id+1;
+  const thirdEvent={kind:'publisher',issue,run_id:thirdPublisherRun,
+    run_attempt:1,target_sha:shaC,outcome:'published'};
+  const thirdTrusted={role:'publisher',
+    workflow_run_id:thirdPublisherRun,
+    write_ahead_publisher_run_id:secondRecord.publisher_run_id,
+    attempt:1,issue,source_sha:shaC,
+    developer_action_id:secondRepair.id,developer_run_id:secondWorkerRun,
+    developer_attempt:1,developer_source_sha:shaB,
+    checkpoint_commit_sha:secondCheckpoint.commit_sha,
+    original_publisher_run_id:publisherRun,pr_number:prNumber,
+    pr_previous_sha:shaB};
+  const thirdAccepted=acceptAttestedQwenRepairPublication(
+    secondDispatchedWorker,secondDispatchedWorker.version,
+    thirdEvent,thirdTrusted,registry);
+  assert.equal(thirdAccepted.phase,'review');
+  assert.equal(thirdAccepted.target_sha,shaC);
+  const thirdReviewer=thirdAccepted.outbox.find(x=>
+    x.task.role==='reviewer'&&x.status==='pending');
+  assert.ok(thirdReviewer);
+  for(const next of [secondPreparedWorker,secondDispatchedWorker,
+    thirdAccepted]){
+    const old=readIssueWorkflowState(post,issue);
+    writeIssueWorkflowState(post,next,old.version);
+    git(post,'add','-A');
+    git(post,'-c','user.name=Qwen Store Case',
+      '-c','user.email=qwen@example.invalid','commit',
+      '-m','authenticated third-cycle Qwen Publisher State '+next.version);
+    publish('agent-store',post,4);
+  }
+  const secondWal=qwenRepairPublisherIntentPath(secondRecord);
+  const secondWalFull=path.join(post,secondWal);
+  fs.mkdirSync(path.dirname(secondWalFull),{recursive:true});
+  fs.writeFileSync(secondWalFull,JSON.stringify(secondRecord,null,2)+'\n');
+  git(post,'add','--',secondWal);
+  git(post,'-c','user.name=Qwen Store Case',
+    '-c','user.email=qwen@example.invalid',
+    'commit','-m','immutable second Qwen Repair Publisher write-ahead');
+  publish('agent-store',post,4);
+  const currentReview=qwenCommittedReviewIntent({
+    storeRoot:post,issue,publisherRunId:thirdPublisherRun});
+  assert.equal(currentReview.repair,true);
+  assert.equal(currentReview.recovered,true);
+  assert.equal(currentReview.publisher_run_id,thirdPublisherRun);
+  assert.equal(currentReview.record.source_sha,shaB);
+  assert.equal(currentReview.record.original_publisher_run_id,publisherRun);
+  assert.equal(currentReview.branch,branch);
+  const sourceC=qwenReviewerPublishedSource({storeRoot:post,issue,
+    actionId:thirdReviewer.id,sha:shaC});
+  assert.equal(sourceC.review_sha,shaC);
+  assert.equal(sourceC.base_sha,inputSha);
+  assert.equal(sourceC.branch,'refs/heads/'+branch);
+  assert.equal(sourceC.publisher_run_id,thirdPublisherRun);
+  const goodWal=fs.readFileSync(secondWalFull,'utf8');
+  try{
+    for(const changed of [
+      {source_sha:commitSha}, // A must NOT impersonate immediate B
+      {original_publisher_run_id:thirdPublisherRun},
+      {original_main_sha:'f'.repeat(40)},
+      {branch:'refs/heads/agent/'+issue+'/qwen-'+'f'.repeat(16)},
+      {checkpoint_version:2}, // 3 published heads require v3
+    ]){
+      fs.writeFileSync(secondWalFull,
+        JSON.stringify({...secondRecord,...changed},null,2)+'\n');
+      assert.throws(()=>qwenReviewerPublishedSource({
+        storeRoot:post,issue,actionId:thirdReviewer.id,sha:shaC}),
+        /trusted Qwen Reviewer source|Qwen Repair write-ahead/);
+    }
+  }finally{fs.writeFileSync(secondWalFull,goodWal);}
   assert.equal(posts,5,'Repair update never creates a second GitHub PR');
   assert.equal(repairMutations.length,4,'Store handoff never writes GitHub');
 

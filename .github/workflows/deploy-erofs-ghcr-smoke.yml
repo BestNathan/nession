@@ -1,0 +1,85 @@
+name: Deploy / EROFS GHCR Smoke
+# #4084: Native EROFS -> OCI CAS -> GHCR write and immutable readback.
+# The trusted main branch alone receives package-write authority.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-erofs-ghcr-smoke.yml'
+      - 'scripts/ci/erofs-ghcr-smoke.rs'
+      - 'scripts/ci/erofs-ghcr-smoke.sh'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/deploy-erofs-ghcr-smoke.yml'
+      - 'scripts/ci/erofs-ghcr-smoke.rs'
+      - 'scripts/ci/erofs-ghcr-smoke.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: erofs-ghcr-smoke-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  verify-local:
+    if: github.repository == 'BestNathan/nession' && github.event_name == 'pull_request'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      RUSTC_WRAPPER: ''
+      CARGO_BUILD_JOBS: '2'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.96.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Install EROFS userspace packer and verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends erofs-utils
+          command -v mkfs.erofs
+          command -v fsck.erofs
+      - name: Build native EROFS and validate OCI Layout without credentials
+        run: bash scripts/ci/erofs-ghcr-smoke.sh local
+
+  publish-ghcr:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      packages: write
+    env:
+      RUSTC_WRAPPER: ''
+      CARGO_BUILD_JOBS: '2'
+      GHCR_ACTOR: ${{ github.actor }}
+      GHCR_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.96.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Install EROFS userspace packer and verifier
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends erofs-utils
+          command -v mkfs.erofs
+          command -v fsck.erofs
+      - name: Build OCI/EROFS, push via native Registry client, and verify GHCR readback
+        run: bash scripts/ci/erofs-ghcr-smoke.sh publish
