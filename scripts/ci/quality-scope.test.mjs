@@ -15,6 +15,9 @@ test('fixture-only, web-only, rust-only and terminal protocol diffs',()=>{
 });
 test('changed owners select affected Gates',()=>{
   assert.deepEqual(flags(['gates/checks/rust-coverage.sh']),{...none,rust:true,tooling:true});
+  assert.deepEqual(flags(['gates/checks/rust-test-route-contract.sh']),{...none,rust:true,tooling:true});
+  assert.deepEqual(flags(['scripts/rust-test-route.mjs']),{...none,rust:true,tooling:true});
+  assert.deepEqual(flags(['scripts/filtered-test.sh']),{...none,rust:true,tooling:true});
   assert.deepEqual(flags(['gates/run']),{...none,rust:true,web:true,tooling:true});
   assert.deepEqual(flags(['.github/workflows/ci-quality.yml']),{...none,rust:true,web:true,tooling:true,workflow:true});
   assert.deepEqual(flags(['docs/AGENTS.md']),{...none,instruction:true});

@@ -272,6 +272,13 @@ npm run dev        # Vite dev server :13000, proxies /ws and /api → :19090
 
 Open http://localhost:13000, connect to the server, then browse agents and open terminals. For production, `npm run build` emits static assets to `web/dist/` (served by nginx in the Docker/K8s images).
 
+The generated local Server profile (`nession config server init`) already lists
+the Vite dev (`:13000`) and preview (`:4173`) origins in `allowed_origins`.
+A Server started from a hand-written config — or the no-file fallback — refuses
+browser WebSocket upgrades until the page's exact origin is listed there; CLI
+and Agent clients present no `Origin` and need no entry. See
+[protocol ownership](docs/architecture/protocol.md#effective-exposure-and-browser-origin-policy).
+
 ### Terminal presentation and scrollback
 
 The terminal uses a fixed logical column count per Session (96 by default; configurable for a release). Web/App adapt font size and visible rows to each viewport without reflowing the Session into a different column count. See [terminal sizing](docs/design/terminal/terminal-sizing.md) for the current contract.

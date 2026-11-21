@@ -311,6 +311,28 @@ pub async fn run(
             compose_mcp_tool_providers(&agent_id, Arc::clone(&tmux_for_client)),
         )
         .context("failed to mount the MCP endpoint")?;
+    // Mount the opt-in read-only OCI Registry on the P2P listener when
+    // `[registry] enabled = true` (#4090). It is backed by the same verified
+    // cache the Managed creation path uses and honours the Agent's own inbound
+    // token. Without a cache the capability is refused rather than exposing an
+    // empty or private CAS; the projection starts empty so nothing is advertised
+    // until the preparation path registers an authorized tag.
+    if config.registry.enabled {
+        match erofs_cache.clone() {
+            Some(cache) => {
+                let registry =
+                    crate::registry::build_read_only_registry(cache, Arc::clone(&p2p_auth))
+                        .context("failed to mount the Agent read-only OCI Registry")?;
+                agent_server.mount_registry(Arc::new(registry));
+            }
+            None => {
+                tracing::warn!(
+                    "Agent Registry enabled but no EROFS cache is available; \
+                     the read-only /v2/ endpoint is not mounted"
+                );
+            }
+        }
+    }
     // The composed contribution catalog and the context its handlers receive
     // (#3778). The central connection advertises the manifest on registration
     // and executes Server-relayed contributed calls through the same catalog

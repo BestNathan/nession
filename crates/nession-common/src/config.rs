@@ -94,6 +94,23 @@ pub struct ServerConfig {
     pub tls_cert_path: String,
     pub tls_key_path: String,
     pub auth_token: String,
+    /// Browser origins allowed to open the Server WebSocket (`#4066`).
+    ///
+    /// Empty is the default and refuses every upgrade that presents an
+    /// `Origin` header. Requests without `Origin` — the CLI, the Agent and
+    /// other native clients — pass. An origin is **not** a credential: it only
+    /// bounds which browser pages may attempt `server.auth`, never replaces
+    /// the Server Token.
+    #[serde(default)]
+    pub allowed_origins: Vec<String>,
+    /// Explicitly accept a non-loopback listener with an empty `auth_token`
+    /// (`#4066`).
+    ///
+    /// Deliberately unsafe: the WebSocket control plane would be reachable
+    /// without any credential. Set it only for an intentionally open listener;
+    /// a blank token paired with a loopback listener needs no opt-in.
+    #[serde(default)]
+    pub allow_insecure_remote: bool,
     /// Interval at which agents should send heartbeats, in seconds.
     /// Sent to each agent in the registration response so the cadence is
     /// configured centrally.
@@ -312,15 +329,7 @@ impl McpConfig {
         if self.max_concurrent_calls == 0 {
             anyhow::bail!("[mcp] max_concurrent_calls must be greater than zero");
         }
-        for origin in &self.allowed_origins {
-            if origin != "null" && !origin.starts_with("http://") && !origin.starts_with("https://")
-            {
-                anyhow::bail!(
-                    "[mcp] allowed_origins entries must include a scheme (http:// or https://) or \
-                     be \"null\"; got {origin:?}"
-                );
-            }
-        }
+        validate_origin_allowlist(&self.allowed_origins, "[mcp] allowed_origins")?;
         Ok(())
     }
 }
@@ -388,9 +397,82 @@ impl ServerConfig {
         if !(1..=1024).contains(&self.image_gc_max_candidates) {
             anyhow::bail!("image_gc_max_candidates must be in [1, 1024]");
         }
+        self.validate_exposure()?;
+        validate_origin_allowlist(&self.allowed_origins, "allowed_origins")?;
         self.mcp.validate_for_host(&self.auth_token, "auth_token")?;
         Ok(())
     }
+
+    /// Refuse a listener that would expose the control plane without a
+    /// credential, unless the operator explicitly accepted that exposure.
+    ///
+    /// The check runs before any socket binds: the runtime entrypoint and the
+    /// listener constructor both call [`Self::validate`]. A loopback listener
+    /// keeps its documented no-auth mode; a remote listener must carry a token
+    /// or set [`Self::allow_insecure_remote`].
+    fn validate_exposure(&self) -> anyhow::Result<()> {
+        if !self.auth_token.is_empty()
+            || self.allow_insecure_remote
+            || listen_address_is_loopback(&self.listen_address)
+        {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "listen_address {:?} is not a loopback address and auth_token is empty: the \
+             WebSocket control plane would accept unauthenticated remote connections. Set \
+             auth_token, bind a loopback address, or set `allow_insecure_remote = true` to \
+             deliberately run an unauthenticated remote listener.",
+            self.listen_address
+        );
+    }
+}
+
+/// Whether a configured listen address is provably loopback.
+///
+/// An IP literal is classified by address family: `127.0.0.0/8` and `::1`
+/// (including IPv4-mapped IPv6) are loopback; wildcards (`0.0.0.0`, `::`) and
+/// every other literal are not. A hostname is not proof of a loopback
+/// interface — `localhost` is the name RFC 6761 reserves for loopback, while
+/// any other name may resolve anywhere — so a name stays on the fail-closed
+/// side unless it is that reserved name.
+fn listen_address_is_loopback(listen_address: &str) -> bool {
+    let address = listen_address.trim();
+    if let Ok(socket) = address.parse::<std::net::SocketAddr>() {
+        return ip_is_loopback(socket.ip());
+    }
+    let host = address
+        .rsplit_once(':')
+        .map_or(address, |(host, _port)| host);
+    host.trim_matches('[')
+        .trim_matches(']')
+        .trim_end_matches('.')
+        .eq_ignore_ascii_case("localhost")
+}
+
+fn ip_is_loopback(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_loopback(),
+        std::net::IpAddr::V6(v6) => {
+            v6.is_loopback() || v6.to_ipv4_mapped().is_some_and(|v4| v4.is_loopback())
+        }
+    }
+}
+
+/// Reject a browser-origin allowance that can never match an `Origin` header.
+///
+/// RFC 6454 origins are `scheme://host[:port]`, plus the literal `null` for an
+/// opaque origin. The WebSocket allowance and the MCP endpoint share this one
+/// rule so the two browser-facing surfaces cannot drift apart.
+fn validate_origin_allowlist(origins: &[String], key: &str) -> anyhow::Result<()> {
+    for origin in origins {
+        if origin != "null" && !origin.starts_with("http://") && !origin.starts_with("https://") {
+            anyhow::bail!(
+                "{key} entries must include a scheme (http:// or https://) or be \"null\"; \
+                 got {origin:?}"
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The default for [`ServerConfig::terminal_stall_grace_secs`], published so the
@@ -431,6 +513,8 @@ impl Default for ServerConfig {
             tls_cert_path: String::new(),
             tls_key_path: String::new(),
             auth_token: String::new(),
+            allowed_origins: Vec::new(),
+            allow_insecure_remote: false,
             heartbeat_interval_secs: default_heartbeat_interval(),
             heartbeat_timeout_secs: default_heartbeat_timeout(),
             db_path: default_db_path(),
@@ -534,6 +618,15 @@ fn default_db_path() -> String {
 mod tests {
     use super::*;
 
+    /// Parse a partial Server config, supplying the required TLS fields every
+    /// config file used to spell out.
+    fn parse_server(body: &str) -> ServerConfig {
+        toml::from_str(&format!(
+            "tls_cert_path = \"\"\ntls_key_path = \"\"\n{body}"
+        ))
+        .expect("parse server config")
+    }
+
     #[test]
     fn test_server_config_default() {
         let config = ServerConfig::default();
@@ -544,6 +637,89 @@ mod tests {
         assert_eq!(config.heartbeat_interval_secs, 10);
         assert_eq!(config.heartbeat_timeout_secs, 30);
         assert!(!config.db_path.is_empty());
+        assert!(config.allowed_origins.is_empty());
+        assert!(!config.allow_insecure_remote);
+    }
+
+    /// #4066 SC-01: an unauthenticated remote control plane needs an explicit
+    /// operator opt-in; the built-in wildcard/blank-token pairing is not a
+    /// startable configuration.
+    #[test]
+    fn non_loopback_listener_without_a_token_is_refused() {
+        assert!(
+            ServerConfig::default().validate().is_err(),
+            "the default wildcard listener with a blank token must fail closed"
+        );
+
+        for listen in ["0.0.0.0:19090", "[::]:19090", "example.com:19090"] {
+            let config = parse_server(&format!("listen_address = {listen:?}\nauth_token = \"\"\n"));
+            let error = config
+                .validate()
+                .expect_err("an unauthenticated non-loopback listener must be refused");
+            assert!(
+                error.to_string().contains("allow_insecure_remote"),
+                "{listen}: {error}"
+            );
+        }
+    }
+
+    /// The safe halves of the exposure rule still start: loopback no-auth and
+    /// any authenticated listener.
+    #[test]
+    fn loopback_no_auth_and_authenticated_remote_configurations_start() {
+        for listen in [
+            "127.0.0.1:19090",
+            "127.8.9.10:19090",
+            "[::1]:19090",
+            "localhost:19090",
+        ] {
+            let config = parse_server(&format!("listen_address = {listen:?}\nauth_token = \"\"\n"));
+            config
+                .validate()
+                .unwrap_or_else(|error| panic!("{listen}: {error}"));
+        }
+        for listen in ["0.0.0.0:19090", "[::]:19090", "example.com:19090"] {
+            let config = parse_server(&format!(
+                "listen_address = {listen:?}\nauth_token = \"secret\"\n"
+            ));
+            config
+                .validate()
+                .unwrap_or_else(|error| panic!("{listen}: {error}"));
+        }
+    }
+
+    #[test]
+    fn an_explicit_unsafe_remote_opt_in_accepts_a_blank_token() {
+        let config = parse_server(
+            "listen_address = \"0.0.0.0:19090\"\n\
+             auth_token = \"\"\n\
+             allow_insecure_remote = true\n",
+        );
+        config
+            .validate()
+            .expect("the documented opt-in makes the listener startable");
+    }
+
+    #[test]
+    fn ws_allowed_origins_use_the_browser_origin_rule() {
+        let config = parse_server(
+            "listen_address = \"127.0.0.1:19090\"\n\
+             auth_token = \"\"\n\
+             allowed_origins = [\"http://localhost:13000\", \"null\"]\n",
+        );
+        config
+            .validate()
+            .expect("scheme-qualified origins are valid");
+
+        let config = parse_server(
+            "listen_address = \"127.0.0.1:19090\"\n\
+             auth_token = \"\"\n\
+             allowed_origins = [\"localhost:13000\"]\n",
+        );
+        let error = config
+            .validate()
+            .expect_err("an Origin allowance without a scheme must be refused");
+        assert!(error.to_string().contains("allowed_origins"), "{error}");
     }
 
     /// Explicit paths are the operator's declaration (#3179 SC-01): the
@@ -565,7 +741,7 @@ mod tests {
     /// MCP is off unless asked for, and disabling it never demands a token.
     #[test]
     fn mcp_is_disabled_by_default() {
-        let config = ServerConfig::default();
+        let config = parse_server("listen_address = \"127.0.0.1:19090\"\nauth_token = \"\"\n");
         assert!(!config.mcp.enabled);
         assert_eq!(config.mcp.path, "/mcp");
         config
@@ -577,13 +753,12 @@ mod tests {
     /// than inherit the WebSocket's no-auth mode.
     #[test]
     fn mcp_enabled_requires_the_host_token() {
-        let mut config = ServerConfig {
-            mcp: McpConfig {
-                enabled: true,
-                ..Default::default()
-            },
-            ..Default::default()
-        };
+        let mut config = parse_server(
+            "listen_address = \"127.0.0.1:19090\"\n\
+             auth_token = \"\"\n\
+             [mcp]\n\
+             enabled = true\n",
+        );
         let error = config
             .validate()
             .expect_err("an empty auth_token must refuse to start MCP");
@@ -649,13 +824,17 @@ mod tests {
     /// (#3795); an empty value disables it rather than authorizing `/`.
     #[test]
     fn image_source_root_is_empty_by_default_and_must_be_absolute() {
-        let default = ServerConfig::default();
+        let default = ServerConfig {
+            listen_address: "127.0.0.1:0".to_string(),
+            ..Default::default()
+        };
         assert!(default.image_source_root.is_empty());
         default
             .validate()
             .expect("the default disables the adapter");
 
         let mut config = ServerConfig {
+            listen_address: "127.0.0.1:0".to_string(),
             image_source_root: "relative/sources".to_string(),
             ..Default::default()
         };
@@ -726,6 +905,7 @@ mod tests {
     fn scheduled_image_gc_bounds_are_validated() {
         for (interval, candidates) in [(0_u64, 1_usize), (60, 1), (604800, 1024)] {
             let config = ServerConfig {
+                listen_address: "127.0.0.1:0".to_string(),
                 image_gc_interval_secs: interval,
                 image_gc_max_candidates: candidates,
                 ..Default::default()
@@ -740,6 +920,7 @@ mod tests {
             (3600, 1025),
         ] {
             let config = ServerConfig {
+                listen_address: "127.0.0.1:0".to_string(),
                 image_gc_interval_secs: interval,
                 image_gc_max_candidates: candidates,
                 ..Default::default()
@@ -846,24 +1027,28 @@ mod tests {
     #[test]
     fn validate_rejects_values_that_bypass_the_parsers() {
         let below = ServerConfig {
+            listen_address: "127.0.0.1:0".to_string(),
             terminal_cols: MIN_TERMINAL_COLS - 1,
             ..Default::default()
         };
         assert!(below.validate().is_err());
 
         let above = ServerConfig {
+            listen_address: "127.0.0.1:0".to_string(),
             terminal_cols: MAX_TERMINAL_COLS + 1,
             ..Default::default()
         };
         assert!(above.validate().is_err());
 
         let not_a_number = ServerConfig {
+            listen_address: "127.0.0.1:0".to_string(),
             terminal_web_font_size: f64::NAN,
             ..Default::default()
         };
         assert!(not_a_number.validate().is_err());
 
         let too_large = ServerConfig {
+            listen_address: "127.0.0.1:0".to_string(),
             terminal_web_font_size: MAX_TERMINAL_WEB_FONT_SIZE + 1.0,
             ..Default::default()
         };

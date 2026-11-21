@@ -1,3 +1,9 @@
+import {
+  collectNonTokenSourceMetrics,
+  isShippingStyleFile,
+  rejectNewMetricDebt,
+} from '../../../design/scripts/visual-token-drift.mjs';
+
 /**
  * Repository-wide visual vocabulary boundary (#1451).
  *
@@ -258,6 +264,15 @@ export default function visualVocabularyRule(metadata) {
       },
       schema: [],
       messages: {
+        metricViolation: [
+          'DESIGN_SYSTEM_VIOLATION',
+          'rule: nession/visual-vocabulary',
+          'kind: {{kind}}',
+          'actual: {{token}}',
+          'expected: a canonical Web/App token-backed visual metric',
+          'owner: design/tokens/experience/*.json + design/scripts/visual-token-drift.mjs',
+          'repair: migrate the edited file\'s non-token metric to var(--nession-*) or a shared Recipe; frozen legacy blobs are not editable exceptions',
+        ].join('\n'),
         violation: [
           'DESIGN_SYSTEM_VIOLATION',
           '',
@@ -314,6 +329,20 @@ export default function visualVocabularyRule(metadata) {
       }
 
       return {
+        Program(node) {
+          if (!isShippingStyleFile(filename)) return;
+          const sourceCode = context.sourceCode ?? context.getSourceCode();
+          const source = sourceCode.text;
+          const observations = collectNonTokenSourceMetrics(source, filename);
+          for (const hit of rejectNewMetricDebt(filename, source, observations)) {
+            context.report({
+              node,
+              loc: sourceCode.getLocFromIndex(hit.index),
+              messageId: 'metricViolation',
+              data: { token: hit.token, kind: hit.kind },
+            });
+          }
+        },
         Literal(node) {
           check(node, node.value);
         },

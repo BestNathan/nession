@@ -40,8 +40,11 @@ test('SC-03 Env variables and editor feedback clear the Capsule', async ({ page 
     await measure(page, VARIABLES, `Env variables list ${viewport.id}`);
     const warnings = await measure(page, WARNINGS, `Env warnings ${viewport.id}`);
     expect(warnings.lastContent, 'a final warning is painted').not.toBeNull();
+    // The helper reports a 48-character excerpt; the last skipped line is the
+    // 24th warning (file line 60), so its line id is the stable reachable-end
+    // marker without depending on text past the excerpt.
     expect(warnings.lastContent.text, 'the last warning is the reachable end')
-      .toContain('this line is not an assignment 23');
+      .toContain('line 60:');
 
     // ── Editor: warnings + expanded Review changes in the feedback owner ──
     await page.getByTestId('env-edit').click();

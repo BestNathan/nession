@@ -1,0 +1,73 @@
+name: Acceptance / PR Quality Waker
+
+# #4146: the initial PR Acceptor may run before required Quality completes.
+# This notification provides scheduling only, never an Acceptance/merge verdict.
+# Select via main-owned read-only GitHub source attestation; the normal
+# Agent / SC Acceptance workflow remains the sole Result projector.
+on:
+  workflow_run:
+    workflows: ["CI / Quality Gate"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: read
+
+concurrency:
+  group: acceptance-pr-quality-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  cancel-in-progress: false
+
+jobs:
+  select:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: read
+      pull-requests: read
+    outputs:
+      head_sha: ${{ steps.proof.outputs.head_sha }}
+      issue_numbers: ${{ steps.proof.outputs.issue_numbers }}
+      has_issues: ${{ steps.proof.outputs.has_issues }}
+    steps:
+      - name: Checkout trusted main PR Quality wake selector
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Authenticate completed Quality and select outstanding exact-HEAD Issues
+        id: proof
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/acceptance-pr-quality-waker.mjs self-test
+          node scripts/acceptance-pr-quality-waker.mjs select
+          echo "PR Quality source selected from GitHub, not PR event claims" >> "$GITHUB_STEP_SUMMARY"
+
+  evaluate:
+    needs: select
+    if: needs.select.outputs.has_issues == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        issue_number: ${{ fromJSON(needs.select.outputs.issue_numbers) }}
+    uses: BestNathan/nession/.github/workflows/agent-sc-acceptance.yml@main
+    with:
+      issue_number: ${{ matrix.issue_number }}
+      stage: pr
+      provider: ${{ vars.AGENT_DEFAULT_ACCEPTOR || vars.ACCEPTANCE_PROVIDER || '' }}
+      target_ref: ${{ needs.select.outputs.head_sha }}
+      deployment: ''
+    secrets: inherit

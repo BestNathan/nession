@@ -18,6 +18,7 @@
 
 pub mod builds;
 pub mod http;
+pub mod registry;
 
 #[cfg(test)]
 mod async_build_tests;
@@ -3373,6 +3374,16 @@ impl ImageManager {
 
     pub fn blob_store(&self) -> &FsBlobStore {
         &self.blobs
+    }
+
+    /// The Server's own catalog connection (#4090).
+    ///
+    /// The mountable `/v2/` Registry service reads reachability and publishes
+    /// pushed objects through this same connection; it never opens a second
+    /// database. Cloned cheaply because `sea_orm::DatabaseConnection` is an
+    /// `Arc`-backed pool handle.
+    pub fn connection(&self) -> sea_orm::DatabaseConnection {
+        self.db.connection().clone()
     }
 
     fn descriptor(

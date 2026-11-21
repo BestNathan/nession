@@ -80,14 +80,17 @@ type FixtureGitHistoryDiffRequest = FixtureGitHistoryRequest & { path: string };
 
 /**
  * Deterministic controls the `git=history-overlap` scenario exposes (#3751),
- * extended with request evidence for the selection-ownership Case (#3767).
+ * extended with request evidence for the selection-ownership Case (#3767)
+ * and a rejected continuation for the failure-feedback Case (#4116).
  *
  * The first older page is held until the Case releases it. The Case can switch
  * Session or refresh the first page first, then assert the held answer changed
  * nothing — no timer decides when the stale continuation settles. Detail and
  * diff reads are recorded with the target they were addressed to and the OID
  * they named, so a Case can prove the successor was never asked about the
- * predecessor's commit.
+ * predecessor's commit. Releasing with `fail` rejects the held read instead of
+ * answering it, so a Case can prove a continuation failure is visible and
+ * retryable without an unhandled rejection.
  */
 type FixtureGitHistoryOverlapWindow = Window & {
   fixtureGitHistoryOverlap?: {
@@ -95,7 +98,7 @@ type FixtureGitHistoryOverlapWindow = Window & {
     firstPageRequests: (session: string) => number;
     olderRequests: () => number;
     olderSettled: () => boolean;
-    releaseOlder: () => void;
+    releaseOlder: (fail?: boolean) => void;
     /** Every `git.commit` read, in order, with its target and OID. */
     commitRequests: () => readonly FixtureGitHistoryRequest[];
     /** Every commit-sourced `git.diff` read, in order. */
@@ -308,7 +311,9 @@ function mutateFixtureRepository(
  *     with the newer repository state (#2787)
  *   /#/fixture/workspace?capability=git&git=history-overlap → two Sessions with
  *     distinct pageable histories; the first older page is held until the Case
- *     releases it, after a Session move or a replaced first page (#3751)
+ *     releases it, after a Session move or a replaced first page (#3751), and
+ *     can be released as a rejection so a continuation failure is observable
+ *     (#4116)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
@@ -700,6 +705,7 @@ interface HistoryOverlapState {
     session: string;
     generation: number;
     resolve: (value: GitLogResponse) => void;
+    reject: (reason: Error) => void;
   } | null;
 }
 
@@ -744,11 +750,12 @@ function historyOverlapLog(
   state.olderRequests += 1;
   publish();
   if (state.olderRequests === 1) {
-    return new Promise<GitLogResponse>((resolve) => {
+    return new Promise<GitLogResponse>((resolve, reject) => {
       state.held = {
         session: fromCursor.session,
         generation: fromCursor.generation,
         resolve,
+        reject,
       };
       publish();
     });
@@ -846,18 +853,24 @@ function historyOverlapGitSurface(): PluginSurface {
       firstPageRequests: (session: string) => state.firstPageRequests.get(session) ?? 0,
       olderRequests: () => state.olderRequests,
       olderSettled: () => state.olderSettled,
-      releaseOlder: () => {
+      releaseOlder: (fail = false) => {
         const current = state.held;
         state.held = null;
         if (!current) {
           return;
         }
-        current.resolve(
-          rememberHistoryOverlapPage(
-            state,
-            historyOverlapOlderPage(current.session, current.generation),
-          ),
-        );
+        if (fail) {
+          // A transport failure is a rejected read, not an error-shaped answer:
+          // the hook's catch path is what the Case must observe (#4116).
+          current.reject(new Error('the held older page failed'));
+        } else {
+          current.resolve(
+            rememberHistoryOverlapPage(
+              state,
+              historyOverlapOlderPage(current.session, current.generation),
+            ),
+          );
+        }
         setTimeout(() => {
           state.olderSettled = true;
           publish();

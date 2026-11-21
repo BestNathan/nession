@@ -130,6 +130,37 @@
       "value": "12px"
     }
   },
+  "fileViewer": {
+    "$description": "FileViewer chrome geometry (#4221 convergence reconciliation). Preserves the component's established pixel baselines while migrating raw utilities to owned tokens; each leaf names the surface that owns it, not an arbitrary spacing scale.",
+    "badgeInsetX": {
+      "$description": "Read-only badge horizontal inset; preserves established 6px px-1.5.",
+      "value": "6px"
+    },
+    "badgeInsetY": {
+      "$description": "Read-only badge vertical inset; preserves established 2px py-0.5.",
+      "value": "2px"
+    },
+    "badgeIconSize": {
+      "$description": "Read-only badge Lock glyph; preserves established 10px h-2.5/w-2.5.",
+      "value": "10px"
+    },
+    "toolbarIconSize": {
+      "$description": "Save/Edit toolbar glyphs; preserves established 12px h-3/w-3.",
+      "value": "12px"
+    },
+    "barInsetY": {
+      "$description": "Markdown suggestion and preview-dirty notice bar vertical inset; preserves established 6px py-1.5.",
+      "value": "6px"
+    },
+    "actionInsetY": {
+      "$description": "Suggestion Preview/Dismiss action vertical inset; preserves established 2px py-0.5.",
+      "value": "2px"
+    },
+    "progressWidth": {
+      "$description": "Chunked download progress track width; preserves established 256px w-64.",
+      "value": "256px"
+    }
+  },
   "rhythm": {
     "$description": "Cross-Experience spatial relationship metrics (#4050). Existing pixel baselines are intentionally unchanged; a named recipe owns where each spacing token applies. Do not use these as an arbitrary spacing scale or override renderer-owned geometry.",
     "sectionStack": {

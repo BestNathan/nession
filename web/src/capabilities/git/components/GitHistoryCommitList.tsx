@@ -13,6 +13,7 @@ export function GitHistoryCommitList({
   endOfHistory,
   nextCursor,
   loadingMore,
+  olderError,
   onSelect,
   onLoadOlder,
   onRefresh,
@@ -25,6 +26,7 @@ export function GitHistoryCommitList({
   endOfHistory: boolean;
   nextCursor: string | null;
   loadingMore: boolean;
+  olderError: string | null;
   onSelect: (hash: string) => void;
   onLoadOlder: () => void;
   onRefresh: () => void;
@@ -34,7 +36,7 @@ export function GitHistoryCommitList({
       role="complementary"
       viewportClassName="max-h-[50%] flex-none border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r"
     >
-      <div data-testid="git-commit-list" className="flex flex-col p-1">
+      <div data-testid="git-commit-list" className="flex flex-col p-[var(--nession-shell-space-1)]">
         {commits.map((commit) => (
           <CommitRow
             key={commit.hash}
@@ -44,26 +46,37 @@ export function GitHistoryCommitList({
           />
         ))}
         {!endOfHistory && nextCursor ? (
-          <button
-            type="button"
-            data-testid="git-history-load-more"
-            disabled={loadingMore}
-            onClick={onLoadOlder}
-            className={cn(
-              'mx-2 my-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left text-primary hover:bg-accent',
-              chromeSansRole('metadata'),
-            )}
-          >
-            {loadingMore ? 'Loading older commits…' : 'Load older commits'}
-          </button>
+          <>
+            <button
+              type="button"
+              data-testid="git-history-load-more"
+              disabled={loadingMore}
+              onClick={onLoadOlder}
+              className={cn(
+                'mx-[var(--nession-shell-space-2)] my-[var(--nession-shell-space-2)] rounded-[var(--nession-radius-control)] px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)] text-left text-primary hover:bg-accent',
+                chromeSansRole('metadata'),
+              )}
+            >
+              {loadingMore ? 'Loading older commits…' : 'Load older commits'}
+            </button>
+            {olderError ? (
+              <p
+                data-testid="git-history-older-error"
+                role="alert"
+                className={cn('mx-[var(--nession-shell-space-2)] my-[var(--nession-shell-space-1)] text-destructive', chromeSansRole('metadata'))}
+              >
+                {olderError}
+              </p>
+            ) : null}
+          </>
         ) : null}
         {commits.length >= limit && endOfHistory ? (
-          <p data-testid="git-history-more" className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
+          <p data-testid="git-history-more" className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}>
             End of history — {commits.length} commit{commits.length === 1 ? '' : 's'} loaded.
           </p>
         ) : null}
         {truncated ? (
-          <p data-testid="git-history-truncated" className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
+          <p data-testid="git-history-truncated" className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}>
             History truncated — {formatBytes(truncatedBytes)} not read.
           </p>
         ) : null}
@@ -92,13 +105,13 @@ function CommitRow({
       aria-current={selected ? 'true' : undefined}
       onClick={() => onSelect(commit.hash)}
       className={cn(
-        'flex flex-col gap-0.5 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+        'flex flex-col gap-[var(--nession-shell-space-1)] rounded-[var(--nession-radius-control)] px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)] text-left transition-colors',
         'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
         selected && 'bg-accent text-accent-foreground',
       )}
     >
       <span className={cn('truncate', chromeSansRole('secondary'))}>{commit.subject}</span>
-      <span className={cn('flex items-center gap-2 text-muted-foreground', chromeSansRole('metadata'))}>
+      <span className={cn('flex items-center gap-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}>
         <span className="font-mono">{commit.short_hash}</span>
         <span className="truncate">{commit.author}</span>
         <span className="shrink-0">{commit.relative_date}</span>

@@ -233,6 +233,9 @@ jobs:
           else
             echo 'actionable=false' >> "$GITHUB_OUTPUT"
           fi
+          # Trusted source-pinned planner, not event-provided path labels.
+          required="$(jq -r '[.branches[] | select(.workflow_write_required == true)] | length > 0' "$RUNNER_TEMP/convergence-plan.json")"
+          echo "workflow_write_required=$required" >> "$GITHUB_OUTPUT"
           {
             echo '## Staging branch convergence (#2926)'
             echo
@@ -255,10 +258,32 @@ jobs:
           permission-contents: write
           permission-pull-requests: write
 
+      # #4059: reuse the installed Publisher App identity but mint a distinct
+      # short-lived token for workflow-bearing integration pushes only.
+      # Only enable after the owner approves Workflows write on this App.
+      # Until then, the controller retains BLOCKED/no-push rather than
+      # repeatedly failing while minting an unauthorized token.
+      # The ordinary Publisher token above remains PR/Contents-scoped.
+      - name: Mint workflow-file integration token from Publisher App
+        id: workflow_writer
+        if: >-
+          steps.plan.outputs.actionable == 'true' &&
+          steps.plan.outputs.workflow_write_required == 'true' &&
+          inputs.dry_run != true &&
+          vars.CONVERGENCE_PUBLISHER_WORKFLOW_WRITE_ENABLED == 'true'
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.PUBLISHER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+          permission-workflows: write
+
       - name: Idempotently prepare and arm protected GitHub Auto-merge
         if: steps.plan.outputs.actionable == 'true' && inputs.dry_run != true
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          CONVERGENCE_WORKFLOW_PUSH_TOKEN: ${{ steps.workflow_writer.outputs.token }}
           READ_GITHUB_TOKEN: ${{ github.token }}
           DISPATCH_GITHUB_TOKEN: ${{ github.token }}
           ISSUE_GITHUB_TOKEN: ${{ github.token }}
@@ -266,6 +291,21 @@ jobs:
           # The legacy qualified merge remains the default until both
           # protected targets enforce strict required qualification.
           NESSION_CONVERGENCE_NATIVE_AUTO_MERGE: ${{ vars.NESSION_CONVERGENCE_NATIVE_AUTO_MERGE }}
+          # #4140: rollout independently; disabled until protected main CI/real
+          # App and source-pair end-to-end proof are verified.
+          # #4140 one-shot owner-merged smoke: this enables no recurring job.
+          # Round 2 uses the exact merge-stage bounded-text fix (#4154) to
+          # exercise the original live Rust/TS conflict, not a synthetic fixture.
+          # The canary's test-plan owner is the still-open production
+          # Requirement; closed historical probe Issues are evidence only.
+          # Only this exact main merge commit triggers a Draft-only repair.
+          # Persistent rollout remains controlled by the repository variable.
+          NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED: >-
+            ${{ (vars.NESSION_CONVERGENCE_AGENT_REPAIR_ENABLED == 'true' ||
+                 (github.event_name == 'push' &&
+                  github.actor == 'BestNathan' &&
+                  contains(github.event.head_commit.message, '[conflict-repair-canary-4140]'))) &&
+                'true' || 'false' }}
         run: |
           set -euo pipefail
           node scripts/staging-branch-convergence.mjs reconcile "$RUNNER_TEMP/convergence-plan.json" | tee "$RUNNER_TEMP/convergence-results.json"

@@ -89,25 +89,25 @@ function FileViewerToolbar({
             open. */}
         <span data-testid="file-viewer-path" className="truncate">{path || filename}</span>
         {forceReadOnly && (
-          <span className={cn('inline-flex items-center gap-1 rounded-[var(--nession-radius-control)] bg-muted px-1.5 py-0.5 text-muted-foreground', chromeSansRole('caption'))}>
-            <Lock className="h-2.5 w-2.5" /> Read-only
+          <span className={cn('inline-flex items-center gap-[var(--nession-shell-space-1)] rounded-[var(--nession-radius-control)] bg-muted px-[var(--nession-file-viewer-badge-inset-x)] py-[var(--nession-file-viewer-badge-inset-y)] text-muted-foreground', chromeSansRole('caption'))}>
+            <Lock className="h-[var(--nession-file-viewer-badge-icon-size)] w-[var(--nession-file-viewer-badge-icon-size)]" /> Read-only
           </span>
         )}
-        {isDirty && <span className="w-2 h-2 rounded-full bg-file-modified" title="Unsaved changes" />}
+        {isDirty && <span className="h-[var(--nession-shell-space-2)] w-[var(--nession-shell-space-2)] rounded-full bg-file-modified" title="Unsaved changes" />}
       </div>
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-[var(--nession-shell-space-1)]">
         {isText && !isReadOnly && (
-          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onSave} disabled={!isDirty || saving}>
-            <Save className="h-3 w-3 mr-1" />{saving ? 'Saving...' : 'Save'}
+          <Button variant="ghost" size="sm" className={cn('h-[var(--nession-control-sm)] text-muted-foreground', fileViewerActionClass)} onClick={onSave} disabled={!isDirty || saving}>
+            <Save className="h-[var(--nession-file-viewer-toolbar-icon-size)] w-[var(--nession-file-viewer-toolbar-icon-size)] mr-[var(--nession-shell-space-1)]" />{saving ? 'Saving...' : 'Save'}
           </Button>
         )}
         {showEditToggle && (
-          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground', fileViewerActionClass)} onClick={onEditToggle}>
-            <Edit3 className="h-3 w-3 mr-1" />{isReadOnly ? 'Edit' : 'View'}
+          <Button variant="ghost" size="sm" className={cn('h-[var(--nession-control-sm)] text-muted-foreground', fileViewerActionClass)} onClick={onEditToggle}>
+            <Edit3 className="h-[var(--nession-file-viewer-toolbar-icon-size)] w-[var(--nession-file-viewer-toolbar-icon-size)] mr-[var(--nession-shell-space-1)]" />{isReadOnly ? 'Edit' : 'View'}
           </Button>
         )}
         {onCloseClick ? (
-          <Button variant="ghost" size="sm" className={cn('h-7 text-muted-foreground hover:text-destructive', fileViewerActionClass)} onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
+          <Button variant="ghost" size="sm" className={cn('h-[var(--nession-control-sm)] text-muted-foreground hover:text-destructive', fileViewerActionClass)} onClick={onCloseClick} aria-label="Close file" title="Close file">✕</Button>
         ) : null}
       </div>
     </div>
@@ -133,6 +133,8 @@ interface FileViewerContentProps {
   loadedBytes: number;
   totalBytes: number;
   onRetry: () => void;
+  /** Return to the draft a failed reload kept, without discarding it. */
+  onKeepEditing: () => void;
   onChange: (value: string) => void;
   onSuggestionPreview: () => void;
   onSuggestionDismiss: () => void;
@@ -146,16 +148,16 @@ function FileViewerContent({
   loading, error, viewerType, mediaBlobUrl, mediaMimeType, path, originalContent, content,
   isReadOnly, isDirty, isMarkdown, viewMode, showSuggestion,
   isChunkedLoading, loadedBytes, totalBytes,
-  onRetry, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
+  onRetry, onKeepEditing, onChange, onSuggestionPreview, onSuggestionDismiss, onCancelLoad,
   onViewModeChange, initialLine, initialColumn,
 }: FileViewerContentProps) {
   // Chunked progress view — shown while a large file is being downloaded in chunks.
   const chunkedProgressView = (
-    <div className="flex flex-col items-center justify-center h-full gap-3 p-6">
+    <div className="flex h-full flex-col items-center justify-center gap-[var(--nession-shell-space-3)] p-[var(--nession-shell-space-5)]">
       <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
         Loading… {formatSize(loadedBytes)} / {formatSize(totalBytes)}
       </p>
-      <Progress value={totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0} className="w-64" />
+      <Progress value={totalBytes > 0 ? (loadedBytes / totalBytes) * 100 : 0} className="w-[var(--nession-file-viewer-progress-width)]" />
       <Button variant="outline" size="sm" onClick={onCancelLoad}>Cancel</Button>
     </div>
   );
@@ -165,13 +167,13 @@ function FileViewerContent({
     return (
       <div className="flex-1 min-h-0">
         {loading ? (
-          <div className="flex flex-col p-3 gap-2">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-1/2" />
+          <div className="flex flex-col gap-[var(--nession-shell-space-2)] p-[var(--nession-shell-space-3)]">
+            <Skeleton className="h-[var(--nession-shell-space-4)] w-full" />
+            <Skeleton className="h-[var(--nession-shell-space-4)] w-3/4" />
+            <Skeleton className="h-[var(--nession-shell-space-4)] w-1/2" />
           </div>
         ) : error ? (
-          <div className={cn('flex h-full flex-col items-center justify-center gap-2 p-3', chromeSansRole('secondary'))}>
+          <div className={cn('flex h-full flex-col items-center justify-center gap-[var(--nession-shell-space-2)] p-[var(--nession-shell-space-3)]', chromeSansRole('secondary'))}>
             <p className="text-destructive">{error}</p>
             <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
           </div>
@@ -194,18 +196,18 @@ function FileViewerContent({
   return (
     <div className="flex-1 min-h-0 flex flex-col">
       {showSuggestion && (
-        <div className={cn('flex items-center gap-2 border-b border-border bg-muted px-3 py-1.5 text-muted-foreground', chromeSansRole('metadata'))}>
-          <Info className="h-3.5 w-3.5 shrink-0" />
+        <div className={cn('flex items-center gap-[var(--nession-shell-space-2)] border-b border-border bg-muted px-[var(--nession-shell-space-3)] py-[var(--nession-file-viewer-bar-inset-y)] text-muted-foreground', chromeSansRole('metadata'))}>
+          <Info className="h-[var(--nession-icon-sm)] w-[var(--nession-icon-sm)] shrink-0" />
           <span>This file looks like Markdown</span>
           <button
             onClick={onSuggestionPreview}
-            className={cn('ml-auto rounded-[var(--nession-radius-control)] bg-primary px-2 py-0.5 text-primary-foreground hover:bg-primary/80', chromeSansRole('metadata'))}
+            className={cn('ml-auto rounded-[var(--nession-radius-control)] bg-primary px-[var(--nession-shell-space-2)] py-[var(--nession-file-viewer-action-inset-y)] text-primary-foreground hover:bg-primary/80', chromeSansRole('metadata'))}
           >
             Preview
           </button>
           <button
             onClick={onSuggestionDismiss}
-            className="px-1 py-0.5 text-muted-foreground hover:text-foreground"
+            className="px-[var(--nession-shell-space-1)] py-[var(--nession-file-viewer-action-inset-y)] text-muted-foreground hover:text-foreground"
             aria-label="Dismiss"
           >
             ✕
@@ -214,15 +216,22 @@ function FileViewerContent({
       )}
       <div className="flex-1 min-h-0">
         {isChunkedLoading ? chunkedProgressView : loading ? (
-          <div className="flex flex-col p-3 gap-2">
-            <Skeleton className="h-4 w-full" />
-            <Skeleton className="h-4 w-3/4" />
-            <Skeleton className="h-4 w-1/2" />
+          <div className="flex flex-col gap-[var(--nession-shell-space-2)] p-[var(--nession-shell-space-3)]">
+            <Skeleton className="h-[var(--nession-shell-space-4)] w-full" />
+            <Skeleton className="h-[var(--nession-shell-space-4)] w-3/4" />
+            <Skeleton className="h-[var(--nession-shell-space-4)] w-1/2" />
           </div>
         ) : error ? (
-          <div className={cn('flex h-full flex-col items-center justify-center gap-2 p-3', chromeSansRole('secondary'))}>
+          <div className={cn('flex h-full flex-col items-center justify-center gap-[var(--nession-shell-space-2)] p-[var(--nession-shell-space-3)]', chromeSansRole('secondary'))}>
             <p className="text-destructive">{error}</p>
-            <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
+            <div className="flex items-center gap-[var(--nession-shell-space-2)]">
+              <Button variant="outline" size="sm" onClick={onRetry}>Retry</Button>
+              {/* A failed reload keeps the user's draft in state; the error
+                  belongs to the read, so the draft must stay reachable (#3743). */}
+              {isDirty ? (
+                <Button variant="outline" size="sm" onClick={onKeepEditing}>Keep editing</Button>
+              ) : null}
+            </div>
           </div>
         ) : (
           <FileContentViewer
@@ -250,7 +259,7 @@ function FileViewerContent({
         <p
           data-workspace-fixed-role="context"
           data-testid="file-viewer-dirty-preview"
-          className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-3 py-1.5 text-warning-foreground', chromeSansRole('metadata'))}
+          className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-[var(--nession-shell-space-3)] py-[var(--nession-file-viewer-bar-inset-y)] text-warning-foreground', chromeSansRole('metadata'))}
         >
           Preview shows the saved version. Save to update preview.
         </p>
@@ -385,13 +394,14 @@ export function FileViewer({
     isChunkedLoading,
     forceReadOnly,
     setShowUnsavedDialog,
-    loadFile,
+    reloadFile,
     handleEditToggle,
     handleSetViewMode,
     handleContentChange,
     handleSave,
     handleSaveOverwrite,
     handleReloadAfterConflict,
+    handleKeepEditing,
     handleCloseClick,
     handleConfirmClose,
     handleSuggestionPreview,
@@ -435,7 +445,8 @@ export function FileViewer({
         isChunkedLoading={isChunkedLoading}
         loadedBytes={loadedBytes}
         totalBytes={totalBytes}
-        onRetry={loadFile}
+        onRetry={reloadFile}
+        onKeepEditing={handleKeepEditing}
         onChange={handleContentChange}
         onSuggestionPreview={handleSuggestionPreview}
         onSuggestionDismiss={handleSuggestionDismiss}

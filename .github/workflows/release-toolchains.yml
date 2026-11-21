@@ -1,0 +1,98 @@
+name: Release / Toolchains
+# #4160: trusted default-branch dispatch. Never execute orphan recipes with Registry credentials.
+on:
+  workflow_dispatch:
+    inputs:
+      tool:
+        description: 'Tool directory in toolchains orphan branch'
+        type: string
+        required: true
+      version:
+        description: 'Exact version directory'
+        type: string
+        required: true
+      platform:
+        description: 'Platform filter or all'
+        type: choice
+        options: [all, linux]
+        default: all
+      arch:
+        description: 'Architecture filter or all'
+        type: choice
+        options: [all, amd64, arm64]
+        default: all
+  workflow_run:
+    workflows: ['Toolchains / Catalog Change']
+    types: [completed]
+    branches: [toolchains]
+permissions:
+  contents: read
+jobs:
+  plan:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_branch == 'toolchains' &&
+        github.event.workflow_run.name == 'Toolchains / Catalog Change' &&
+        github.event.workflow_run.head_repository.full_name == 'BestNathan/nession'))
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.catalog.outputs.matrix }}
+      count: ${{ steps.catalog.outputs.count }}
+      source_sha: ${{ steps.catalog.outputs.source_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || 'toolchains' }}
+          path: toolchain-catalog
+          fetch-depth: 2 # source HEAD and first parent; merge commits included
+          persist-credentials: false
+      - id: catalog
+        name: Resolve pinned orphan source and catalog candidates
+        env:
+          EVENT: ${{ github.event_name }}
+          TOOL: ${{ inputs.tool }}
+          VERSION: ${{ inputs.version }}
+          EXPECTED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          source_sha="$(git -C toolchain-catalog rev-parse HEAD)"
+          if [ "$EVENT" = workflow_run ]; then
+            test "$source_sha" = "$EXPECTED_SHA"
+            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" changed "$source_sha")"
+          else
+            matrix="$(node scripts/toolchains/catalog-plan.mjs discover "$PWD/toolchain-catalog" one "$TOOL" "$VERSION")"
+          fi
+          count="$(node -e 'console.log(JSON.parse(process.argv[1]).include.length)' "$matrix")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$source_sha" >> "$GITHUB_OUTPUT"
+          echo "Selected $count catalog versions at $source_sha"
+  release:
+    needs: plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    uses: ./.github/workflows/release-toolchain-one.yml
+    with:
+      tool: ${{ matrix.tool }}
+      version: ${{ matrix.version }}
+      source_sha: ${{ needs.plan.outputs.source_sha }}
+      platform: ${{ github.event_name == 'workflow_dispatch' && inputs.platform || 'all' }}
+      arch: ${{ github.event_name == 'workflow_dispatch' && inputs.arch || 'all' }}
+    permissions:
+      contents: read
+      actions: read
+      packages: write

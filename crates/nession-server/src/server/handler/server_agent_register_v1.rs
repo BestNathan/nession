@@ -17,9 +17,11 @@ impl ConnectionHandler {
         // registration consumes other payload fields below.
         let mcp_tool_manifest = payload.mcp_tool_manifest.clone();
 
-        // Empty server auth_token means no-auth mode: accept any agent
-        let auth_ok = self.config.server_auth_token.is_empty()
-            || payload.auth_token.as_str() == self.config.server_auth_token;
+        // A disabled verifier means no-auth mode: accept any agent. A
+        // configured token goes through the same constant-time verifier as
+        // every other consumer of the Server Token (#4066 SC-03).
+        let auth_ok = !self.config.server_auth.is_enabled()
+            || self.config.server_auth.verify(payload.auth_token.as_str());
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);

@@ -93,13 +93,34 @@ export function qwenCommittedReviewIntent({storeRoot,issue,publisherRunId}){
       if(file.name!==valid.worker_run_id+'-'+valid.worker_run_attempt+
           '-'+valid.action_id+'.json')
         fail('Repair Reviewer Intent path differs from signed Worker');
-      if(priorWriter!==null&&
-          (!['review','repair'].includes(state?.phase)||
+      if(priorWriter!==null){
+        // A first Repair consumes A, but a second Repair consumes B.
+        // The immutable initial Publisher remains the ONLY original branch
+        // and main owner; the most recent prior Publisher (not initial A)
+        // owns source_sha. Never equate these two distinct identities.
+        const first=qwenCommittedPublisherIntent({storeRoot,issue,
+          publisherRunId:valid.original_publisher_run_id});
+        const published=state?.transitions.filter(t=>t.kind==='publisher'&&
+          t.outcome==='published')??[];
+        const latest=published.at(-1),previous=published.at(-2);
+        if(!['review','repair'].includes(state?.phase)||
            state.target_sha===valid.source_sha||
-           !state.transitions.some(t=>t.kind==='publisher'&&
-             t.run_id===valid.original_publisher_run_id&&
-             t.outcome==='published'&&t.target_sha===valid.source_sha)))
-        fail('cross-Run Repair Reviewer lacks original trusted PR-A publisher');
+           first.branch!=='agent/'+issue+'/qwen-'+first.action_id.slice(0,16)||
+           'refs/heads/'+first.branch!==valid.branch||
+           first.target_main_sha!==valid.original_main_sha||
+           published.length!==valid.checkpoint_version||
+           published[0]?.run_id!==valid.original_publisher_run_id||
+           previous?.target_sha!==valid.source_sha||
+           latest?.run_id!==publisherRunId||
+           latest?.target_sha!==state.target_sha||
+           latest?.write_ahead_publisher_run_id!==priorWriter||
+           new Set(published.map(t=>t.run_id)).size!==published.length||
+           new Set(published.map(t=>t.target_sha)).size!==published.length||
+           published.some(t=>t.attempt!==1||!SHA.test(t.target_sha??''))||
+           state.transitions.indexOf(previous)>=
+             state.transitions.indexOf(latest))
+          fail('cross-Run Repair Reviewer lacks ordered original and previous trusted Publishers');
+      }
       candidates.push({repair:true,record:valid,
         branch:valid.branch.replace(/^refs\/heads\//,''),
         recovered:priorWriter!==null,

@@ -6,6 +6,7 @@ import { SOURCE_V2 as QWEN_PREFLIGHT_FAILURE_V2,
 import {SOURCE as QWEN_CLI_FAILURE} from './qwen-cli-failure.mjs';
 import {SOURCE as QWEN_REPAIR_TURNS_FAILURE} from './qwen-repair-turns-failure.mjs';
 import {SOURCE as QWEN_TOOL_FAILURE} from './qwen-tool-policy-failure.mjs';
+import {SOURCE as QWEN_TRACKED_SOURCE_FAILURE} from './qwen-tracked-source-failure.mjs';
 
 const SHA = /^[0-9a-f]{40}$/;
 const ROLE_TASK = { developer: ['implement','repair'], reviewer: ['review'], acceptor: ['accept'] };
@@ -59,8 +60,45 @@ export const REVIEWER_PREMODEL_FAILURE_3784=Object.freeze({
   failure_code:'qwen_reviewer_base_file_premodel_failure',
   state_version:12,
 });
+// #4097: the exact third-cycle Reviewer failed before its model stage.
+export const REVIEWER_PREMODEL_FAILURE_3784_C=Object.freeze({
+  issue:3784,
+  action_id:'ad5899ead831233a22dcac8856c7029bfebb47d23bb3eb47f0c9e68afaf2c504',
+  run_id:44500591865,
+  source_sha:'d80e0827ad2d9f2dd548d20fc92b9462681c3094',
+  main_sha:'b0a07c1f5a012b8d4814558c15d9df77cec0f887',
+  publisher_run_id:44497822207,
+  failure_code:'qwen_reviewer_owner_reconciler_premodel_failure',
+  state_version:35,
+});
+// #4192: actual #4065/#4191 Reviewer prepare failed on a valid 161-KiB base.
+// This is a terminal pre-model Run: no model or verdict artifacts were emitted.
+export const REVIEWER_PREMODEL_FAILURE_4065=Object.freeze({
+  issue:4065,
+  action_id:'73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127',
+  run_id:44744956936,
+  source_sha:'f79547b0def78418e109aba82673d7f20edbc341',
+  main_sha:'a1e9ae535f5581cfbfeaee6b0ce35a07aab40b3e',
+  publisher_run_id:44744656206,
+  failure_code:'qwen_reviewer_large_base_premodel_failure',
+  state_version:9,
+});
+export const REVIEWER_TOOL_FAILURE_4065=Object.freeze({
+  issue:4065,
+  action_id:'320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde',
+  run_id:44776788638,
+  source_sha:'8d512ec934770944a208c9e1a797bc155a7a46d2',
+  // The actual GitHub Run 44776788638/1 and BOTH original immutable
+  // admission/claim Artifacts point to this exact main-owned workflow SHA,
+  // not the main commit observed when the Issue was first triaged.
+  main_sha:'cef947a7efdeb65bea3272e7797ade607387fe93',
+  publisher_run_id:44776472241,
+  failure_code:'qwen_reviewer_forbidden_tool_postmodel_failure',
+  state_version:19,
+});
 export const REVIEWER_PREMODEL_FAILURE_SOURCES=Object.freeze([
   REVIEWER_PREMODEL_FAILURE,REVIEWER_PREMODEL_FAILURE_3784,
+  REVIEWER_PREMODEL_FAILURE_3784_C,REVIEWER_PREMODEL_FAILURE_4065,
 ]);
 export const REVIEWER_JSON_FAILURE=Object.freeze({
   issue:3433,
@@ -280,8 +318,12 @@ export function validateDevelopmentState(state) {
             QWEN_CLI_FAILURE.failure_code,
             QWEN_REPAIR_TURNS_FAILURE.failure_code,
             QWEN_TOOL_FAILURE.failure_code,
+            QWEN_TRACKED_SOURCE_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE.failure_code,
             REVIEWER_PREMODEL_FAILURE_3784.failure_code,
+            REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
+            REVIEWER_PREMODEL_FAILURE_4065.failure_code,
+            REVIEWER_TOOL_FAILURE_4065.failure_code,
             REVIEWER_JSON_FAILURE.failure_code,
             REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code)||
           (r.failure_code===QWEN_PREFLIGHT_FAILURE.failure_code&&(
@@ -320,6 +362,38 @@ export function validateDevelopmentState(state) {
             item.task.task!=='review'||
             item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784.source_sha||
             r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_TOOL_FAILURE_4065.failure_code&&(
+            state.issue!==REVIEWER_TOOL_FAILURE_4065.issue||
+            item.id!==REVIEWER_TOOL_FAILURE_4065.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||item.task.sha!==REVIEWER_TOOL_FAILURE_4065.source_sha||
+            r.source_run_id!==REVIEWER_TOOL_FAILURE_4065.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_PREMODEL_FAILURE_4065.failure_code&&(
+            state.issue!==REVIEWER_PREMODEL_FAILURE_4065.issue||
+            item.id!==REVIEWER_PREMODEL_FAILURE_4065.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||
+            item.task.sha!==REVIEWER_PREMODEL_FAILURE_4065.source_sha||
+            r.source_run_id!==REVIEWER_PREMODEL_FAILURE_4065.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===REVIEWER_PREMODEL_FAILURE_3784_C.failure_code&&(
+            state.issue!==REVIEWER_PREMODEL_FAILURE_3784_C.issue||
+            item.id!==REVIEWER_PREMODEL_FAILURE_3784_C.action_id||
+            item.task.role!=='reviewer'||item.task.agent_id!=='review-qwen-01'||
+            item.task.task!=='review'||
+            item.task.sha!==REVIEWER_PREMODEL_FAILURE_3784_C.source_sha||
+            r.source_run_id!==REVIEWER_PREMODEL_FAILURE_3784_C.run_id||
+            r.source_attempt!==1))||
+          (r.failure_code===QWEN_TRACKED_SOURCE_FAILURE.failure_code&&(
+            state.issue!==QWEN_TRACKED_SOURCE_FAILURE.issue||
+            item.id!==QWEN_TRACKED_SOURCE_FAILURE.action_id||
+            item.task.agent_id!=='dev-qwen-01'||
+            item.task.role!=='developer'||
+            item.task.task!=='implement'||
+            item.task.sha!==QWEN_TRACKED_SOURCE_FAILURE.source_sha||
+            r.source_run_id!==QWEN_TRACKED_SOURCE_FAILURE.run_id||
             r.source_attempt!==1))||
           (r.failure_code===QWEN_TOOL_FAILURE.failure_code&&(
             state.issue!==QWEN_TOOL_FAILURE.issue||
@@ -372,6 +446,9 @@ export function validateDevelopmentState(state) {
             !(item.task.role==='reviewer'&&
               [REVIEWER_PREMODEL_FAILURE.failure_code,
                 REVIEWER_PREMODEL_FAILURE_3784.failure_code,
+                REVIEWER_PREMODEL_FAILURE_3784_C.failure_code,
+                REVIEWER_PREMODEL_FAILURE_4065.failure_code,
+                REVIEWER_TOOL_FAILURE_4065.failure_code,
                 REVIEWER_JSON_FAILURE.failure_code,
                 REVIEWER_JSON_FAILURE_3784.failure_code].includes(r.failure_code))))
         reject('invalid authenticated failure receipt');
@@ -942,6 +1019,58 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
   onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
     'source_sha','failure_code'],'Reviewer admission failure proof');
   const old=state.outbox.find(x=>x.id===f.action_id);
+  if(f===REVIEWER_PREMODEL_FAILURE_3784_C){
+    // Historical v35 C remains the only eligible replacement. Verify every
+    // signed A→B→C transition and pre-existing reviewer/developer history
+    // before committing one successor. A drifted PR is rejected separately
+    // by the trusted Controller's exact-ref source verifier.
+    const t=state.transitions, last=t.at(-1);
+    const p=t.filter(x=>x.kind==='publisher'&&x.outcome==='published');
+    const expectedPublished=[
+      [44281178406,'5d7e9118b7e954e760cc680fff7d43b4f9e17612'],
+      [44457994853,'51f82d64ec159397ea501e6cbb99e7039ee141bd'],
+      [44497822207,f.source_sha],
+    ];
+    const history=state.outbox.filter(x=>x.id!==f.action_id);
+    if(state.issue!==3784||state.version!==35||version!==35||
+       state.phase!=='review'||state.target_sha!==f.source_sha||
+       state.repair_attempts!==2||t.length!==5||p.length!==3||
+       p.some((x,i)=>x.run_id!==expectedPublished[i][0]||
+         x.target_sha!==expectedPublished[i][1]||x.attempt!==1)||
+       t[1]?.kind!=='reviewer'||t[1].outcome!=='changes_requested'||
+       t[1].run_id!==44457049411||
+       t[3]?.kind!=='reviewer'||t[3].outcome!=='changes_requested'||
+       t[3].run_id!==44466992692||
+       last!==p[2]||last.write_ahead_publisher_run_id!==44476308903||
+       state.assignments.developer!=='dev-qwen-01'||
+       state.assignments.reviewer!=='review-qwen-01'||
+       state.outbox.length!==6||history.length!==5||
+       history.filter(x=>x.status==='failed').length!==5||
+       proof.verified!==true||proof.issue!==f.issue||
+       proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+       proof.attempt!==1||proof.source_sha!==f.source_sha||
+       proof.failure_code!==f.failure_code||
+       old?.status!=='dispatched'||old.attempts!==1||
+       old.task.type!=='dispatch'||old.task.role!=='reviewer'||
+       old.task.task!=='review'||old.task.agent_id!=='review-qwen-01'||
+       old.task.sha!==f.source_sha||
+       old.receipt?.status!=='verified'||
+       old.receipt?.dispatch_id!==f.action_id||
+       old.receipt?.source_run_id!==f.run_id||
+       state.outbox.some(x=>x.id===reviewerPremodelSuccessorId(
+         f.issue,f.action_id,f.run_id)))
+      reject('unverified or already consumed #3784 C pre-model Reviewer source');
+    const successorId=reviewerPremodelSuccessorId(f.issue,f.action_id,f.run_id);
+    if(state.outbox.length>=MAX_OUTBOX)
+      reject('bounded Reviewer successor Outbox exhausted');
+    const failed={...old,status:'failed',receipt:{
+      status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
+      source_attempt:1,failure_code:f.failure_code}};
+    return validateDevelopmentState({...state,version:version+1,
+      outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),
+        {id:successorId,task:{...old.task},status:'pending',
+          attempts:0,receipt:null}]});
+  }
   if(state.issue!==f.issue||version!==(f.state_version??6)||
      state.version!==version||
      state.phase!=='review'||state.target_sha!==f.source_sha||
@@ -949,7 +1078,16 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
      !state.transitions.some(t=>t.kind==='publisher'&&
        t.run_id===f.publisher_run_id&&t.attempt===1&&
        t.target_sha===f.source_sha&&t.outcome==='published')||
-     (f.issue===3784
+     (f.issue===4065
+       ?(state.outbox.length!==2||state.repair_attempts!==0||
+         !state.outbox.some(x=>
+           x.id===QWEN_TRACKED_SOURCE_FAILURE.action_id&&
+           x.status==='failed'&&x.task.role==='developer'&&
+           x.task.task==='implement'&&
+           x.task.sha===QWEN_TRACKED_SOURCE_FAILURE.source_sha&&
+           x.receipt?.source_run_id===QWEN_TRACKED_SOURCE_FAILURE.run_id&&
+           x.receipt?.failure_code===QWEN_TRACKED_SOURCE_FAILURE.failure_code))
+       :f.issue===3784
        ?(state.outbox.length!==3||
          !state.outbox.some(x=>x.id===QWEN_CLI_FAILURE.action_id&&x.status==='failed')||
          !state.outbox.some(x=>x.id===QWEN_TOOL_FAILURE.action_id&&x.status==='failed'))
@@ -980,6 +1118,70 @@ export function recordAttestedReviewerPremodelFailure(state,version,proof){
   return validateDevelopmentState({...state,version:version+1,
     outbox:[...state.outbox.map(x=>x.id===f.action_id?failed:x),
       successor]});
+}
+
+// #4211: an independently attested policy-denied post-model Reviewer may
+// retire only the exact consumed Action and mint one new signed successor.
+export function reviewerToolSuccessorId(issue,actionId,runId){
+  const f=REVIEWER_TOOL_FAILURE_4065;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized Reviewer tool-policy source');
+  return hash([issue,actionId,runId,'qwen-reviewer-readonly-denial-recovery-v1']);
+}
+export function recordAttestedReviewerToolFailure(state,version,proof){
+  const f=REVIEWER_TOOL_FAILURE_4065;
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','failure_code'],'Reviewer native tool failure proof');
+  const old=state.outbox.find(o=>o.id===f.action_id);
+  const first=state.outbox.find(o=>
+    o.id==='73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127');
+  const developer=state.outbox.find(o=>
+    o.id==='f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44');
+  const expected=[
+    ['publisher',44744656206,'published','f79547b0def78418e109aba82673d7f20edbc341'],
+    ['reviewer',44773349621,'changes_requested','f79547b0def78418e109aba82673d7f20edbc341'],
+    ['publisher',f.publisher_run_id,'published',f.source_sha],
+  ];
+  const transitionsOk=Array.isArray(state.transitions)&&
+    state.transitions.length===expected.length&&
+    expected.every(([kind,run_id,outcome,target_sha],i)=>{
+      const x=state.transitions[i];
+      return x.kind===kind&&x.run_id===run_id&&x.attempt===1&&
+        x.outcome===outcome&&x.target_sha===target_sha;
+    });
+  if(state.issue!==f.issue||state.version!==f.state_version||
+     version!==f.state_version||state.phase!=='review'||
+     state.target_sha!==f.source_sha||state.repair_attempts!==1||
+     state.assignments?.developer!=='dev-qwen-01'||
+     state.assignments?.reviewer!=='review-qwen-01'||
+     !transitionsOk||state.outbox.length!==3||
+     developer?.status!=='failed'||
+     developer.receipt?.failure_code!=='qwen_tracked_source_gate_rejected'||
+     developer.receipt?.source_run_id!==44733719096||
+     first?.status!=='failed'||
+     first.receipt?.failure_code!=='qwen_reviewer_large_base_premodel_failure'||
+     first.receipt?.source_run_id!==44744956936||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='reviewer'||
+     old.task.task!=='review'||old.task.agent_id!=='review-qwen-01'||
+     old.task.sha!==f.source_sha||old.receipt?.status!=='verified'||
+     old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id||
+     proof?.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.failure_code!==f.failure_code)
+    reject('unverified or consumed #4065 Reviewer tool-policy failure');
+  const id=reviewerToolSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(o=>o.id===id))
+    reject('Reviewer tool-policy successor collision');
+  const failed={...old,status:'failed',receipt:{status:'failed',
+    dispatch_id:old.id,source_run_id:f.run_id,source_attempt:1,
+    failure_code:f.failure_code}};
+  const successor={id,task:{...old.task},status:'pending',attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(o=>o.id===f.action_id?failed:o),successor]});
 }
 
 // #3601: one exact *post-model* Reviewer output-format failure has no
@@ -1479,6 +1681,53 @@ export function recordAttestedQwenToolFailure(state,version,proof){
   const nextId=qwenToolSuccessorId(f.issue,f.action_id,f.run_id);
   if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===nextId))
     reject('Qwen readonly-tool successor already scheduled');
+  const failed={...old,status:'failed',receipt:{
+    status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
+    source_attempt:1,failure_code:f.failure_code}};
+  const successor={id:nextId,task:{...old.task},status:'pending',
+    attempts:0,receipt:null};
+  return validateDevelopmentState({...state,version:version+1,
+    outbox:[...state.outbox.map(x=>x.id===old.id?failed:x),successor]});
+}
+
+// #4174: original signed Developer proposal failed the immutable tracked-file
+// gate. Preserve the failed Run and grant only one NEW Qwen Action after
+// separate GitHub Run/Job/Artifact/log verification. The original model's
+// untracked bytes never become an accepted Store Result.
+export function qwenTrackedSourceSuccessorId(issue,actionId,runId){
+  const f=QWEN_TRACKED_SOURCE_FAILURE;
+  if(issue!==f.issue||actionId!==f.action_id||runId!==f.run_id)
+    reject('unrecognized Qwen tracked-source failure source');
+  return hash([issue,actionId,runId,'qwen-tracked-existing-source-recovery-v1']);
+}
+export function recordAttestedQwenTrackedSourceFailure(state,version,proof){
+  validateDevelopmentState(state);
+  onlyKeys(proof,['verified','issue','action_id','run_id','attempt',
+    'source_sha','run_head_sha','failure_code'],
+    'independently attested Qwen tracked-source failure');
+  const f=QWEN_TRACKED_SOURCE_FAILURE;
+  const old=state.outbox.find(x=>x.id===f.action_id);
+  if(state.version!==version||version!==3||
+     state.issue!==f.issue||state.phase!=='ready'||state.target_sha!==null||
+     state.transitions.length!==0||state.outbox.length!==1||
+     state.assignments.developer!=='dev-qwen-01'||
+     state.assignments.reviewer!=='review-qwen-01'||
+     proof.verified!==true||proof.issue!==f.issue||
+     proof.action_id!==f.action_id||proof.run_id!==f.run_id||
+     proof.attempt!==1||proof.source_sha!==f.source_sha||
+     proof.run_head_sha!==f.run_head_sha||
+     proof.failure_code!==f.failure_code||
+     old?.status!=='dispatched'||old.attempts!==1||
+     old.task.type!=='dispatch'||old.task.role!=='developer'||
+     old.task.task!=='implement'||old.task.agent_id!=='dev-qwen-01'||
+     old.task.sha!==f.source_sha||old.task.resume!=null||
+     old.receipt?.status!=='verified'||
+     old.receipt.dispatch_id!==f.action_id||
+     old.receipt.source_run_id!==f.run_id)
+    reject('Qwen tracked-source failure lacks original signed Store/Run lineage');
+  const nextId=qwenTrackedSourceSuccessorId(f.issue,f.action_id,f.run_id);
+  if(state.outbox.length>=MAX_OUTBOX||state.outbox.some(x=>x.id===nextId))
+    reject('Qwen tracked-source failure already has a successor');
   const failed={...old,status:'failed',receipt:{
     status:'failed',dispatch_id:old.id,source_run_id:f.run_id,
     source_attempt:1,failure_code:f.failure_code}};

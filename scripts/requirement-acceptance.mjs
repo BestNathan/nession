@@ -572,8 +572,18 @@ export function completedIssueAcceptanceDecision(issue) {
 
 async function runIssueCloseGuard() {
   const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8'));
-  const issue = event.issue;
-  if (!issue) throw new Error('issues event context is required');
+  const hinted = event.issue;
+  if (!hinted) throw new Error('issues event context is required');
+  // Native GitHub closing keywords may bypass our deterministic lifecycle
+  // writer. Always evaluate the LIVE Issue, not a stale event body.
+  const [owner,name] = process.env.GITHUB_REPOSITORY.split('/');
+  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const issue = await githubRequest(`/repos/${owner}/${name}/issues/${hinted.number}`,
+    {token});
+  if(issue?.state !== 'closed'){
+    console.log('Issue was already reopened; stale close-guard event ignored');
+    return;
+  }
   const decision = completedIssueAcceptanceDecision(issue);
   if (decision.kind === 'ignore') {
     console.log(`Issue #${issue.number} has no bug or requirement label; nothing to guard.`);
@@ -583,14 +593,25 @@ async function runIssueCloseGuard() {
     console.log(`Issue #${issue.number} closed as not_planned; acceptance is not required.`);
     return;
   }
+  // A syntactically valid Acceptance Report is NOT sufficient for a
+  // native GitHub close. Reuse canonical lifecycle/Quality owner, including
+  // exact PR source HEAD, Run/Attempt/Job/Step and merged relation.
+  let nativeSource = null;
   if (decision.kind === 'accepted') {
-    console.log(`Issue #${issue.number}: ${decision.result.criteriaCount} criteria accepted; closure stands.`);
-    return;
+    const {assessNativeCompletedIssueSource} = await import('./issue-lifecycle-reconcile.mjs');
+    nativeSource = await assessNativeCompletedIssueSource(
+      process.env.GITHUB_REPOSITORY,issue.number,token);
+    if (nativeSource.qualified) {
+      console.log(`Issue #${issue.number}: acceptance and exact-source Quality verified; closure stands.`);
+      return;
+    }
   }
-  const { result, mergeReadiness, deferredOnly } = decision;
-
-  const [owner, name] = process.env.GITHUB_REPOSITORY.split('/');
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
+  const { result, mergeReadiness, deferredOnly } = decision.kind === 'accepted'
+    ? {result:{...decision.result,errors:[
+        'native GitHub completion lacks qualified source: '+nativeSource.reason]},
+      mergeReadiness:{...decision.result,deferredPostMergeCount:0},
+      deferredOnly:false}
+    : decision;
   const diagnostic = formatErrors(issue.number, result.errors);
   await githubRequest(`/repos/${owner}/${name}/issues/${issue.number}`, {
     token,
@@ -603,7 +624,7 @@ async function runIssueCloseGuard() {
     body: {
       body: deferredOnly
         ? `<!-- requirement-acceptance-guard -->\n## Post-merge acceptance pending\n\nThis requirement was reopened intentionally: the release was merge-ready, but ${mergeReadiness.deferredPostMergeCount} Success Criterion/Criteria are explicitly staged as **post-merge** and still Pending. Merge/release is not considered a failed acceptance; the requirement remains open until those criteria can run and are accepted.\n\n${diagnostic}\n\nRun the post-merge verification described in each pending row, record concrete evidence, check the accepted criteria, then close the requirement.`
-        : `<!-- requirement-acceptance-guard -->\n## Requirement acceptance guard\n\nThis requirement was reopened because completed requirements must pass every Success Criterion before closure.\n\n${diagnostic}\n\nUpdate the Acceptance Report with concrete evidence, check the accepted criteria, then close it again. Use **Close as not planned** only when the requirement is intentionally cancelled rather than completed.`,
+        : `<!-- requirement-acceptance-guard -->\n## Requirement acceptance guard\n\nThis requirement was reopened because completed requirements must pass every Success Criterion AND independently qualified exact-source Quality and merged implementation provenance before closure.\n\n${diagnostic}\n\nUpdate the Acceptance Report with concrete evidence, check the accepted criteria, then close it again. Use **Close as not planned** only when the requirement is intentionally cancelled rather than completed.`,
     },
   });
   console.log(

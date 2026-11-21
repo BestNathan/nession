@@ -1030,6 +1030,10 @@ pub struct AgentServer {
     handshake_policy: P2pHandshakePolicy,
     /// The MCP endpoint (`#565`) mounted on this listener, when enabled.
     mcp: Option<Arc<McpService>>,
+    /// The opt-in read-only OCI Registry capability (`#4090`) mounted on this
+    /// listener when `[registry] enabled = true`. `None` exposes no `/v2/`
+    /// endpoint and advertises nothing of the private local CAS.
+    registry: Option<Arc<crate::registry::AgentReadOnlyRegistry>>,
     /// The post-create preparation hook composed by `runtime.rs` (`#4073`).
     /// `None` for a directly constructed server (tests), which must not write
     /// external capability state.
@@ -1239,6 +1243,8 @@ struct P2pHttpState {
     auth: Arc<P2pAuth>,
     /// The optional MCP endpoint mounted on the same listener (`#565`).
     mcp: Option<Arc<McpService>>,
+    /// The opt-in read-only OCI Registry capability (`#4090`), when enabled.
+    registry: Option<Arc<crate::registry::AgentReadOnlyRegistry>>,
     /// The pre-authentication deadline for this connection (#2653).
     deadline: Duration,
     /// The listener's budget for upgraded-but-unauthenticated sockets
@@ -1348,18 +1354,23 @@ impl Drop for ClosedOnDrop {
 /// carry any path.
 fn p2p_router(state: P2pHttpState) -> Router {
     let mcp_path = state.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    // The opt-in read-only `/v2/` Registry router (#4090), when enabled. It is
+    // stateless once built and merged below so its requests share the same
+    // admission-slot backstop as the P2P upgrade and MCP routes.
+    let registry_router = state.registry.as_ref().map(|registry| registry.router());
     let slot = state.slot.clone();
     let mut router = Router::new();
     if let Some(path) = mcp_path.as_deref() {
         router = router.route(path, any(mcp_http));
     }
-    router
-        .fallback(p2p_upgrade_or_not_found)
-        .layer(axum::middleware::from_fn_with_state(
-            slot,
-            ingress::release_after_response,
-        ))
-        .with_state(state)
+    let mut router = router.fallback(p2p_upgrade_or_not_found).with_state(state);
+    if let Some(registry_router) = registry_router {
+        router = router.merge(registry_router);
+    }
+    router.layer(axum::middleware::from_fn_with_state(
+        slot,
+        ingress::release_after_response,
+    ))
 }
 
 /// The P2P upgrade route, for any path the MCP endpoint did not claim.
@@ -3602,6 +3613,7 @@ impl AgentServer {
             auth: context.auth,
             handshake_policy: context.handshake_policy,
             mcp: None,
+            registry: None,
             session_created: None,
         })
     }
@@ -3652,6 +3664,20 @@ impl AgentServer {
             self.session_created.clone(),
         )?;
         Ok(())
+    }
+
+    /// Mount the opt-in read-only OCI Registry capability (`#4090`).
+    ///
+    /// Called by `runtime.rs` only when `[registry] enabled = true` and a
+    /// verified cache is present. The handle's reachability projection starts
+    /// empty; the Image preparation path registers authorized tags against it.
+    pub fn mount_registry(&mut self, registry: Arc<crate::registry::AgentReadOnlyRegistry>) {
+        self.registry = Some(registry);
+    }
+
+    /// The mounted read-only Registry handle, when enabled (`#4090`).
+    pub fn registry(&self) -> Option<Arc<crate::registry::AgentReadOnlyRegistry>> {
+        self.registry.clone()
     }
 
     /// The composed MCP catalog this Agent serves, when MCP is enabled
@@ -3732,6 +3758,7 @@ impl AgentServer {
         let tls_acceptor = self.tls_acceptor;
         let auth = Arc::clone(&self.auth);
         let mcp = self.mcp.clone();
+        let registry = self.registry.clone();
         let handshake_policy = self.handshake_policy;
         // Used by the accept loop itself: the log line and the shutdown path's
         // backend close.
@@ -3790,6 +3817,7 @@ impl AgentServer {
                                     ingress: ingress_context.clone(),
                                     auth: Arc::clone(&auth),
                                     mcp: mcp.clone(),
+                                    registry: registry.clone(),
                                     deadline: handshake_policy.timeout,
                                     pending_auth: Arc::clone(&pending_auth_slots),
                                     auth_timeout: handshake_policy.auth_timeout,

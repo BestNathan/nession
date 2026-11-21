@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import assert from 'node:assert/strict';
+import {readFileSync} from 'node:fs';
 import {REVIEWER_PREMODEL_FAILURE as F,
   REVIEWER_PREMODEL_FAILURE_3784 as F3784,
+  REVIEWER_PREMODEL_FAILURE_3784_C as FC,
+  REVIEWER_PREMODEL_FAILURE_4065 as F4065,
   hasOnlyRetiredReviewerForQwenRepair,validateDevelopmentState,
   recordAttestedReviewerPremodelFailure,reviewerPremodelSuccessorId}
   from './outbox.mjs';
@@ -222,3 +225,191 @@ assert.throws(()=>recordAttestedReviewerPremodelFailure(v13,13,proof3784),
 assert.throws(()=>reviewerPremodelSuccessorId(3784,F.action_id,F3784.run_id),
   /agent outbox/);
 console.log('✓ #3784 Reviewer pre-model: authentic v12→v13, exact SHA, unique successor, forgery and replay denial');
+
+
+// #4097: immutable real Store v35, third-cycle Owner-published PR-C. No
+// authored Reviewer verdict or synthetic reset may stand in for this source.
+const v35=JSON.parse(readFileSync(new URL(
+  './fixtures/issue-3784-reviewer-v35.json',import.meta.url),'utf8'));
+validateDevelopmentState(v35);
+const runC={...run,id:FC.run_id,head_sha:FC.main_sha};
+const jobsC={...jobs,jobs:jobs.jobs.map(j=>({...j,run_id:FC.run_id}))};
+const proofC=attestReviewerPremodelFailure(runC,jobsC,FC);
+assert.equal(proofC.action_id,FC.action_id);
+assert.equal(v35.version,FC.state_version);
+assert.equal(v35.target_sha,FC.source_sha);
+const v36=recordAttestedReviewerPremodelFailure(v35,35,proofC);
+const successorC=reviewerPremodelSuccessorId(3784,FC.action_id,FC.run_id);
+assert.equal(v36.version,36);
+assert.equal(v36.target_sha,v35.target_sha);
+assert.deepEqual(v36.transitions,v35.transitions);
+assert.equal(v36.outbox.length,v35.outbox.length+1);
+assert.deepEqual(v36.outbox.slice(0,-2),v35.outbox.slice(0,-1));
+assert.equal(v36.outbox.at(-2).status,'failed');
+assert.deepEqual(v36.outbox.at(-2).receipt,{
+  status:'failed',dispatch_id:FC.action_id,
+  source_run_id:FC.run_id,source_attempt:1,failure_code:FC.failure_code});
+assert.equal(v36.outbox.at(-1).id,successorC);
+assert.equal(v36.outbox.at(-1).status,'pending');
+assert.deepEqual(v36.outbox.at(-1).task,v35.outbox.at(-1).task);
+for(const delta of [
+  {run_attempt:2},{event:'issue_comment'},
+  {actor:{login:'BestNathan'}},{head_sha:'f'.repeat(40)},
+  {conclusion:'success'},{name:'Agent / Development'},
+])assert.throws(()=>attestReviewerPremodelFailure(
+  {...runC,...delta},jobsC,FC),/trusted Reviewer pre-model failure/);
+for(const mutated of [
+  {...jobsC,total_count:4},
+  {...jobsC,jobs:jobsC.jobs.map((j,i)=>i===0?{...j,conclusion:'success'}:j)},
+  {...jobsC,jobs:jobsC.jobs.map((j,i)=>i===1?{...j,conclusion:'failure'}:j)},
+  {...jobsC,jobs:jobsC.jobs.map((j,i)=>i===0?{...j,steps:[
+    {name:'Run model',status:'completed',conclusion:'failure'}]}:j)},
+])assert.throws(()=>attestReviewerPremodelFailure(runC,mutated,FC),
+  /trusted Reviewer pre-model failure/);
+for(const delta of [
+  {version:36},{phase:'repair'},
+  {target_sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'},
+  {repair_attempts:1},
+  {transitions:v35.transitions.slice(0,4)},
+  {transitions:v35.transitions.map((t,i)=>i===4
+    ?{...t,write_ahead_publisher_run_id:44495243036}:t)},
+  {outbox:v35.outbox.map((x,i)=>i===5
+    ?{...x,receipt:{...x.receipt,source_run_id:1}}:x)},
+  {outbox:v35.outbox.map((x,i)=>i===0
+    ?{...x,status:'pending',receipt:null}:x)},
+])assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  {...v35,...delta},35,proofC),/agent outbox/);
+for(const delta of [
+  {verified:false},{run_id:FC.run_id+1},
+  {source_sha:'b66bdec2a59a5480cf11a3d6e61c05d33d951044'},
+  {failure_code:'forged'},
+])assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  v35,35,{...proofC,...delta}),/agent outbox/);
+assert.throws(()=>recordAttestedReviewerPremodelFailure(v36,36,proofC),
+  /agent outbox/);
+console.log('✓ #4097 real Store v35→v36 exactly one pre-model Reviewer successor, replay/forgery denial');
+
+ 
+// #4192: real #4065 Store v9 / PR #4191 before the 128KiB base-file
+// pre-model failure. Preserve failed Developer provenance and source SHA.
+const v9_4065={
+  "schema_version": 1,
+  "issue": 4065,
+  "version": 9,
+  "phase": "review",
+  "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+  "repair_attempts": 0,
+  "transitions": [
+    {
+      "key": "cddaa9c1fc8ca0d85221c2bd3e3449b5dd8dc28ee9991daf541cee627fad3464",
+      "kind": "publisher",
+      "run_id": 44744656206,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "published"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "8b7777f48a577d01961fd7d9e75311f75d6d57a1",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+        "source_run_id": 44733719096,
+        "source_attempt": 1,
+        "failure_code": "qwen_tracked_source_gate_rejected"
+      }
+    },
+    {
+      "id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "f79547b0def78418e109aba82673d7f20edbc341",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+        "source_run_id": 44744956936
+      }
+    }
+  ]
+};
+validateDevelopmentState(v9_4065);
+const run4065={...run,id:F4065.run_id,head_sha:F4065.main_sha};
+const jobs4065={...jobs,jobs:jobs.jobs.map(x=>({...x,run_id:F4065.run_id}))};
+const noArtifacts={total_count:0,artifacts:[]};
+const proof4065=attestReviewerPremodelFailure(
+  run4065,jobs4065,F4065,noArtifacts);
+assert.equal(proof4065.issue,4065);
+assert.equal(proof4065.source_sha,v9_4065.target_sha);
+const v10_4065=recordAttestedReviewerPremodelFailure(v9_4065,9,proof4065);
+const successor4065=reviewerPremodelSuccessorId(
+  F4065.issue,F4065.action_id,F4065.run_id);
+assert.equal(v10_4065.version,10);
+assert.equal(v10_4065.phase,'review');
+assert.deepEqual(v10_4065.transitions,v9_4065.transitions);
+assert.deepEqual(v10_4065.outbox.slice(0,1),v9_4065.outbox.slice(0,1));
+assert.equal(v10_4065.outbox[1].status,'failed');
+assert.equal(v10_4065.outbox[1].receipt.failure_code,F4065.failure_code);
+assert.equal(v10_4065.outbox[2].id,successor4065);
+assert.equal(v10_4065.outbox[2].status,'pending');
+assert.deepEqual(v10_4065.outbox[2].task,v9_4065.outbox[1].task);
+for(const bad of [
+  {run_attempt:2},{head_sha:'f'.repeat(40)},
+  {actor:{login:'BestNathan'}},{conclusion:'success'},
+])assert.throws(()=>attestReviewerPremodelFailure(
+  {...run4065,...bad},jobs4065,F4065,noArtifacts),
+  /trusted Reviewer pre-model failure/);
+for(const bad of [
+  null,{total_count:1,artifacts:[{id:1}]},
+  {total_count:0,artifacts:[{id:1}]},
+  {total_count:1,artifacts:[]},
+])assert.throws(()=>attestReviewerPremodelFailure(
+  run4065,jobs4065,F4065,bad),
+  /unexpected Artifact/);
+for(const delta of [
+  {total_count:4},
+  {jobs:jobs4065.jobs.map((x,j)=>j===1?{...x,conclusion:'success'}:x)},
+  {jobs:jobs4065.jobs.map((x,j)=>j===0?{...x,steps:[
+    {name:'Run model',status:'completed',conclusion:'failure'}]}:x)},
+])assert.throws(()=>attestReviewerPremodelFailure(
+  run4065,{...jobs4065,...delta},F4065,noArtifacts),
+  /trusted Reviewer pre-model failure/);
+for(const bad of [
+  {version:10},{phase:'repair'}, {target_sha:'f'.repeat(40)},
+  {outbox:[...v9_4065.outbox,v9_4065.outbox.at(-1)]},
+  {outbox:v9_4065.outbox.map((x,j)=>j===0?{...x,status:'pending',
+    receipt:null}:x)},
+  {outbox:v9_4065.outbox.map((x,j)=>j===1?{...x,receipt:{
+    ...x.receipt,source_run_id:1}}:x)},
+])assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  {...v9_4065,...bad},9,proof4065),/agent outbox/);
+for(const delta of [
+  {run_id:F4065.run_id+1},{verified:false},
+  {source_sha:'f'.repeat(40)},{failure_code:'forged'},
+])assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  v9_4065,9,{...proof4065,...delta}),/agent outbox/);
+assert.throws(()=>recordAttestedReviewerPremodelFailure(
+  v10_4065,10,proof4065),/agent outbox/);
+assert.throws(()=>reviewerPremodelSuccessorId(4065,
+  F3784.action_id,F4065.run_id),/agent outbox/);
+console.log('✓ #4065 real Store v9→v10: zero artifacts, exact failed Run, one successor and replay denial');
