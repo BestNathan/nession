@@ -31,3 +31,7 @@ fi
 version_output="$("$rootfs/bin/just" --version | sed -n '1p')"
 [[ "$version_output" == "just 1.59.0"* ]] || { echo "incorrect just version: $version_output" >&2; exit 1; }
 
+# Exercise just's taskfile parser and native shell invocation without the network.
+probe_dir="$(mktemp -d)"; trap 'rm -rf -- "$probe_dir"' EXIT
+printf 'check:\n    @printf nession-just\n' > "$probe_dir/justfile"
+[[ "$("$rootfs/bin/just" --justfile "$probe_dir/justfile" check)" == nession-just ]] || { echo 'just task execution failed' >&2; exit 1; }
