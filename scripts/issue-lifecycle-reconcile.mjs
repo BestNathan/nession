@@ -38,7 +38,7 @@ export function resolveAcceptComment(event, repo, actor) {
 }
 
 export function decideIssueClosure(issue, associatedPrs, options = {}) {
-  if (!issue || issue.pull_request || issue.state !== 'open' || !isAcceptanceIssue(issue)) {
+  if (!issue || issue.pull_request || String(issue.state).toLowerCase() !== 'open' || !isAcceptanceIssue(issue)) {
     return { action: 'skip', reason: 'not an open Bug/Requirement' };
   }
   if (issue.state_reason === 'not_planned') return { action: 'skip', reason: 'not planned' };
