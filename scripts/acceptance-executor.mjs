@@ -1067,6 +1067,20 @@ function applyCommand(issueNumber, resultFile) {
   }
   let replacementReadback = null;
   if (normalized.pr_source_replacement) {
+    // An authenticated, already projected same Run is a no-op. Replayed
+    // delivery never consumes the historical one-shot replacement again.
+    const prior = normalized.pr_source_replacement;
+    const marker = 'independent-replacement:'+prior.previous_pr+':'+
+      prior.replacement_pr+':'+normalized.run_id;
+    const report = parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+    if (issue.body.includes('<!-- '+marker+' -->') &&
+        normalized.selected_criteria?.every(id =>
+          new RegExp('^run '+normalized.run_id+'; ref '+normalized.target_ref+
+            '; source agent(?:-[a-z0-9-]+)?;','i').test(
+              String(report.rows.get(id)?.evidence || '')))) {
+      console.log('replacement Acceptance '+normalized.run_id+' already projected; no-op');
+      return;
+    }
     replacementReadback = liveIndependentReplacement(issue,normalized.target_ref,
       normalized.pr_source_replacement.comment_id);
     if (!replacementReadback ||
@@ -1083,7 +1097,7 @@ function applyCommand(issueNumber, resultFile) {
     const conflicts = [...new Set(priorAcceptedPrRefs(issue.body, normalized))];
     // One explicit source lineage proof may authorize multiple SCs anchored
     // to the same prior head; multiple predecessors are ambiguous and rejected.
-    const proof = conflicts.length === 1
+    const proof = !replacementReadback && conflicts.length === 1
       ? livePrSourceSupersession(issueNumber, conflicts[0], normalized.target_ref)
       : null;
     updated = applyAcceptanceResultToBody(issue.body, normalized,
