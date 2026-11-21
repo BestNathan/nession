@@ -31,3 +31,5 @@ fi
 version_output="$("$rootfs/bin/sccache" --version | sed -n '1p')"
 [[ "$version_output" == "sccache 0.19.0"* ]] || { echo "incorrect sccache version: $version_output" >&2; exit 1; }
 
+# Keep this probe offline and side-effect free: do not start the cache daemon.
+"$rootfs/bin/sccache" --help >/dev/null || { echo 'sccache help smoke failed' >&2; exit 1; }
