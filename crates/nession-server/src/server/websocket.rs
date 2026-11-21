@@ -2000,6 +2000,7 @@ where
         &mut agent_write,
         session_name,
         INPUT_THROTTLE,
+        AGENT_LEG_PROBE_INTERVAL,
         Some(dispatch),
     );
 
@@ -2626,6 +2627,7 @@ async fn forward_client_to_agent<RS, AS, E>(
     agent_write: &mut AS,
     session_name: &str,
     input_throttle: std::time::Duration,
+    agent_probe_interval: std::time::Duration,
     mut dispatch: Option<&mut RelayDispatch<'_>>,
 ) -> ClientToAgent
 where
@@ -2648,9 +2650,11 @@ where
     // ping on the Agent leg. The Agent's tungstenite auto-answers with a pong,
     // which surfaces as a frame on `agent_read` and is what keeps the idle
     // deadline in `agent_to_client` from declaring the leg half-open. The
-    // interval is [`AGENT_LEG_PROBE_INTERVAL`]; any client frame resets it so
-    // we never send a probe right after forwarding real traffic.
-    let mut probe_ticker = tokio::time::interval(AGENT_LEG_PROBE_INTERVAL);
+    // interval is [`AGENT_LEG_PROBE_INTERVAL`] in production; tests may pass
+    // a shorter interval to exercise the probe behavior without wall-clock
+    // delays. Any client frame resets it so we never send a probe right after
+    // forwarding real traffic.
+    let mut probe_ticker = tokio::time::interval(agent_probe_interval);
     probe_ticker.tick().await; // consume the immediate first tick
 
     'forward: loop {
@@ -3217,11 +3221,14 @@ mod tests {
         let mut client_read = futures_util::stream::iter(items);
         let mut agent_write = RecordingSink::default();
 
+        // Use a very long probe interval so existing tests (which complete
+        // quickly) never see a probe ping fire.
         let outcome = forward_client_to_agent(
             &mut client_read,
             &mut agent_write,
             "sess",
             WIDE_WINDOW,
+            std::time::Duration::from_secs(3600),
             None,
         )
         .await;
@@ -3833,6 +3840,115 @@ mod tests {
              the idle deadline fires",
             AGENT_LEG_PROBE_INTERVAL,
             AGENT_LEG_IDLE_TIMEOUT
+        );
+    }
+
+    /// SC-01 behavioral regression: a probe ping is sent during an idle period
+    /// (#4065).
+    ///
+    /// When the client sends no frames for longer than the probe interval, the
+    /// relay must write a WebSocket ping on the Agent leg. This test uses a
+    /// short probe interval (100ms) to verify the behavior without wall-clock
+    /// delays. A pending stream (never yields) simulates an idle client; after
+    /// 150ms, at least one probe ping should have been sent.
+    #[tokio::test]
+    async fn idle_client_triggers_probe_ping_within_interval() {
+        let mut client_read = futures_util::stream::pending::<Result<WsFrame, std::io::Error>>();
+        let mut agent_write = RecordingSink::default();
+        let probe_interval = std::time::Duration::from_millis(100);
+
+        let relay = async {
+            forward_client_to_agent(
+                &mut client_read,
+                &mut agent_write,
+                "sess",
+                WIDE_WINDOW,
+                probe_interval,
+                None,
+            )
+            .await
+        };
+
+        // Race the relay against a 150ms timeout. The relay should send at
+        // least one probe ping before the timeout fires.
+        let result = tokio::time::timeout(std::time::Duration::from_millis(150), relay).await;
+
+        // The relay should not have completed (the stream is pending).
+        assert!(
+            result.is_err(),
+            "the relay should still be running (pending stream), but it completed: {:?}",
+            result
+        );
+
+        // At least one probe ping should have been sent.
+        let ping_count = agent_write
+            .sent
+            .iter()
+            .filter(|f| matches!(f, WsFrame::Ping(_)))
+            .count();
+        assert!(
+            ping_count >= 1,
+            "expected at least one probe ping after 150ms with a 100ms interval, got {ping_count}; \
+             sent frames: {:?}",
+            agent_write.sent
+        );
+    }
+
+    /// SC-03 behavioral regression: client activity suppresses probe pings
+    /// (#4065).
+    ///
+    /// When the client sends frames at intervals shorter than the probe
+    /// interval, the relay should forward them without sending probe pings.
+    /// This test uses a 200ms probe interval and sends frames every 50ms; no
+    /// probe pings should be sent because the ticker is reset on each frame.
+    #[tokio::test]
+    async fn active_client_suppresses_probe_pings() {
+        // Create a stream that yields 3 frames at 50ms intervals.
+        let frames = vec![
+            frame("client.terminal.input", "frame-1"),
+            frame("client.terminal.input", "frame-2"),
+            frame("client.terminal.input", "frame-3"),
+        ];
+        let items: Vec<Result<WsFrame, std::io::Error>> = frames.into_iter().map(Ok).collect();
+        let mut client_read = futures_util::stream::iter(items);
+        let mut agent_write = RecordingSink::default();
+        let probe_interval = std::time::Duration::from_millis(200);
+
+        let outcome = forward_client_to_agent(
+            &mut client_read,
+            &mut agent_write,
+            "sess",
+            WIDE_WINDOW,
+            probe_interval,
+            None,
+        )
+        .await;
+
+        assert_eq!(
+            outcome,
+            ClientToAgent::Ended,
+            "the relay should complete normally"
+        );
+
+        // All three frames should be forwarded.
+        assert_eq!(
+            agent_write.sent.len(),
+            3,
+            "expected exactly 3 forwarded frames, got: {:?}",
+            agent_write.sent
+        );
+
+        // No probe pings should have been sent (the ticker was reset on each frame).
+        let ping_count = agent_write
+            .sent
+            .iter()
+            .filter(|f| matches!(f, WsFrame::Ping(_)))
+            .count();
+        assert_eq!(
+            ping_count, 0,
+            "expected no probe pings when client is active, got {ping_count}; \
+             sent frames: {:?}",
+            agent_write.sent
         );
     }
 }
