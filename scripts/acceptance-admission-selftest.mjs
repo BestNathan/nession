@@ -50,6 +50,12 @@ for(const fragment of [
   '      needs.prepare-pr.outputs.admission ==',
 ])assert.throws(()=>verify(source+'\n'+fragment),/obsolete PR dependency\/gate/);
 assert.match(background,/\n  acceptance-close-guard:/);
+const closeGuardJob = background.split('\n  acceptance-close-guard:')[1]
+  .split(/\n  [a-z][a-z0-9-]*:/)[0];
+for (const permission of ['pull-requests: read', 'issues: write', 'contents: read']) {
+  assert.match(closeGuardJob, new RegExp('^      ' + permission + '$', 'm'),
+    'the close guard must declare ' + permission + ' to discover and read implementation PRs');
+}
 assert.match(background,/\n  merged-agent-acceptance:/);
 assert.match(background,/\n  post-merge-provider-evidence-acceptance:/);
 assert.ok(acceptor.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117'))"),

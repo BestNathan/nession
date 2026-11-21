@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
+import type { FileSaveOutcome } from '@/capabilities/files';
 import {
   useFilesWebSwitchGuard,
   type FilesWebSelection,
@@ -56,7 +57,7 @@ describe('useFilesWebSwitchGuard (#3171)', () => {
 
   it('switches only after a successful guarded save; failure keeps A and the error', async () => {
     const { result } = renderHook(() => useFilesWebSwitchGuard('source-1'));
-    let outcome: 'saved' | 'conflict' | 'failed' = 'saved';
+    let outcome: FileSaveOutcome = 'saved';
     act(() => result.current.requestFile(file('a.txt')));
     act(() => result.current.onDirtyChange(true));
     act(() => result.current.onSaveHandlerChange(async () => outcome));
@@ -123,6 +124,96 @@ describe('useFilesWebSwitchGuard (#3171)', () => {
     expect(result.current.selected?.ref.path).toBe('a.txt');
     expect(result.current.switchState.pending?.ref.path).toBe('b.txt');
     expect(result.current.switchState.error).toContain('did not complete');
+  });
+
+  it('keeps A and the open decision when the guarded save persisted an older snapshot (#3959)', async () => {
+    const { result } = renderHook(() => useFilesWebSwitchGuard('source-1'));
+    let outcome: FileSaveOutcome = 'saved-dirty';
+    act(() => result.current.requestFile(file('a.txt')));
+    act(() => result.current.onDirtyChange(true));
+    act(() => result.current.onSaveHandlerChange(async () => outcome));
+    act(() => result.current.requestFile(file('b.txt')));
+
+    await act(async () => {
+      await result.current.switchState.save();
+    });
+
+    // The write succeeded, but the editor holds newer content than the
+    // committed snapshot: A stays mounted and the one decision stays open.
+    expect(result.current.selected?.ref.path).toBe('a.txt');
+    expect(result.current.switchState.pending?.ref.path).toBe('b.txt');
+    expect(result.current.switchState.error).toBeNull();
+    expect(result.current.switchState.guardSaving).toBe(false);
+
+    // Rapid alternate targets cannot replace or bypass the open decision.
+    act(() => result.current.requestFile(file('c.txt')));
+    expect(result.current.switchState.pending?.ref.path).toBe('b.txt');
+
+    // A later save that commits the current draft may proceed to B.
+    outcome = 'saved';
+    await act(async () => {
+      await result.current.switchState.save();
+    });
+    expect(result.current.selected?.ref.path).toBe('b.txt');
+    expect(result.current.switchState.pending).toBeNull();
+  });
+
+  it('lets explicit Discard proceed after a partial guarded save (#3959)', async () => {
+    const { result } = renderHook(() => useFilesWebSwitchGuard('source-1'));
+    act(() => result.current.requestFile(file('a.txt')));
+    act(() => result.current.onDirtyChange(true));
+    act(() => result.current.onSaveHandlerChange(async () => 'saved-dirty'));
+    act(() => result.current.requestFile(file('b.txt')));
+    await act(async () => {
+      await result.current.switchState.save();
+    });
+    expect(result.current.selected?.ref.path).toBe('a.txt');
+
+    act(() => result.current.switchState.discard());
+    expect(result.current.selected?.ref.path).toBe('b.txt');
+    expect(result.current.switchState.pending).toBeNull();
+  });
+
+  it('keeps A and the draft when a save after a partial guarded save fails (#3959)', async () => {
+    const { result } = renderHook(() => useFilesWebSwitchGuard('source-1'));
+    let outcome: FileSaveOutcome = 'saved-dirty';
+    act(() => result.current.requestFile(file('a.txt')));
+    act(() => result.current.onDirtyChange(true));
+    act(() => result.current.onSaveHandlerChange(async () => outcome));
+    act(() => result.current.requestFile(file('b.txt')));
+    await act(async () => {
+      await result.current.switchState.save();
+    });
+
+    outcome = 'failed';
+    await act(async () => {
+      await result.current.switchState.save();
+    });
+    expect(result.current.selected?.ref.path).toBe('a.txt');
+    expect(result.current.switchState.pending?.ref.path).toBe('b.txt');
+    expect(result.current.switchState.error).toContain('could not be saved');
+  });
+
+  it('does not re-decide a partial guarded save from the viewer saving report (#3959)', async () => {
+    const { result } = renderHook(() => useFilesWebSwitchGuard('source-1'));
+    act(() => result.current.requestFile(file('a.txt')));
+    act(() => result.current.onDirtyChange(true));
+    act(() => result.current.onSaveHandlerChange(async () => {
+      // The viewer reports its own save lifecycle around the deferred write,
+      // including the newer edit typed while that write was pending.
+      act(() => result.current.onSavingChange(true));
+      act(() => result.current.onDirtyChange(true));
+      await Promise.resolve();
+      act(() => result.current.onSavingChange(false));
+      return 'saved-dirty';
+    }));
+    act(() => result.current.requestFile(file('b.txt')));
+    await act(async () => {
+      await result.current.switchState.save();
+    });
+    expect(result.current.selected?.ref.path).toBe('a.txt');
+    expect(result.current.switchState.pending?.ref.path).toBe('b.txt');
+    expect(result.current.switchState.error).toBeNull();
   });
 
   it('resets selection and the pending decision when the source changes', () => {

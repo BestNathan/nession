@@ -25,6 +25,9 @@ declare global {
       writeExternal: (path: string, content: string) => void;
       delayNextWrite: (milliseconds: number) => void;
       failNextWrite: (message?: string) => void;
+      holdNextWrite: () => void;
+      releaseHeldWrite: () => void;
+      failHeldWrite: (message?: string) => void;
     };
   }
 }
@@ -41,6 +44,13 @@ async function clickTree(page: Page, name: string): Promise<void> {
     .getByText(name, { exact: true })
     .first()
     .click();
+}
+
+/** What the fixture filesystem actually holds for the file under edit. */
+async function persisted(page: Page): Promise<string | null> {
+  return page.evaluate(
+    () => window.fixtureFiles?.contentsOf('web/src/index.css') ?? null,
+  );
 }
 
 test('Web: creation follows the captured selection/right-click target, create-only', async ({ page }) => {
@@ -248,6 +258,107 @@ test('Web: edits typed during a pending save stay dirty after it completes (#332
   await clickTree(page, 'App.tsx');
   await clickTree(page, 'index.css');
   await expect(page.locator('.cm-content')).toContainText('B1C1');
+});
+
+// #3959 SC-01: a deterministically deferred guarded save keeps the one
+// decision open until the write settles. The modal decision dialog makes the
+// editor inert while it is open (verified finding on the Issue), so the
+// reachable browser proof is the deferred-save lifecycle itself; the
+// newer-draft retention contract is proven by the composed integration test
+// (web/src/app/experiences/web/__tests__/integration/FilesWebSwitchGuard.test.tsx).
+test('Web: a deferred guarded save keeps the one decision until the write settles (#3959)', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'fixtures');
+  await clickTree(page, 'index.css');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('D3959-B');
+
+  // The guarded write of B is held unresolved; the decision must stay open.
+  await page.evaluate(() => window.fixtureFiles?.holdNextWrite());
+  await clickTree(page, 'App.tsx');
+  const dialog = page.getByTestId('files-web-unsaved-dialog');
+  await expect(dialog).toBeVisible();
+  await page.getByTestId('files-web-switch-save').click();
+  await expect(page.getByTestId('files-web-switch-save')).toHaveText('Saving…');
+  await expect(page.getByTestId('files-web-switch-cancel')).toBeDisabled();
+  await expect(page.getByTestId('files-web-switch-discard')).toBeDisabled();
+
+  // Dismissal cannot close the decision while the guarded save is in flight.
+  await page.keyboard.press('Escape');
+  await expect(dialog).toBeVisible();
+
+  // A rapid alternate target cannot replace the pending decision or unmount A.
+  const otherFile = page
+    .locator('[data-testid="file-workspace"] [role="tree"]')
+    .getByText('events.jsonl', { exact: true })
+    .first();
+  await otherFile.evaluate((element) => (element as HTMLElement).click());
+  await expect(dialog).toContainText('App.tsx');
+  await expect(page.getByText('web/src/index.css', { exact: true })).toBeVisible();
+  await expect(page.locator('.cm-content')).toContainText('D3959-B');
+
+  // Nothing is persisted until the held write settles.
+  expect(await persisted(page)).not.toContain('D3959-B');
+
+  // The held write of B succeeds with no newer edits: the switch proceeds.
+  await page.evaluate(() => window.fixtureFiles?.releaseHeldWrite());
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('web/src/App.tsx', { exact: true })).toBeVisible();
+  expect(await persisted(page)).toContain('D3959-B');
+
+  // Re-opening A reads exactly the committed snapshot, clean.
+  await clickTree(page, 'index.css');
+  await expect(page.locator('.cm-content')).toContainText('D3959-B');
+  await expect(page.getByTitle('Unsaved changes')).toHaveCount(0);
+});
+
+// #3959 SC-02 (reachable clauses): a failed or conflicting deferred guarded
+// save keeps A and its draft; the conflict hands off to the viewer's own
+// decision without opening B.
+test('Web: a failed or conflicting deferred guarded save keeps A and its draft (#3959)', async ({ page }) => {
+  await openWebFiles(page);
+  await clickTree(page, 'web');
+  await clickTree(page, 'src');
+  await clickTree(page, 'index.css');
+  await page.getByRole('button', { name: 'Edit' }).click();
+  await page.locator('.cm-content').click();
+  await page.keyboard.press('End');
+  await page.keyboard.type('D3959-F');
+
+  // A held guarded write that fails keeps A, the draft and the open decision,
+  // and the settled failure keeps its own message (no late-report overwrite).
+  await page.evaluate(() => window.fixtureFiles?.holdNextWrite());
+  await clickTree(page, 'App.tsx');
+  const dialog = page.getByTestId('files-web-unsaved-dialog');
+  await expect(dialog).toBeVisible();
+  await page.getByTestId('files-web-switch-save').click();
+  await expect(page.getByTestId('files-web-switch-save')).toHaveText('Saving…');
+  await page.evaluate(() => window.fixtureFiles?.failHeldWrite('fixture write unavailable'));
+  await expect(page.getByTestId('files-web-switch-error')).toContainText('could not be saved');
+  await expect(page.getByText('web/src/index.css', { exact: true })).toBeVisible();
+  await expect(page.locator('.cm-content')).toContainText('D3959-F');
+  await expect(dialog).toBeVisible();
+  expect(await persisted(page)).not.toContain('D3959-F');
+
+  // A competing writer during the next held guarded write surfaces the
+  // viewer's conflict decision; the switch decision hands off without B.
+  await page.evaluate(() => window.fixtureFiles?.holdNextWrite());
+  await page.getByTestId('files-web-switch-save').click();
+  await expect(page.getByTestId('files-web-switch-save')).toHaveText('Saving…');
+  await page.evaluate(() => {
+    window.fixtureFiles?.writeExternal('web/src/index.css', 'external change');
+  });
+  await page.evaluate(() => window.fixtureFiles?.releaseHeldWrite());
+  await expect(page.getByTestId('file-conflict-dialog')).toBeVisible();
+  await expect(dialog).toBeHidden();
+  await expect(page.getByText('web/src/index.css', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: 'Reload file' }).click();
+  await expect(page.getByTestId('file-conflict-dialog')).toBeHidden();
+  await expect(page.locator('.cm-content')).toContainText('external change');
 });
 
 test('App: create in the pushed folder, read-first viewer, unsaved guard', async ({ page }) => {
