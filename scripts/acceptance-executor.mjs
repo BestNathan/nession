@@ -10,7 +10,9 @@ import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import {enforceLiveFullFailure,requiresLiveFullFailureProof} from './acceptance-main-full-failure-bug-evidence.mjs';
-import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
+import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging,
+  independentReplacementContract, independentReplacementSourceEvidence,
+} from './issue-lifecycle-reconcile.mjs';
 import { verifiedIssueAuditCriterion, verifiedIssueAudit3843Criterion, SIDEBAR_AUDIT_REPAIR_PROOF, ISSUE_AUDIT_3843_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
   collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
@@ -497,6 +499,37 @@ export function recoverAdvancedGreenPrCriteria(issue, context, {
   };
 }
 
+// #4253. Only a fresh, unedited Owner Issue comment can opt into a distinct,
+// already merged replacement. GitHub REST independently proves both PRs,
+// exact replacement HEAD association, two-parent merge and branch ancestry.
+// This never reclassifies the old accepted PR receipt as replacement evidence.
+export function liveIndependentReplacement(issue, targetRef, commentId,
+  read = path => JSON.parse(execFileSync('gh',['api',path],
+    {encoding:'utf8',env:process.env,maxBuffer:4*1024*1024}))) {
+  const repo = String(process.env.GITHUB_REPOSITORY || '');
+  const n = Number(commentId);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) ||
+      !Number.isSafeInteger(n) || n <= 0 ||
+      !SHA.test(String(targetRef || ''))) return null;
+  const base = 'repos/' + repo;
+  const comment = read(base+'/issues/comments/'+n);
+  const match = /^\/accept replace ([1-9][0-9]{0,8}) ([1-9][0-9]{0,8})$/
+    .exec(String(comment?.body || ''));
+  if (!match) return null;
+  const previous = read(base+'/pulls/'+match[1]);
+  const replacement = read(base+'/pulls/'+match[2]);
+  const proof = independentReplacementContract(issue,previous,replacement,repo,comment);
+  if (!proof || proof.target_ref !== targetRef) return null;
+  const associated = read(base+'/commits/'+targetRef+'/pulls?per_page=100');
+  const branch = read(base+'/branches/'+replacement.base.ref);
+  const merge = read(base+'/commits/'+replacement.merge_commit_sha);
+  if (!SHA.test(String(branch?.commit?.sha || ''))) return null;
+  const compare = read(base+'/compare/'+replacement.merge_commit_sha+
+    '...'+branch.commit.sha);
+  return independentReplacementSourceEvidence(proof,replacement,
+    associated,branch,merge,compare,repo) ? proof : null;
+}
+
 function priorAcceptedPrRefs(body, normalized) {
   if (stageOf(normalized.stage) !== 'pr') return [];
   const contract = parseContract(body);
@@ -704,7 +737,14 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   for (const [id] of resultMap) {
     if (stage === 'pr') {
       const oldRef = acceptedPrSourceRef(contract.criteria.get(id), contract.rows.get(id));
+      const replacement = options.prSourceReplacement;
+      const independentlyReplaced = replacement &&
+        JSON.stringify(replacement) === JSON.stringify(normalized.pr_source_replacement) &&
+        replacement.issue === normalized.issue &&
+        replacement.target_ref === normalized.target_ref &&
+        replacement.criteria.includes(id) && replacement.old_sources.includes(oldRef);
       if (oldRef && oldRef !== normalized.target_ref &&
+          !independentlyReplaced &&
           !verifiedPrSourceSupersession(normalized.issue, oldRef,
             normalized.target_ref, options.prSourceSupersession)) {
         throw new Error(id + ' accepted PR source ' + oldRef +
@@ -745,6 +785,33 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
         updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
           '<!-- '+marker+' -->\n'+rows.join('\n');
       }
+    }
+  }
+  // Keep the original SC evidence verbatim in immutable historical context.
+  // The NEW active Pass is evaluated at an independent, verified source.
+  const separate = options.prSourceReplacement;
+  if (stage === 'pr' && separate &&
+      JSON.stringify(separate) === JSON.stringify(normalized.pr_source_replacement) &&
+      separate.issue === normalized.issue &&
+      separate.target_ref === normalized.target_ref) {
+    const historical = separate.criteria.filter(id => resultMap.has(id) &&
+      separate.old_sources.includes(acceptedPrSourceRef(
+        contract.criteria.get(id),contract.rows.get(id))));
+    if (historical.length !== separate.criteria.length)
+      throw new Error('independent replacement must cover every original accepted PR criterion');
+    const heading = '## Acceptance Source Recovery History';
+    const marker = 'independent-replacement:'+separate.previous_pr+':'+
+      separate.replacement_pr+':'+runId;
+    if (!updated.includes(marker)) {
+      const rows = historical.map(id => {
+        const row=contract.rows.get(id);
+        return '- '+id+' historical '+row.result+' at '+
+          acceptedPrSourceRef(contract.criteria.get(id),row)+
+          ' (evidence: '+escapeCell(row.evidence)+'); independently re-attested by merged PR #'+
+          separate.replacement_pr+' at '+normalized.target_ref+' in run '+runId;
+      });
+      updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
+        '<!-- '+marker+' -->\n'+rows.join('\n');
     }
   }
   // A green accepted source that the same PR advanced past keeps its prior
@@ -839,6 +906,14 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   const ciEvidence = evidencePath
     ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
     : null;
+  const replacementCommentId = process.env.ACCEPTANCE_REPLACEMENT_COMMENT_ID || '';
+  if (replacementCommentId && (stage !== 'pr' ||
+      process.env.DETERMINISTIC_RESULT_JSON))
+    throw new Error('independent PR replacement requires real PR-stage Agent evidence');
+  const replacement = replacementCommentId
+    ? liveIndependentReplacement(issue,targetRef,replacementCommentId) : null;
+  if (replacementCommentId && !replacement)
+    throw new Error('independent PR replacement lacks current Owner/PR/merge proof');
   let context = buildAcceptanceContext(issue, stage, {
     targetRef,
     deployment,
@@ -846,13 +921,19 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
     method: 'agent',
     // Only a LIVE PR Agent evaluation skips previously source-accepted SCs.
     // Historical Case/CI readback must still see those original criteria.
-    skipAcceptedPrCriteria: true,
+    skipAcceptedPrCriteria: !replacement,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
   context = recoverFailedQualityPrCriteria(issue, context);
   // A green accepted source whose SAME PR advanced is re-evaluated at the
   // merged head; the updater re-attests the lineage before projecting (#4204).
   context = recoverAdvancedGreenPrCriteria(issue, context);
+  if (replacement) {
+    const selected = context.criteria.map(x=>x.criterion).sort();
+    if (JSON.stringify(selected) !== JSON.stringify(replacement.criteria))
+      throw new Error('independent replacement must re-evaluate every historical PR SC');
+    context.pr_source_replacement = replacement;
+  }
   // Every PR-stage model Pass must be independently Quality-qualified even
   // when the SC text does not explicitly name test execution (#4146).
   if (context.stage === 'pr' && context.criteria.length > 0) {
@@ -887,6 +968,10 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
       };
     }
   }
+  if (replacement && (context.pr_required_quality?.status !== 'pass' ||
+      !validPrRequiredQualityReceipt(context.pr_required_quality.receipt,
+        replacement.target_ref)))
+    throw new Error('independent replacement lacks exact-head required Quality');
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
 }
@@ -910,6 +995,8 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
       ? {pr_quality_recovery: context.pr_quality_recovery} : {}),
     ...(context.pr_head_advance
       ? {pr_head_advance: context.pr_head_advance} : {}),
+    ...(context.pr_source_replacement
+      ? {pr_source_replacement: context.pr_source_replacement} : {}),
   };
   fs.writeFileSync(outFile, JSON.stringify(frozen, null, 2) + '\n');
 }
@@ -978,6 +1065,16 @@ function applyCommand(issueNumber, resultFile) {
       throw new Error('PR head advance lacks current authenticated same-PR green Quality lineage');
     }
   }
+  let replacementReadback = null;
+  if (normalized.pr_source_replacement) {
+    replacementReadback = liveIndependentReplacement(issue,normalized.target_ref,
+      normalized.pr_source_replacement.comment_id);
+    if (!replacementReadback ||
+        JSON.stringify(replacementReadback) !==
+          JSON.stringify(normalized.pr_source_replacement) ||
+        normalized.source === 'deterministic-caller')
+      throw new Error('replacement Acceptance result lacks independent current Owner/PR/source attestation');
+  }
   // Concurrent Acceptance runs may finish out of order. Never project older
   // evidence over a newer run, but treat the superseded updater as a no-op.
   // All other contract, provenance and result validation errors still fail.
@@ -990,7 +1087,8 @@ function applyCommand(issueNumber, resultFile) {
       ? livePrSourceSupersession(issueNumber, conflicts[0], normalized.target_ref)
       : null;
     updated = applyAcceptanceResultToBody(issue.body, normalized,
-      { prSourceSupersession: proof });
+      { prSourceSupersession: proof,
+        prSourceReplacement: replacementReadback });
   } catch (error) {
     if (isSupersededRunError(error)) {
       console.log('superseded acceptance run ' + normalized.run_id + ' for requirement #' + issueNumber + '; newer Issue evidence preserved');
