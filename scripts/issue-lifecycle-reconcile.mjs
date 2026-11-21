@@ -232,7 +232,19 @@ export function independentReplacementContract(issue, previousPr, replacementPr,
     SHA.test(String(pr.head?.sha || '')) &&
     SHA.test(String(pr.merge_commit_sha || '')) &&
     explicitlyImplementsIssue(pr,issue.number,owner,name);
-  if (!eligible(previousPr) || !eligible(replacementPr) ||
+  // The retired PR may carry only a historical Refs declaration (#3919).
+  // It is never an authority for a new Pass; the independently checked new PR
+  // still must explicitly IMPLEMENT the Issue under the canonical rule.
+  const oldHistoricallyLinked = eligible(previousPr) ||
+    (Boolean(previousPr?.merged_at) &&
+      previousPr.head?.repo?.full_name === repository &&
+      previousPr.base?.repo?.full_name === repository &&
+      ['main','staging'].includes(previousPr.base?.ref) &&
+      SHA.test(String(previousPr.head?.sha || '')) &&
+      SHA.test(String(previousPr.merge_commit_sha || '')) &&
+      new RegExp('(?:^|\\n)Refs\\s+#'+issue.number+'(?:\\.|\\s|$)','i')
+        .test(String(previousPr.body || '')));
+  if (!oldHistoricallyLinked || !eligible(replacementPr) ||
       String(previousPr.merged_at) >= String(replacementPr.merged_at))
     return null;
   const criteria = parseSuccessCriteria(extractSection(issue.body,'Success Criteria'));
@@ -1306,6 +1318,79 @@ async function selfTest() {
     issue: { number: 19, state: 'open' }, sender: { login: 'owner' },
     comment: { body: '/accept', id: 7, user: { login: 'owner', type: 'User' },
       author_association: 'OWNER' } };
+  // #4253: the original PR's forced-away SC SHA is NEVER asserted to be
+  // an ancestor of an independent replacement. Fresh merged source and
+  // two-parent branch proof authorize new evaluation; all negatives reject.
+  const replacementComment={id:501,body:'/accept replace 31 32',
+    user:{login:'BestNathan',type:'User'},author_association:'OWNER',
+    issue_url:'https://api.github.com/repos/BestNathan/nession/issues/19',
+    created_at:'2026-11-19T08:00:00Z',
+    updated_at:'2026-11-19T08:00:00Z'};
+  const repRepo={full_name:'BestNathan/nession'};
+  const previousPr={number:31,body:'Refs #19.',title:'historical proposal',
+    merged_at:'2026-11-17T00:00:00Z',
+    head:{sha:'c'.repeat(40),repo:repRepo},
+    base:{ref:'main',repo:repRepo},merge_commit_sha:'d'.repeat(40)};
+  const replacementPr={number:32,body:'Refs #19.',title:'fix: replacement (#19)',
+    merged_at:'2026-11-18T00:00:00Z',
+    head:{sha:'e'.repeat(40),repo:repRepo},
+    base:{ref:'staging',repo:repRepo},merge_commit_sha:'f'.repeat(40)};
+  const replacementIssue={...issue,body:body.replaceAll(sha,'b'.repeat(40))};
+  const expectedReplacement=independentReplacementContract(replacementIssue,
+    previousPr,replacementPr,'BestNathan/nession',replacementComment);
+  assert.deepEqual(expectedReplacement?.criteria,['SC-01']);
+  assert.deepEqual(expectedReplacement?.old_sources,['b'.repeat(40)]);
+  for (const invalid of [
+    {comment:{...replacementComment,updated_at:'2026-11-19T08:01:00Z'}},
+    {comment:{...replacementComment,author_association:'COLLABORATOR'}},
+    {comment:{...replacementComment,body:'/accept replace 31 33'}},
+    {comment:{...replacementComment,issue_url:'https://api.github.com/repos/X/y/issues/19'}},
+    {old:{...previousPr,merged_at:null}},
+    {old:{...previousPr,head:{...previousPr.head,repo:{full_name:'foreign/r'}}}},
+    {new:{...replacementPr,body:'Refs #19.',title:'unrelated'}},
+    {new:{...replacementPr,merged_at:null}},
+    {new:{...replacementPr,head:{...replacementPr.head,repo:{full_name:'foreign/r'}}}},
+  ]) assert.equal(independentReplacementContract(replacementIssue,
+    invalid.old??previousPr,invalid.new??replacementPr,'BestNathan/nession',
+    invalid.comment??replacementComment),null,'foreign or edited source not accepted');
+  const replacementAssoc=[{number:32,merged_at:replacementPr.merged_at,
+    head:replacementPr.head,base:replacementPr.base}];
+  const replacementBranch={commit:{sha:'a'.repeat(40)}};
+  const replacementMerge={sha:replacementPr.merge_commit_sha,
+    parents:[{sha:'1'.repeat(40)},{sha:'2'.repeat(40)}]};
+  const replacementCompare={status:'ahead',behind_by:0,ahead_by:4,
+    base_commit:{sha:replacementPr.merge_commit_sha},
+    merge_base_commit:{sha:replacementPr.merge_commit_sha}};
+  const sourceValid=(assoc=replacementAssoc,branch=replacementBranch,
+    merge=replacementMerge,compare=replacementCompare)=>
+    independentReplacementSourceEvidence(expectedReplacement,replacementPr,
+      assoc,branch,merge,compare,'BestNathan/nession');
+  assert.equal(sourceValid(),true,'merged replacement has independently verified source');
+  assert.equal(sourceValid([{...replacementAssoc[0],number:33}]),false);
+  assert.equal(sourceValid(replacementAssoc,replacementBranch,replacementMerge,
+    {...replacementCompare,status:'diverged',behind_by:1}),false);
+  assert.equal(sourceValid(replacementAssoc,replacementBranch,
+    {...replacementMerge,parents:[{sha:'1'.repeat(40)}]}),false);
+  const replacementRead=async path=>{
+    if(path.endsWith('/pulls/31'))return previousPr;
+    if(path.endsWith('/pulls/32'))return replacementPr;
+    if(path.endsWith('/issues/comments/501'))return replacementComment;
+    if(path.endsWith('/commits/'+replacementPr.head.sha+'/pulls?per_page=100'))
+      return replacementAssoc;
+    if(path.endsWith('/branches/staging'))return replacementBranch;
+    if(path.endsWith('/commits/'+replacementPr.merge_commit_sha))return replacementMerge;
+    if(path.includes('/compare/'))return replacementCompare;
+    throw Error('unknown replacement test endpoint '+path);
+  };
+  assert.deepEqual(await verifyIndependentReplacement('BestNathan/nession',
+    replacementIssue,31,32,501,'fixture-token',replacementRead),
+    expectedReplacement);
+  await assert.rejects(verifyIndependentReplacement('BestNathan/nession',
+    replacementIssue,31,32,501,'fixture-token',
+    async path=>path.includes('/compare/')?
+      {...replacementCompare,status:'diverged'}:replacementRead(path)),
+    /replacement lacks authenticated/);
+
   assert.equal(resolveAcceptComment(e, 'X/y', 'owner').issueNumber, 19);
   const historicalEvent = {...e,comment:{...e.comment,
     body:'/accept post-merge '+targetMain}};
