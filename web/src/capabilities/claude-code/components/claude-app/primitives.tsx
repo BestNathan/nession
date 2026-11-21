@@ -9,27 +9,29 @@ import {
 } from '@/components/ui/dialog';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import type { AppRoute } from './model';
 
-/** A scroll owner inside the Workspace, spending the capsule's clearance. */
+/**
+ * A bounded scroll owner inside the Workspace (#4222 SC-01).
+ *
+ * `className` is content spacing and is applied inside the scroll viewport, so
+ * a route's `p-2`/`pb-6` can never override the host-measured bottom inset.
+ */
 export function ScrollBody({
   children,
   className,
+  testId,
 }: {
   children: React.ReactNode;
   className?: string;
+  /** Stable endpoint marker for the route coverage contract (#4222 SC-03). */
+  testId?: string;
 }) {
   return (
-    <div
-      className={cn(
-        'min-h-0 flex-1 overflow-y-auto',
-        workspaceBoundedScrollClearanceClass,
-        className,
-      )}
-    >
+    <WorkspaceBoundedScrollport className={className} data-testid={testId}>
       {children}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 

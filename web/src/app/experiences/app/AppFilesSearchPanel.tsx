@@ -5,7 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { FileEntry } from '@/capabilities/files';
 import type { AppFilesSearchStatus } from './useAppFilesSearch';
 import { cn } from '@/shared/lib/utils';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { bodyAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
 import { chromeLabelRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
 
@@ -51,11 +51,9 @@ export function AppFilesSearchPanel({
           list is the internal scroll owner and spends the host's measured
           trailing inset, so the last hit can scroll above the Capsule without
           the panel computing that geometry itself. */}
-      <div
-        className={cn(
-          'min-h-0 flex-1 overflow-y-auto px-[var(--nession-shell-space-3)]',
-          workspaceBoundedScrollClearanceClass,
-        )}
+      <WorkspaceBoundedScrollport
+        className="px-[var(--nession-shell-space-3)]"
+        data-testid="files-search-scroll"
       >
         <p className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', chromeLabelRole())}>
           Files
@@ -114,7 +112,7 @@ export function AppFilesSearchPanel({
             ))}
           </ul>
         ) : null}
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

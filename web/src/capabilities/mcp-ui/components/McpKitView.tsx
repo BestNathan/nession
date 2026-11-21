@@ -3,7 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { WorkspaceDepthControl } from '@/app/workspace/workspaceContext';
 import { DetailEmpty, DetailNote } from '@/components/ui/resource-detail';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { cn } from '@/shared/lib/utils';
 
 import { useMcpKit } from '../hooks/useMcpKit';
@@ -265,13 +265,13 @@ function McpKitWebBody({
       className="flex h-full min-h-0 flex-col"
     >
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto lg:grid lg:grid-cols-[minmax(11rem,15rem)_minmax(11rem,17rem)_minmax(0,1fr)] lg:overflow-hidden">
-        <div className={cn('max-h-[45%] min-h-0 shrink-0 overflow-y-auto border-b border-border lg:max-h-none lg:shrink lg:border-b-0', workspaceBoundedScrollClearanceClass)}>
+        <WorkspaceBoundedScrollport viewportClassName="max-h-[45%] flex-none border-b border-border lg:max-h-none lg:border-b-0">
           <McpServerNavigation kit={kit} provider={provider} state={state} actions={actions} />
-        </div>
-        <div className={cn('max-h-[45%] min-h-0 shrink-0 overflow-y-auto border-b border-border lg:max-h-none lg:shrink lg:border-b-0', workspaceBoundedScrollClearanceClass)}>
+        </WorkspaceBoundedScrollport>
+        <WorkspaceBoundedScrollport viewportClassName="max-h-[45%] flex-none border-b border-border lg:max-h-none lg:border-b-0">
           <McpToolNavigation kit={kit} provider={provider} state={state} actions={actions} />
-        </div>
-        <div className={cn('min-h-0 overflow-y-auto', workspaceBoundedScrollClearanceClass)}>
+        </WorkspaceBoundedScrollport>
+        <WorkspaceBoundedScrollport viewportClassName="min-w-0">
           <McpDetailPane
             kit={kit}
             provider={provider}
@@ -279,7 +279,7 @@ function McpKitWebBody({
             actions={actions}
             experience="web"
           />
-        </div>
+        </WorkspaceBoundedScrollport>
       </div>
       {kit.inventory?.state === 'ready' && kit.inventory.servers.length === 0 ? (
         <p
@@ -309,10 +309,11 @@ function McpKitAppBody({
 }) {
   const level = appLevelOf(state);
   return (
-    <div
+    <WorkspaceBoundedScrollport
       data-testid="mcp-kit"
       data-experience="app"
-      className={cn('flex h-full min-h-0 flex-col overflow-y-auto', workspaceBoundedScrollClearanceClass)}
+      viewportClassName="flex h-full flex-col"
+      className="flex min-h-full flex-col"
     >
       {level === 'list' ? (
         <McpServerNavigation kit={kit} provider={provider} state={state} actions={actions} />
@@ -326,7 +327,7 @@ function McpKitAppBody({
       ) : (
         <McpDetailPane kit={kit} provider={provider} state={state} actions={actions} experience="app" />
       )}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 

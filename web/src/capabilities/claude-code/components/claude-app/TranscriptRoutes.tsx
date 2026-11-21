@@ -79,7 +79,7 @@ export function RecordRoute({
         title={label}
         description={`${formatSize(record.size_bytes)} · every record is readable, recognised or not`}
       />
-      <ScrollBody className="px-4 py-3">
+      <ScrollBody className="px-4 py-3" testId="claude-app-record-scroll">
         <TranscriptRecordDetail parsed={parsed} record={record} />
         <div className="mt-4 border-t pt-3">
           <Button

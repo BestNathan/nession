@@ -125,7 +125,12 @@ export function GitHistoryView({ ctx }: { ctx: WorkspaceContext }) {
           onSelectFile={onSelectFile}
         />
         {selectedFile ? (
-          <div className="min-h-0 flex-1 overflow-y-auto border-t">
+          /* #4222 SC-04: the wrapper is a layout parent, not a second scroll
+             owner. `GitDiffView` already owns a bounded body; leaving
+             `overflow-y-auto` here gave the same pixels two scrollers with
+             different ends. Flex here lets the inner reader be the one the
+             finger reaches. */
+          <div className="flex min-h-0 flex-1 flex-col border-t">
             <GitDiffView response={diffResponse} loading={diffLoading} error={diffError} />
           </div>
         ) : null}

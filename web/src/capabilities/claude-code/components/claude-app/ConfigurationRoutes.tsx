@@ -57,7 +57,11 @@ export function ConfigurationRoute({ data }: { data: ClaudeAppData }) {
         }}
         onRetry={state.handleRetry}
       />
-      <p className={cn('shrink-0 px-4 py-2 text-muted-foreground', chromeSansRole('caption'))}>
+      <p
+        data-workspace-fixed-role="context"
+        data-testid="claude-app-configuration-note"
+        className={cn('shrink-0 px-4 py-2 text-muted-foreground', chromeSansRole('caption'))}
+      >
         Configuration is read-only here. Editing belongs to an explicitly authorized
         operation.
       </p>

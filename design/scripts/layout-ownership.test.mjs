@@ -3,13 +3,16 @@ import test from 'node:test';
 
 import {
   APP_VIEWPORT_OWNER_ROOT,
+  checkScrollCoverageContract,
   KEYBOARD_SCROLL_OWNER_FILE,
   KEYBOARD_SCROLL_OWNER_MARKER,
   LAYOUT_RECIPE_OWNER,
   MASTER_DETAIL_MARKER,
+  parseScrollCoverageSource,
   SCROLL_OWNER_MARKER,
   scanLayoutSource,
   scanRepository,
+  WORKSPACE_SCROLLPORT_OWNER,
 } from './layout-ownership.mjs';
 
 const rules = (violations) => violations.map((violation) => violation.kind).sort();
@@ -99,11 +102,11 @@ test('the App host owns page scrolling and Capsule clearance (#4115)', () => {
     [],
   );
 
-  // Positive: a declared bounded adapter spends the host's scroll value and a
+  // Positive: the declared bounded recipe spends the host's scroll value and a
   // local list/editor remains a legal inner scroll.
   assert.deepEqual(
     scanLayoutSource(
-      "<div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)} />",
+      '<WorkspaceBoundedScrollport viewportClassName="min-h-0 flex-1 overflow-y-auto" />',
       'web/src/capabilities/good/components/Good.tsx',
     ),
     [],
@@ -377,6 +380,141 @@ test('only the App viewport environment reads window.visualViewport', () => {
     ['no-foreign-visual-viewport'],
     'a second visual-viewport reader outside AppLayout is a competing owner',
   );
+});
+
+test('a bounded scrollport cannot couple content spacing with the measured inset (#4222)', () => {
+  const coupled = [
+    'const Bad = () => (',
+    "  <div className={cn('min-h-0 flex-1 overflow-y-auto p-2', workspaceBoundedScrollClearanceClass)} />",
+    ');',
+  ].join('\n');
+  assert.deepEqual(
+    rules(scanLayoutSource(coupled, 'web/src/capabilities/files/components/Pane.tsx')),
+    ['no-coupled-bounded-scrollport'],
+  );
+  assert.deepEqual(
+    scanLayoutSource(coupled, WORKSPACE_SCROLLPORT_OWNER),
+    [],
+    'the recipe owner is the one element that spends the viewport clearance',
+  );
+  const recipe = [
+    'const Good = () => (',
+    "  <WorkspaceBoundedScrollport viewportClassName=\"h-full\" className=\"p-2\" />",
+    ');',
+  ].join('\n');
+  assert.deepEqual(
+    scanLayoutSource(recipe, 'web/src/capabilities/files/components/Pane.tsx'),
+    [],
+    'content spacing inside the recipe is the accepted repair',
+  );
+});
+
+test('a persistent capability footer must be declared (#4222)', () => {
+  const undeclared = '<p className="shrink-0 border-t px-4 py-2">Read-only</p>';
+  assert.deepEqual(
+    rules(scanLayoutSource(undeclared, 'web/src/capabilities/claude-code/components/Surface.tsx')),
+    ['no-unregistered-fixed-workspace-footer'],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<p data-workspace-fixed-role="context" className="shrink-0 border-t px-4 py-2">Read-only</p>',
+      'web/src/capabilities/claude-code/components/Surface.tsx',
+    ),
+    [],
+    'an intentional fixed context declares its role',
+  );
+  assert.deepEqual(
+    scanLayoutSource(undeclared, 'web/src/app/experiences/app/ShellFoot.tsx'),
+    [],
+    'the host composition is not capability content',
+  );
+});
+
+test('scroll coverage rejects a missing route, mode and owner (#4222 SC-03)', () => {
+  const valid = [
+    {
+      capability: 'claude-code',
+      routes: [
+        {
+          route: 'conversation',
+          mode: 'bounded',
+          scrollers: ['conversation-transcript-scroll'],
+          fixed: ['claude-app-read-only-note'],
+          scenario: 'fixture-app/claude-conversation',
+        },
+      ],
+    },
+  ];
+  const expected = { 'claude-code': ['conversation'] };
+  assert.deepEqual(checkScrollCoverageContract(valid, expected), []);
+
+  const missingRoute = [
+    {
+      capability: 'claude-code',
+      routes: [
+        {
+          route: 'conversations',
+          mode: 'bounded',
+          scrollers: ['claude-app-conversations-scroll'],
+          scenario: 'fixture-app/claude-conversations',
+        },
+      ],
+    },
+  ];
+  assert.match(
+    checkScrollCoverageContract(missingRoute, expected).join('\n'),
+    /reachable route lacks coverage: claude-code\/conversation/,
+  );
+
+  const noOwner = structuredClone(valid);
+  noOwner[0].routes[0].scrollers = [];
+  assert.match(
+    checkScrollCoverageContract(noOwner, expected).join('\n'),
+    /bounded route has no scroll owner/,
+  );
+
+  const documentWithInnerOwner = structuredClone(valid);
+  documentWithInnerOwner[0].routes[0].mode = 'document';
+  assert.match(
+    checkScrollCoverageContract(documentWithInnerOwner, expected).join('\n'),
+    /document route names a non-page scroll owner/,
+  );
+
+  const noScenario = structuredClone(valid);
+  noScenario[0].routes[0].scenario = '';
+  assert.match(
+    checkScrollCoverageContract(noScenario, expected).join('\n'),
+    /route has no executable scenario/,
+  );
+
+  const staleRoute = structuredClone(valid);
+  staleRoute[0].routes.push({
+    ...staleRoute[0].routes[0],
+    route: 'removed-depth',
+  });
+  assert.match(
+    checkScrollCoverageContract(staleRoute, expected).join('\n'),
+    /coverage names a route the union no longer reaches: claude-code\/removed-depth/,
+  );
+});
+
+test('scroll coverage parsing keeps one route contract per declared variant', () => {
+  const source = [
+    'export const COVERAGE = [',
+    "  { capability: 'git', routes: [",
+    "    { route: 'changes', mode: 'bounded', scrollers: ['git-diff-body'], scenario: 'fixture-git/changes' },",
+    "    { route: 'history', mode: 'bounded', scrollers: ['git-commit-list', 'git-commit-detail'], scenario: 'fixture-git/history' },",
+    '  ] },',
+    "  { capability: 'session', routes: [",
+    "    { route: 'details', mode: 'document', scrollers: ['app-workspace-scrollport'], scenario: 'fixture-app/session' },",
+    '  ] },',
+    '];',
+  ].join('\n');
+  const entries = parseScrollCoverageSource(source);
+  assert.deepEqual(entries.map((entry) => entry.capability), ['git', 'session']);
+  assert.deepEqual(entries[0].routes.map((route) => route.route), ['changes', 'history']);
+  assert.deepEqual(entries[0].routes[1].scrollers, ['git-commit-list', 'git-commit-detail']);
+  assert.equal(entries[1].routes[0].mode, 'document');
 });
 
 test('the committed tree satisfies layout ownership', () => {

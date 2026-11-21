@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 
 /**
  * The five native/portable policy entries (#3408, superseding #3143's six
@@ -41,6 +41,16 @@ export function SandboxPolicyTabs({
   renderPanel,
 }: SandboxPolicyTabsProps) {
   const vertical = experience === 'web';
+  const policyPanels = SANDBOX_POLICY_TABS.map((tab) => (
+    <TabsContent
+      key={tab.id}
+      value={tab.id}
+      data-testid={`sandbox-tabpanel-${tab.id}`}
+      className="min-w-0 outline-none"
+    >
+      {value === tab.id ? renderPanel(tab.id) : null}
+    </TabsContent>
+  ));
   return (
     <Tabs
       value={value}
@@ -95,25 +105,15 @@ export function SandboxPolicyTabs({
           ))}
         </TabsList>
       </div>
-      <div
-        data-testid="sandbox-tab-content"
-        className={
-          vertical
-            ? cn('min-h-0 min-w-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)
-            : 'min-w-0'
-        }
-      >
-        {SANDBOX_POLICY_TABS.map((tab) => (
-          <TabsContent
-            key={tab.id}
-            value={tab.id}
-            data-testid={`sandbox-tabpanel-${tab.id}`}
-            className="min-w-0 outline-none"
-          >
-            {value === tab.id ? renderPanel(tab.id) : null}
-          </TabsContent>
-        ))}
-      </div>
+      {vertical ? (
+        <WorkspaceBoundedScrollport data-testid="sandbox-tab-content" viewportClassName="min-w-0">
+          {policyPanels}
+        </WorkspaceBoundedScrollport>
+      ) : (
+        <div data-testid="sandbox-tab-content" className="min-w-0">
+          {policyPanels}
+        </div>
+      )}
     </Tabs>
   );
 }

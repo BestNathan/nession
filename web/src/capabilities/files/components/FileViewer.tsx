@@ -247,7 +247,11 @@ function FileViewerContent({
         )}
       </div>
       {isDirty && viewMode === 'preview' ? (
-        <p className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-3 py-1.5 text-warning-foreground', chromeSansRole('metadata'))}>
+        <p
+          data-workspace-fixed-role="context"
+          data-testid="file-viewer-dirty-preview"
+          className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-3 py-1.5 text-warning-foreground', chromeSansRole('metadata'))}
+        >
           Preview shows the saved version. Save to update preview.
         </p>
       ) : null}

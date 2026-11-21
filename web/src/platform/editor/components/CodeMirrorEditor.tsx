@@ -2,8 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { EditorSelection, type Extension } from '@codemirror/state';
 import { EditorView } from '@codemirror/view';
 import CodeMirror from '@uiw/react-codemirror';
-import { cn } from '@/shared/lib/utils';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { EDITOR_METRICS, EDITOR_THEME } from '../model/editorTheme';
 import {
   ensureLangsModule,
@@ -124,17 +123,15 @@ export function CodeMirrorEditor({
   }, [positionKey, initialLine, initialColumn, value]);
 
   return (
-    <div
+    <WorkspaceBoundedScrollport
       // The editor is a Workspace scroller wherever the Workspace hosts it, so
-      // it spends the capsule clearance like every other one. The padding goes
-      // on this host rather than on `.cm-scroller`: the editor fills the host's
-      // content box, so the scroller's reachable end stops above the padded
-      // edge — and CodeMirror keeps its own metrics untouched (the renderer
-      // boundary measures the scroller's own font and line height).
-      className={cn(
-        'h-full w-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto',
-        workspaceBoundedScrollClearanceClass,
-      )}
+      // it spends the capsule clearance like every other one. The clearance
+      // belongs to this viewport; the content wrapper only preserves the
+      // editor's full-height layout. CodeMirror keeps its own metrics
+      // untouched (the renderer boundary measures the scroller's own font and
+      // line height).
+      viewportClassName="h-full w-full overflow-auto [&_.cm-editor]:h-full [&_.cm-scroller]:!overflow-auto"
+      className="h-full"
       data-testid="codemirror-editor"
     >
       <CodeMirror
@@ -161,6 +158,6 @@ export function CodeMirrorEditor({
         }}
         className="h-full"
       />
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
