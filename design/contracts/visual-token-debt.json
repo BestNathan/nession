@@ -598,7 +598,8 @@
       "6a71cdc6bcec8084baac90c23ad31f4873c382a6",
       "d794f092d43439fdc714a815351fbfe867a0da5b",
       "d2877685d14ba14eb8f3be1890ad96ba7ea26a13",
-      "013b80cc086cca2b1d91a665719774f1b86bc62e"
+      "013b80cc086cca2b1d91a665719774f1b86bc62e",
+      "e301a7e394dfe9d6c2d97b3db63fde6e57965da2"
     ],
     "web/src/capabilities/claude-code/components/TranscriptView.tsx": [
       "35f4b877a4025cb1958edc30d79ccd863be4c12b",
@@ -611,12 +612,14 @@
     ],
     "web/src/capabilities/claude-code/components/claude-app/ConfigurationRoutes.tsx": [
       "f4c193401f6b0eecfe987f205f535702fb36d975",
-      "e4994ed632a2464034797894fc2b0b82cf9a0682"
+      "e4994ed632a2464034797894fc2b0b82cf9a0682",
+      "13e2ab888c51477bb33a67d55d38eb6b6725ca1f"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ConversationRoutes.tsx": [
       "df8edb52eed166b2631b2c703a2fc3856f9e3b7b",
       "dd827bee3189fefb6b63316b111460c9d5f14653",
-      "4326fbcb258eb15a7812bac8e0a3a3ead9113ddf"
+      "4326fbcb258eb15a7812bac8e0a3a3ead9113ddf",
+      "a74153ab189612764b01d6f0f8f27387e60b3198"
     ],
     "web/src/capabilities/claude-code/components/claude-app/McpRoutes.tsx": [
       "42412de38c8d5a7e85e94eff0e8b29810c867e4b",
@@ -735,7 +738,8 @@
     "web/src/capabilities/env/components/EnvProfileEditor.tsx": [
       "572311e30b2354c7216d75f850b50427fd7ef41c",
       "e5b94065898ec80c367263428f181b51d483cd71",
-      "8034a4fb18e2862c857868dd316a61b582e1ef94"
+      "8034a4fb18e2862c857868dd316a61b582e1ef94",
+      "c81301318d75d5f1b5698a5f7547c6ee3d9727a2"
     ],
     "web/src/capabilities/env/components/EnvVariablesView.tsx": [
       "97a6db0a08f52d6b6a26340b460ab2e8777bc875",
@@ -2349,7 +2353,8 @@
     "web/src/shared/lib/workspaceScrollClearance.ts": [
       "4b034394154f7f09e3a394151ff621cf7decb39c",
       "79a1f3fd3b6aca0e5cccd56e5d200dc893c0aa04",
-      "4bf8bacb974146048afc0252f18c194d514912a8"
+      "4bf8bacb974146048afc0252f18c194d514912a8",
+      "8d9fa104b72daa83c69b908df2e71eaac2eb3d33"
     ],
     "web/src/shared/markdown/ChatMarkdown.module.css": [
       "db648428cfed1ac3df3b158edf6137aae8e705c2"

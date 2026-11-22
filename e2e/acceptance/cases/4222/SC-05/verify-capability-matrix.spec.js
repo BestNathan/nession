@@ -37,18 +37,26 @@ async function openCapability(page, capability) {
 }
 
 async function assertEndpoint(page, capability, label) {
+  if (capability.mode === 'bounded') {
+    // A bounded page must expose a real internal owner; wait for its content
+    // to arrive rather than letting an immediate probe call a loading page
+    // "short".
+    const state = await helper.scrollToEndAndMeasure(page);
+    helper.expectEndpoint(state, label);
+    helper.expectHostInset(state, label);
+    expect(state.host.mode, `${label}: the declared surface mode`).toBe('bounded');
+    expect(state.scroller.className, `${label}: a marked bounded owner`)
+      .toContain('nession-workspace-bounded-scroll');
+    return state;
+  }
+
   const state = await helper.expectSurfaceAtEnd(page, null, label);
   if (state && state.host) {
     helper.expectHostInset(state, label);
-    expect(state.host.mode, `${label}: the declared surface mode`).toBe(capability.mode);
-    if (capability.mode === 'bounded') {
-      expect(state.scroller.className, `${label}: a marked bounded owner`)
-        .toContain('nession-workspace-bounded-scroll');
-    } else {
-      expect(state.scroller.testid, `${label}: the host page scrollport`).toBe(
-        'app-workspace-scrollport',
-      );
-    }
+    expect(state.host.mode, `${label}: the declared surface mode`).toBe('document');
+    expect(state.scroller.testid, `${label}: the host page scrollport`).toBe(
+      'app-workspace-scrollport',
+    );
   } else {
     // A short document route has no overflowing scroller; its surface mode is
     // still the host's declaration and its final row was proven above the
@@ -57,7 +65,7 @@ async function assertEndpoint(page, capability, label) {
       document.querySelector('[data-workspace-app-surface]')
         ?.getAttribute('data-workspace-app-surface') ?? null
     ));
-    expect(mode, `${label}: the declared surface mode`).toBe(capability.mode);
+    expect(mode, `${label}: the declared surface mode`).toBe('document');
   }
   return state;
 }

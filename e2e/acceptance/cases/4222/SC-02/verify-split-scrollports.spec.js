@@ -52,9 +52,17 @@ test('SC-02 each split scrollport ends above the Capsule at its own bottom', asy
     expect(listMeasurements[0].state.scroller.bottom)
       .toBeLessThan(listMeasurements[1].state.scroller.bottom);
     const warnings = listMeasurements[1].state;
-    expect(warnings.lastContent, 'the final skipped-line warning is painted').not.toBeNull();
-    expect(warnings.lastContent.text, 'the warning endpoint is the last warning')
-      .toContain('this line is not an assignment 23');
+    expect(warnings.lastContent, 'the warnings owner paints content at its end').not.toBeNull();
+    // Assert the *named* final warning, not whichever text leaf the generic
+    // helper happened to sample: the last skipped line is the observable end.
+    const lastWarning = page
+      .locator('[data-testid="env-var-warnings"] p')
+      .filter({ hasText: 'this line is not an assignment 23' });
+    await expect(lastWarning).toHaveCount(1);
+    const warningBox = await lastWarning.boundingBox();
+    expect(warningBox, 'the final skipped-line warning is painted').not.toBeNull();
+    expect(warningBox.y + warningBox.height, 'the final warning clears the Capsule')
+      .toBeLessThanOrEqual((await helper.capsuleTop(page)) + 1);
 
     // ── Editor + expanded feedback: a reader above a second reader ──
     await page.getByTestId('env-edit').click();

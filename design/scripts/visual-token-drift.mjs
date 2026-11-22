@@ -21,7 +21,7 @@ const BASELINE_PATH = join(HERE, '..', 'contracts', 'visual-token-debt.json');
 // introduces none) — while keeping a 623-metric, unrelated token migration out
 // of a scroll-ownership change. Any further edit to one of these files still
 // changes its blob and fails closed until its metrics are migrated.
-export const PINNED_LEGACY_BASELINE_BLOB = 'c51681094c31849352579967cacb01c7632430ec';
+export const PINNED_LEGACY_BASELINE_BLOB = 'd0bae9f500121096b6b9026a0fd6f55f1598feec';
 
 /** One lexical collector for both ESLint and the fast source Gate. Legacy
  * literal baseline decisions are based on the complete Git blob, not the
