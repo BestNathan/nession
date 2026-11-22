@@ -1084,7 +1084,7 @@ export async function authenticatedGithubRead(apiPath,{
   fetcher=fetch,sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms)),
 }={}){
   if(!token)throw Error('GITHUB_TOKEN/GH_TOKEN is required');
-  if(!/^\\/repos\\/BestNathan\\/nession\\//.test(apiPath))
+  if(!/^\/repos\/BestNathan\/nession\//.test(apiPath))
     throw Error('GitHub read path outside canonical repository');
   if(!['json','text'].includes(format))
     throw Error('unsupported GitHub read format');
@@ -1148,7 +1148,7 @@ export async function selfTestAuthenticatedGithubRead(){
   await assert.rejects(authenticatedGithubRead(apiPath,{
     ...options,fetcher:async()=>{calls++;
       throw new TypeError('fetch failed',{cause:{code:'ETIMEDOUT'}});}}),
-    /GitHub API transport failed at \\/repos\\/BestNathan\\/nession\\/issues\\/4253 after 3 bounded attempts \\(ETIMEDOUT\\)/);
+    /GitHub API transport failed at \/repos\/BestNathan\/nession\/issues\/4253 after 3 bounded attempts \(ETIMEDOUT\)/);
   assert.equal(calls,3);
   calls=0;
   await assert.rejects(authenticatedGithubRead(apiPath,{
