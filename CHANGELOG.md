@@ -885,3 +885,10 @@
 - Categories: architecture, ci, erofs, release, security, toolchain, workflows
 - Reason: Verified source-parent changed-only orphan Merge Commit detection with real jq 1.8.1 multi-platform GHCR Index update and native readback; preserve previous immutable root as historical
 - Source: https://github.com/BestNathan/nession/issues/4160
+
+## 2026-11-22T15:48:07Z | update | Nession native Toolchain OCI release to GHCR
+- Path: topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md
+- Topic: workflows
+- Categories: architecture, ci, erofs, release, security, toolchain, workflows
+- Reason: Record authenticated #4241 completion of 13 tool types / 14 dual-architecture EROFS OCI versions, immutable GHCR Index digests, independent extracted-native Run receipts, and resolved Git publisher failures
+- Source: https://github.com/BestNathan/nession/issues/4241
