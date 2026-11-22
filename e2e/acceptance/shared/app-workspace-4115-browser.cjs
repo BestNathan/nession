@@ -451,8 +451,17 @@ async function surfaceProbe(page, selector = null) {
     );
     const controls = [...root.querySelectorAll('button, a, [role="button"], input, textarea, select')]
       .filter(paintedNode);
-    const bottoms = [...texts, ...controls].map((node) => node.getBoundingClientRect().bottom)
+    let bottoms = [...texts, ...controls].map((node) => node.getBoundingClientRect().bottom)
       .filter((bottom) => Number.isFinite(bottom) && bottom > rect.top);
+    if (bottoms.length === 0) {
+      // A renderer with its content in a shadow root (the Git patch renderer)
+      // exposes no light-DOM text; its painted host element is the content
+      // boundary the user actually sees.
+      bottoms = [...root.querySelectorAll('*')]
+        .filter(paintedNode)
+        .map((node) => node.getBoundingClientRect().bottom)
+        .filter((bottom) => Number.isFinite(bottom) && bottom > rect.top);
+    }
     return {
       exists: true,
       named: namedSelector === null

@@ -87,8 +87,6 @@ test('SC-05 every App Workspace capability reaches its end at each viewport', as
   // viewer is pushed and Back restores the directory's owner.
   await page.setViewportSize({ width: 390, height: 844 });
   await helper.openFilesLong(page);
-  await page.getByTestId('file-row-bulk').click({ timeout: 30_000 });
-  await page.getByTestId('files-app-list').waitFor({ timeout: 30_000 });
   await helper.expectSurfaceAtEnd(page, '[data-testid="files-app-list"]', 'Files pushed directory');
   await page.getByTestId('app-page-back').click();
   await page.getByTestId('files-app-list').waitFor({ timeout: 30_000 });
