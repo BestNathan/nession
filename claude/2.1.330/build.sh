@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pinned official claude 2.1.330 native executable; upstream GitHub Release asset SHA256.
+# Pinned official claude 2.1.330 glibc native executable; upstream GitHub Release asset SHA256; musl asset requires absent musl loader on Ubuntu 24.04 runner.
 # Refs #4241. No auth material, user HOME or machine-local configuration is bundled.
 set -euo pipefail
 if [[ "${1:-}" == targets && "$#" -eq 1 ]]; then printf 'linux/amd64\nlinux/arm64\n'; exit 0; fi
@@ -9,13 +9,13 @@ mode="$1"; os="$3"; arch="$5"; rootfs="$7"
 [[ "$rootfs" == /* && "$rootfs" != / && "$rootfs" != *"/../"* && "$rootfs" != */.. && "$rootfs" != *"/./"* && "$rootfs" != */. && -d "$rootfs" && ! -L "$rootfs" ]] || { echo 'unsafe rootfs' >&2; exit 2; }
 version=2.1.330
 case "$arch" in
-  amd64) upstream_arch=x64; digest=5cedf0900b6ea61a565a2a96b53ffe652b2b0ffe097c55abe1f553792d8eb1e4 ;;
-  arm64) upstream_arch=arm64; digest=74b7fd080b8409e54b9abf910963caf1e909fc54b78fe6ac1763ed2cc225c92c ;;
+  amd64) upstream_arch=x64; digest=4d2cde1b749a0c9badcb7ad2ac49d735eebb66b5d503b6e073b81e356ffd5f54 ;;
+  arm64) upstream_arch=arm64; digest=d14fa911fec091b5e0365fa55f900d3b596e4bf5040a9fac79ca417ec370287c ;;
 esac
 if [[ "$mode" == prepare ]]; then
   [[ -z "$(find "$rootfs" -mindepth 1 -print -quit)" ]] || { echo 'rootfs must be empty' >&2; exit 2; }
   tmp="$(mktemp -d)"; trap 'rm -rf -- "$tmp"' EXIT
-  archive="claude-linux-${upstream_arch}-musl.tar.gz"
+  archive="claude-linux-${upstream_arch}.tar.gz"
   curl -fLSs --retry 3 --max-time 600 "https://github.com/anthropics/claude-code/releases/download/v2.1.330/${archive}" -o "$tmp/archive.tar.gz"
   printf '%s  %s\n' "$digest" "$tmp/archive.tar.gz" | sha256sum --check --status || { echo 'claude official archive SHA256 mismatch' >&2; exit 1; }
   # Upstream versions may wrap the binary in an architecture-specific directory.
