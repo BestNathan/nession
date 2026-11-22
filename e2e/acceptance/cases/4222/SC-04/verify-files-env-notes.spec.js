@@ -54,6 +54,12 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
   );
 
   await page.getByTestId('app-page-back').click();
+  // The dirty draft is a real leave guard: confirm the discard before the
+  // directory owner returns.
+  const discard = page.getByRole('button', { name: 'Leave without saving' });
+  if (await discard.count()) {
+    await discard.first().click();
+  }
   await page.getByTestId('files-app-list').waitFor({ timeout: 30_000 });
 
   // ── Files: the long source file is read in the declared bounded owner ──
