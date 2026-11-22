@@ -7,7 +7,9 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use crate::env::EnvService;
-use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
+use crate::registry::{
+    AgentInfo, AgentRegistry, AgentStatus, SessionProjectMembership, SessionRegistry, SessionStatus,
+};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, ConnectionGeneration};
 use crate::server::outbound::WsMessageSender;
@@ -555,9 +557,9 @@ impl ConnectionHandler {
     /// Called after any mutation so browsers don't have to poll or wait for a
     /// manual refresh to notice changes.
     async fn broadcast_sessions(&self) {
-        let project_ids = self.session_registry.project_ids().await;
+        let project_memberships = self.session_registry.project_memberships().await;
         self.web_client_registry
-            .broadcast_sessions_changed(Arc::clone(&self.session_registry), &project_ids)
+            .broadcast_sessions_changed(Arc::clone(&self.session_registry), &project_memberships)
             .await;
     }
 
@@ -1362,7 +1364,7 @@ fn current_timestamp() -> u64 {
 /// web client feeds either straight into the same state setter.
 pub(crate) fn session_to_info(
     s: &crate::registry::SessionInfo,
-    project_id: Option<&str>,
+    project: Option<&SessionProjectMembership>,
 ) -> WebSessionInfo {
     WebSessionInfo {
         session_id: s.session_id.clone(),
@@ -1384,7 +1386,10 @@ pub(crate) fn session_to_info(
         // The Agent's last reported work-context summary (#4007); omitted when
         // no current Agent has reported one.
         metadata: s.metadata.clone(),
-        project_id: project_id.map(std::string::ToString::to_string),
+        project_id: project.map(|membership| membership.project_id.clone()),
+        // `0` is the unassociated token; an associated entry carries the
+        // revision the membership CAS accepts (#4234).
+        project_revision: Some(project.map_or(0, |membership| membership.revision)),
         // The same shared serializer feeds `server.session.list` and
         // `server.sessions.changed`, so the two always agree on Activity too.
         activity: s.activity.clone(),
@@ -1394,9 +1399,9 @@ pub(crate) fn session_to_info(
 
 pub(crate) fn session_to_json(
     s: &crate::registry::SessionInfo,
-    project_id: Option<&str>,
+    project: Option<&SessionProjectMembership>,
 ) -> serde_json::Value {
-    serde_json::to_value(session_to_info(s, project_id)).unwrap_or(json!({}))
+    serde_json::to_value(session_to_info(s, project)).unwrap_or(json!({}))
 }
 
 /// Convert an agent's `sessions.list` reply into registry entries.

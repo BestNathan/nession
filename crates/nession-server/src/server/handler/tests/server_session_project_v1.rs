@@ -81,12 +81,26 @@ fn project_id_for(sessions: &[Value], session_id: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn project_revision_for(sessions: &[Value], session_id: &str) -> Option<u64> {
+    sessions
+        .iter()
+        .find(|session| session["session_id"] == session_id)
+        .and_then(|session| session.get("project_revision"))
+        .and_then(Value::as_u64)
+}
+
 #[tokio::test]
 async fn association_round_trips_and_projects_through_session_list() {
     let mut h = handler_with_online_agent().await;
     seed_project(&h, PROJECT_ID).await;
     seed_project(&h, OTHER_PROJECT_ID).await;
     let session = seed_session(&mut h, "s1").await;
+
+    // An unassociated Session advertises the `0` token the caller echoes on
+    // its first association (#4234).
+    let unbound = list_sessions(&mut h).await;
+    assert_eq!(project_id_for(&unbound, &session.session_id), None);
+    assert_eq!(project_revision_for(&unbound, &session.session_id), Some(0));
 
     let associated = set_project(
         &mut h,
@@ -99,6 +113,10 @@ async fn association_round_trips_and_projects_through_session_list() {
     assert_eq!(associated["payload"]["success"], true);
     assert_eq!(associated["payload"]["project_id"], PROJECT_ID);
     assert_eq!(associated["payload"]["revision"], 1);
+    assert_eq!(
+        project_revision_for(&list_sessions(&mut h).await, &session.session_id),
+        Some(1)
+    );
     let binding =
         h.db.get_session_project_binding(&session.session_id)
             .await
@@ -124,6 +142,10 @@ async fn association_round_trips_and_projects_through_session_list() {
     assert_eq!(changed["payload"]["success"], true);
     assert_eq!(changed["payload"]["project_id"], OTHER_PROJECT_ID);
     assert_eq!(changed["payload"]["revision"], 2);
+    assert_eq!(
+        project_revision_for(&list_sessions(&mut h).await, &session.session_id),
+        Some(2)
+    );
 
     let removed = set_project(
         &mut h,
@@ -143,9 +165,12 @@ async fn association_round_trips_and_projects_through_session_list() {
         .await
         .unwrap()
         .is_none());
+    let after_removal = list_sessions(&mut h).await;
+    assert_eq!(project_id_for(&after_removal, &session.session_id), None);
     assert_eq!(
-        project_id_for(&list_sessions(&mut h).await, &session.session_id),
-        None
+        project_revision_for(&after_removal, &session.session_id),
+        Some(0),
+        "a removed membership reads as the unassociated token"
     );
     // A Session survives every membership edit.
     assert!(h.session_registry.get(&session.session_id).await.is_some());
@@ -197,6 +222,11 @@ async fn stale_revision_after_remove_and_reassociate_is_a_conflict() {
     assert_eq!(reassociated["payload"]["success"], true);
     assert_eq!(reassociated["payload"]["project_id"], OTHER_PROJECT_ID);
     assert_eq!(reassociated["payload"]["revision"], 3);
+    assert_eq!(
+        project_revision_for(&list_sessions(&mut h).await, &session.session_id),
+        Some(3),
+        "the read model exposes the reassociated generation"
+    );
 
     // The delayed client still holds revision 1. It must not match the new
     // association, even though a membership at revision 1 once existed.
@@ -210,6 +240,10 @@ async fn stale_revision_after_remove_and_reassociate_is_a_conflict() {
     )
     .await;
     assert_eq!(stale["payload"]["error_kind"], "conflict");
+    assert_eq!(
+        stale["payload"]["revision"], 3,
+        "a conflict reports the current token an intentional retry can use"
+    );
     let binding =
         h.db.get_session_project_binding(&session.session_id)
             .await
@@ -459,6 +493,112 @@ async fn a_reused_session_name_does_not_inherit_membership() {
     assert_eq!(
         project_id_for(&list_sessions(&mut h).await, &first.session_id),
         None
+    );
+}
+
+/// A revision alone cannot fence a same-name replacement once the old row is
+/// invalidated: the replacement's generation restarts at 1 and can collide
+/// with a stale editor's token. The optional incarnation precondition closes
+/// that gap, and the read model ties the token to the live incarnation
+/// (#4234 SC-02).
+#[tokio::test]
+async fn expected_instance_id_fences_a_same_name_replacement() {
+    let mut h = handler_with_online_agent().await;
+    seed_project(&h, PROJECT_ID).await;
+    seed_project(&h, OTHER_PROJECT_ID).await;
+    let original = seed_session(&mut h, "s1").await;
+    assert_eq!(original.instance_id.as_deref(), Some("instance-1"));
+
+    let associated = set_project(
+        &mut h,
+        json!({
+            "session_id": original.session_id,
+            "project_id": PROJECT_ID,
+            "expected_revision": 0,
+            "expected_instance_id": "instance-1",
+        }),
+    )
+    .await;
+    assert_eq!(associated["payload"]["success"], true);
+    assert_eq!(associated["payload"]["revision"], 1);
+
+    // An editor that read another incarnation cannot write this one.
+    let wrong_instance = set_project(
+        &mut h,
+        json!({
+            "session_id": original.session_id,
+            "project_id": OTHER_PROJECT_ID,
+            "expected_revision": 1,
+            "expected_instance_id": "instance-0",
+        }),
+    )
+    .await;
+    assert_eq!(wrong_instance["payload"]["error_kind"], "conflict");
+    assert_eq!(wrong_instance["payload"]["revision"], 1);
+    assert_eq!(
+        h.db.get_session_project_binding(&original.session_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .project_id,
+        PROJECT_ID
+    );
+
+    // The Agent reports a same-name replacement. The old binding is
+    // invalidated, and a fresh association restarts at revision 1.
+    let mut replacement = original.clone();
+    replacement.created_at = original.created_at + chrono::Duration::seconds(60);
+    replacement.last_activity = replacement.created_at;
+    replacement.instance_id = Some("instance-2".to_string());
+    h.session_registry.update_session(replacement).await;
+
+    let listed = list_sessions(&mut h).await;
+    assert_eq!(project_id_for(&listed, &original.session_id), None);
+    assert_eq!(
+        project_revision_for(&listed, &original.session_id),
+        Some(0),
+        "a replacement's own absent membership reads as the unassociated token"
+    );
+
+    let reassociated = set_project(
+        &mut h,
+        json!({
+            "session_id": original.session_id,
+            "project_id": OTHER_PROJECT_ID,
+            "expected_revision": 0,
+            "expected_instance_id": "instance-2",
+        }),
+    )
+    .await;
+    assert_eq!(reassociated["payload"]["success"], true);
+    assert_eq!(reassociated["payload"]["revision"], 1);
+
+    // The stale editor holds revision 1, which now names the replacement's
+    // membership. Only the incarnation precondition rejects it; without it the
+    // write would silently overwrite the replacement's Project.
+    let stale = set_project(
+        &mut h,
+        json!({
+            "session_id": original.session_id,
+            "project_id": PROJECT_ID,
+            "expected_revision": 1,
+            "expected_instance_id": "instance-1",
+        }),
+    )
+    .await;
+    assert_eq!(stale["payload"]["error_kind"], "conflict");
+    assert_eq!(stale["payload"]["revision"], 1);
+    assert_eq!(
+        h.db.get_session_project_binding(&original.session_id)
+            .await
+            .unwrap()
+            .unwrap()
+            .project_id,
+        OTHER_PROJECT_ID
+    );
+    assert_eq!(
+        project_id_for(&list_sessions(&mut h).await, &original.session_id).as_deref(),
+        Some(OTHER_PROJECT_ID)
     );
 }
 

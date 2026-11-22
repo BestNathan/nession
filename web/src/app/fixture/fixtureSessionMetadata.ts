@@ -282,10 +282,26 @@ export interface FixtureSessionMetadataWindow {
   fixtureSessionProject?: FixtureSessionProjectControls;
 }
 
+/** One attempted Session→Project mutation a Case can inspect (#4234). */
+export interface FixtureProjectSetRequest {
+  session_id: string;
+  project_id: string | null;
+  expected_revision?: number;
+  expected_instance_id?: string | null;
+}
+
 /** Browser-window controls for the explicit Session→Project wire (#3082). */
 export interface FixtureSessionProjectControls {
   bindings(): Record<string, string | null>;
-  setRequests(): { session_id: string; project_id: string | null }[];
+  /**
+   * Commit another client's successful membership change (#4234).
+   *
+   * The control stands in for a second Web/App client that observed its own
+   * valid revision and saved before this editor did, so a Case can drive the
+   * stale-editor conflict deterministically.
+   */
+  simulateRemoteChange(sessionId: string, projectId: string | null): void;
+  setRequests(): FixtureProjectSetRequest[];
 }
 
 interface FixtureSessionMetadataTransport {
@@ -305,8 +321,14 @@ interface FixtureSessionMetadataTransport {
   incarnation: string;
   incarnationSeq: number;
   bindings: Map<string, string | null>;
-  projectSetRequests: { session_id: string; project_id: string | null }[];
-  onProjectSet?: (sessionId: string, projectId: string | null) => void;
+  /**
+   * The durable membership generation per Session (#4234). It advances on
+   * every committed change and is retained across removal, so a reassociation
+   * never reuses a revision a stale editor may still hold (#3661).
+   */
+  projectRevisions: Map<string, number>;
+  projectSetRequests: FixtureProjectSetRequest[];
+  onProjectSet?: (sessionId: string, projectId: string | null, revision: number) => void;
 }
 
 function currentMetadata(
@@ -428,6 +450,33 @@ function updateMetadata(
   });
 }
 
+/** The token the Server read model exposes: `0` when unassociated (#4234). */
+function visibleProjectRevision(
+  state: FixtureSessionMetadataTransport,
+  sessionId: string,
+): number {
+  const projectId = state.bindings.get(sessionId) ?? null;
+  return projectId === null ? 0 : (state.projectRevisions.get(sessionId) ?? 1);
+}
+
+/**
+ * Commit one membership change and return the new generation (#4234).
+ *
+ * The generation advances across removal as well, so a reassociation never
+ * reuses a revision a stale editor may still hold (#3661).
+ */
+function commitProjectMembership(
+  state: FixtureSessionMetadataTransport,
+  sessionId: string,
+  projectId: string | null,
+): number {
+  const generation = (state.projectRevisions.get(sessionId) ?? 0) + 1;
+  state.projectRevisions.set(sessionId, generation);
+  state.bindings.set(sessionId, projectId);
+  state.onProjectSet?.(sessionId, projectId, generation);
+  return generation;
+}
+
 function createMetadataSurface(state: FixtureSessionMetadataTransport): PluginSurface {
   const protocols = new ProtocolDirectory();
   protocols.publish(manifestsOf(FIXTURE_AGENTS));
@@ -445,13 +494,46 @@ function createMetadataSurface(state: FixtureSessionMetadataTransport): PluginSu
         const sessionId = String(payload.session_id ?? '');
         const projectId =
           typeof payload.project_id === 'string' ? payload.project_id : null;
-        state.bindings.set(sessionId, projectId);
-        state.projectSetRequests.push({ session_id: sessionId, project_id: projectId });
-        state.onProjectSet?.(sessionId, projectId);
+        const expectedRevision =
+          typeof payload.expected_revision === 'number'
+            ? payload.expected_revision
+            : undefined;
+        const expectedInstance =
+          typeof payload.expected_instance_id === 'string'
+            ? payload.expected_instance_id
+            : null;
+        const currentRevision = visibleProjectRevision(state, sessionId);
+        state.projectSetRequests.push({
+          session_id: sessionId,
+          project_id: projectId,
+          ...(expectedRevision === undefined
+            ? {}
+            : { expected_revision: expectedRevision }),
+          ...(expectedInstance === null
+            ? {}
+            : { expected_instance_id: expectedInstance }),
+        });
+        if (expectedInstance !== null && expectedInstance !== state.incarnation) {
+          return Promise.resolve({
+            success: false,
+            revision: currentRevision,
+            error_kind: 'conflict',
+            error: 'Session instance changed; reload the membership before saving',
+          }) as Promise<T>;
+        }
+        if (expectedRevision !== undefined && expectedRevision !== currentRevision) {
+          return Promise.resolve({
+            success: false,
+            revision: currentRevision,
+            error_kind: 'conflict',
+            error: `Project membership changed (expected revision ${expectedRevision}, current ${currentRevision})`,
+          }) as Promise<T>;
+        }
+        const generation = commitProjectMembership(state, sessionId, projectId);
         return Promise.resolve({
           success: true,
           project_id: projectId,
-          revision: projectId === null ? 0 : 1,
+          revision: projectId === null ? 0 : generation,
         }) as Promise<T>;
       }
       if (type === 'server.session.attach') {
@@ -531,7 +613,7 @@ export function createFixtureSessionMetadataHarness(
   search: string,
   options: {
     initialBindings?: Record<string, string | null>;
-    onProjectSet?: (sessionId: string, projectId: string | null) => void;
+    onProjectSet?: (sessionId: string, projectId: string | null, revision: number) => void;
   } = {},
 ): {
   surface: PluginSurface;
@@ -556,6 +638,13 @@ export function createFixtureSessionMetadataHarness(
     incarnation: 'fixture-instance-1',
     incarnationSeq: 1,
     bindings: new Map(Object.entries(options.initialBindings ?? {})),
+    // An initial association starts at revision 1; `0` is unassociated.
+    projectRevisions: new Map(
+      Object.entries(options.initialBindings ?? {}).map(([sessionId, projectId]) => [
+        sessionId,
+        projectId === null ? 0 : 1,
+      ]),
+    ),
     projectSetRequests: [],
     onProjectSet: options.onProjectSet,
   };
@@ -564,6 +653,9 @@ export function createFixtureSessionMetadataHarness(
     controls: createMetadataControls(state),
     projectControls: {
       bindings: () => Object.fromEntries(state.bindings),
+      simulateRemoteChange: (sessionId, projectId) => {
+        commitProjectMembership(state, sessionId, projectId);
+      },
       setRequests: () => state.projectSetRequests.map((request) => ({ ...request })),
     },
   };
@@ -588,7 +680,7 @@ export function useFixtureSessionMetadata(
   search: string,
   options: {
     initialBindings?: Record<string, string | null>;
-    onProjectSet?: (sessionId: string, projectId: string | null) => void;
+    onProjectSet?: (sessionId: string, projectId: string | null, revision: number) => void;
   } = {},
 ): void {
   const onProjectSet = options.onProjectSet;
@@ -599,8 +691,8 @@ export function useFixtureSessionMetadata(
     () =>
       createFixtureSessionMetadataHarness(search, {
         initialBindings: JSON.parse(initialBindings) as Record<string, string | null>,
-        onProjectSet: (sessionId, projectId) =>
-          onProjectSetRef.current?.(sessionId, projectId),
+        onProjectSet: (sessionId, projectId, revision) =>
+          onProjectSetRef.current?.(sessionId, projectId, revision),
       }),
     [search, initialBindings],
   );

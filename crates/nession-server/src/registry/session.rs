@@ -53,6 +53,18 @@ pub enum SessionStatus {
     Zombie,
 }
 
+/// One live Session→Project membership as the Web read model sees it (#4234).
+///
+/// `revision` is the token a client echoes as `expected_revision`. It belongs
+/// to one Session incarnation; the projection omits a binding that does not
+/// match the Session's current durable instance, and an unassociated Session
+/// (absent or tombstone) has no entry at all — its token is `0`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionProjectMembership {
+    pub project_id: String,
+    pub revision: u64,
+}
+
 pub struct SessionRegistry {
     sessions: Arc<RwLock<HashMap<String, SessionInfo>>>,
     /// One lifecycle lock per Session id (#2848).
@@ -203,7 +215,15 @@ impl SessionRegistry {
     /// create-placeholder window; a binding whose timestamp does not match the
     /// current row is omitted (and is invalidated by the report/refresh path),
     /// so a reused `agent_id:session_name` never inherits an old Project.
-    pub async fn project_ids_for(&self, sessions: &[SessionInfo]) -> HashMap<String, String> {
+    ///
+    /// Each entry carries the binding revision the client must echo as
+    /// `expected_revision` (#4234). An unassociated Session has no entry: its
+    /// token is the protocol's unassociated `0`, which the projection layer
+    /// supplies.
+    pub async fn project_memberships_for(
+        &self,
+        sessions: &[SessionInfo],
+    ) -> HashMap<String, SessionProjectMembership> {
         match self.db.list_session_project_bindings().await {
             Ok(bindings) => bindings
                 .into_iter()
@@ -220,7 +240,13 @@ impl SessionRegistry {
                     } else {
                         session.created_at.timestamp() >= binding.updated_at.saturating_sub(300)
                     };
-                    matches_incarnation.then_some((binding.session_id, binding.project_id))
+                    matches_incarnation.then_some((
+                        binding.session_id,
+                        SessionProjectMembership {
+                            project_id: binding.project_id,
+                            revision: binding.revision,
+                        },
+                    ))
                 })
                 .collect(),
             Err(e) => {
@@ -231,9 +257,9 @@ impl SessionRegistry {
     }
 
     /// All live Sessions with their Project membership.
-    pub async fn project_ids(&self) -> HashMap<String, String> {
+    pub async fn project_memberships(&self) -> HashMap<String, SessionProjectMembership> {
         let sessions = self.list().await;
-        self.project_ids_for(&sessions).await
+        self.project_memberships_for(&sessions).await
     }
 
     pub async fn update_session(&self, mut session: SessionInfo) {

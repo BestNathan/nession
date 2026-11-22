@@ -55,16 +55,43 @@ export function fixtureSessionBindings(
   }
 }
 
-/** Overlay the fixture's current membership map on its Session set. */
+/**
+ * The revision generation behind each initial membership (#4234).
+ *
+ * A bound Session starts at revision 1; `0` is the unassociated token. The
+ * fixture advances this generation monotonically across remove/reassociate so
+ * a stale editor is exercised exactly like the Server's CAS.
+ */
+export function fixtureSessionProjectRevisions(search: string): Record<string, number> {
+  return Object.fromEntries(
+    Object.entries(fixtureSessionBindings(search)).map(([sessionId, projectId]) => [
+      sessionId,
+      projectId === null ? 0 : 1,
+    ]),
+  );
+}
+
+/**
+ * Overlay the fixture's current membership and revision on its Session set.
+ *
+ * Every Session carries `project_revision`: an unassociated one reports the
+ * `0` token, mirroring the Server read model (#4234).
+ */
 export function applySessionProjectBindings(
   sessions: Session[],
   bindings: Record<string, string | null>,
+  revisions: Record<string, number>,
 ): Session[] {
-  return sessions.map((session) =>
-    Object.prototype.hasOwnProperty.call(bindings, session.session_id)
-      ? { ...session, project_id: bindings[session.session_id] }
-      : session,
-  );
+  return sessions.map((session) => {
+    const bound = Object.prototype.hasOwnProperty.call(bindings, session.session_id);
+    const projectId = bound ? bindings[session.session_id] : (session.project_id ?? null);
+    return {
+      ...session,
+      ...(bound ? { project_id: projectId } : {}),
+      project_revision:
+        projectId === null ? 0 : (revisions[session.session_id] ?? session.project_revision ?? 1),
+    };
+  });
 }
 
 /**

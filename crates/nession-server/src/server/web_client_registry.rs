@@ -156,7 +156,10 @@ impl WebClientRegistry {
     pub async fn broadcast_sessions_changed(
         &self,
         session_registry: Arc<crate::registry::SessionRegistry>,
-        project_ids: &std::collections::HashMap<String, String>,
+        project_memberships: &std::collections::HashMap<
+            String,
+            crate::registry::SessionProjectMembership,
+        >,
     ) {
         let sessions = session_registry.list().await;
         let payload = serde_json::json!({
@@ -171,7 +174,7 @@ impl WebClientRegistry {
                     .iter()
                     .map(|session| crate::server::handler::session_to_json(
                         session,
-                        project_ids.get(&session.session_id).map(String::as_str),
+                        project_memberships.get(&session.session_id),
                     ))
                     .collect::<Vec<_>>(),
             }
