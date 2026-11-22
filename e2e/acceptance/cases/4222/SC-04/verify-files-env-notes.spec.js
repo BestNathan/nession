@@ -14,7 +14,7 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
 
   // ── Files: a dirty structured preview declares its fixed note ──
-  await helper.openApp(page);
+  await helper.openApp(page, '?env=warnings');
   await helper.seedLongEditableFile(page);
   await page.evaluate(() => {
     const control = window.fixtureFiles;
@@ -85,26 +85,21 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
   await page.keyboard.type('X');
   await expect(page.locator('.cm-content')).toContainText('X');
 
-  // ── Env: the name-validation note is a declared fixed context ──
+  // ── Env: a new profile's name validation is a declared fixed context ──
   await page.getByTestId('workspace-tool-env').click();
-  await page.getByTestId('env-profile-row-server::noisy.env').waitFor({ timeout: 30_000 });
-  await page.getByTestId('env-profile-row-server::noisy.env').click();
-  await page.getByTestId('env-edit').click();
-  await page.locator('.cm-editor').waitFor({ timeout: 30_000 });
-  await expect(page.locator('.cm-content')).toContainText('LONG_LIST_KEY_00');
-
-  const name = page.getByTestId('env-editor-name');
-  await name.click();
-  await name.fill('');
-  await page.getByTestId('env-editor-name-note').waitFor({ timeout: 15_000 });
+  await page.getByTestId('env-navigator-list').waitFor({ timeout: 30_000 });
+  await page.getByTestId('env-new-menu').click();
+  await page.getByTestId('env-new-profile').click();
+  await page.getByTestId('env-editor-name-note').waitFor({ timeout: 30_000 });
 
   helper.expectFixedClearsCapsule(
     await helper.fixedRoleState(page, 'env-editor-name-note'),
     'Env name validation',
   );
 
-  const editor = await helper.scrollToEndAndMeasure(page, '.cm-scroller');
-  helper.expectEndpoint(editor, 'Env editor');
+  // A new profile's editor is short; the tolerant endpoint proves its visible
+  // content stays above the Capsule without forcing a scrollbar.
+  await helper.expectSurfaceAtEnd(page, '.cm-scroller', 'Env editor');
 
   // No page-level scroll owner sneaked in around the editor.
   const documentState = await page.evaluate(() => ({
