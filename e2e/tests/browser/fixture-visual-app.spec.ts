@@ -488,11 +488,11 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-list')).toBeVisible();
-    // #3451 removed per-child directory counts from ordinary navigation, so
-    // a row's meta is no longer a load signal. The row itself is rendered only
-    // after the fixture's `listDir` resolves, so waiting for it keeps the
-    // screenshot from racing the list.
-    await expect(page.getByTestId('file-row-web')).toBeVisible({ timeout: 10_000 });
+    // #3451 removed per-child directory counts from ordinary navigation, so a
+    // row's meta is no longer a load signal. The row itself is rendered after
+    // the fixture's `listDir` resolves; assert the completed no-count text so
+    // the screenshot cannot race the list.
+    await expect(page.getByTestId('file-row-web')).toHaveText('web', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,
