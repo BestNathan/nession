@@ -24,6 +24,24 @@ function checkRoles(items, label, expected = ROLES) {
 function safeString(v) {
   return String(v ?? '').replace(/[\r\n\t]+/g,' ').slice(0,180);
 }
+// #4032: GHCR is the sole GitOps deployment registry. ACR remains readable as
+// the legacy witness; both keep every exact-SHA/digest/readiness check.
+function deploymentSourceKind(images) {
+  if (!Array.isArray(images) || images.length === 0) return 'unknown';
+  const repositories = images.map(image => String(image?.repository ?? ''));
+  if (repositories.every(r => r.endsWith('/n_public/nession'))) return 'acr';
+  if (repositories.every(r => r === 'ghcr.io/bestnathan/nession')) return 'ghcr';
+  return 'unknown';
+}
+// A GHCR-sourced record cannot satisfy the legacy ACR witness; the SC text
+// explicitly permits an explicit Pending blocker instead of a false Pass.
+function deploymentWitnessDecision(kind) {
+  if (kind === 'ghcr') {
+    return { status: 'pending', reason: 'GHCR is the sole GitOps deployment registry since #4032; no ACR-sourced Staging deployment witness exists for the exact SHA' };
+  }
+  if (kind === 'acr') return { status: 'continue' };
+  throw Error('attested images require an approved deployment registry');
+}
 function validateIndexAndRecord(index, record, sha) {
   assert.match(sha, SHA);
   assert.equal(index.schema_version, 1);
@@ -54,13 +72,12 @@ function validateIndexAndRecord(index, record, sha) {
   assert.ok(Number.isSafeInteger(source.run_attempt) && source.run_attempt > 0);
   checkRoles(record.images, 'attested images');
   checkRoles(record.workloads, 'attested workloads');
+  const sourceKind = deploymentSourceKind(record.images);
+  deploymentWitnessDecision(sourceKind); // unknown registries fail closed
   const digestByRole = new Map();
   for (const image of record.images) {
     assert.match(image.digest, DIGEST, 'immutable role digest');
     assert.equal(image.tag, image.role + '-' + sha.slice(0, 7));
-    assert.ok(typeof image.repository === 'string' &&
-      image.repository.endsWith('/n_public/nession'),
-      'attested image requires approved ACR repository');
     digestByRole.set(image.role, image.digest);
   }
   for (const w of record.workloads) {
@@ -94,7 +111,7 @@ function validateIndexAndRecord(index, record, sha) {
   }
   return {sourceRun:source.run_id,sourceAttempt:source.run_attempt,
     gitops:index.gitops_revision,observed:record.observed_at,
-    digests:Object.fromEntries(digestByRole)};
+    sourceKind,digests:Object.fromEntries(digestByRole)};
 }
 function offlineFixtures() {
   const sha='a'.repeat(40), gitops='b'.repeat(40), digest='sha256:'+'c'.repeat(64);
@@ -129,6 +146,28 @@ function offlineFixtures() {
   invalid(x=>{x.gitops_revision='f'.repeat(40)});
   invalid(x=>{x.provenance.verified_source.run_id=99});
   invalid(x=>{x.provenance.verified_source.head_branch='staging'});
+  // #4032/#4285: GHCR is authoritative, ACR is the legacy witness, and any
+  // other registry fails closed. A GHCR-only record yields the SC's explicit
+  // Pending blocker rather than a false Pass or an assertion Fail.
+  const ghcrRecord = structuredClone(rec);
+  for (const image of ghcrRecord.images) image.repository = 'ghcr.io/bestnathan/nession';
+  for (const w of ghcrRecord.workloads) {
+    w.repository = 'ghcr.io/bestnathan/nession';
+    w.image = w.repository + ':' + w.role + '-' + sha.slice(0, 7);
+    w.image_id = w.repository + '@' + w.digest;
+  }
+  assert.equal(deploymentSourceKind(rec.images), 'acr');
+  assert.equal(deploymentSourceKind(ghcrRecord.images), 'ghcr');
+  assert.equal(deploymentSourceKind([{ role: 'agent', repository: 'registry.example.com/other' }]), 'unknown');
+  assert.equal(validateIndexAndRecord(idx, ghcrRecord, sha).sourceKind, 'ghcr');
+  assert.deepEqual(deploymentWitnessDecision('acr'), { status: 'continue' });
+  assert.equal(deploymentWitnessDecision('ghcr').status, 'pending');
+  assert.match(deploymentWitnessDecision('ghcr').reason,
+    /GHCR is the sole GitOps deployment registry since #4032/);
+  assert.throws(() => deploymentWitnessDecision('unknown'), /approved deployment registry/);
+  const unknownRecord = structuredClone(rec);
+  unknownRecord.images[0].repository = 'registry.example.com/other';
+  assert.throws(() => validateIndexAndRecord(idx, unknownRecord, sha), /approved deployment registry/);
   process.stdout.write('deployed-identity-proof: immutable source/role/digest and negative fixtures passed\n');
 }
 async function get(url) {
@@ -240,6 +279,11 @@ async function verify(issue) {
     assert.equal(comparison.behind_by,0);
   }
   const deployed=await sourceAttestation(sha);
+  // #4032: a GHCR-only deployment cannot satisfy the legacy ACR witness. The
+  // SC text explicitly allows an explicit Pending blocker instead of a false
+  // Pass (and an assertion Fail would misreport a legitimate supersession).
+  const witness=deploymentWitnessDecision(deployed.props.sourceKind);
+  if(witness.status==='pending')throw new Unobservable(witness.reason);
   const acr=await fourRoleACR(sha);
   const ev=[
     {type:'provenance',value:'immutable deployment receipt '+deployed.index.record+
@@ -266,7 +310,7 @@ function run(issue) {
     if(!pending)process.exitCode=1;
   });
 }
-module.exports={run,verify,validateIndexAndRecord,offlineFixtures};
+module.exports={run,verify,validateIndexAndRecord,deploymentSourceKind,deploymentWitnessDecision,offlineFixtures};
 
 if (require.main === module) {
   if (process.argv[2] !== 'self-test') {
