@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "40e575972d7d333dd91948b806c70cd0c812f8f9a098b7725637d4689963864e",
+  "run_id": 44982114261,
+  "run_attempt": 1,
+  "issue": 4222,
+  "criterion": "SC-04",
+  "criterion_text": "— Remaining capability-specific scroll defects fixed. The Chromium Case exercises Claude conversation history/current/unbound footer, Raw Record, MCP server/tool, configuration, transcript/record; Git History split list/detail/diff; and Files dirty-preview / Env Editor validation. Each actual last visible note, content row and enabled action is reachable above the live Capsule at scroll end; no nested-scroll dead end or uncontrolled fixed footer. All findings are assessed on **rendered behavior**; source-only suspicions may be disproven without forcing unrelated changes.",
+  "stage": "staging",
+  "target_sha": "6fa25d71f9d41d72a1a5f35dad3b192fe0f556c9",
+  "contract_sha256": "25ef840716d7fe8205889b777cc07e66b430ac1100457126c76e74a24177ba48",
+  "case_revision": "6fa25d71f9d41d72a1a5f35dad3b192fe0f556c9",
+  "case_tree_sha": "c55ac5ad00271722c609cdf933defb01cde65bea",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-22T03:49:47.134Z",
+  "finished_at": "2026-11-22T03:50:46.510Z",
+  "duration_ms": 59376,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-claude-residuals.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify-claude-residuals.spec.js:82:50",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 31
+      },
+      "duration_ms": 33643,
+      "exit_code": 1
+    },
+    {
+      "type": "browser",
+      "entry": "verify-git-history.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at app-workspace-4115-browser.cjs:480:83",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 14
+      },
+      "duration_ms": 2413,
+      "exit_code": 1
+    },
+    {
+      "type": "browser",
+      "entry": "verify-files-env-notes.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify-files-env-notes.spec.js:44:55",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 0
+      },
+      "duration_ms": 17469,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44982114261,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6fa25d71f9d41d72a1a5f35dad3b192fe0f556c9",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44982114261",
+    "record_path": "runs/2026-11-22/44982114261-1/4222/SC-04.json",
+    "source_result_sha256": "0b5b355afb26cbd2aee64654a41061c97c9bf04f64f80e37870df8d3848c7111"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44982114261-1",
+    "sha256": "0b5b355afb26cbd2aee64654a41061c97c9bf04f64f80e37870df8d3848c7111",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44982114261",
+    "durability": "time-limited; object archival not configured"
+  }
+}
