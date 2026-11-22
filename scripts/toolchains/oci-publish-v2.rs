@@ -11,7 +11,7 @@ use nession_erofs::registry::{
     RegistryCredentialProvider, RegistryError, RemoteReference,
 };
 use nession_erofs::{
-    image_documents, validate_erofs_file, BlobStore, ErofsBuilder, Packaging,
+    image_documents, validate_erofs_file, FsBlobStore, ErofsBuilder, Packaging,
     ProcessGitRunner, ProcessMkfsRunner,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -71,7 +71,7 @@ impl Release {
         Ok(Self{tool,version,fingerprint,source_sha,targets})
     }
     fn tag(&self)->String {format!("{}-{}",self.tool,self.version)}
-    fn reference(&self)->Result<RemoteReference> {Ok(RemoteReference::parse(&self.tag())?)}
+    fn reference(&self)->Result<RemoteReference> {Ok(RemoteReference::parse(&self.tag()).map_err(RegistryError::InvalidReference)?)}
     fn image_ref(&self)->String {format!("ghcr.io/{REMOTE_REPOSITORY}:{}",self.tag())}
 }
 fn annotations(r:&Release)->BTreeMap<String,String> {
@@ -168,13 +168,13 @@ async fn check_remote(c:&RegistryClient,r:&Release,download:Option<&Path>)->Resu
         };
         ensure!(config.digest()==manifest.config.digest,"config hash mismatch");
         if let Some(out)=download {
-            let store=BlobStore::new(out.join(format!("cas-{}",target_dir(platform))))?;
+            let store=FsBlobStore::new(out.join(format!("cas-{}",target_dir(platform))))?;
             c.download_blob(&store,REMOTE_REPOSITORY,&manifest.layers[0]).await?;
             store.verify_named_size(&manifest.layers[0].digest,manifest.layers[0].size)?;
             extract(&store.path_for(&manifest.layers[0].digest)?,&out.join(target_dir(platform)))?;
         } else {
             let probe=tempfile::tempdir()?;
-            let store=BlobStore::new(probe.path().join("probe-cas"))?;
+            let store=FsBlobStore::new(probe.path().join("probe-cas"))?;
             match c.download_blob(&store,REMOTE_REPOSITORY,&manifest.layers[0]).await {
                 Err(RegistryError::NotFound(_))=>return Ok(None),
                 Err(error)=>return Err(error.into()),
@@ -210,7 +210,7 @@ async fn main()->Result<()> {
     let source=PathBuf::from(env::var("TOOLCHAIN_ROOTFS")?);
     ensure!(source.is_dir(),"prepared rootfs parent absent");
     let tmp=tempfile::tempdir()?;
-    let store=BlobStore::new(tmp.path().join("cas"))?;
+    let store=FsBlobStore::new(tmp.path().join("cas"))?;
     let builder=ErofsBuilder::new(
         Arc::new(ProcessGitRunner::default()),
         Arc::new(ProcessMkfsRunner::default()),store.clone(),tmp.path().join("build"))?;
