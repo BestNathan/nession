@@ -1,0 +1,15 @@
+name: CI / Toolchain Candidate
+# #4241: unprivileged orphan-side trigger only; real validation is main-owned.
+# No untrusted scripts execute in this workflow's own context.
+on:
+  pull_request:
+    branches: [toolchains]
+    types: [opened, synchronize, reopened, ready_for_review]
+permissions:
+  contents: read
+jobs:
+  validate:
+    if: github.repository == 'BestNathan/nession'
+    permissions:
+      contents: read
+    uses: BestNathan/nession/.github/workflows/ci-toolchain-candidate.yml@main
