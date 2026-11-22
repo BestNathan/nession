@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "55ec009ba4bc4cc9246fa4f1fad294950f195d584b94c820b39cb645d150a45e",
+  "run_id": 44990096825,
+  "run_attempt": 1,
+  "issue": 4222,
+  "criterion": "SC-02",
+  "criterion_text": "— Real inner scrollport geometry. In a bounded App page with two independently scrolling children at distinct bottom coordinates (including sibling footer/actions) and a dynamically changing Capsule, *each designated active scroller* reaches its last painted/actionable content no lower than Capsule top (+1px) without >64px blank tail, unexpected body scroll, horizontal overflow or double-counted safe-area/inset. Editor focus/caret remains functional.",
+  "stage": "staging",
+  "target_sha": "fbf4c361f411968d61ee3c0cdaaeee08c001968c",
+  "contract_sha256": "25ef840716d7fe8205889b777cc07e66b430ac1100457126c76e74a24177ba48",
+  "case_revision": "fbf4c361f411968d61ee3c0cdaaeee08c001968c",
+  "case_tree_sha": "a7757d0430b1912b620ce539c492f76d4ac8902c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-22T05:38:57.606Z",
+  "finished_at": "2026-11-22T05:39:12.745Z",
+  "duration_ms": 15139,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-split-scrollports.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=156"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 156
+      },
+      "duration_ms": 6270,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-dynamic-geometry.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=91"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 91
+      },
+      "duration_ms": 2966,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44990096825,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "fbf4c361f411968d61ee3c0cdaaeee08c001968c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44990096825",
+    "record_path": "runs/2026-11-22/44990096825-1/4222/SC-02.json",
+    "source_result_sha256": "5ffdcb944e47f2d82817f1425681dfa7f0ed7d73c376ce0e79363041d8d721aa"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44990096825-1",
+    "sha256": "5ffdcb944e47f2d82817f1425681dfa7f0ed7d73c376ce0e79363041d8d721aa",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44990096825",
+    "durability": "time-limited; object archival not configured"
+  }
+}

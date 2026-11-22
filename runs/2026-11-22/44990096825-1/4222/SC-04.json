@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c21b91daf11f4fa1fca04b1d882415aaef3b2f3e70d63fbc0c3b462493d9e0bc",
+  "run_id": 44990096825,
+  "run_attempt": 1,
+  "issue": 4222,
+  "criterion": "SC-04",
+  "criterion_text": "— Remaining capability-specific scroll defects fixed. The Chromium Case exercises Claude conversation history/current/unbound footer, Raw Record, MCP server/tool, configuration, transcript/record; Git History split list/detail/diff; and Files dirty-preview / Env Editor validation. Each actual last visible note, content row and enabled action is reachable above the live Capsule at scroll end; no nested-scroll dead end or uncontrolled fixed footer. All findings are assessed on **rendered behavior**; source-only suspicions may be disproven without forcing unrelated changes.",
+  "stage": "staging",
+  "target_sha": "fbf4c361f411968d61ee3c0cdaaeee08c001968c",
+  "contract_sha256": "25ef840716d7fe8205889b777cc07e66b430ac1100457126c76e74a24177ba48",
+  "case_revision": "fbf4c361f411968d61ee3c0cdaaeee08c001968c",
+  "case_tree_sha": "638abfd9841799c3f4a86ecfd6cd029619f97dfd",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-22T05:39:12.746Z",
+  "finished_at": "2026-11-22T05:40:05.329Z",
+  "duration_ms": 52583,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-claude-residuals.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=33"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 33
+      },
+      "duration_ms": 8524,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-git-history.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=81"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 81
+      },
+      "duration_ms": 4811,
+      "exit_code": 0
+    },
+    {
+      "type": "browser",
+      "entry": "verify-files-env-notes.spec.js",
+      "result": "Fail",
+      "summary": "Playwright assertions failed at verify-files-env-notes.spec.js:90:63",
+      "evidence": [],
+      "execution": {
+        "discovered": 1,
+        "passed": 0,
+        "failed": 1,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 13
+      },
+      "duration_ms": 33394,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44990096825,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "fbf4c361f411968d61ee3c0cdaaeee08c001968c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44990096825",
+    "record_path": "runs/2026-11-22/44990096825-1/4222/SC-04.json",
+    "source_result_sha256": "037dfc8256565b2d8a2aaba33a9ca8b723ff5273be2343033c38404952ad5020"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44990096825-1",
+    "sha256": "037dfc8256565b2d8a2aaba33a9ca8b723ff5273be2343033c38404952ad5020",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44990096825",
+    "durability": "time-limited; object archival not configured"
+  }
+}
