@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "85f63bd95c5c837e2eca52f379eb9c3bca3504af4d1f4747f34b99228788b086",
+  "run_id": 44982785675,
+  "run_attempt": 2,
+  "issue": 4234,
+  "criterion": "SC-02",
+  "criterion_text": "The Server Session read model exposes the current binding revision/token tied to the current Session incarnation; Web/App sends the exact observed token for association, change and removal, including after reconnect/recreation. Existing optional-revision protocol compatibility remains explicit and unchanged.",
+  "stage": "pr",
+  "target_sha": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+  "contract_sha256": "f5481119ca2717ee63927ce491b6ff1fb33d6f10d6684bd3edf75103c6f0f9f6",
+  "case_revision": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+  "case_tree_sha": "195e46f0d8f90f6f115950d2b11669a4b77bf09e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-22T06:58:42.145Z",
+  "finished_at": "2026-11-22T06:59:39.154Z",
+  "duration_ms": 57009,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The Session read model exposes the incarnation-scoped membership token; stale revisions and stale incarnations conflict with the current token reported",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 1c6877d19ef4ef5288543fb4853fd55c02ad864f: server.session.list exposed project_revision 0 for an unassociated/removed Session and the committed revision otherwise; a stale expected_revision was refused as a conflict reporting the current token, including after remove/reassociate; a same-name replacement rejected a write carrying the previous incarnation even when the numeric revision collided; concurrent sets committed once and the optional-revision compatibility still succeeded (server handler tests over isolated SQLite)"
+        }
+      ],
+      "duration_ms": 56951,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44982785675,
+      "run_attempt": 2,
+      "event": "pull_request",
+      "head_sha": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+      "head_branch": "fix/4234-session-project-expected-revision",
+      "workflow_id": 378248506,
+      "source_kind": "pr-smoke",
+      "pr_binding": {
+        "pr_number": 4261,
+        "issue": 4234,
+        "head_sha": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+        "case_job_id": 137126559388,
+        "artifact_id": 14742869642,
+        "quality_run_id": 44982785646,
+        "e2e_run_id": 44982785750
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44982785675",
+    "record_path": "runs/2026-11-22/44982785675-2/4234/SC-02.json",
+    "source_result_sha256": "4be3d78a4a7c3f0d694d5a5fe3a97c4e4e8082d7bb80af01b4f08cfcc6c41059"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44982785675-2",
+    "sha256": "4be3d78a4a7c3f0d694d5a5fe3a97c4e4e8082d7bb80af01b4f08cfcc6c41059",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44982785675",
+    "durability": "time-limited; object archival not configured"
+  }
+}

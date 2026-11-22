@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "mode": "acceptance",
+  "source": {
+    "repository": "BestNathan/nession",
+    "run_id": 44982785675,
+    "run_attempt": 2,
+    "event": "pull_request",
+    "head_sha": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+    "head_branch": "fix/4234-session-project-expected-revision",
+    "workflow_id": 378248506,
+    "source_kind": "pr-smoke",
+    "pr_binding": {
+      "pr_number": 4261,
+      "issue": 4234,
+      "head_sha": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+      "case_job_id": 137126559388,
+      "artifact_id": 14742869642,
+      "quality_run_id": 44982785646,
+      "e2e_run_id": 44982785750
+    }
+  },
+  "record": "runs/2026-11-22/44982785675-2/4234/SC-02.json",
+  "execution_id": "85f63bd95c5c837e2eca52f379eb9c3bca3504af4d1f4747f34b99228788b086",
+  "target_sha": "1c6877d19ef4ef5288543fb4853fd55c02ad864f",
+  "issue": 4234,
+  "criterion": "SC-02",
+  "stage": "pr",
+  "case_tree_sha": "195e46f0d8f90f6f115950d2b11669a4b77bf09e",
+  "contract_sha256": "f5481119ca2717ee63927ce491b6ff1fb33d6f10d6684bd3edf75103c6f0f9f6"
+}
