@@ -20,7 +20,9 @@ import {
   requiresPrToolingEvidence, requiresPrRustQualityEvidence,
   requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
   collectPrRequiredQuality, validPrRequiredQualityReceipt, enforcePrRequiredQuality,
+  requiresPrRequiredQualityEvidence,
 } from './acceptance-pr-web-quality-receipt.mjs';
+import { acceptanceModelView } from './lib/agent/tasks/acceptance.mjs';
 
 import {collectPrCiTriad, requiresPrCiTriad, requiresPrVisualEvidenceCriterion,
   validPrCiTriadReceipt, enforcePrCiTriad, selfTestPrCiTriad}
@@ -938,6 +940,11 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   // when the SC text does not explicitly name test execution (#4146).
   if (context.stage === 'pr' && context.criteria.length > 0) {
     context.pr_required_quality = collectPrRequiredQuality(context.target_ref);
+    // #4231: expose the aggregate receipt to the model only when a criterion
+    // explicitly names it; the normalizer's enforcePrRequiredQuality barrier
+    // still rejects any Pass without a valid exact-head receipt.
+    context.pr_required_quality_exposed =
+      requiresPrRequiredQualityEvidence(context);
   }
   // The trusted prepare step has read-only Actions credentials. Read the
   // required Web Gate only for executable Web integration SCs, not every PR.
@@ -1155,6 +1162,20 @@ function fixtureBody() {
 
 function selfTest() {
   assert.equal(selfTestPrCiTriad(), true);
+  // #4231: the aggregate Quality receipt is visible to the model only for an
+  // explicitly activated PR criterion; unactivated/staging views omit it.
+  const aggregateView = {
+    stage: 'pr',
+    pr_required_quality: { status: 'pass', receipt: { kind: 'pr_required_quality_v1' } },
+    pr_required_quality_exposed: true,
+    criteria: [],
+    requirement_body: '',
+  };
+  assert.equal(acceptanceModelView(aggregateView).pr_required_quality?.status, 'pass');
+  assert.equal(acceptanceModelView({
+    ...aggregateView, pr_required_quality_exposed: false }).pr_required_quality, null);
+  assert.equal(acceptanceModelView({
+    ...aggregateView, stage: 'staging' }).pr_required_quality, null);
   // Both issue kinds use the same trusted Acceptance context/projector.
   // Discussions without an eligible label remain out of scope.
   for (const labels of [['bug'], [{ name: 'bug' }], ['requirement'], [{ name: 'requirement' }]]) {
