@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { MASKED_VALUE, isSensitiveKey } from '@/capabilities/env/model/sensitive';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { copyToClipboard } from '@/shared/lib/clipboard';
 
 /** Below this count a filter field would be chrome in search of a problem. */
@@ -152,10 +152,7 @@ export function EnvVariablesView({
         </div>
       ) : null}
 
-      <div
-        data-testid="env-variable-list-scroll"
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
-      >
+      <WorkspaceBoundedScrollport data-testid="env-variable-list-scroll">
         {filtered.length === 0 ? (
           <p className={cn('px-4 py-8 text-center text-muted-foreground', chromeSansRole('secondary'))}>
             No variables match &ldquo;{query.trim()}&rdquo;
@@ -172,7 +169,7 @@ export function EnvVariablesView({
             ))}
           </div>
         )}
-      </div>
+      </WorkspaceBoundedScrollport>
 
       {warnings.length > 0 ? (
         // The footer stays pinned below the list, but it is itself a bounded
@@ -180,11 +177,9 @@ export function EnvVariablesView({
         // the App bounded region with no scroll to reach its end. It keeps the
         // measured clearance because it is the element that meets the pane
         // bottom, and it stays content-height (no reserved footer) while short.
-        <div
-          className={cn(
-            'max-h-[40%] min-h-0 shrink-0 overflow-y-auto overscroll-contain border-t px-3 py-2',
-            workspaceBoundedScrollClearanceClass,
-          )}
+        <WorkspaceBoundedScrollport
+          viewportClassName="max-h-[40%] flex-none border-t"
+          className="px-3 py-2"
           data-testid="env-var-warnings"
         >
           <p className={cn('text-warning', chromeSansRole('metadata'))}>
@@ -195,7 +190,7 @@ export function EnvVariablesView({
               {w}
             </p>
           ))}
-        </div>
+        </WorkspaceBoundedScrollport>
       ) : null}
     </div>
   );

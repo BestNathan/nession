@@ -457,6 +457,7 @@ export function ConversationTranscript({
         */}
         <MessageScrollerViewport
           preserveScrollOnPrepend
+          data-testid="conversation-transcript-scroll"
           className={workspaceBoundedScrollClearanceClass}
         >
           <TranscriptContent

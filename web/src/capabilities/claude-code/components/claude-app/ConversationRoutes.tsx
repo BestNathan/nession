@@ -24,7 +24,7 @@ export function ConversationsRoute({ data }: { data: ClaudeAppData }) {
         title="This working directory"
         description="Read-only history. Only an exact binding defines the current conversation."
       />
-      <ScrollBody className="p-2">
+      <ScrollBody className="p-2" testId="claude-app-conversations-scroll">
         <ConversationListSurface
           snapshot={data.state.conversation.snapshot}
           onSelect={data.actions.openCandidate}
@@ -82,7 +82,7 @@ function UnboundConversation({ data }: { data: ClaudeAppData }) {
     );
   }
   return (
-    <ScrollBody className="px-4 pb-6">
+    <ScrollBody className="px-4 pb-6" testId="claude-app-unbound-scroll">
       <div className="py-8 text-center" data-testid="claude-app-unbound">
         <p className={chromeSansRole('title')}>No conversation linked to this Session</p>
         <p className={cn('mt-2 text-muted-foreground', chromeSansRole('secondary'))}>
@@ -162,6 +162,8 @@ function BoundConversation({ data }: { data: ClaudeAppData }) {
         />
       </WorkspaceSurface>
       <p
+        data-workspace-fixed-role="context"
+        data-testid="claude-app-read-only-note"
         className={cn(
           'shrink-0 border-t px-4 py-2 text-muted-foreground',
           chromeSansRole('caption'),

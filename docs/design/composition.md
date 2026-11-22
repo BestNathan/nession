@@ -310,9 +310,9 @@ geometry, or add trailing padding to compensate for the floating overlay.
 | Role | Owner | Contract |
 |---|---|---|
 | Default App page scroll | `AppWorkspaceScrollRegion` (host) | one bounded `overflow-y-auto` scrollport per depth, in natural document flow; trailing extent measured from the scrollport's own bottom to the floating bar's top |
-| Bounded surface | host adapter `AppWorkspaceBoundedRegion` + a binding declaration `appScroll: 'bounded'` | the capability keeps one internal scroll owner (collection, reader, diff, editor) and spends `workspaceBoundedScrollClearanceClass` there; it never measures the Capsule |
+| Bounded surface | host adapter `AppWorkspaceBoundedRegion` + a binding declaration `appScroll: 'bounded'` | the capability keeps its internal scroll owners (collection, reader, diff, editor), each rendered through `WorkspaceBoundedScrollport` (or an equivalent declared adapter); it never measures the Capsule |
 | Bottom actions | host `workspace-bottom-actions` slot | capability owns the action semantics; the host positions the band below the scrollport, above the Capsule, and applies the measured safe-area/Capsule inset |
-| Capsule clearance | `useWorkspaceCapsuleClearance` | publishes the whole band, the actual scrolling viewport's inset, and the actions-slot inset; safe area is counted once |
+| Capsule clearance | `useWorkspaceCapsuleClearance` | publishes the whole band and the actions-slot inset, and measures **every declared bounded owner** from that element's own visible bottom to the floating bar's top; safe area is counted once |
 
 Consequences that are part of the contract:
 
@@ -328,13 +328,42 @@ Consequences that are part of the contract:
   clearance class at all. `appScroll: 'bounded'` is the explicit exception for
   surfaces that genuinely scroll internally.
 - A split bounded surface may have more than one internal scroller (a list plus
-  a pinned footer, an editor plus its warnings/review). The owner that meets the
-  pane bottom spends the measured inset; siblings that already end above it must
-  not reserve the band again. Nested routes of a bounded capability (a Git
-  section, a GitHub reader, an Env split surface) follow the same rule — a
-  bounded declaration is not satisfied by the root view alone. A capability
-  must not substitute a Capsule-sized fixed `pb-*` band for the measured inset
+  a pinned footer, an editor plus its warnings/review). Each owner is measured
+  from its own visible bottom, so one shared shell number cannot under- or
+  over-clear a sibling; siblings that already end above the Capsule must not
+  reserve the band again. Nested routes of a bounded capability (a Git section,
+  a GitHub reader, an Env split surface) follow the same rule — a bounded
+  declaration is not satisfied by the root view alone. A capability must not
+  substitute a Capsule-sized fixed `pb-*` band for the measured inset
   (`layout-ownership` rejects it).
+- **Reusable scrollport recipe (#4222).** A bounded owner renders through
+  `WorkspaceBoundedScrollport`. The recipe puts the scroll role, the stable
+  `min-h-0/flex-1/overflow` constraints and the measured trailing inset on the
+  **viewport**, and the caller's spacing/layout `className` on an **inner
+  content wrapper**. A caller's `p-2`, `pb-6` or `py-3` therefore cannot win
+  Tailwind's merge and erase the host inset. A declared third-party viewport
+  (MessageScroller, CodeMirror, a virtualized list) may keep its own element,
+  but must publish the same marker and spend the inset outside content spacing.
+- **Persistent siblings declare a role.** Ordinary explanation, errors,
+  warnings, status, Load-more and final rows live *inside* their scroll area.
+  Only an intentionally persistent context is a fixed sibling, marked
+  `data-workspace-fixed-role="context"` and listed in the route coverage; the
+  Gate rejects an unregistered fixed footer in capability content.
+
+### Route-complete scroll coverage (#4222)
+
+`web/src/app/workspace/scrollCoverage.ts` is the inventory of every reachable
+App route/depth/tab/section variant for every Workspace view binding, with its
+surface mode and the observable scroll owners a browser Case must exercise.
+It is not a second capability registry: `scrollCoverage.test.ts` proves it is
+exhaustive against `WORKSPACE_VIEW_BINDINGS` and the Claude `AppRoute`,
+Environment, Sandbox section/policy and Git section unions, and that each
+route's mode matches its binding's `appScroll`. The design Gate then rejects a
+reachable union member with no coverage, a bounded route with no owner, a
+document route naming an inner owner, an empty scenario, and an owner
+identifier that appears nowhere in shipped source. Adding a nested route
+without a contract therefore fails deterministically rather than shipping on
+the parent's `appScroll` declaration.
 
 ### Representative inventory
 
@@ -363,7 +392,11 @@ numeric spacing in the shared recipe owner. From #4115 it also rejects a
 capability-owned App page scroll, a capability claiming the host App surface
 marker, and a reintroduction of the retired per-scroller Capsule padding; from
 #4188 it rejects a capability scroll owner that hardcodes a Capsule-sized
-`pb-*` band. It accepts the declared bounded-surface class and a local
+`pb-*` band. From #4222 it rejects a capability/shared consumer that restates
+the bounded clearance class outside `WorkspaceBoundedScrollport` (or the
+documented third-party adapter), an unregistered `shrink-0 border-t` footer in
+capability content, and a scroll-coverage inventory that misses a reachable
+route or owner. It accepts the declared bounded-surface recipe and a local
 list/editor scroller. It
 accepts local flex/grid composition, `data-swipe-owner` surfaces, and the
 Issue's control sample. It also owns the keyboard-avoidance binding from §15:

@@ -1,6 +1,7 @@
 import { useLayoutEffect, type RefObject } from 'react';
 import {
   WORKSPACE_ACTIONS_BOTTOM_INSET,
+  WORKSPACE_BOUNDED_SCROLL_MARKER,
   WORKSPACE_CONTENT_BOTTOM_INSET,
   WORKSPACE_SCROLL_BOTTOM_INSET,
 } from '@/shared/lib/workspaceScrollClearance';
@@ -34,6 +35,13 @@ const APP_WORKSPACE_SURFACE_SELECTOR = '[data-workspace-app-surface]';
  *   region; a Host-owned Bottom Actions row below the scrollport makes this
  *   zero, which is exactly the point: the scroll end must not reserve a blank
  *   tail for space that is already outside it.
+ * - **per-scrollport inset** — the same value is written on every element
+ *   carrying the bounded marker, measured from *that* element's own visible
+ *   bottom. Split surfaces (a list above a warnings footer, an editor above a
+ *   feedback pane) therefore do not share one number. The marked element is
+ *   the owning viewport even when an inner renderer currently carries the
+ *   scroll (CodeMirror, a virtualized body); an owner already above the bar
+ *   naturally measures zero (#4222 SC-02).
  * - **actions inset** — the full band, spent by the Host-owned actions slot so
  *   its controls sit above the Capsule at every overlay height.
  *
@@ -55,6 +63,9 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
     }
 
     const observed = new Set<HTMLElement>();
+    // The last value written to each individually measured scrollport, so a
+    // steady layout does not thrash inline styles on every observer tick.
+    const measuredInsets = new Map<HTMLElement, number>();
     let safeAreaBottom = 0;
 
     const observe = (element: HTMLElement | null) => {
@@ -65,11 +76,44 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
       resizeObserver.observe(element);
     };
 
+    const forget = (element: HTMLElement) => {
+      if (!observed.delete(element)) {
+        return;
+      }
+      resizeObserver.unobserve(element);
+      if (measuredInsets.delete(element)) {
+        element.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+      }
+    };
+
     const update = () => {
       const bar = shell.querySelector(TOOL_BAR_SELECTOR);
       const barElement = bar instanceof HTMLElement ? bar : null;
       const surface = shell.querySelector(APP_WORKSPACE_SURFACE_SELECTOR);
       const surfaceElement = surface instanceof HTMLElement ? surface : null;
+
+      // Every declared bounded scrollport in this Workspace (#4222 SC-02).
+      // Each one is measured against the same live Capsule top, but from its
+      // own visible bottom: sibling scrollers that end at different
+      // coordinates (a split reader, a list beside a detail pane) each get the
+      // clearance that belongs to them instead of inheriting one number
+      // derived from the outer surface.
+      const scrollports = new Set<HTMLElement>(
+        Array.from(
+          shell.querySelectorAll<HTMLElement>(
+            `[class~="${WORKSPACE_BOUNDED_SCROLL_MARKER}"]`,
+          ),
+        ),
+      );
+
+      // Drop observations for elements whose marker/lifecycle left the shell.
+      for (const element of Array.from(observed)) {
+        const stillNeeded =
+          element === barElement || element === surfaceElement || scrollports.has(element);
+        if (!stillNeeded || !element.isConnected) {
+          forget(element);
+        }
+      }
 
       observe(barElement);
       observe(surfaceElement);
@@ -91,6 +135,42 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
       shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, `${contentBand}px`);
       shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, `${scrollInset}px`);
       shell.style.setProperty(WORKSPACE_ACTIONS_BOTTOM_INSET, `${contentBand}px`);
+
+      // Measured per element, not inherited from the shell. The owning
+      // *element* is the scrolling viewport even when an inner renderer (the
+      // CodeMirror host, a virtualized body) currently carries the scroll:
+      // requiring the outer element's own `scrollHeight` to exceed its
+      // `clientHeight` would zero the inset for exactly those adapters. A
+      // constrained element already above the bar yields zero naturally.
+      //
+      // A marked element nested inside another marked owner is not an
+      // independent surface: it is a renderer inside the outer scroll area
+      // (a CodeMirror host inside the Git preview body). Measuring it from its
+      // content-height bottom would inflate its padding and steal the scroll
+      // relation; it inherits the outer owner's published value instead.
+      const nestedInsideOwner = (element: HTMLElement): boolean => {
+        for (let parent = element.parentElement; parent && parent !== shell; parent = parent.parentElement) {
+          if (scrollports.has(parent)) {
+            return true;
+          }
+        }
+        return false;
+      };
+      for (const element of scrollports) {
+        observe(element);
+        if (nestedInsideOwner(element)) {
+          if (measuredInsets.delete(element)) {
+            element.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+          }
+          continue;
+        }
+        const inset = Math.max(0, element.getBoundingClientRect().bottom - floatingTop);
+        if (measuredInsets.get(element) === inset) {
+          continue;
+        }
+        element.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, `${inset}px`);
+        measuredInsets.set(element, inset);
+      }
     };
 
     const resizeObserver = new ResizeObserver(update);
@@ -119,6 +199,10 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
+      for (const element of measuredInsets.keys()) {
+        element.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+      }
+      measuredInsets.clear();
       environment?.removeEventListener(APP_VIEWPORT_SNAPSHOT_EVENT, onSnapshot);
       window.removeEventListener('resize', update);
       shell.style.removeProperty(WORKSPACE_CONTENT_BOTTOM_INSET);

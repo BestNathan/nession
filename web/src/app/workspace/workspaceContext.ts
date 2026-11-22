@@ -268,9 +268,9 @@ export interface WorkspaceViewBinding {
    * declaration that the view is a fill surface with its own internal scroll
    * owner — a collection, reader, diff or editor — for which the host provides
    * the effective height and the measured trailing clearance. A capability
-   * that declares `bounded` is responsible for spending
-   * `workspaceBoundedScrollClearanceClass` inside that internal scroller; it
-   * still never measures the Capsule itself.
+   * that declares `bounded` renders each internal scroller through
+   * `WorkspaceBoundedScrollport` (or an equivalent declared adapter); it still
+   * never measures the Capsule itself.
    */
   appScroll?: 'document' | 'bounded';
 }

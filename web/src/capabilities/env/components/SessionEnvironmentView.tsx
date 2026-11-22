@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { AlertTriangle, ChevronDown, CircleAlert, RefreshCw } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import type { Agent, EnvFileInfo } from '@/types';
@@ -217,25 +217,25 @@ export function SessionEnvironmentView({
 
   if (binding.loading && !binding.binding) {
     return (
-      <div
+      <WorkspaceBoundedScrollport
         data-testid="env-session-environment"
-        className={cn('flex h-full min-h-0 flex-col gap-3 p-4', workspaceBoundedScrollClearanceClass)}
+        data-status={status.status}
+        viewportClassName="h-full flex flex-col"
+        className="flex min-h-full flex-col gap-3 p-4"
       >
         <Skeleton className="h-6 w-48" />
         <Skeleton className="h-16 w-full" />
         <Skeleton className="h-24 w-full" />
-      </div>
+      </WorkspaceBoundedScrollport>
     );
   }
 
   return (
-    <div
+    <WorkspaceBoundedScrollport
       data-testid="env-session-environment"
       data-status={status.status}
-      className={cn(
-        'flex h-full min-h-0 flex-col overflow-y-auto p-4',
-        workspaceBoundedScrollClearanceClass,
-      )}
+      viewportClassName="h-full flex flex-col"
+      className="flex flex-col p-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -291,6 +291,6 @@ export function SessionEnvironmentView({
         <h3 className={cn('mb-2', chromeSansRole('primary'))}>Included profiles</h3>
         <IncludedProfiles desired={desired} profiles={profiles} agents={agents} />
       </div>
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }

@@ -353,6 +353,130 @@ function expectEndpoint(state, label) {
  * The host's published scroll inset is derived from the App surface that is
  * actually there, not from a capability constant (#4115).
  */
+async function measureNamedScrollports(page, selectors) {
+  const measurements = [];
+  for (const selector of selectors) {
+    const state = await scrollToEndAndMeasure(page, selector);
+    measurements.push({ selector, state });
+  }
+  return measurements;
+}
+
+/**
+ * A persistent sibling outside the scroll area, measured against the Capsule
+ * (#4222 SC-04). It is legal only when it declares a Host-managed role and
+ * remains entirely above the floating bar.
+ */
+async function fixedRoleState(page, testId) {
+  return page.evaluate((id) => {
+    const element = document.querySelector(`[data-testid="${id}"]`);
+    const bar = document.querySelector('[data-testid="workspace-tool-bar"]');
+    const shell = document.querySelector('[data-testid="workspace-shell"]');
+    if (!(element instanceof HTMLElement) || element.offsetParent === null) {
+      return null;
+    }
+    const rect = element.getBoundingClientRect();
+    const capsuleTop = bar instanceof HTMLElement
+      ? bar.getBoundingClientRect().top
+      : (shell instanceof HTMLElement ? shell.getBoundingClientRect().bottom : window.innerHeight);
+    return {
+      testId: id,
+      declared: element.getAttribute('data-workspace-fixed-role'),
+      top: rect.top,
+      bottom: rect.bottom,
+      capsuleTop,
+    };
+  }, testId);
+}
+
+function expectFixedClearsCapsule(state, label) {
+  expect(state, label + ': the fixed surface is rendered').not.toBeNull();
+  expect(state.declared, label + ': the fixed surface declares its role').not.toBeNull();
+  expect(state.bottom, label + ': the fixed surface clears the Capsule')
+    .toBeLessThanOrEqual(state.capsuleTop + ROUNDING_TOLERANCE_PX);
+}
+
+/**
+ * Probe the designated (or largest) surface and report whether it scrolls.
+ *
+ * A short route is a valid endpoint state: every row is already visible. The
+ * Case must not invent content just to force a scrollbar, but it still proves
+ * the final painted row sits above the Capsule and no content is clipped by an
+ * `overflow-hidden` ancestor that never scrolls.
+ */
+async function surfaceProbe(page, selector = null) {
+  return page.evaluate((namedSelector) => {
+    const content = document.querySelector('[data-testid="workspace-tool-content"]');
+    const bar = document.querySelector('[data-testid="workspace-tool-bar"]');
+    const shell = document.querySelector('[data-testid="workspace-shell"]');
+    if (!(content instanceof HTMLElement)) return null;
+    const visible = (element) => element instanceof HTMLElement
+      && element.offsetParent !== null
+      && getComputedStyle(element).visibility !== 'hidden'
+      && getComputedStyle(element).display !== 'none';
+    const scrollers = [content, ...content.querySelectorAll('*')].filter((element) => {
+      if (!visible(element)) return false;
+      const style = getComputedStyle(element);
+      return (style.overflowY === 'auto' || style.overflowY === 'scroll')
+        && element.scrollHeight > element.clientHeight + 1;
+    });
+    const named = namedSelector ? document.querySelector(namedSelector) : null;
+    const namedVisible = named instanceof HTMLElement && visible(named);
+    const scroller = namedVisible
+      ? named
+      : scrollers.sort((a, b) => b.clientHeight - a.clientHeight)[0] ?? null;
+    const root = scroller ?? content;
+    const rect = root.getBoundingClientRect();
+    const capsuleTop = bar instanceof HTMLElement
+      ? bar.getBoundingClientRect().top
+      : (shell instanceof HTMLElement ? shell.getBoundingClientRect().bottom : window.innerHeight);
+    const texts = [...root.querySelectorAll('*')].filter(
+      (node) => visible(node) && node.children.length === 0 && (node.textContent || '').trim().length > 0,
+    );
+    const controls = [...root.querySelectorAll('button, a, [role="button"], input, textarea, select')]
+      .filter(visible);
+    const bottoms = [...texts, ...controls].map((node) => node.getBoundingClientRect().bottom)
+      .filter((bottom) => Number.isFinite(bottom) && bottom > rect.top);
+    return {
+      exists: true,
+      named: namedSelector === null
+        ? null
+        : { present: named instanceof HTMLElement, visible: namedVisible },
+      scrollable: scroller instanceof HTMLElement
+        && scroller.scrollHeight > scroller.clientHeight + 1,
+      scroller: scroller instanceof HTMLElement
+        ? { testid: scroller.getAttribute('data-testid'), bottom: scroller.getBoundingClientRect().bottom }
+        : null,
+      capsuleTop,
+      lastBottom: bottoms.length > 0 ? Math.max(...bottoms) : null,
+      clipped: scroller === null && content.scrollHeight > content.clientHeight + 1,
+    };
+  }, selector);
+}
+
+/**
+ * The tolerant endpoint check: scroll when the surface really scrolls, and
+ * otherwise assert the visible final row is above the Capsule and the content
+ * is not clipped by a non-scrolling ancestor.
+ */
+async function expectSurfaceAtEnd(page, selector, label) {
+  const probe = await surfaceProbe(page, selector);
+  expect(probe, label + ': a Workspace surface').not.toBeNull();
+  if (selector) {
+    expect(probe.named.visible, label + ': the named scroll owner is rendered').toBe(true);
+  }
+  expect(probe.clipped, label + ': content is not clipped by a non-scrolling ancestor').toBe(false);
+  if (probe.scrollable) {
+    const state = await scrollToEndAndMeasure(page, selector);
+    expectEndpoint(state, label);
+    return state;
+  }
+  expect(probe.lastBottom, label + ': the short surface has painted content').not.toBeNull();
+  expect(probe.lastBottom, label + ': the short surface clears the Capsule')
+    .toBeLessThanOrEqual(probe.capsuleTop + ROUNDING_TOLERANCE_PX);
+  return probe;
+}
+
 function expectHostInset(state, label) {
   expect(state.host, label + ': the App host publishes its insets').not.toBeNull();
   const scrollInset = Number.parseFloat(state.host.scrollInset);
@@ -429,6 +553,11 @@ module.exports = {
   growSandboxUntilScrolls,
   capsuleTop,
   scrollToEndAndMeasure,
+  measureNamedScrollports,
+  fixedRoleState,
+  expectFixedClearsCapsule,
+  surfaceProbe,
+  expectSurfaceAtEnd,
   expectEndpoint,
   expectHostInset,
   longPress,

@@ -98,7 +98,8 @@
     "web/src/app/experiences/app/AppFilesSearchPanel.tsx": [
       "2b1d8f8f9f7d64cbd01b0cca65dbfc3f4f4afc0b",
       "9253c2a36a6e4c3748746c7d63749be45b3c2c3c",
-      "e9090ce6de1e2960ce9099be59182b084643bcbf"
+      "e9090ce6de1e2960ce9099be59182b084643bcbf",
+      "206c616a7a3103baf632469293cbc0aef8301c03"
     ],
     "web/src/app/experiences/app/AppFilesSelectionChrome.tsx": [
       "d38ee55b9893e06c505134b5d90d21cf3c01abb3",
@@ -567,7 +568,8 @@
     "web/src/capabilities/claude-code/components/ClaudeCodeWorkspace.tsx": [
       "83b5137aa13cac65ddd28dd4934d64fed4069405",
       "98d0223e3d59860bcc825146618ee40b39b12e3b",
-      "72331958550f95c0852038af5d44375bca65de0a"
+      "72331958550f95c0852038af5d44375bca65de0a",
+      "56a3cf26c6a4cd54c6690b7e8013e49b47621d29"
     ],
     "web/src/capabilities/claude-code/components/ConversationOverlay.tsx": [
       "16d26f0c88e3bf411c2e727d6ceff4053968ed1b"
@@ -575,16 +577,19 @@
     "web/src/capabilities/claude-code/components/McpView.tsx": [
       "b06aa953e09cb0117c5e91a8131d991a6802a130",
       "f9205d275eed87d9683d6979c703064c63c99de3",
-      "b3c2da63065360fd980be1f93825e7b0b18e6e23"
+      "b3c2da63065360fd980be1f93825e7b0b18e6e23",
+      "ddd16a7127b5f68dd886d6787ad9d1cd9e8e3c4e"
     ],
     "web/src/capabilities/claude-code/components/MemoryView.tsx": [
       "26dc07d09bd7070b0f4438ce030e42ff647a8ed5",
       "99a08e16fd0a012c4c55ba97a0289ed4f9062c51",
-      "a37339510e5ed6d1a8240499293647b1452548c4"
+      "a37339510e5ed6d1a8240499293647b1452548c4",
+      "817ddf55936cbca1b1242dacc627c7ad08bf4f34"
     ],
     "web/src/capabilities/claude-code/components/TranscriptRawInspector.tsx": [
       "01ccdda897c25fe3ffd365dbb7eac89675575746",
-      "60d18515e697a1c25b4aad17d0b74b097d0c92f4"
+      "60d18515e697a1c25b4aad17d0b74b097d0c92f4",
+      "aa63734c7e7cf4f420401d6c650a6294d6e048e2"
     ],
     "web/src/capabilities/claude-code/components/TranscriptRecordDetail.tsx": [
       "3c0923fd6c00d63f4e4c751306285d8225c89449"
@@ -592,38 +597,45 @@
     "web/src/capabilities/claude-code/components/TranscriptTimeline.tsx": [
       "6a71cdc6bcec8084baac90c23ad31f4873c382a6",
       "d794f092d43439fdc714a815351fbfe867a0da5b",
-      "d2877685d14ba14eb8f3be1890ad96ba7ea26a13"
+      "d2877685d14ba14eb8f3be1890ad96ba7ea26a13",
+      "013b80cc086cca2b1d91a665719774f1b86bc62e"
     ],
     "web/src/capabilities/claude-code/components/TranscriptView.tsx": [
       "35f4b877a4025cb1958edc30d79ccd863be4c12b",
       "e762d05fa517eefa22279683a29862446dac698c",
-      "f4d6adf29569fd452efd59b4454ec90ae8baa5c4"
+      "f4d6adf29569fd452efd59b4454ec90ae8baa5c4",
+      "2dac112581d2dd5e140df523fb2017523800dc4c"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ClaudeAppRouteLayer.tsx": [
       "98c56ae4d7f40181bb3ff5b651decff3106c317f"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ConfigurationRoutes.tsx": [
-      "f4c193401f6b0eecfe987f205f535702fb36d975"
+      "f4c193401f6b0eecfe987f205f535702fb36d975",
+      "e4994ed632a2464034797894fc2b0b82cf9a0682"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ConversationRoutes.tsx": [
       "df8edb52eed166b2631b2c703a2fc3856f9e3b7b",
-      "dd827bee3189fefb6b63316b111460c9d5f14653"
+      "dd827bee3189fefb6b63316b111460c9d5f14653",
+      "4326fbcb258eb15a7812bac8e0a3a3ead9113ddf"
     ],
     "web/src/capabilities/claude-code/components/claude-app/McpRoutes.tsx": [
-      "42412de38c8d5a7e85e94eff0e8b29810c867e4b"
+      "42412de38c8d5a7e85e94eff0e8b29810c867e4b",
+      "eca19d26b0787012b3d311d1466e2f983ae7cdb8"
     ],
     "web/src/capabilities/claude-code/components/claude-app/MemoryRoutes.tsx": [
       "2237ee213042bf9eba375c87c6afac6bf20452b7"
     ],
     "web/src/capabilities/claude-code/components/claude-app/TranscriptRoutes.tsx": [
-      "31f8aeb482f0c45c04a2f764037ef33c1bbf5ad4"
+      "31f8aeb482f0c45c04a2f764037ef33c1bbf5ad4",
+      "b1eb03c344331eb5bdb2dfb67efbca88dec8294d"
     ],
     "web/src/capabilities/claude-code/components/claude-app/model.ts": [
       "bc1e370f656cfafb7987cad0b12251cc635a474c"
     ],
     "web/src/capabilities/claude-code/components/claude-app/primitives.tsx": [
       "2919072867dd08e115fd7f28d21010a5c2028852",
-      "5fec685f9ee06fc2d137639b0a195752d07f399e"
+      "5fec685f9ee06fc2d137639b0a195752d07f399e",
+      "d7d285c863ef0c68bffba71cce2b3bd111ca136b"
     ],
     "web/src/capabilities/claude-code/components/claude-app/useClaudeAppNavigation.ts": [
       "5408a63ed9e29b049d2020eed29a5b04297eb9a6"
@@ -705,7 +717,8 @@
     ],
     "web/src/capabilities/env/components/BindingDraftView.tsx": [
       "69d912e8c002b697e3249d08a1c6ab85155da0c8",
-      "d708b8d93951d19718438628bdfbd3944248a36b"
+      "d708b8d93951d19718438628bdfbd3944248a36b",
+      "380ff67bc2e9b8e11ad918e6fe69c96a96c776f1"
     ],
     "web/src/capabilities/env/components/EnvDiff.tsx": [
       "8cf07f1c2ae51174cbf227598e7de61ebff2bf1c"
@@ -721,25 +734,29 @@
     ],
     "web/src/capabilities/env/components/EnvProfileEditor.tsx": [
       "572311e30b2354c7216d75f850b50427fd7ef41c",
-      "e5b94065898ec80c367263428f181b51d483cd71"
+      "e5b94065898ec80c367263428f181b51d483cd71",
+      "8034a4fb18e2862c857868dd316a61b582e1ef94"
     ],
     "web/src/capabilities/env/components/EnvVariablesView.tsx": [
       "97a6db0a08f52d6b6a26340b460ab2e8777bc875",
-      "ac502708f110e7e2187f986fd439b01a75682d06"
+      "ac502708f110e7e2187f986fd439b01a75682d06",
+      "68e30758fea2822dd1ebe291f866727959bdb5df"
     ],
     "web/src/capabilities/env/components/EnvironmentGuardDialog.tsx": [
       "085673b608239ae40634d40343ab377846309fec"
     ],
     "web/src/capabilities/env/components/EnvironmentNavigator.tsx": [
       "2ce23fbe8595d148c65cabbee79a524172ba336f",
-      "e58aa35faf5330ead10331c52d7a646e2db8dbe2"
+      "e58aa35faf5330ead10331c52d7a646e2db8dbe2",
+      "69c505f6602a6a3274d23b47584453085c566c9f"
     ],
     "web/src/capabilities/env/components/SessionEnvironmentSummary.tsx": [
       "de0f723ed4838fcca0fa799171164bf12aedac55"
     ],
     "web/src/capabilities/env/components/SessionEnvironmentView.tsx": [
       "cabf1317a792e57ff01b87bfa30050e37cf4eaa5",
-      "18050fb59192b37c19a1dc07c91867dc6b14f523"
+      "18050fb59192b37c19a1dc07c91867dc6b14f523",
+      "6dd0cb94512fe04a853e4de7848ebc77ed9e8286"
     ],
     "web/src/capabilities/env/envApi.ts": [
       "49b6a776eadaf77e73c5fbb2634b7479dcba72d9"
@@ -853,7 +870,8 @@
     ],
     "web/src/capabilities/git/components/GitBranchesView.tsx": [
       "8244ab17940368ae6dc846978fac6af9913449cb",
-      "359e6802b807f501a1039da19a4b53702110558d"
+      "359e6802b807f501a1039da19a4b53702110558d",
+      "3cfa96e7831239bb03477da14fe2dd03adafc6aa"
     ],
     "web/src/capabilities/git/components/GitChangeList.tsx": [
       "37399e58e17fc15909338530bff39b8454f4f279",
@@ -864,15 +882,18 @@
     ],
     "web/src/capabilities/git/components/GitDiffView.tsx": [
       "7554d017481674a3e9e1004954d990e0c43e5b3e",
-      "1f229314a03d8bd249bd35b37b6ce2cfdfd7a1d8"
+      "1f229314a03d8bd249bd35b37b6ce2cfdfd7a1d8",
+      "9d3c5c66255f8680fc59ee08629cfed18161acd9"
     ],
     "web/src/capabilities/git/components/GitFilePreviewView.tsx": [
       "d171405cc0e5fc6c666db3b49e150f8a6fb56a5a",
-      "36202d85d4a0ff4e62b9d154370bd2f993f2c4fd"
+      "36202d85d4a0ff4e62b9d154370bd2f993f2c4fd",
+      "bf822868e602b7e97f80e86c061101fc3655d1c3"
     ],
     "web/src/capabilities/git/components/GitHistoryCommitDetail.tsx": [
       "ae14cddac0ae11cdb666e78cdc150eb8cc3ffb70",
-      "c7cecd6cd722b603df9b2917d19392e195007aa0"
+      "c7cecd6cd722b603df9b2917d19392e195007aa0",
+      "8a23ec7a36e9ff4a25c9e34ac8f496c7151849e4"
     ],
     "web/src/capabilities/git/components/GitHistoryCommitList.tsx": [
       "437e0ab88600c13a4a25abdd0850d9623073a465"
@@ -888,33 +909,40 @@
     ],
     "web/src/capabilities/git/components/GitWorkspace.tsx": [
       "90839f29fd14c09e82beea9282b3eeda0c599722",
-      "287f8f5122c6fb822ba6dccfbeddc00a2a22f446"
+      "287f8f5122c6fb822ba6dccfbeddc00a2a22f446",
+      "773df7b08fda8f2d1ad5204e1820e57db11fd935"
     ],
     "web/src/capabilities/git/components/GitWorktreesView.tsx": [
       "a2af97a8e0efd530419c1363f8ef2003cf81b56e",
-      "dd68b1026650ac195a1cab602be6a7479f3705d3"
+      "dd68b1026650ac195a1cab602be6a7479f3705d3",
+      "02d972751602379c385b355af11418a3f59eeeb7"
     ],
     "web/src/capabilities/git/components/GithubActionsView.tsx": [
       "e83cb75eacd1c3b4c39186ff994ca44d96b0a4dc",
-      "7d2ced5e5600eadb9204908f41e5e082b7068154"
+      "7d2ced5e5600eadb9204908f41e5e082b7068154",
+      "4b7232064a092b52e215f6b8ced4bdde92230482"
     ],
     "web/src/capabilities/git/components/GithubHostingView.tsx": [
-      "e960459a1844c5fb72d7108d133a4ba3485a1651"
+      "e960459a1844c5fb72d7108d133a4ba3485a1651",
+      "c28eaf4fe918fe3601b0082208775059dae7a772"
     ],
     "web/src/capabilities/git/components/GithubIssuesView.tsx": [
       "abdb923d6ac4b3077e44bc1578cdc13b5b19fcc8",
-      "6643b5f5869c4b8174c459097cd0742e81f7f3bd"
+      "6643b5f5869c4b8174c459097cd0742e81f7f3bd",
+      "9c4b788c5c60dec6723356a38935cc77d13a4d26"
     ],
     "web/src/capabilities/git/components/GithubNotice.tsx": [
       "d7bc6872258697322d635957d31bef77e3adbb7a"
     ],
     "web/src/capabilities/git/components/GithubPullRequestsView.tsx": [
       "fcefdd49001c70474026a962b5a72418b0dd8b42",
-      "3fc5d7236a24b8a9fecc46b5915357493dc8abaa"
+      "3fc5d7236a24b8a9fecc46b5915357493dc8abaa",
+      "201addf411d3635691fe2e9cc824ad8aea003f34"
     ],
     "web/src/capabilities/git/components/GithubReaderLayout.tsx": [
       "51d42f0d7fb2a786f07f1eb9263de47ebf6c7cc1",
-      "173b140f46d8c714268b588452592aedcde445dc"
+      "173b140f46d8c714268b588452592aedcde445dc",
+      "4081ada8e6c98e7ad22b2bb9c03f232a4e531bf8"
     ],
     "web/src/capabilities/git/components/patchPresentation.ts": [
       "5014bda733b826825a1036e7e6eb5b11cb62e284"
@@ -1016,7 +1044,8 @@
     ],
     "web/src/capabilities/mcp-ui/components/McpKitView.tsx": [
       "ad01c0f5078ba7f722106effc7d74bf564ff17ea",
-      "5c3e4edcd82cda82a0fdada28dda32bd5921809d"
+      "5c3e4edcd82cda82a0fdada28dda32bd5921809d",
+      "359394623a48e5d0231bc64d100bf7df9e869464"
     ],
     "web/src/capabilities/mcp-ui/components/McpSchemaViewer.tsx": [
       "48350804dbb1b33a93818c308f2163571d734f5e"
@@ -1142,7 +1171,8 @@
     ],
     "web/src/capabilities/sandbox/components/SandboxPolicyTabs.tsx": [
       "1de9b9fd76eaa53b208360acfc60b49feb23bdb3",
-      "54865489c32d7e3acf4682b980053cef406ce72d"
+      "54865489c32d7e3acf4682b980053cef406ce72d",
+      "39d5b464dc1d9627e1a7005b90da59ea7a64306b"
     ],
     "web/src/capabilities/sandbox/components/SandboxSectionNav.tsx": [
       "1b294cc2b6bfaa2377fc5a6732109011f6628713"
@@ -2137,7 +2167,8 @@
     ],
     "web/src/shared/ai-conversation/components/ConversationTranscript.tsx": [
       "8f87699f91cb6945e70592a9aee96488876d965d",
-      "0f201b696d3fe1daf5a5bb3b13f37a7df4038402"
+      "0f201b696d3fe1daf5a5bb3b13f37a7df4038402",
+      "c352379b517848e2c03782c0d85b189e5bd60e9d"
     ],
     "web/src/shared/ai-conversation/components/ConversationView.tsx": [
       "61e0a852a8f81cdaf0a754bdd3a046481c17ce25",
@@ -2221,11 +2252,13 @@
     ],
     "web/src/shared/file-viewer/components/ImageViewer.tsx": [
       "7af55f69df0367a2971c0836e437368b1b065112",
-      "ec346fcb2bcd5edee4f55ac8d9326b75c95dc7e7"
+      "ec346fcb2bcd5edee4f55ac8d9326b75c95dc7e7",
+      "8aae6b3b1248a05fbfed65eafeb2b44e793652ba"
     ],
     "web/src/shared/file-viewer/components/JsonPreview.tsx": [
       "673049eae0ecb5f3f975992974355dc10a1a8f54",
-      "88f57171f56d6bd7ba2dff9f5327ce5ceb2b0dfe"
+      "88f57171f56d6bd7ba2dff9f5327ce5ceb2b0dfe",
+      "158cc37115e5077ca114f021d4f92a644d8678f0"
     ],
     "web/src/shared/file-viewer/components/JsonlPreview.tsx": [
       "48529995e37694e73bcf0e773cabddd90c3a7003"
@@ -2235,7 +2268,8 @@
     ],
     "web/src/shared/file-viewer/components/MarkdownPreview.tsx": [
       "44523d7284c1b25317fa6cf2211dbbd2a08019a1",
-      "5add87dba4a7ef2e5f08b7f966be22425d40ed5e"
+      "5add87dba4a7ef2e5f08b7f966be22425d40ed5e",
+      "0f03fbc68ab01800560cc801d08c84649d4fc66c"
     ],
     "web/src/shared/file-viewer/components/PdfViewer.tsx": [
       "26986a5896d530d6c7caaeea187282745443bc05"
@@ -2314,7 +2348,8 @@
     ],
     "web/src/shared/lib/workspaceScrollClearance.ts": [
       "4b034394154f7f09e3a394151ff621cf7decb39c",
-      "79a1f3fd3b6aca0e5cccd56e5d200dc893c0aa04"
+      "79a1f3fd3b6aca0e5cccd56e5d200dc893c0aa04",
+      "4bf8bacb974146048afc0252f18c194d514912a8"
     ],
     "web/src/shared/markdown/ChatMarkdown.module.css": [
       "db648428cfed1ac3df3b158edf6137aae8e705c2"

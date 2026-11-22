@@ -555,9 +555,17 @@ seen.
   fully visible and tappable above it.
 - **Declared bounded surfaces are the exception.** A collection, reader, diff
   or editor that genuinely scrolls internally declares itself `bounded` on its
-  view binding and keeps exactly one internal scroll owner. The host gives it
-  the full region and the measured trailing inset; the capability still does
-  not measure the Capsule.
+  view binding and keeps its internal scroll owners. The host gives it the full
+  region; each owner rendered through `WorkspaceBoundedScrollport` carries the
+  measured trailing inset on its viewport, while its content spacing stays on
+  an inner wrapper (`p-2` cannot override the inset). Split surfaces may have
+  several owners at different bottoms — the host measures each from that
+  element's own visible rect, not from one shared number.
+- **Every route variant is in the coverage contract.** A nested depth, tab or
+  section inherits no scrolling guarantee from its parent's `bounded`
+  declaration. `scrollCoverage.ts` names the mode and the observable owners for
+  every reachable variant, and the design Gate fails closed when a union member
+  has no entry.
 - **Bottom actions are hosted.** A capability's bottom actions (Files'
   Copy/Delete while selecting) are contributed as content and mounted by the
   host below the scrollport and above the Capsule. The host owns the band's
@@ -565,7 +573,9 @@ seen.
   and no capability computes a capability-specific footer offset.
 - **No permanently reserved footer.** An actions slot with nothing in it is
   hidden; the scroll end reserves nothing for space that is already outside
-  the scrolling viewport.
+  the scrolling viewport. Ordinary notes, errors and status rows live inside
+  the scroll area; a genuinely persistent context declares
+  `data-workspace-fixed-role="context"` and must stay above the Capsule.
 - **The overlay is dynamic.** Opening/collapsing the Capsule, switching
   capabilities or depths, wrapping items, orientation/safe-area changes and a
   keyboard/focus change recompute the same measurement. The App viewport
