@@ -436,11 +436,21 @@ async function surfaceProbe(page, selector = null) {
     const capsuleTop = bar instanceof HTMLElement
       ? bar.getBoundingClientRect().top
       : (shell instanceof HTMLElement ? shell.getBoundingClientRect().bottom : window.innerHeight);
+    const paintedNode = (node) => {
+      if (!visible(node)) return false;
+      const box = node.getBoundingClientRect();
+      // `sr-only`/visually-hidden controls (a count, a duplicate refresh) are
+      // 1px and can sit at the layout bottom; they are not readable content.
+      const style = getComputedStyle(node);
+      return box.width >= 2 && box.height >= 2
+        && style.clipPath === 'none'
+        && (style.clip === 'auto' || style.clip === '');
+    };
     const texts = [...root.querySelectorAll('*')].filter(
-      (node) => visible(node) && node.children.length === 0 && (node.textContent || '').trim().length > 0,
+      (node) => paintedNode(node) && node.children.length === 0 && (node.textContent || '').trim().length > 0,
     );
     const controls = [...root.querySelectorAll('button, a, [role="button"], input, textarea, select')]
-      .filter(visible);
+      .filter(paintedNode);
     const bottoms = [...texts, ...controls].map((node) => node.getBoundingClientRect().bottom)
       .filter((bottom) => Number.isFinite(bottom) && bottom > rect.top);
     return {

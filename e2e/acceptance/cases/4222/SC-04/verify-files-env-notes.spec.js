@@ -36,6 +36,12 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
     await rawToggle.first().click();
   }
   await page.getByTestId('codemirror-editor').waitFor({ timeout: 30_000 });
+  // Raw opens read-only; the toolbar's Edit control is what makes the draft
+  // writable, and a dirty draft is required to exercise the stale-preview note.
+  const editToggle = page.getByRole('button', { name: 'Edit' });
+  if ((await editToggle.count()) > 0) {
+    await editToggle.first().click();
+  }
   await page.locator('.cm-content').click();
   await page.keyboard.press('Control+End');
   await page.keyboard.type('\n- edited');
