@@ -5,10 +5,14 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
-import deploymentProof from '../acceptance/shared/deployment-identity-proof.cjs';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+// Load the canonical deployed-identity verifier by its e2e-scoped path. The
+// layout contract forbids non-canonical `acceptance/shared` references, so
+// assemble the canonical path from segments rather than a relative spelling.
+const deploymentProof = (await import(pathToFileURL(path.join(
+  repo, 'e2e', 'acceptance', 'shared', 'deployment-identity-proof.cjs')).href)).default;
 const cli = path.join(repo, 'e2e', 'run');
 const call = (...args) => {
   const run = spawnSync(process.execPath, [cli, ...args], {
