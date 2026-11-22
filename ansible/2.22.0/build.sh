@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Official Ansible Core 2.22.0; source and all 8 runtime Python dependencies
 # SHA256-locked as wheels in the embedded Python 3.13 universal dependency lock.
-# #4241. Python 3.13 runtime is provided by separately composed Ubuntu base.
+# #4241. Python 3.13 runtime is separately supplied by Ubuntu Base. The trusted
+# uncredentialed native CI and extracted readback use setup-python@v5 (#4274).
 # Lock provenance: fabr​iziosalmi/certmate@3fe28d75fe3c712dff4c137a1361a0fdd23961ed,
 # requirements-galaxy.lock blob de3e9d9ebd4256e8311ff6e760f9a03cc8743a64.
 set -euo pipefail
