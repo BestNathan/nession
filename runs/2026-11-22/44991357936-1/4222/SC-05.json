@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "668a747049d5aff87ca83bde3925b36af0bcf4f601e0e1863e31c134f69f87fa",
+  "run_id": 44991357936,
+  "run_attempt": 1,
+  "issue": 4222,
+  "criterion": "SC-05",
+  "criterion_text": "— Eight-capability cross-page regression. The route inventory's full currently reachable App Workspace set (Files, Session, Agent, Env, Sandbox, Claude Code, Git, Project) is executed in the approved Case matrix at 375/390/430px, a landscape/short-height condition and representative Capsule/keyboard simulation. Long contents and expanded details reach their end, focus/Back work, document and body stay unscrolled, and representative Web master/detail flows remain intact. Explicit exceptions for virtualized lists, CodeMirror, PDF/iframe and Dialogs have dedicated observable scroll/end assertions rather than skipped checks.",
+  "stage": "staging",
+  "target_sha": "a532a34a8315be7033e3d6d83029dcfefca91e10",
+  "contract_sha256": "25ef840716d7fe8205889b777cc07e66b430ac1100457126c76e74a24177ba48",
+  "case_revision": "a532a34a8315be7033e3d6d83029dcfefca91e10",
+  "case_tree_sha": "7d9d3492027eb66de967d6d07454a3dc5b829f21",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-22T05:57:42.459Z",
+  "finished_at": "2026-11-22T05:58:01.401Z",
+  "duration_ms": 18942,
+  "verifiers": [
+    {
+      "type": "browser",
+      "entry": "verify-capability-matrix.spec.js",
+      "result": "Pass",
+      "summary": "Playwright JSON confirms executed passing tests and assertions with no skips",
+      "evidence": [
+        {
+          "type": "browser",
+          "value": "Playwright discovered=1 passed=1 skipped=0 assertions=432"
+        }
+      ],
+      "execution": {
+        "discovered": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "assertions": 432
+      },
+      "duration_ms": 13087,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 44991357936,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a532a34a8315be7033e3d6d83029dcfefca91e10",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/44991357936",
+    "record_path": "runs/2026-11-22/44991357936-1/4222/SC-05.json",
+    "source_result_sha256": "4fef937b1cc687ce5bb614db9ad6290d22d945ca9adf31ee6c49bfd03a23dbbb"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-44991357936-1",
+    "sha256": "4fef937b1cc687ce5bb614db9ad6290d22d945ca9adf31ee6c49bfd03a23dbbb",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/44991357936",
+    "durability": "time-limited; object archival not configured"
+  }
+}
