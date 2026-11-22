@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 44998203558,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4285-deployed-identity-ghcr",
+    "target_sha": "b8ea5d249b4d9aa71422b5d687791cf521b8cc1e",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/44998203558",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "f254c2ed37d591ab111c2abec820a16afd5cb64aa8b028b55a549b392f768cf7"
+  },
+  "record": "runs/2026-11-22/44998203558-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "b13f8ece0e03f9c8a580b77c5588755332d6253a1f3568320e80988667ee2e76"
+}
