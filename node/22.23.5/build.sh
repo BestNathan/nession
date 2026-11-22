@@ -27,7 +27,17 @@ if [[ "$mode" == prepare ]]; then
     printf '%s\n' '#!/bin/sh' 'set -eu' 'base="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)"' "exec \"\$base/bin/node\" \"\$base/lib/node_modules/npm/bin/${command}-cli.js\" \"\$@\"" > "$rootfs/bin/$command"
     chmod 0755 "$rootfs/bin/$command"
   done
-  [[ -z "$(find "$rootfs" -type l -print -quit)" ]] || { echo 'Node archive contains unsupported symlink beyond npm/npx/corepack' >&2; exit 1; }
+  # The official archive also ships internal Corepack/npm helper links.
+  # Convert only resolvable regular files *inside* the source-verified tree,
+  # retaining relative behavior while honoring the EROFS no-symlink contract.
+  while IFS= read -r -d '' link; do
+    resolved="$(readlink -f -- "$link")"
+    [[ "$resolved" == "$rootfs/"* && -f "$resolved" ]] || { echo "unsafe Node installed link: $link" >&2; exit 1; }
+    cp -L -- "$link" "$link.nession-copy"
+    rm -- "$link"
+    mv -- "$link.nession-copy" "$link"
+  done < <(find "$rootfs" -type l -print0)
+  [[ -z "$(find "$rootfs" -type l -print -quit)" ]] || { echo 'Node rootfs contains unsupported symlink' >&2; exit 1; }
 fi
 [[ -x "$rootfs/bin/node" && -x "$rootfs/bin/npm" && -x "$rootfs/bin/npx" ]] || { echo 'missing Node/npm/npx executable' >&2; exit 1; }
 [[ "$("$rootfs/bin/node" --version)" == "v${version}" ]] || { echo 'wrong Node version' >&2; exit 1; }
