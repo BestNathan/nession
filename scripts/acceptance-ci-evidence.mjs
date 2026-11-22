@@ -980,16 +980,7 @@ export function computeReuseComparison({targetSha,acceptanceBatchReceipts=[],
 }
 
 async function githubJobLog(path,maxBytes=1048576){
-  const token=process.env.GITHUB_TOKEN??process.env.GH_TOKEN;
-  if(!token)throw Error('historical Case read requires GitHub token');
-  const response=await fetch('https://api.github.com'+path,{
-    headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,
-      'X-GitHub-Api-Version':'2022-11-28'},
-    signal:AbortSignal.timeout(30000)});
-  if(!response.ok)throw Error('GitHub historical Case logs HTTP '+response.status);
-  const body=await response.text();
-  if(body.length>=maxBytes)throw Error('historical Case log too large');
-  return body;
+  return authenticatedGithubRead(path,{format:'text',maxBytes});
 }
 
 // #1866 SC-04: the batch decision is written into the job log by the batch CLI,
@@ -1083,21 +1074,89 @@ export async function collectTargetPushE2eRuns(repo,sha,request=githubGet) {
   return attestTargetPushE2eRuns(payload,sha,repo);
 }
 
-async function githubGet(path) {
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (!token) throw new Error('GITHUB_TOKEN/GH_TOKEN is required');
-  const response = await fetch('https://api.github.com' + path, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: 'Bearer ' + token,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'nession-acceptance-ci-evidence',
-    },
-  });
-  if (!response.ok) {
-    throw new Error('GitHub API ' + response.status + ' for ' + path + ': ' + await response.text());
+// #4253: GitHub read transport failures are evidence-unavailable, never
+// acceptance failures or implicit Passes. Retry only network/timeout errors
+// with a hard bound; expose a safe API path and cause code, never credentials.
+// The same owner handles Job-log redirects and ordinary JSON API reads.
+export async function authenticatedGithubRead(apiPath,{
+  format='json',maxBytes=1048576,
+  token=process.env.GITHUB_TOKEN??process.env.GH_TOKEN,
+  fetcher=fetch,sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms)),
+}={}){
+  if(!token)throw Error('GITHUB_TOKEN/GH_TOKEN is required');
+  if(!/^\/repos\/BestNathan\/nession\//.test(apiPath))
+    throw Error('GitHub read path outside canonical repository');
+  if(!['json','text'].includes(format))
+    throw Error('unsupported GitHub read format');
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      const response=await fetcher('https://api.github.com'+apiPath,{
+        headers:{
+          Accept:'application/vnd.github+json',
+          Authorization:'Bearer '+token,
+          'X-GitHub-Api-Version':'2022-11-28',
+          'User-Agent':'nession-acceptance-ci-evidence',
+        },
+        signal:AbortSignal.timeout(20000),
+      });
+      if(!response.ok){
+        throw Error('GitHub API '+response.status+' for '+apiPath);
+      }
+      if(format==='json')return await response.json();
+      const body=await response.text();
+      if(body.length>=maxBytes)throw Error('historical Case log too large');
+      return body;
+    }catch(error){
+      const transient=error instanceof TypeError ||
+        ['TimeoutError','AbortError'].includes(error?.name);
+      if(!transient)throw error;
+      if(attempt===3){
+        const code=String(error?.cause?.code??error?.code??
+          error?.name??'unknown').slice(0,80);
+        throw Error('GitHub API transport failed at '+apiPath+
+          ' after 3 bounded attempts ('+code+')',{cause:error});
+      }
+      await sleep(250*attempt);
+    }
   }
-  return response.json();
+}
+
+async function githubGet(path) {
+  return authenticatedGithubRead(path);
+}
+
+export async function selfTestAuthenticatedGithubRead(){
+  const apiPath='/repos/BestNathan/nession/issues/4253';
+  let calls=0;
+  const response={ok:true,json:async()=>({verified:true}),
+    text:async()=> 'verified log'};
+  const read=async()=>{calls++;
+    if(calls<3)throw new TypeError('fetch failed',{
+      cause:{code:'ECONNRESET'}});
+    return response;
+  };
+  const options={token:'test-only',fetcher:read,sleep:async()=>{}};
+  assert.deepEqual(await authenticatedGithubRead(apiPath,options),
+    {verified:true});
+  assert.equal(calls,3);
+  assert.equal(await authenticatedGithubRead(apiPath,{
+    ...options,fetcher:async()=>response,format:'text'}),'verified log');
+  await assert.rejects(authenticatedGithubRead(apiPath,{
+    ...options,format:'text',maxBytes:4,fetcher:async()=>response}),
+    /historical Case log too large/);
+  calls=0;
+  await assert.rejects(authenticatedGithubRead(apiPath,{
+    ...options,fetcher:async()=>{calls++;
+      throw new TypeError('fetch failed',{cause:{code:'ETIMEDOUT'}});}}),
+    /GitHub API transport failed at \/repos\/BestNathan\/nession\/issues\/4253 after 3 bounded attempts \(ETIMEDOUT\)/);
+  assert.equal(calls,3);
+  calls=0;
+  await assert.rejects(authenticatedGithubRead(apiPath,{
+    ...options,fetcher:async()=>{calls++;
+      return {ok:false,status:403};}}),/GitHub API 403/);
+  assert.equal(calls,1);
+  await assert.rejects(authenticatedGithubRead('/repos/attacker/fork/issues/1',
+    options),/outside canonical repository/);
 }
 
 // A completed Provider source may be older than MAX_RUNS_PER_SHA and get
@@ -2219,6 +2278,7 @@ async function selfTestLaneEvidenceReceipts() {
 }
 
 async function selfTest() {
+  await selfTestAuthenticatedGithubRead();
   selfTestConflictProbe4124();
   selfTestKnowledgePublication();
   selfTestToolchain4160();
