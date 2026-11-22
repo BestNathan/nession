@@ -24,7 +24,11 @@ if [[ "$mode" == prepare ]]; then
   # Preserve libcurl/OpenSSL HTTP support; only omit optional UI and Perl tools.
   # Runtime prefix lets helpers resolve relative to this EROFS mount, rather
   # than hard-coding the transient CI staging path.
-  build_flags=(RUNTIME_PREFIX=YesPlease NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease)
+  # Git's default install hardlinks >100 dashed builtins to the multi-MB git
+  # binary. The EROFS manifest accounts for each pathname's bytes and rejects
+  # payloads beyond 2 GiB. Builtins remain callable as 'git <subcommand>';
+  # do not duplicate the standalone git ELF for every dashed built-in.
+  build_flags=(RUNTIME_PREFIX=YesPlease NO_RUST=YesPlease NO_TCLTK=YesPlease NO_GETTEXT=YesPlease NO_PERL=YesPlease NO_PYTHON=YesPlease INSTALL_SYMLINKS=YesPlease SKIP_DASHED_BUILT_INS=YesPlease)
   make -C "$src" -j2 "${build_flags[@]}" prefix="$rootfs" all
   make -C "$src" "${build_flags[@]}" prefix="$rootfs" install
   # The EROFS layer format accepted by the current publisher excludes links.
@@ -36,6 +40,11 @@ if [[ "$mode" == prepare ]]; then
     rm -- "$link"
     mv -- "$link.nession-copy" "$link"
   done < <(find "$rootfs" -type l -print0)
+  # Mirror the publisher's per-file byte accounting (including hardlinks)
+  # here so an oversized Git distro fails uncredentialed candidate proof,
+  # not the trusted GHCR uploader after a time-consuming native compile.
+  payload_bytes="$(find "$rootfs" -type f -printf '%s\n' | awk '{sum += $1} END {printf "%.0f",sum+0}')"
+  [[ "$payload_bytes" -le 2147483648 ]] || { echo "Git prepared rootfs exceeds EROFS 2GiB image source bound: $payload_bytes" >&2; exit 1; }
 fi
 [[ -x "$rootfs/bin/git" ]] || { echo 'missing Git binary' >&2; exit 1; }
 [[ "$("$rootfs/bin/git" --version)" == "git version ${version}" ]] || { echo 'incorrect Git version' >&2; exit 1; }
