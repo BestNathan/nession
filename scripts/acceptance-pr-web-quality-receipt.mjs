@@ -128,6 +128,17 @@ export function requiresPrToolingEvidence(context) {
       /\b(?:CI|Quality|Gate|workflow|test)\b/i.test(String(item.text ?? '')));
 }
 
+// #4231: a web-check-only PR path-scopes `web-tests` to completed/skipped, so
+// `pr_web_quality` correctly refuses it as execution proof. A criterion may
+// instead explicitly make the authenticated aggregate exact-head Quality
+// receipt its proof; activation is opt-in by exact text so ordinary PR SCs
+// never receive the aggregate as a proxy for executed test evidence.
+export function requiresPrRequiredQualityEvidence(context) {
+  if (context?.stage !== 'pr') return false;
+  return (context.criteria ?? []).some(item =>
+    /\baggregate\s+`?pr_required_quality`?\s+receipt\b/i.test(String(item.text ?? '')));
+}
+
 // A PR-stage criterion can make the exact-head Rust Quality job its own
 // proof obligation ("Exact-head Rust coverage/Quality ... completes
 // successfully", #3584 SC-02). The obligation is deliberately narrow: the
@@ -611,6 +622,13 @@ function selfTest() {
   assert.equal(requiresPrToolingEvidence({ stage: 'pr',
     requirement_body: 'SCN-01 Web fixtures',
     criteria: [{ text: 'An exact-head Web Gate cannot Pass while pending' }] }), false);
+  assert.equal(requiresPrRequiredQualityEvidence({ stage: 'pr',
+    criteria: [{ text: 'The exact-head web-check passed, as attested by the authenticated aggregate `pr_required_quality` receipt for the repair PR head.' }] }), true);
+  assert.equal(requiresPrRequiredQualityEvidence({ stage: 'pr',
+    criteria: [{ text: 'The exact-head web-check passed at the repair PR head.' }] }), false);
+  assert.equal(requiresPrRequiredQualityEvidence({ stage: 'staging',
+    criteria: [{ text: 'aggregate `pr_required_quality` receipt' }] }), false);
+  assert.equal(requiresPrRequiredQualityEvidence({ stage: 'pr', criteria: [] }), false);
 
   // #3584 SC-02: the exact-head Rust Quality job is positive evidence; a
   // skipped job is inapplicable (never a failure) and a failed one is Fail.
