@@ -45,6 +45,9 @@ test('SC-04 Git History keeps one measured reader per split pane', async ({ page
     if ((await fileRow.count()) > 0) {
       await fileRow.click();
       await page.getByTestId('git-diff').waitFor({ timeout: 30_000 });
+      // The patch renderer is a shadow-DOM host; wait for its painted content
+      // before measuring the short-surface endpoint.
+      await page.getByTestId('git-diff-patch').waitFor({ timeout: 30_000 }).catch(() => undefined);
       await measure(page, '[data-testid="git-diff-body"]', `Git history diff ${viewport.id}`);
 
       // The wrapper between the diff reader and its flex parent is a layout

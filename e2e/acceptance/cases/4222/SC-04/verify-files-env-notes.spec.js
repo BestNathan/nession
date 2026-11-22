@@ -70,11 +70,16 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
     .click();
   await page.getByTestId('codemirror-editor').waitFor({ timeout: 30_000 });
 
-  const viewer = await helper.scrollToEndAndMeasure(page, '[data-testid="codemirror-editor"]');
+  const viewer = await helper.scrollToEndAndMeasure(page, '.cm-scroller');
   helper.expectEndpoint(viewer, 'Files source viewer');
   expect(viewer.host.mode, 'Files is a declared bounded surface').toBe('bounded');
 
-  // The editor keeps its caret path after endpoint measurement.
+  // The editor keeps its caret path after endpoint measurement. Raw opens
+  // read-only; the toolbar Edit control makes the draft writable.
+  const sourceEditToggle = page.getByRole('button', { name: 'Edit' });
+  if ((await sourceEditToggle.count()) > 0) {
+    await sourceEditToggle.first().click();
+  }
   await page.locator('.cm-content').click();
   await page.keyboard.press('Control+End');
   await page.keyboard.type('X');
@@ -98,7 +103,7 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
     'Env name validation',
   );
 
-  const editor = await helper.scrollToEndAndMeasure(page, '[data-testid="codemirror-editor"]');
+  const editor = await helper.scrollToEndAndMeasure(page, '.cm-scroller');
   helper.expectEndpoint(editor, 'Env editor');
 
   // No page-level scroll owner sneaked in around the editor.
