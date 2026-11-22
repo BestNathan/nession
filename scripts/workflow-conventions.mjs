@@ -63,6 +63,7 @@ export const CATALOG = [
   ['e2e-test-ingest', 'e2e-test-run-ingest.yml', 'E2E Test Run Ingest', 'e2e-test-ingest.yml', 'E2E / Test Ingest', 'e2e'],
   ['e2e-full-failure-ingest', 'e2e-full-failure-ingest.yml', 'E2E Full Failure Intake', 'e2e-full-failure-ingest.yml', 'E2E / Full Failure Intake', 'e2e'],
   ['ci-quality', 'quality.yml', 'Quality Gate', 'ci-quality.yml', 'CI / Quality Gate', 'ci'],
+  ['ci-toolchain-candidate', 'ci-toolchain-candidate.yml', 'CI / Toolchain Candidate', 'ci-toolchain-candidate.yml', 'CI / Toolchain Candidate', 'ci'],
   ['ci-web-dist-reuse-proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci-web-dist-reuse-proof.yml', 'CI / Web Dist Reuse Proof', 'ci'],
   ['ci-run-store-integrity-audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci-run-store-integrity-audit.yml', 'CI / Run Store Integrity Audit', 'ci'],
   ['ci-run-store-anchor', 'ci-run-store-anchor.yml', 'CI / Run Store Signed Checkpoint', 'ci-run-store-anchor.yml', 'CI / Run Store Signed Checkpoint', 'ci'],
