@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 45038896727,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "push",
+    "unique_run_name": "45038896727-1-issue-4241-post-merge"
+  },
+  "task": {
+    "id": "issue-4241-post-merge",
+    "type": "acceptance",
+    "issue": 4241,
+    "stage": "post-merge",
+    "target_ref": "ff00fbd6b504ca2953293dce9ea4097fce9a3452",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "4b976c5d-4756-4df8-a514-82a32e2b3d1a",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v4",
+      "sha256": "09498d24b940bca834ccfcb04ce32f6e8f5a77649d848618afc5d744db790d06"
+    }
+  },
+  "execution": {
+    "turns": 18,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 84,
+    "output": 7094,
+    "cache_read": 573965,
+    "cache_write": 26512,
+    "reasoning": null,
+    "total": 607655
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-22T15:38:05.759Z",
+    "finished_at": "2026-11-22T15:44:37.679Z",
+    "agent_duration_ms": 126677,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed",
+    "pass": 0,
+    "pending": 4,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "invalid-result",
+      "error": "unknown or wrong-stage criterion SC-01",
+      "started_at": "2026-11-22T15:33:58.644Z",
+      "finished_at": "2026-11-22T15:38:05.759Z",
+      "turns": 2,
+      "tokens": {
+        "input": 12,
+        "output": 907,
+        "cache_read": 93713,
+        "cache_write": 6303,
+        "reasoning": null,
+        "total": null
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "valid",
+      "error": null,
+      "started_at": "2026-11-22T15:38:05.759Z",
+      "finished_at": "2026-11-22T15:44:37.679Z",
+      "turns": 18,
+      "tokens": {
+        "input": 72,
+        "output": 6187,
+        "cache_read": 480252,
+        "cache_write": 20209,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
