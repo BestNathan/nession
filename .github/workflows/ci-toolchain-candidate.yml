@@ -81,6 +81,16 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate-catalog
           persist-credentials: false
+      - name: Select cf CLI's externally composed Node 24 runtime
+        if: matrix.tool == 'cf'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.3'
+      - name: Select Ansible Core's externally composed Python 3.13 runtime
+        if: matrix.tool == 'ansible'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
       - name: Install pinned-platform Git HTTPS build prerequisites (uncredentialed runner only)
         if: matrix.tool == 'git' && matrix.version == '2.56.0'
         shell: bash
