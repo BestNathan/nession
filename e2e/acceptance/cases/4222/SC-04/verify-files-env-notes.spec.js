@@ -14,6 +14,7 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
   await page.setViewportSize({ width: 390, height: 844 });
 
   // ── Files: a dirty structured preview declares its fixed note ──
+  await helper.openApp(page);
   await helper.seedLongEditableFile(page);
   await page.evaluate(() => {
     const control = window.fixtureFiles;
@@ -22,7 +23,6 @@ test('SC-04 Files viewer and Env editor endpoints and declared notes', async ({ 
       '# Notes\n\n' + Array.from({ length: 60 }, (_, index) => `- item ${index}`).join('\n'),
     );
   });
-  await helper.openApp(page);
   await page.getByTestId('app-header-workspace').first().click();
   await page.getByTestId('workspace-tool-files').click({ timeout: 30_000 });
   await page.getByTestId('files-app-list').waitFor({ timeout: 30_000 });

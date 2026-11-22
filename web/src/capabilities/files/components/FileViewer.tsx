@@ -24,6 +24,7 @@ import {
 } from '../hooks/useFileViewer';
 import type { FileOps } from '@/capabilities/files';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 
 export interface FileViewerProps {
   fileOps: FileOps;
@@ -259,7 +260,7 @@ function FileViewerContent({
         <p
           data-workspace-fixed-role="context"
           data-testid="file-viewer-dirty-preview"
-          className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-[var(--nession-shell-space-3)] py-[var(--nession-file-viewer-bar-inset-y)] text-warning-foreground', chromeSansRole('metadata'))}
+          className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-[var(--nession-shell-space-3)] py-[var(--nession-file-viewer-bar-inset-y)] text-warning-foreground', chromeSansRole('metadata'), workspaceFixedContextClearanceClass)}
         >
           Preview shows the saved version. Save to update preview.
         </p>

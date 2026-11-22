@@ -376,6 +376,8 @@ async function fixedRoleState(page, testId) {
       return null;
     }
     const rect = element.getBoundingClientRect();
+    const style = getComputedStyle(element);
+    const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
     const capsuleTop = bar instanceof HTMLElement
       ? bar.getBoundingClientRect().top
       : (shell instanceof HTMLElement ? shell.getBoundingClientRect().bottom : window.innerHeight);
@@ -384,6 +386,10 @@ async function fixedRoleState(page, testId) {
       declared: element.getAttribute('data-workspace-fixed-role'),
       top: rect.top,
       bottom: rect.bottom,
+      // A fixed context may extend to the shell bottom exactly like the Host
+      // actions slot; its measured content box is what must clear the Capsule.
+      contentBottom: rect.bottom - paddingBottom,
+      paddingBottom,
       capsuleTop,
     };
   }, testId);
@@ -392,7 +398,7 @@ async function fixedRoleState(page, testId) {
 function expectFixedClearsCapsule(state, label) {
   expect(state, label + ': the fixed surface is rendered').not.toBeNull();
   expect(state.declared, label + ': the fixed surface declares its role').not.toBeNull();
-  expect(state.bottom, label + ': the fixed surface clears the Capsule')
+  expect(state.contentBottom, label + ': the fixed surface content clears the Capsule')
     .toBeLessThanOrEqual(state.capsuleTop + ROUNDING_TOLERANCE_PX);
 }
 

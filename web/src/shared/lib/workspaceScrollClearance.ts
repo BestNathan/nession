@@ -113,6 +113,19 @@ export const workspaceBoundedScrollClearanceClass =
   `${WORKSPACE_BOUNDED_SCROLL_MARKER} pb-[var(--nession-local-workspace-scroll-bottom-inset,0px)]`;
 
 /**
+ * The trailing clearance a declared **fixed context** sibling spends (#4222).
+ *
+ * Ordinary notes, warnings and status rows belong inside the scroll area. An
+ * intentionally persistent one (a read-only banner, a validation note) stays a
+ * sibling and declares `data-workspace-fixed-role="context"`; this class makes
+ * its content sit above the floating Capsule using the Host-measured band the
+ * actions slot already spends. The element's *content box* clears the Capsule;
+ * its box may extend to the shell bottom, exactly like the actions slot.
+ */
+export const workspaceFixedContextClearanceClass =
+  'pb-[var(--nession-local-workspace-actions-bottom-inset,0px)]';
+
+/**
  * The retired per-capability clearance opt-in (#1347). Kept as a name so the
  * design Gate's negative fixture can prove a reintroduction is rejected; no
  * shipped consumer may use it.
