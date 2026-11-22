@@ -27,12 +27,11 @@
   ],
   "baseline_png_blobs": {
     "__snapshots__/fixture-visual.spec.ts/app-capability-entry-linux.png": "9e5ac075285d286d05335b97c3bcdab6f4828af1",
-    "__snapshots__/fixture-visual.spec.ts/app-claude-code-browse-linux.png": "537c0812810444670fdc9d31365d5f8a5a3767c4",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-linux.png": "eda9c14900c5e6b67388eff7df3908448cad25ca",
     "__snapshots__/fixture-visual.spec.ts/app-claude-code-chat-dialect-peek-linux.png": "797765295b400b535c693a3f73803a4e5d110343",
-    "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "ea6692d9aaecac92cc03cb48463722ddb2f1fe09",
+    "__snapshots__/fixture-visual.spec.ts/app-claude-code-conversation-linux.png": "0ab097de9407f34ce123ce3d53876698854efa02",
     "__snapshots__/fixture-visual.spec.ts/app-env-detail-linux.png": "e57161ab62852fc5c69155e95422747a28184568",
-    "__snapshots__/fixture-visual.spec.ts/app-files-list-linux.png": "b58ed33757eaa1e1c978c1b877c68acbc48f5c4c",
+    "__snapshots__/fixture-visual.spec.ts/app-files-list-linux.png": "2eadf71bcf722c1bb4c0f5386cf6909f42b2c9bc",
     "__snapshots__/fixture-visual.spec.ts/app-git-peek-linux.png": "b2278605a1746f15e1e485f86b706d5918a08f3a",
     "__snapshots__/fixture-visual.spec.ts/app-home-375-linux.png": "8cdeb1caeb7604777736d6649cafae02891cfef5",
     "__snapshots__/fixture-visual.spec.ts/app-home-linux.png": "e13c6923b680dc23f1957a55c4fa83c8def9266a",
@@ -58,8 +57,8 @@
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-configuration-linux.png": "adcb5867659e4095f6aafd10f8b7d5dd8a255b37",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-conversation-linux.png": "edb6dc770a3a7cdeb800d83c0c1416070f75699d",
     "__snapshots__/fixture-visual.spec.ts/web-claude-code-conversations-linux.png": "66507115b04d4d2a8f8b5483676e39ca21aee4f0",
-    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-configuration-linux.png": "837384141f756523fbca326117295c503ded69b4",
-    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-linux.png": "593003fe477b580b81d4d78d60196480f077c60b",
+    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-configuration-linux.png": "364525f0c9081ed2d680804797e46ddbc35d36b6",
+    "__snapshots__/fixture-visual.spec.ts/web-claude-code-view-tabs-linux.png": "e4f4821421e09be2318c768e40dcaab681dd1061",
     "__snapshots__/fixture-visual.spec.ts/web-compact-terminal-linux.png": "9b11e4f2d9f6d1d60636278485e926915a5454f9",
     "__snapshots__/fixture-visual.spec.ts/web-compact-workspace-linux.png": "900acbcac38c064da42274a3bdda362c84c46678",
     "__snapshots__/fixture-visual.spec.ts/web-env-edit-dirty-linux.png": "e7d64b816609110217b606f90ce3107310683aaa",
@@ -75,11 +74,12 @@
     "__snapshots__/fixture-visual.spec.ts/web-sandbox-outside-linux.png": "de36818c58ce402f955035ab107d2dd29de31e67",
     "__snapshots__/fixture-visual.spec.ts/web-sandbox-inside-linux.png": "a94ee642b7beda70f3cae83ef0eecbaec1df7199",
     "__snapshots__/fixture-visual-app.spec.ts/app-project-detail-linux.png": "944949cd7268466ac9a4842de8b1d5677cf6b0a2",
-    "__snapshots__/fixture-visual-app.spec.ts/app-sandbox-inside-linux.png": "d49571f6f24963aa2a61f6b4aefdaad408b645d4"
+    "__snapshots__/fixture-visual-app.spec.ts/app-sandbox-inside-linux.png": "d49571f6f24963aa2a61f6b4aefdaad408b645d4",
+    "__snapshots__/fixture-visual.spec.ts/app-claude-code-browse-linux.png": "537c0812810444670fdc9d31365d5f8a5a3767c4"
   },
   "baseline_set_updated": {
-    "requirement": 3971,
-    "reason": "The App stack header, semantic surfaces, icon actions and inner-stack swipe change the canonical App Workspace screenshots; only the six affected App PNGs were accepted from the canonical update-snapshots dispatch.",
-    "date": "2026-11-20"
+    "requirement": 4280,
+    "reason": "Merged main into staging and regenerated the Linux fixture-visual baselines on the merged tree for the convergence repair (#4280). Main #3451/#1290/#4235 and staging #3829/#3971 changed the same App snapshots; the pre-#3829 App view-tabs baseline is retired because the merged spec asserts no permanent view-tabs strip, and the App browse-sheet baseline takes its place. All 50 paths and Git blob pins are updated together; exact PR-head CI is required.",
+    "date": "2026-11-22"
   }
 }

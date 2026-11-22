@@ -1,0 +1,142 @@
+name: CI / Toolchain Candidate
+# #4241: uncredentialed native proof of orphan catalog PR recipes.
+# Toolchain orphan pull_request router can reuse this trusted-main logic.
+on:
+  pull_request:
+    branches: [toolchains]
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_call:
+permissions:
+  contents: read
+concurrency:
+  group: toolchain-candidate-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  plan:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.base.ref == 'toolchains' &&
+      github.event.pull_request.head.repo.full_name == 'BestNathan/nession'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.select.outputs.matrix }}
+      count: ${{ steps.select.outputs.count }}
+    steps:
+      - name: Checkout trusted main candidate policy
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Checkout exact orphan base SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: base-catalog
+          persist-credentials: false
+      - name: Checkout exact proposed orphan head SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate-catalog
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate trusted selector and plan exact script-byte changes
+        id: select
+        shell: bash
+        run: |
+          set -euo pipefail
+          node trusted/scripts/toolchains/catalog-candidate.mjs self-test
+          matrix="$(node trusted/scripts/toolchains/catalog-candidate.mjs plan "$PWD/base-catalog" "$PWD/candidate-catalog")"
+          count="$(node -e 'console.log(JSON.parse(process.argv[1]).include.length)' "$matrix")"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          echo "count=$count" >> "$GITHUB_OUTPUT"
+          echo "Candidate recipes and native targets: $count"
+  native:
+    needs: plan
+    if: needs.plan.result == 'success' && needs.plan.outputs.count != '0'
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted unprivileged recipe runner
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+      - name: Checkout exact candidate SHA
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate-catalog
+          persist-credentials: false
+      - name: Select cf CLI's externally composed Node 24 runtime
+        if: matrix.tool == 'cf'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.3'
+      - name: Select Ansible Core's externally composed Python 3.13 runtime
+        if: matrix.tool == 'ansible'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install pinned-platform Git HTTPS build prerequisites (uncredentialed runner only)
+        if: matrix.tool == 'git' && matrix.version == '2.56.0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libcurl4-openssl-dev zlib1g-dev libssl-dev
+          command -v curl-config
+      - name: Prepare and independently verify on native Linux runner
+        shell: bash
+        env:
+          TOOL: ${{ matrix.tool }}
+          VERSION: ${{ matrix.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          EXPECTED_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C candidate-catalog rev-parse HEAD)" = "$EXPECTED_SHA"
+          root="$RUNNER_TEMP/nession-toolchain-candidate-${TOOL}-${VERSION}-${ARCH}"
+          test ! -e "$root"
+          mkdir -p "$root"
+          echo "Candidate $TOOL/$VERSION $PLATFORM/$ARCH at $EXPECTED_SHA"
+          bash trusted/scripts/toolchains/catalog-run.sh prepare "$PWD/candidate-catalog" "$TOOL" "$VERSION" "$PLATFORM" "$ARCH" "$root/rootfs"
+          bash trusted/scripts/toolchains/catalog-run.sh verify "$PWD/candidate-catalog" "$TOOL" "$VERSION" "$PLATFORM" "$ARCH" "$root/rootfs"
+          echo "PASS: $TOOL/$VERSION $PLATFORM/$ARCH native prepare+verify"
+  result:
+    if: ${{ always() }}
+    needs: [plan, native]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Fail closed on absent or failed native proofs
+        shell: bash
+        env:
+          PLAN: ${{ needs.plan.result }}
+          COUNT: ${{ needs.plan.outputs.count }}
+          NATIVE: ${{ needs.native.result }}
+        run: |
+          set -euo pipefail
+          test "$PLAN" = success
+          if test "$COUNT" = 0; then
+            test "$NATIVE" = skipped
+            echo 'No tool/version fingerprints changed; native proof not required'
+          else
+            test "$NATIVE" = success
+            echo "All $COUNT native candidate probes passed"
+          fi
