@@ -71,6 +71,14 @@ function jobNamed(jobs,name,runId) {
     'Job Run/Attempt/SHA/conclusion not authenticated');
   return job;
 }
+// The trusted caller reads GitHub API paths, never raw numeric Job IDs.
+// Bind this path to the already authenticated exact Run/Attempt/request Job.
+function trustedRequestLogPath(repo,requestJobs) {
+  requireCheck(repo===REPO,'wrong repository for replacement request log');
+  const job=jobNamed(requestJobs,'request',EXPECTED.request_run);
+  return '/repos/'+repo+'/actions/jobs/'+job.id+'/logs';
+}
+
 function goodStep(job,name) {
   const steps=(job?.steps??[]).filter(s=>s?.name===name);
   return steps.length===1 && steps[0].status==='completed' &&
@@ -285,7 +293,7 @@ export async function collectReplacement4253({repo=REPO,targetSha,stage,issue,
     'missing independently read protected staging HEAD');
   const [stageCompare,requestLog,result,unchanged]=await Promise.all([
     get(api+'/compare/'+EXPECTED.replacement_merge+'...'+stagingBranch.commit.sha),
-    (async()=>getLog(jobNamed(requestJobs,'request',EXPECTED.request_run).id))(),
+    (async()=>getLog(trustedRequestLogPath(repo,requestJobs)))(),
     (async()=>loadResult(repo,EXPECTED.acceptance_run,ARTIFACT))(),
     Promise.resolve(sourceUnchanged(EXPECTED.source_main_sha,targetSha,SOURCE_PATHS)),
   ]);
@@ -376,6 +384,16 @@ export function selfTestReplacement4253() {
     old_pr:old,new_pr:replacement,
     associated_pulls:[replacement],
   };
+  // #4253 real post-merge Run 44986455449: the collector once sent raw
+  // Job ID 137098... to githubJobLog(path), yielding TypeError: fetch failed.
+  // Verify the complete same-repository API path and fail-closed job identity.
+  assert.equal(trustedRequestLogPath(REPO,data.request_jobs),
+    '/repos/'+REPO+'/actions/jobs/11/logs');
+  assert.throws(()=>trustedRequestLogPath('attacker/repo',data.request_jobs),
+    /wrong repository for replacement request log/);
+  assert.throws(()=>trustedRequestLogPath(REPO,{jobs:[{
+    ...data.request_jobs.jobs[0],id:'11'}]}),
+    /Job Run\/Attempt\/SHA\/conclusion not authenticated/);
   const args={targetSha:'f'.repeat(40),qualityVerifier:()=>true};
   const verify=d=>attestReplacement4253(d,args);
   assert.equal(verify(data).verdict,'Verified');
