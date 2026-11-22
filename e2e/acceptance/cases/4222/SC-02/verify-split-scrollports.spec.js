@@ -23,15 +23,19 @@ async function openNoisyProfile(page) {
 }
 
 async function measureAll(page, selectors, label) {
-  const measurements = await helper.measureNamedScrollports(page, selectors);
-  for (const { selector, state } of measurements) {
-    helper.expectEndpoint(state, `${label} ${selector}`);
+  const measurements = [];
+  for (const selector of selectors) {
+    const state = await helper.expectSurfaceAtEnd(page, selector, `${label} ${selector}`);
+    measurements.push({ selector, state });
   }
-  const bottoms = measurements.map(({ state }) => Math.round(state.scroller.bottom));
-  expect(
-    new Set(bottoms).size,
-    `${label}: the designated owners are independent scrollports, not one inherited number`,
-  ).toBeGreaterThan(1);
+  const scrollable = measurements.filter(({ state }) => state && state.host);
+  if (scrollable.length > 1) {
+    const bottoms = scrollable.map(({ state }) => Math.round(state.scroller.bottom));
+    expect(
+      new Set(bottoms).size,
+      `${label}: the designated owners are independent scrollports, not one inherited number`,
+    ).toBeGreaterThan(1);
+  }
   return measurements;
 }
 

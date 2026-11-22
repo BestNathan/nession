@@ -16,7 +16,7 @@ const CAPABILITIES = [
   { id: 'agent', search: '', mode: 'document' },
   { id: 'env', search: '?env=warnings', mode: 'bounded', openProfile: true },
   { id: 'sandbox', search: '', mode: 'document', growSandbox: true },
-  { id: 'claude-code', search: '?conversation=tool-scroll', mode: 'bounded' },
+  { id: 'claude-code', search: '?conversation=rich', mode: 'bounded' },
   { id: 'git', search: '?git=many', mode: 'bounded' },
   { id: 'project', search: '?projects=canonical&sessionProject=bound', mode: 'document' },
 ];
