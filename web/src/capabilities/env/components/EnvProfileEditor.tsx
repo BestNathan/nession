@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -382,7 +383,7 @@ export function EnvProfileEditor({
         <p
           data-workspace-fixed-role="context"
           data-testid="env-editor-error-note"
-          className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'))}
+          className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'), workspaceFixedContextClearanceClass)}
         >
           {flow.error}
         </p>
@@ -391,7 +392,7 @@ export function EnvProfileEditor({
         <p
           data-workspace-fixed-role="context"
           data-testid="env-editor-name-note"
-          className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'))}
+          className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'), workspaceFixedContextClearanceClass)}
         >
           Name the environment to save it.
         </p>

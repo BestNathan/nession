@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import type { ClaudeCodeConfigFile, ClaudeCodeConfigScope } from '../../hooks/useClaudeCodeWorkspace';
 import { ContentPanel, ScopePanel } from '../ClaudeCodeWorkspace';
 import type { ClaudeAppData } from './model';
@@ -60,7 +61,7 @@ export function ConfigurationRoute({ data }: { data: ClaudeAppData }) {
       <p
         data-workspace-fixed-role="context"
         data-testid="claude-app-configuration-note"
-        className={cn('shrink-0 px-4 py-2 text-muted-foreground', chromeSansRole('caption'))}
+        className={cn('shrink-0 px-4 py-2 text-muted-foreground', chromeSansRole('caption'), workspaceFixedContextClearanceClass)}
       >
         Configuration is read-only here. Editing belongs to an explicitly authorized
         operation.

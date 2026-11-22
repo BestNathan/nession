@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { WorkspaceSurface } from '@/components/ui/workspace-content';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import {
   ConversationListSurface,
   ConversationTranscript,
@@ -167,6 +168,7 @@ function BoundConversation({ data }: { data: ClaudeAppData }) {
         className={cn(
           'shrink-0 border-t px-4 py-2 text-muted-foreground',
           chromeSansRole('caption'),
+          workspaceFixedContextClearanceClass,
         )}
       >
         Read-only view. Continue this conversation in the Terminal.

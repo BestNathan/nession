@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { formatClockTime } from '@/shared/lib/format';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { parseTranscriptRecord, type ParsedTranscriptRecord } from '../model/transcriptRecord';
@@ -224,7 +225,7 @@ export function TranscriptTimeline({
       {partialTail ? (
         <p
           data-workspace-fixed-role="context"
-          className={cn('px-3 py-1 text-muted-foreground', chromeSansRole('metadata'))}
+          className={cn('px-3 py-1 text-muted-foreground', chromeSansRole('metadata'), workspaceFixedContextClearanceClass)}
           data-testid="transcript-partial"
         >
           The transcript is still being written.

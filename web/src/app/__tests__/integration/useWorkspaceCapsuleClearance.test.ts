@@ -129,9 +129,9 @@ describe('useWorkspaceCapsuleClearance', () => {
     const upper = scrollport(300, true, 'upper');
     const lower = scrollport(380, true, 'lower');
     const aboveBar = scrollport(330, false, 'above-bar');
-    // A renderer inside the lower owner is not an independent surface: it
-    // inherits the owner's published value instead of measuring its own
-    // content-height bottom (a CodeMirror host inside a preview body).
+    // A renderer extending past the shell (the CodeMirror host inside a
+    // preview body) is measured by its visible bottom clamped to the shell,
+    // not by its off-screen content edge.
     const nested = document.createElement('div');
     nested.className = WORKSPACE_BOUNDED_SCROLL_MARKER;
     Object.defineProperty(nested, 'scrollHeight', { configurable: true, value: 600 });
@@ -144,7 +144,7 @@ describe('useWorkspaceCapsuleClearance', () => {
     expect(upper.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
     expect(lower.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('40px');
     expect(aboveBar.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
-    expect(nested.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET), 'nested renderer inherits, not measures').toBe('');
+    expect(nested.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET), 'off-screen content is clamped to the shell band').toBe('60px');
     // The document surface's shell-wide value is unchanged.
     expect(shell.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('60px');
   });
