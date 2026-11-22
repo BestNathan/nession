@@ -6,6 +6,7 @@ import { useProjects } from '@/product/project/hooks/useProjects';
 import { useProjectDialogs } from '@/product/project/hooks/useProjectDialogs';
 import type { Project, ProjectShellProps } from '@/product/project/types';
 import { FIXTURE_AGENTS } from './fixtureData';
+import { FIXTURE_PROJECT_SOURCE_DIGEST } from './fixtureImages';
 
 export const PROJECT_ONE = 'project-00000000-0000-4000-8000-000000000001';
 export const PROJECT_TWO = 'project-00000000-0000-4000-8000-000000000002';
@@ -28,7 +29,7 @@ function seedProjects(): Project[] {
         env_profile_ids: ['staging.env'],
         sandbox_policy_ref: 'sandbox/default',
       },
-      image_digest: `sha256:${'a'.repeat(64)}`,
+      image_digest: FIXTURE_PROJECT_SOURCE_DIGEST,
       created_at: CREATED_AT,
       updated_at: UPDATED_AT,
     },

@@ -32,13 +32,15 @@ test('SC-04: Web Projects open a standalone detail and return to the Terminal', 
   await expect(selected).toHaveCount(1);
   expect(await selected.getAttribute('data-session-row')).toBe(selectedSession);
 
-  // Managed is present but fails closed; no Native Session is substituted.
-  await page.getByTestId('project-detail-managed-session').click();
-  const managed = page.getByTestId('project-managed-unavailable');
-  await expect(managed).toBeVisible();
-  await expect(managed).toContainText('no Native fallback was attempted');
-  await page.keyboard.press('Escape');
-  await expect(managed).toHaveCount(0);
+  // #3794 supersedes the unconditional Managed stub with one explicit runtime
+  // choice on New Session; no Native fallback exists for a Managed request.
+  await expect(page.getByTestId('project-detail-managed-session')).toHaveCount(0);
+  await page.getByTestId('project-detail-create-session').click();
+  const runtimeDialog = page.getByRole('dialog').filter({ hasText: 'Create Session in' });
+  await expect(runtimeDialog.getByTestId('session-runtime-native')).toBeVisible();
+  await expect(runtimeDialog.getByTestId('session-runtime-managed')).toBeVisible();
+  await runtimeDialog.getByRole('button', { name: 'Cancel' }).click();
+  await expect(runtimeDialog).toHaveCount(0);
   await expect(page.getByTestId('session-item-row')).toHaveCount(6);
 
   // Existing creation opens from the standalone detail.
@@ -59,7 +61,7 @@ test('SC-04: Web Projects open a standalone detail and return to the Terminal', 
       'exact SHA ' + sha + ': Web 1440x900 showed two selectable Projects beside the flat ' +
       'Session list; opening Nession kept the selected Session ' + selectedSession +
       ' and rendered Source ref main, one Existing Location and the sha256 image digest; ' +
-      'Managed failed closed with no Native fallback and no new Session row; Existing ' +
+      'the obsolete Managed stub was gone and New Session offered Host/Managed runtimes; Existing ' +
       'creation opened; selecting a Session returned to the Terminal with the detail gone',
   });
 });

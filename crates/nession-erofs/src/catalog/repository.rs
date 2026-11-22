@@ -5,59 +5,9 @@ use sea_orm::ConnectionTrait;
 
 use super::sqlite;
 
-/// Maximum repository name length.
-pub const MAX_REPOSITORY_NAME: usize = 255;
-/// Maximum one repository path segment length.
-pub const MAX_SEGMENT: usize = 63;
-
-/// Validate a repository name such as `nession/base-runtime`.
-///
-/// A name is lowercase alphanumeric segments joined by `/`. `_`, `.` and `-`
-/// may separate inner alphanumerics; leading/trailing separators, empty
-/// segments and `..` are refused. The name is also the repository's stable
-/// identity, so it cannot be renamed into a second row.
-pub fn validate_repository_name(name: &str) -> Result<()> {
-    if name.is_empty() || name.len() > MAX_REPOSITORY_NAME {
-        anyhow::bail!("repository name must be 1..={MAX_REPOSITORY_NAME} bytes");
-    }
-    for segment in name.split('/') {
-        if segment.is_empty() {
-            anyhow::bail!("repository name {name:?} contains an empty segment");
-        }
-        if segment.len() > MAX_SEGMENT {
-            anyhow::bail!("repository segment {segment:?} exceeds {MAX_SEGMENT} bytes");
-        }
-        if segment == ".." || segment == "." {
-            anyhow::bail!("repository name {name:?} must not contain a dot segment");
-        }
-        let mut characters = segment.chars();
-        let Some(first) = characters.next() else {
-            anyhow::bail!("repository name {name:?} contains an empty segment");
-        };
-        if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-            anyhow::bail!(
-                "repository segment {segment:?} must start with a lowercase letter or digit"
-            );
-        }
-        let last = segment.chars().last().unwrap_or(first);
-        if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
-            anyhow::bail!(
-                "repository segment {segment:?} must end with a lowercase letter or digit"
-            );
-        }
-        for character in segment.chars() {
-            if !(character.is_ascii_lowercase()
-                || character.is_ascii_digit()
-                || character == '_'
-                || character == '.'
-                || character == '-')
-            {
-                anyhow::bail!("repository segment {segment:?} contains an unsupported character");
-            }
-        }
-    }
-    Ok(())
-}
+/// The shared repository grammar is owned by the #4087 contracts so the
+/// Server catalog and the Agent local projection validate identical names.
+pub use crate::contracts::{validate_repository_name, MAX_REPOSITORY_NAME, MAX_SEGMENT};
 
 /// Insert the repository row if this is its first use.
 pub async fn ensure_repository(conn: &impl ConnectionTrait, name: &str, now: i64) -> Result<()> {

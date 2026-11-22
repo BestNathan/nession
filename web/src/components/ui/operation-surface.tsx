@@ -43,7 +43,7 @@ export function OperationActions({ className, ...props }: React.ComponentProps<'
   return (
     <div
       data-recipe-part="operation-actions"
-      className={cn('flex min-w-0 flex-wrap items-center gap-2', className)}
+      className={cn('flex min-w-0 flex-wrap items-center gap-[var(--nession-rhythm-inline)]', className)}
       {...props}
     />
   );
@@ -65,7 +65,7 @@ export function OperationError({
       data-recipe-part="operation-error"
       data-testid={testId}
       className={cn(
-        'rounded-[var(--nession-radius-surface)] bg-destructive/10 px-2.5 py-1.5',
+        'rounded-[var(--nession-radius-surface)] bg-destructive/10 px-[var(--nession-rhythm-error-inset-x)] py-[var(--nession-rhythm-error-inset-y)]',
         chromeSansRole('secondary'),
         'text-destructive',
         className,

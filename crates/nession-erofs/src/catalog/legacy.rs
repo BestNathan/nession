@@ -15,7 +15,7 @@ use super::reference::{record_object, record_reference, ObjectKind, StoredObject
 use super::repository::ensure_repository;
 use super::sqlite;
 use super::tag::{self, TagExpectation};
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::oci::annotation::{MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST};
 use crate::oci::config::{ImageConfig, RootFs, RuntimeConfig};
 use crate::oci::descriptor::Descriptor;
@@ -104,7 +104,7 @@ struct PreparedImage {
 /// CAS objects.
 pub async fn migrate_legacy_images(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     platform: &LegacyPlatform,
     now: i64,
 ) -> Result<LegacyMigrationReport> {
@@ -257,7 +257,7 @@ pub async fn migrate_legacy_images(
 }
 
 fn prepare_image(
-    store: &BlobStore,
+    store: &FsBlobStore,
     legacy_image_id: &str,
     legacy_digest: &str,
     platform: &LegacyPlatform,
@@ -422,7 +422,7 @@ pub async fn pin_migrated_image(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blob::store::BlobStore;
+    use crate::blob::store::FsBlobStore;
     use crate::catalog::sqlite::tests::memory_connection;
     use crate::catalog::tag;
     use sea_orm::ConnectionTrait;
@@ -441,9 +441,9 @@ mod tests {
         )",
     ];
 
-    async fn fixture() -> (tempfile::TempDir, BlobStore, DatabaseConnection, String) {
+    async fn fixture() -> (tempfile::TempDir, FsBlobStore, DatabaseConnection, String) {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         sqlite::migrate(&conn).await.unwrap();
         for statement in LEGACY_TABLES {

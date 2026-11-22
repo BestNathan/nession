@@ -14,7 +14,7 @@ import { GithubIssuesView } from './GithubIssuesView';
 import { GithubNotice } from './GithubNotice';
 import { GithubPullRequestsView } from './GithubPullRequestsView';
 
-type GithubSection = 'issues' | 'pull-requests' | 'actions';
+export type GithubSection = 'issues' | 'pull-requests' | 'actions';
 
 const SECTIONS: { value: GithubSection; label: string }[] = [
   { value: 'issues', label: 'Issues' },

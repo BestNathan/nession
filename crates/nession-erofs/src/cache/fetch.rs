@@ -79,12 +79,61 @@ pub const MAX_METADATA_BYTES: u64 = 16 * 1024 * 1024;
 /// descriptor-mismatched object yields no `FetchedImage`, so no caller can
 /// mount a guessed or partially verified identity. `route_prefix` is the
 /// Protocol owner's blob route (the crate does not duplicate that constant).
+///
+/// This is the proprietary compatibility path (`/images/blobs/<digest>`). The
+/// standard OCI Distribution cutover target is [`fetch_manifest_image_v2`];
+/// both share one verified fetch implementation during the compatibility window.
 pub async fn fetch_manifest_image(
     cache: &ErofsCache,
     objects: &[ImageObjectGrant],
     origin: &str,
     server_auth_token: &str,
     route_prefix: &str,
+) -> Result<FetchedImage> {
+    fetch_manifest_image_with_route(cache, objects, origin, server_auth_token, &|object| {
+        format!("{route_prefix}{}", object.digest)
+    })
+    .await
+}
+
+/// Fetch one resolved Manifest closure through a Server-hosted standard OCI
+/// `/v2/` Registry (#4090), with no proprietary download URL.
+///
+/// The grant names one authorized `repository`; the Manifest is fetched by its
+/// immutable digest through `/v2/{repository}/manifests/{digest}` and the
+/// Config/EROFS objects through `/v2/{repository}/blobs/{digest}`. Every route
+/// is repository-scoped, so the Server's reachability fence — not possession of
+/// a digest — decides what the Agent may read. The verified cache mechanics,
+/// descriptor validation and pin semantics are identical to the proprietary
+/// path: this is the same SDK/cache fetch, only the authorized route shape
+/// changes for the cutover.
+pub async fn fetch_manifest_image_v2(
+    cache: &ErofsCache,
+    objects: &[ImageObjectGrant],
+    origin: &str,
+    server_auth_token: &str,
+    repository: &str,
+) -> Result<FetchedImage> {
+    crate::contracts::validate_repository_name(repository)?;
+    fetch_manifest_image_with_route(cache, objects, origin, server_auth_token, &|object| {
+        if object.media_type == MEDIA_TYPE_MANIFEST {
+            format!("/v2/{repository}/manifests/{}", object.digest)
+        } else {
+            format!("/v2/{repository}/blobs/{}", object.digest)
+        }
+    })
+    .await
+}
+
+/// The one verified fetch implementation shared by the proprietary and `/v2/`
+/// route shapes. `expected_route` computes the authorized route for each object;
+/// a grant whose path disagrees is refused before any network request.
+async fn fetch_manifest_image_with_route(
+    cache: &ErofsCache,
+    objects: &[ImageObjectGrant],
+    origin: &str,
+    server_auth_token: &str,
+    expected_route: &(dyn Fn(&ImageObjectGrant) -> String + Sync),
 ) -> Result<FetchedImage> {
     let manifest_grant = exactly_one(objects, MEDIA_TYPE_MANIFEST, "Manifest")?;
     let config_grant = exactly_one(objects, MEDIA_TYPE_CONFIG, "Config")?;
@@ -103,7 +152,7 @@ pub async fn fetch_manifest_image(
         if !crate::digest::is_valid_digest(&object.digest) {
             anyhow::bail!("invalid authorized object digest {:?}", object.digest);
         }
-        let expected = format!("{route_prefix}{}", object.digest);
+        let expected = expected_route(object);
         if object.path != expected {
             anyhow::bail!(
                 "authorized route {:?} is not the blob route for {}",

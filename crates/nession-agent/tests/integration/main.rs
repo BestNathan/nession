@@ -5,6 +5,7 @@ mod control_mode;
 mod full_chain; // ← e2e_test.rs renamed (spec: Rust has no E2E layer)
 mod mcp;
 mod server;
+mod session_env_4080;
 mod sync;
 mod tmux;
 

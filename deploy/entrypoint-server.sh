@@ -7,6 +7,13 @@ LISTEN_PORT="${LISTEN_PORT:-10080}"
 SERVER_LISTEN="${SERVER_LISTEN:-0.0.0.0:18080}"
 SERVER_BACKEND="${SERVER_BACKEND:-127.0.0.1:18080}"
 SERVER_AUTH_TOKEN="${SERVER_AUTH_TOKEN:-}"
+# Browser clients present an Origin and must be named here (#4066). The local
+# Compose profile is served from SERVER_HTTP_PORT on the host; a deployment
+# names its own Web origin. Empty refuses every browser origin.
+SERVER_ALLOWED_ORIGINS="${SERVER_ALLOWED_ORIGINS:-}"
+# Deliberately unsafe, and only for an intentionally open listener: permits a
+# non-loopback listener with no Server Token.
+SERVER_ALLOW_INSECURE_REMOTE="${SERVER_ALLOW_INSECURE_REMOTE:-false}"
 SERVER_HEARTBEAT_INTERVAL="${SERVER_HEARTBEAT_INTERVAL:-10}"
 SERVER_HEARTBEAT_TIMEOUT="${SERVER_HEARTBEAT_TIMEOUT:-30}"
 NESSION_HOME="${NESSION_HOME:-}"
@@ -28,6 +35,7 @@ mkdir -p "${NESSON_CONFIG_DIR}"
 
 # Generate validated Server config before nginx starts; no anonymous MCP.
 export SERVER_LISTEN SERVER_AUTH_TOKEN TLS_CERT_PATH TLS_KEY_PATH
+export SERVER_ALLOWED_ORIGINS SERVER_ALLOW_INSECURE_REMOTE
 export SERVER_HEARTBEAT_INTERVAL SERVER_HEARTBEAT_TIMEOUT
 "$(dirname "$0")/render-server-config.sh" "${NESSON_CONFIG_DIR}/config.toml"
 

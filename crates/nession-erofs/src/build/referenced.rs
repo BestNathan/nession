@@ -33,7 +33,7 @@ use super::{
     Packaging, ProcessControl, ReferencedImageMetadata, Stage, TreeStats, MAX_SNAPSHOT_BYTES,
     MAX_SNAPSHOT_ENTRIES,
 };
-use crate::blob::store::{BlobDigest, BlobStore};
+use crate::blob::store::{BlobDigest, FsBlobStore};
 use crate::oci::annotation::{
     COMPOSE_FORMAT_REFERENCED_V1, MEDIA_TYPE_COMPOSITE, MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS,
     MEDIA_TYPE_MANIFEST,
@@ -110,7 +110,7 @@ pub struct ReferencedImage {
 pub struct ErofsReferencedComposer {
     pub extractor: Arc<dyn compose::ErofsExtractor>,
     pub mkfs: Arc<dyn MkfsRunner>,
-    pub blobs: BlobStore,
+    pub blobs: FsBlobStore,
     pub work_root: PathBuf,
 }
 
@@ -118,7 +118,7 @@ impl ErofsReferencedComposer {
     pub fn new(
         extractor: Arc<dyn compose::ErofsExtractor>,
         mkfs: Arc<dyn MkfsRunner>,
-        blobs: BlobStore,
+        blobs: FsBlobStore,
         work_root: impl Into<PathBuf>,
     ) -> Result<Self> {
         let work_root = work_root.into();
@@ -728,7 +728,7 @@ mod tests {
         let composer = ErofsReferencedComposer::new(
             extractor.clone(),
             mkfs.clone(),
-            BlobStore::new(root.join("blobs")).unwrap(),
+            FsBlobStore::new(root.join("blobs")).unwrap(),
             root.join("work"),
         )
         .unwrap();
@@ -1004,7 +1004,7 @@ mod tests {
         let composer = ErofsReferencedComposer::new(
             Arc::new(compose::ProcessErofsExtractor::default()),
             mkfs.clone(),
-            BlobStore::new(root.path().join("blobs")).unwrap(),
+            FsBlobStore::new(root.path().join("blobs")).unwrap(),
             root.path().join("work"),
         )
         .unwrap();

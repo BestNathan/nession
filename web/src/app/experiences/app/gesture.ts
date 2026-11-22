@@ -53,11 +53,46 @@ export const SWIPE_FLICK_MIN_PX = 40;
 export const SWIPE_FLICK_VELOCITY_PX_PER_MS = 0.45;
 
 /**
- * The most of the shell a drag may reveal. The Terminal must stay readable
- * under the incoming layer, so the preview stops here rather than sliding a
- * layer fully across before release.
+ * The preferred reveal of the shell: up to here the preview follows the finger
+ * one-to-one (#2724, #4185).
+ *
+ * Beyond this point the shell does not stop responding — a finger that is
+ * still moving must still move something. Further travel is converted through
+ * {@link resistedTravel} toward {@link SWIPE_REVEAL_LIMIT_FRACTION}, so the
+ * preview keeps advancing with diminishing gain instead of going flat. The
+ * Terminal stays readable under the incoming layer.
  */
 export const SWIPE_MAX_REVEAL_FRACTION = 0.8;
+
+/**
+ * The absolute bound of the outer preview (#4185).
+ *
+ * The asymptotic limit of {@link resistedTravel}: even an arbitrarily long
+ * drag cannot reveal more than this, so the current layer never fully leaves
+ * before release and the geometry stays inside the pager's own `[-width, 0]`
+ * frame. The remaining sliver is what release still decides.
+ */
+export const SWIPE_REVEAL_LIMIT_FRACTION = 0.92;
+
+/**
+ * The preferred travel of an inner Workspace stack page (#3971, #4185).
+ *
+ * Outer navigation previews most of the shell because another layer is
+ * genuinely arriving. An inner Pop/Forward is the same opaque Workspace
+ * surface sliding, revealing the canvas and a destination label — not the
+ * Terminal — so a short range is enough to make the gesture legible without
+ * pretending the whole page has left.
+ */
+export const SWIPE_INNER_MAX_REVEAL_PX = 125;
+
+/**
+ * The absolute bound of the inner preview (#4185).
+ *
+ * Past the preferred 125px the same continuous resistance applies, so a
+ * dragged-through contact keeps responding without sliding the Workspace
+ * frame far enough to read as a page change.
+ */
+export const SWIPE_INNER_TRAVEL_LIMIT_PX = 180;
 
 /**
  * Damped travel when there is no destination at all (the edge of the pager,
@@ -97,4 +132,32 @@ export const EDGE_BAND_PX = 28;
 /** The travel needed to commit at `shellWidth`; the larger of the two rules. */
 export function swipeCommitThreshold(shellWidth: number): number {
   return Math.max(SWIPE_COMMIT_MIN_PX, shellWidth * SWIPE_COMMIT_FRACTION);
+}
+
+/**
+ * Convert finger travel into preview displacement (#4185).
+ *
+ * Up to `preferred` the surface follows the finger exactly. Past it the
+ * displacement grows asymptotically toward `limit`: the first pixel past the
+ * preferred point still moves the preview, and every later pixel moves it a
+ * little less, so a still-moving finger never meets a flat plateau. The result
+ * is bounded by `limit` and is continuous in value and slope at `preferred`,
+ * which is what keeps the transition from the direct phase invisible.
+ *
+ * A non-finite or non-positive bound means "unmeasured shell": pass the travel
+ * through and let the geometry clamp.
+ */
+export function resistedTravel(travel: number, preferred: number, limit: number): number {
+  const forward = Math.max(0, travel);
+  if (!Number.isFinite(preferred) || preferred <= 0) {
+    return forward;
+  }
+  if (forward <= preferred) {
+    return forward;
+  }
+  const room = Math.max(0, limit - preferred);
+  if (!Number.isFinite(room) || room === 0) {
+    return preferred;
+  }
+  return preferred + room * (1 - Math.exp(-(forward - preferred) / room));
 }

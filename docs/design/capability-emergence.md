@@ -69,6 +69,11 @@ This is where richer information and management belongs:
 
 Workspace is not a feature lobby. It is the high-density contextual layer for the current work.
 
+On App, a capability's Workspace is a push hierarchy rather than a tab strip:
+its root shows the current work, and resource collections, details and
+inspectors are pushed under the one host header. The capability owns the stack
+and what Back means at each depth; the shell owns the bar.
+
 ## TerminalCapsule relationship
 
 The resting TerminalCapsule remains minimal.
@@ -105,6 +110,11 @@ This refines the 2026-09-16 #748 decision:
 The stable rule is now:
 
 > **No permanent capability chrome on the resting capsule. Contextual capability projections may emerge around it, then deepen into Workspace.**
+
+Session **Activity** (#3804) is ambient Session state, not capability chrome:
+its one presentation is the fixed glyph slot on the Session row. It never adds
+a chip or spinner to the resting capsule, never auto-materializes a Peek, and
+never becomes a second status dot for connectivity, lifecycle or attachment.
 
 ## Capability entry
 

@@ -36,6 +36,7 @@ use std::sync::{Arc, Mutex, Weak};
 
 use async_trait::async_trait;
 use nession_common::extension::{AgentExtension, ExtensionUnitPolicy};
+use nession_common::session_env::SessionEnvironment;
 use nession_protocol::{IdentityError, ProtocolDescriptor};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -138,6 +139,11 @@ pub struct GitAgentExtension {
     /// a retry fail rather than duplicate; replaying the original answer makes
     /// it truthful as well.
     commit_results: Mutex<CommitResults>,
+    /// How this host resolves a Session's explicit environment overrides
+    /// (#4080). Every child this provider launches is Session-addressed, so
+    /// its explicit values are applied on top of the inherited Agent
+    /// environment.
+    session_env: Arc<dyn SessionEnvironment>,
 }
 
 /// How long a commit outcome is remembered, by request id.
@@ -166,12 +172,17 @@ impl CommitResults {
 }
 
 impl GitAgentExtension {
-    pub fn new(bin: impl Into<String>, resolve_workdir: Arc<dyn WorkdirResolver>) -> Self {
+    pub fn new(
+        bin: impl Into<String>,
+        resolve_workdir: Arc<dyn WorkdirResolver>,
+        session_env: Arc<dyn SessionEnvironment>,
+    ) -> Self {
         Self {
             bin: bin.into(),
             resolve_workdir,
             repo_locks: Mutex::new(HashMap::new()),
             commit_results: Mutex::new(CommitResults::default()),
+            session_env,
         }
     }
 
@@ -222,7 +233,25 @@ impl GitAgentExtension {
                     message: "Could not resolve this Session's working directory.".to_string(),
                 })?;
 
-        Ok(GitCmd::new(self.bin.clone(), workdir))
+        // The Session's explicit Environment Binding values (#4080). They are
+        // applied on top of the inherited Agent environment; non-overridden
+        // variables still come from the Agent. A binding that cannot be
+        // verified is reported, never treated as "no overrides" — otherwise an
+        // explicitly bound credential or PATH would silently become the
+        // Agent's.
+        let environment = self
+            .session_env
+            .session_overrides(session, None)
+            .await
+            .map_err(|error| GitFailure::Unavailable {
+                reason: "session_environment_unavailable".to_string(),
+                message: format!(
+                    "Could not resolve this Session's environment: {}",
+                    error.message()
+                ),
+            })?;
+
+        Ok(GitCmd::new(self.bin.clone(), workdir).with_environment(environment))
     }
 
     /// The checks every command needs before it can answer: is git here at all,
@@ -694,7 +723,7 @@ mod tests {
     }
 
     fn extension() -> GitAgentExtension {
-        GitAgentExtension::new("git", Arc::new(NoResolver))
+        GitAgentExtension::new("git", Arc::new(NoResolver), Arc::new(NoEnvironment))
     }
 
     #[test]
@@ -803,6 +832,28 @@ mod tests {
     #[async_trait]
     impl WorkdirResolver for NoResolver {
         async fn resolve(&self, _session: &str) -> Option<PathBuf> {
+            None
+        }
+    }
+
+    /// A host environment with no explicit Session overrides and no Agent
+    /// values — sufficient for the contract-routing tests above.
+    struct NoEnvironment;
+
+    #[async_trait]
+    impl SessionEnvironment for NoEnvironment {
+        async fn session_overrides(
+            &self,
+            _session: &str,
+            _keys: Option<&[&str]>,
+        ) -> Result<
+            std::collections::BTreeMap<String, String>,
+            nession_common::session_env::SessionEnvironmentError,
+        > {
+            Ok(std::collections::BTreeMap::new())
+        }
+
+        fn agent_variable(&self, _key: &str) -> Option<String> {
             None
         }
     }

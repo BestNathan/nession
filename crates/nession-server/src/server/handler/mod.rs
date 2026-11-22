@@ -7,7 +7,9 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use crate::env::EnvService;
-use crate::registry::{AgentInfo, AgentRegistry, AgentStatus, SessionRegistry, SessionStatus};
+use crate::registry::{
+    AgentInfo, AgentRegistry, AgentStatus, SessionProjectMembership, SessionRegistry, SessionStatus,
+};
 use crate::server::client_registry::ClientRegistry;
 use crate::server::command_broker::{CommandBroker, ConnectionGeneration};
 use crate::server::outbound::WsMessageSender;
@@ -39,12 +41,13 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionEnvResponsePayload, ClientSessionEnvUnsetPayload, ClientSessionKillPayload,
     ClientSessionProcessesPayload, ClientSessionSandboxContextPayload,
     ClientSessionSandboxEnterPayload, ClientSessionSandboxFocusPayload,
-    ClientSessionSandboxPreflightPayload, ClientSessionSandboxReturnPayload, ProcessSnapshot,
-    SandboxContextResponse, ServerSessionListPayload, ServerSessionListReply,
+    ClientSessionSandboxImagePreparePayload, ClientSessionSandboxPreflightPayload,
+    ClientSessionSandboxReturnPayload, ProcessSnapshot, SandboxContextResponse,
+    SandboxImagePrepareResponse, ServerSessionListPayload, ServerSessionListReply,
     ServerSessionProcessesReply, SessionEnvActiveResponse, SessionEnvBindingRefusalKind,
     SessionEnvQueryResponse, SessionMetadata, SessionMetadataResponse, SessionProcessesResponse,
     SessionRefusal, WebSessionInfo, WebSessionKillResponse, WebSessionMetadataGetPayload,
-    WebSessionMetadataUpdatePayload, WebSessionsListResponse,
+    WebSessionMetadataPatchPayload, WebSessionMetadataUpdatePayload, WebSessionsListResponse,
 };
 use nession_protocol::ProtocolMessage;
 
@@ -122,6 +125,8 @@ pub struct ConnectionHandler {
     image_manager: Arc<crate::image::ImageManager>,
     /// Database handle for quick-command CRUD (issue #95, part 3).
     db: Arc<crate::db::Database>,
+    /// The validated Extension-contribution catalog (`#3778`).
+    extension_tools: Option<Arc<crate::server::extension_tools::ExtensionToolCatalog>>,
     config: ConnectionHandlerConfig,
     authenticated_client: bool,
     registered_agent_id: Option<String>,
@@ -176,8 +181,9 @@ impl Clone for ConnectionHandler {
             env_service: Arc::clone(&self.env_service),
             image_manager: Arc::clone(&self.image_manager),
             db: Arc::clone(&self.db),
+            extension_tools: self.extension_tools.clone(),
             config: ConnectionHandlerConfig {
-                server_auth_token: self.config.server_auth_token.clone(),
+                server_auth: self.config.server_auth.clone(),
                 heartbeat_interval_secs: self.config.heartbeat_interval_secs,
                 terminal_cols: self.config.terminal_cols,
                 terminal_web_font_size: self.config.terminal_web_font_size,
@@ -197,7 +203,10 @@ impl Clone for ConnectionHandler {
 
 /// Immutable per-connection configuration.
 pub struct ConnectionHandlerConfig {
-    pub server_auth_token: String,
+    /// The canonical constant-time verifier for this host's inbound Server
+    /// Token (`#4066`). A disabled verifier is the documented no-auth mode; a
+    /// configured token never goes through plain string equality.
+    pub server_auth: nession_protocol::TokenVerifier,
     pub heartbeat_interval_secs: u64,
     /// The release-selected fixed column count (#2487).
     pub terminal_cols: u16,
@@ -220,6 +229,11 @@ pub struct ConnectionHandlerDeps {
     /// Server-owned global EROFS image manager (#3022).
     pub image_manager: Arc<crate::image::ImageManager>,
     pub db: Arc<crate::db::Database>,
+    /// The Server's validated Extension-contributed MCP Tool catalog
+    /// (`#3778`). Registration installs each Agent's advertised manifest here,
+    /// and the route handlers read the same catalog. `None` only in tests that
+    /// do not exercise contribution routing.
+    pub extension_tools: Option<Arc<crate::server::extension_tools::ExtensionToolCatalog>>,
 }
 
 /// Why the canonical Session binding mutation refused.
@@ -275,6 +289,7 @@ impl ConnectionHandler {
             env_service: deps.env_service,
             image_manager: deps.image_manager,
             db: deps.db,
+            extension_tools: deps.extension_tools,
             config,
             authenticated_client: false,
             registered_agent_id: None,
@@ -542,9 +557,9 @@ impl ConnectionHandler {
     /// Called after any mutation so browsers don't have to poll or wait for a
     /// manual refresh to notice changes.
     async fn broadcast_sessions(&self) {
-        let project_ids = self.session_registry.project_ids().await;
+        let project_memberships = self.session_registry.project_memberships().await;
         self.web_client_registry
-            .broadcast_sessions_changed(Arc::clone(&self.session_registry), &project_ids)
+            .broadcast_sessions_changed(Arc::clone(&self.session_registry), &project_memberships)
             .await;
     }
 
@@ -1349,7 +1364,7 @@ fn current_timestamp() -> u64 {
 /// web client feeds either straight into the same state setter.
 pub(crate) fn session_to_info(
     s: &crate::registry::SessionInfo,
-    project_id: Option<&str>,
+    project: Option<&SessionProjectMembership>,
 ) -> WebSessionInfo {
     WebSessionInfo {
         session_id: s.session_id.clone(),
@@ -1368,16 +1383,25 @@ pub(crate) fn session_to_info(
         foreground_command: s.foreground_command.clone(),
         working_dir: s.working_dir.clone(),
         instance_id: s.instance_id.clone(),
-        project_id: project_id.map(std::string::ToString::to_string),
+        // The Agent's last reported work-context summary (#4007); omitted when
+        // no current Agent has reported one.
+        metadata: s.metadata.clone(),
+        project_id: project.map(|membership| membership.project_id.clone()),
+        // `0` is the unassociated token; an associated entry carries the
+        // revision the membership CAS accepts (#4234).
+        project_revision: Some(project.map_or(0, |membership| membership.revision)),
+        // The same shared serializer feeds `server.session.list` and
+        // `server.sessions.changed`, so the two always agree on Activity too.
+        activity: s.activity.clone(),
         last_activity: s.last_activity.to_rfc3339(),
     }
 }
 
 pub(crate) fn session_to_json(
     s: &crate::registry::SessionInfo,
-    project_id: Option<&str>,
+    project: Option<&SessionProjectMembership>,
 ) -> serde_json::Value {
-    serde_json::to_value(session_to_info(s, project_id)).unwrap_or(json!({}))
+    serde_json::to_value(session_to_info(s, project)).unwrap_or(json!({}))
 }
 
 /// Convert an agent's `sessions.list` reply into registry entries.
@@ -1446,6 +1470,20 @@ fn parse_agent_sessions(
                             .and_then(serde_json::Value::as_str)
                             .filter(|id| !id.is_empty())
                             .map(std::string::ToString::to_string),
+                        metadata: s
+                            .get("metadata")
+                            .cloned()
+                            .and_then(|raw| {
+                                serde_json::from_value::<
+                                    nession_protocol::contracts::session::v1::SessionMetadataAvailability,
+                                >(raw)
+                                .ok()
+                            }),
+                        // The inventory reply carries no Activity; the
+                        // replacement preserves a same-incarnation level.
+                        activity: None,
+                        activity_epoch: None,
+                        activity_generation: 0,
                     })
                 })
                 .collect()
@@ -1469,6 +1507,7 @@ mod server_agent_git_invalidated_v1;
 mod server_agent_list_v1;
 mod server_agent_register_v1;
 mod server_agent_rename_v1;
+mod server_agent_session_activity_v1;
 mod server_agent_session_env_binding_v1;
 mod server_agent_session_update_v1;
 mod server_agent_terminal_resize_v1;
@@ -1488,9 +1527,15 @@ mod server_image_build_retry_v1;
 mod server_image_build_submit_v1;
 mod server_image_build_v1;
 mod server_image_get_v1;
+mod server_image_impact_get_v1;
+mod server_image_library_list_v1;
 mod server_image_list_v1;
+mod server_image_tag_remove_v1;
+mod server_image_tag_set_v1;
 mod server_info_v1;
 mod server_mcp_endpoint_v1;
+mod server_mcp_tool_call_v1;
+mod server_mcp_tools_list_v1;
 mod server_project_create_v1;
 mod server_project_delete_v1;
 mod server_project_get_v1;
@@ -1509,6 +1554,7 @@ mod server_session_env_unset_v1;
 mod server_session_kill_v1;
 mod server_session_list_v1;
 mod server_session_metadata_get_v1;
+mod server_session_metadata_patch_v1;
 mod server_session_metadata_update_v1;
 mod server_session_processes_v1;
 mod server_session_project_set_v1;
@@ -1516,6 +1562,7 @@ mod server_session_relay_begin_v1;
 mod server_session_sandbox_context_v1;
 mod server_session_sandbox_enter_v1;
 mod server_session_sandbox_focus_v1;
+mod server_session_sandbox_image_prepare_v1;
 mod server_session_sandbox_images;
 mod server_session_sandbox_preflight_v1;
 mod server_session_sandbox_return_to_native_v1;
@@ -1648,6 +1695,12 @@ pub(super) fn metadata_response(
             .and_then(serde_json::Value::as_str)
             .map(str::to_string),
         metadata,
+        // The Agent is the identity's authority; the Server relays it with the
+        // value so a caller can use it as its next write precondition (#4007).
+        instance_id: value
+            .get("instance_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string),
     }
 }
 
@@ -1657,5 +1710,6 @@ pub(super) fn metadata_refusal(kind: &str, message: &str) -> SessionMetadataResp
         error: Some(message.to_string()),
         error_kind: Some(kind.to_string()),
         metadata: None,
+        instance_id: None,
     }
 }

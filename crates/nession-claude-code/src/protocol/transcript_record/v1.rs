@@ -5,8 +5,8 @@
 //! when they fit. A record too large for a page arrives as a placeholder with
 //! its `record_ref`; this unit is how the caller reads that record completely
 //! without asking for an unbounded response. The reference is resource-scoped
-//! and carries a generation fingerprint, so it cannot be replayed against
-//! another transcript or a replaced file.
+//! and carries a fingerprint of the record's own bytes, so it cannot be
+//! replayed against another transcript or a rewritten record.
 //!
 //! The response is one bounded chunk of the line. `has_more` says whether the
 //! line continues; a caller concatenates chunks until it is false. Invalid
@@ -29,17 +29,19 @@ pub const DEFAULT_CHUNK: u32 = 256 * 1024;
 /// Where a single-record read stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptRecordStateV1 {
     /// The record was found and this chunk is part of it.
     Ready,
     /// The reference does not name a record visible to this Session.
     NotFound,
-    /// The reference was issued for a different file generation.
+    /// The reference was issued for different bytes.
     ///
-    /// The caller must reload the transcript page; this response carries no
-    /// bytes, so a stale reference never returns text from a replaced file.
+    /// The line it named was rewritten or the file replaced — even when the
+    /// file's first line is unchanged. The caller must reload the transcript
+    /// page; this response carries no bytes, so a stale reference never returns
+    /// changed text under the old identity.
     StaleGeneration,
     /// The provider cannot establish the Session's cwd, so it cannot scope the
     /// read.
@@ -49,9 +51,9 @@ pub enum TranscriptRecordStateV1 {
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordRequestV1 {
     /// The Nession session the read is scoped to. Required.
     pub session_id: String,
@@ -71,9 +73,9 @@ pub struct TranscriptRecordRequestV1 {
 }
 
 /// The answer: one chunk of one record.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordResponseV1 {
     pub state: TranscriptRecordStateV1,
 

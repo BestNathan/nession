@@ -1,8 +1,14 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { useMediaQuery } from '@/shared/hooks/useMediaQuery';
-import { subscribeTouchOwnership } from '@/shared/lib/touchOwnership';
+import type { WorkspaceStackReport } from '@/app/workspace/workspaceContext';
+import { useSwipePagerCancellations } from './useSwipePagerCancellations';
 import type { ShellBounds } from './edgeBand';
-import { SwipeGesture, type SwipePhase, type SwipeSnapshot } from './swipeGesture';
+import {
+  SwipeGesture,
+  type InnerSwipeAction,
+  type SwipePhase,
+  type SwipeSnapshot,
+} from './swipeGesture';
 import { bindSwipeTouchListeners } from './swipeTouchBinding';
 import { useSwipeSettle, type SwipeSettleState } from './useSwipeSettle';
 
@@ -30,6 +36,12 @@ export interface UseSwipePagerArgs {
    * both be reachable.
    */
   shellMayPage: boolean;
+  /**
+   * The active Workspace depth's inner stack (#3971), or null when it has
+   * none. The same coordinator routes a claimed contact here before the outer
+   * spatial pager; there is never a second touch owner.
+   */
+  innerStack?: WorkspaceStackReport | null;
   /** The shell root the native touch listeners bind to. */
   rootRef: RefObject<HTMLElement | null>;
 }
@@ -40,10 +52,24 @@ export interface UseSwipePagerResult {
   phase: SwipePhase;
   /** The frozen destination while the shell owns the contact. */
   destinationIndex: number | null;
+  /** The inner stack operation the contact resolved to, if any. */
+  innerAction: InnerSwipeAction | null;
+  /** The inner page's live offset while the Workspace stack moves. */
+  innerOffset: number;
+  /** True while an inner destination settles back to rest. */
+  innerSettling: boolean;
+  /** The destination title, for the transient preview label. */
+  destinationLabel: string | null;
   direction: -1 | 0 | 1;
   /** Why the last contact ended; observed by device diagnostics and E2E. */
   lastReason: string | null;
   isDragging: boolean;
+  /**
+   * Finish the rendered settle now. Both animated surfaces (the outer slab and
+   * the inner Workspace frame) call this from `transitionend`; the settle's
+   * own timer remains the bounded fallback (#4185).
+   */
+  finishSettle: () => void;
 }
 
 function reportStandDown(reason: string, snapshot: SwipeSnapshot): void {
@@ -55,6 +81,69 @@ function reportStandDown(reason: string, snapshot: SwipeSnapshot): void {
     offset: snapshot.offset,
     destination: snapshot.destinationIndex,
   });
+}
+
+/**
+ * The public shape from the latest snapshot and settle state.
+ *
+ * An inner stack move and an outer page are mutually exclusive for one
+ * contact. Keeping their offsets separate is what stops an inner Pop from
+ * translating the whole Workspace layer over the Terminal.
+ */
+function pagerResult(
+  settle: SwipeSettleState | null,
+  snapshot: SwipeSnapshot,
+  finishSettle: () => void,
+): UseSwipePagerResult {
+  const phase: SwipePhase = settle !== null ? 'settling' : snapshot.phase;
+  const innerAction = settle?.innerAction ?? snapshot.innerAction;
+  const innerSettling = settle !== null && settle.innerAction !== null;
+  const innerOffset = innerAction === null ? 0 : (settle?.offset ?? snapshot.offset);
+  const destinationLabel = innerAction === null
+    ? null
+    : (settle?.destinationLabel ?? snapshot.destinationLabel);
+  const dragOffset = innerAction === null ? (settle?.offset ?? snapshot.offset) : 0;
+  const destinationIndex = innerAction === null
+    ? (settle?.previewIndex ?? snapshot.destinationIndex)
+    : null;
+  return {
+    dragOffset,
+    phase,
+    destinationIndex,
+    innerAction,
+    innerOffset,
+    innerSettling,
+    destinationLabel,
+    direction: snapshot.direction,
+    lastReason: snapshot.reason,
+    isDragging: phase === 'navigation' || phase === 'resisting' || phase === 'settling',
+    finishSettle,
+  };
+}
+
+/**
+ * Catch a running settle up when a new contact arrives (#4185).
+ *
+ * The pending commit of that settle is applied now. The authority changes it
+ * causes — the route itself and any capability stack that the route owns — are
+ * expected consequences of this contact's own start, so the cancellation hook
+ * must not treat them as authority moving under the new contact.
+ */
+function useSettleCatchUp(finishSettle: () => SwipeSettleState | null): {
+  catchUpSettle: () => void;
+  isSettledRouteChange: () => boolean;
+  clearSettledRouteChange: () => void;
+} {
+  const caughtUpRef = useRef(false);
+  const isSettledRouteChange = useCallback(() => caughtUpRef.current, []);
+  const clearSettledRouteChange = useCallback(() => {
+    caughtUpRef.current = false;
+  }, []);
+  const catchUpSettle = useCallback(() => {
+    const finished = finishSettle();
+    caughtUpRef.current = finished !== null && finished.commitIndex !== null;
+  }, [finishSettle]);
+  return { catchUpSettle, isSettledRouteChange, clearSettledRouteChange };
 }
 
 /**
@@ -73,10 +162,25 @@ export function useSwipePager({
   onIndexChange,
   getShellBounds,
   shellMayPage,
+  innerStack = null,
   rootRef,
 }: UseSwipePagerArgs): UseSwipePagerResult {
-  const optionsRef = useRef({ pageCount, index, onIndexChange, getShellBounds, shellMayPage });
-  optionsRef.current = { pageCount, index, onIndexChange, getShellBounds, shellMayPage };
+  const optionsRef = useRef({
+    pageCount,
+    index,
+    onIndexChange,
+    getShellBounds,
+    shellMayPage,
+    innerStack,
+  });
+  optionsRef.current = {
+    pageCount,
+    index,
+    onIndexChange,
+    getShellBounds,
+    shellMayPage,
+    innerStack,
+  };
 
   const engineRef = useRef<SwipeGesture | null>(null);
   if (engineRef.current === null) {
@@ -85,6 +189,16 @@ export function useSwipePager({
       getIndex: () => optionsRef.current.index,
       getPageCount: () => optionsRef.current.pageCount,
       shellMayPage: () => optionsRef.current.shellMayPage,
+      getInnerStack: () => {
+        const stack = optionsRef.current.innerStack;
+        if (stack === null) {
+          return null;
+        }
+        return {
+          pop: stack.pop?.title ?? null,
+          forward: stack.forward?.title ?? null,
+        };
+      },
     });
   }
   const engine = engineRef.current;
@@ -95,14 +209,27 @@ export function useSwipePager({
     setSnapshot(engine.snapshot());
   }, [engine]);
 
-  const { settle, complete, clearSettle } = useSwipeSettle({
+  const onInnerCommit = useCallback((action: InnerSwipeAction) => {
+    const stack = optionsRef.current.innerStack;
+    if (stack === null) {
+      return;
+    }
+    const destination = action === 'pop' ? stack.pop : stack.forward;
+    destination?.onActivate();
+  }, []);
+
+  const { settle, complete, finishSettle, clearSettle } = useSwipeSettle({
     publish,
     onIndexChange,
+    onInnerCommit,
     getShellBounds,
     reducedMotion,
   });
-  const settleRef = useRef<SwipeSettleState | null>(settle);
-  settleRef.current = settle;
+  // A settle's commit runs when the animation ends, not at release. If the
+  // user's next contact arrives first, catch the settle up rather than
+  // ignoring the contact (#4185).
+  const { catchUpSettle, isSettledRouteChange, clearSettledRouteChange } =
+    useSettleCatchUp(finishSettle);
 
   const standDown = useCallback(
     (reason: string) => {
@@ -127,36 +254,20 @@ export function useSwipePager({
       publish,
       standDown,
       complete,
-      isSettling: () => settleRef.current !== null,
+      catchUpSettle,
     });
-  }, [complete, engine, publish, rootRef, standDown]);
+  }, [catchUpSettle, complete, engine, publish, rootRef, standDown]);
 
-  // A claim by another surface (today: the Terminal's long-press direction
-  // pad, #2657) is authority, not an ordering accident. The claim may consume
-  // the following events before they reach this root, so stand down from the
-  // registry notification rather than waiting for a move that never arrives.
-  useEffect(
-    () => subscribeTouchOwnership((identifier, owner) => {
-      if (engine.isTracking(identifier)) {
-        standDown('owned-by:' + owner);
-      }
-    }),
-    [engine, standDown],
-  );
-
-  // Losing the shell's authority or the route behind a live contact must not
-  // leave a preview following a finger that no longer owns a destination.
-  useEffect(() => {
-    if (!shellMayPage && engine.trackedIdentifier() !== null) {
-      standDown('shell-standdown');
-    }
-  }, [engine, shellMayPage, standDown]);
-
-  useEffect(() => {
-    if (engine.trackedIdentifier() !== null) {
-      standDown('route-change');
-    }
-  }, [engine, index, pageCount, standDown]);
+  useSwipePagerCancellations({
+    engine,
+    shellMayPage,
+    innerStack,
+    index,
+    pageCount,
+    standDown,
+    isSettledRouteChange,
+    clearSettledRouteChange,
+  });
 
   useEffect(
     () => () => {
@@ -165,16 +276,5 @@ export function useSwipePager({
     [engine],
   );
 
-  const phase: SwipePhase = settle !== null ? 'settling' : snapshot.phase;
-  const dragOffset = settle?.offset ?? snapshot.offset;
-  const destinationIndex = settle?.previewIndex ?? snapshot.destinationIndex;
-
-  return {
-    dragOffset,
-    phase,
-    destinationIndex,
-    direction: snapshot.direction,
-    lastReason: snapshot.reason,
-    isDragging: phase === 'navigation' || phase === 'resisting' || phase === 'settling',
-  };
+  return pagerResult(settle, snapshot, finishSettle);
 }

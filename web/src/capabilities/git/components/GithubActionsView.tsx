@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { githubApi } from '../GithubPlugin';
 import { asGithubError, type GithubRunScope, type GithubWorkflow } from '../githubTypes';
 import { useGithubPagedList } from '../hooks/useGithubPagedList';
@@ -79,7 +80,10 @@ export function GithubActionsView({
         onScopeChange={setScope}
         onRefresh={list.refresh}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 pb-16">
+      {/* #4188: the Actions list is the declared bounded surface's internal
+          scroll owner. `pb-16` was a fixed guess at the Capsule band; the host
+          measures the real one. */}
+      <WorkspaceBoundedScrollport className="p-3" data-testid="github-actions-scroll">
         {list.error ? (
           <GithubNotice error={list.error} testId="github-actions-error" onRetry={list.refresh} />
         ) : list.loading ? (
@@ -111,7 +115,7 @@ export function GithubActionsView({
             </Button>
           </div>
         ) : null}
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

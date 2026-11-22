@@ -4,6 +4,7 @@ use anyhow::Result;
 use sea_orm::ConnectionTrait;
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use super::pin::ConsumerKind;
 use super::sqlite;
 use crate::digest::is_valid_digest;
 use crate::oci::{
@@ -247,6 +248,206 @@ pub async fn parents_for_reference(
                 .map_err(|error| anyhow::anyhow!("catalog reference is invalid: {error}"))
         })
         .collect()
+}
+
+/// Every parent digest of one object, for every reference role.
+pub async fn parents_of(conn: &impl ConnectionTrait, child_digest: &str) -> Result<Vec<String>> {
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT parent_digest FROM catalog_references \
+         WHERE child_digest = ? ORDER BY parent_digest",
+        vec![child_digest.into()],
+    )
+    .await?;
+    rows.iter()
+        .map(|row| {
+            row.try_get("", "parent_digest")
+                .map_err(|error| anyhow::anyhow!("catalog reference is invalid: {error}"))
+        })
+        .collect()
+}
+
+/// Every Manifest/Index ancestor of one catalog object, nearest first.
+///
+/// A build publishes a Manifest that names the raw EROFS layer, and a
+/// referenced Composite adds one metadata hop. Walk parent edges until a
+/// Manifest/Index root is found; unreachable or cyclic history is bounded and
+/// reported as an empty answer rather than interpreted.
+pub async fn manifest_ancestors(
+    conn: &impl ConnectionTrait,
+    child_digest: &str,
+) -> Result<Vec<StoredObject>> {
+    if !is_valid_digest(child_digest) {
+        anyhow::bail!("invalid catalog object digest {child_digest:?}");
+    }
+    let mut frontier = vec![child_digest.to_string()];
+    let mut seen: HashSet<String> = HashSet::new();
+    let mut manifests: HashMap<String, StoredObject> = HashMap::new();
+    for _ in 0..8 {
+        if frontier.is_empty() {
+            break;
+        }
+        let mut next = Vec::new();
+        for digest in frontier {
+            if !seen.insert(digest.clone()) {
+                continue;
+            }
+            for parent in parents_of(conn, &digest).await? {
+                let Some(object) = get_object(conn, &parent).await? else {
+                    continue;
+                };
+                if matches!(object.kind, ObjectKind::Manifest | ObjectKind::Index) {
+                    manifests.insert(object.digest.clone(), object);
+                } else if seen.insert(parent.clone()) {
+                    next.push(parent);
+                }
+            }
+        }
+        frontier = next;
+    }
+    let mut manifests: Vec<StoredObject> = manifests.into_values().collect();
+    manifests.sort_by(|left, right| left.digest.cmp(&right.digest));
+    Ok(manifests)
+}
+
+/// The direct descriptor edges of one object, with each child's stored kind.
+pub async fn references_of(
+    conn: &impl ConnectionTrait,
+    parent_digest: &str,
+) -> Result<Vec<(StoredObject, String)>> {
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT r.role, o.digest, o.media_type, o.size_bytes, o.kind \
+         FROM catalog_references r JOIN catalog_objects o ON o.digest = r.child_digest \
+         WHERE r.parent_digest = ? ORDER BY r.role, o.digest",
+        vec![parent_digest.into()],
+    )
+    .await?;
+    rows.iter()
+        .map(|row| {
+            let role: String = row
+                .try_get("", "role")
+                .map_err(|error| anyhow::anyhow!("catalog reference is invalid: {error}"))?;
+            let object = object_from_row(row)?;
+            Ok((object, role))
+        })
+        .collect()
+}
+
+/// Every repository Tag resolving to one Manifest, sorted.
+pub async fn tags_for_manifest(
+    conn: &impl ConnectionTrait,
+    manifest_digest: &str,
+) -> Result<Vec<(String, String)>> {
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT repository, tag FROM catalog_tags WHERE manifest_digest = ? \
+         ORDER BY repository, tag",
+        vec![manifest_digest.into()],
+    )
+    .await?;
+    rows.iter()
+        .map(|row| {
+            let repository: String = row
+                .try_get("", "repository")
+                .map_err(|error| anyhow::anyhow!("catalog tag is invalid: {error}"))?;
+            let tag: String = row
+                .try_get("", "tag")
+                .map_err(|error| anyhow::anyhow!("catalog tag is invalid: {error}"))?;
+            Ok((repository, tag))
+        })
+        .collect()
+}
+
+/// Live catalog pins for one digest, counted by consumer kind.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PinCounts {
+    pub project: u64,
+    pub session: u64,
+    pub build: u64,
+    pub transfer: u64,
+    pub mount: u64,
+}
+
+impl PinCounts {
+    pub fn leases(&self) -> u64 {
+        self.build + self.transfer + self.mount
+    }
+}
+
+/// Count durable pins and unexpired leases for one Manifest.
+pub async fn pin_counts(
+    conn: &impl ConnectionTrait,
+    manifest_digest: &str,
+    now: i64,
+) -> Result<PinCounts> {
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT consumer_kind, COUNT(*) AS count FROM catalog_pins \
+         WHERE manifest_digest = ? AND (expires_at IS NULL OR expires_at > ?) \
+         GROUP BY consumer_kind",
+        vec![manifest_digest.into(), now.into()],
+    )
+    .await?;
+    let mut counts = PinCounts::default();
+    for row in rows {
+        let kind: String = row
+            .try_get("", "consumer_kind")
+            .map_err(|error| anyhow::anyhow!("catalog pin is invalid: {error}"))?;
+        let count: i64 = row
+            .try_get("", "count")
+            .map_err(|error| anyhow::anyhow!("catalog pin count is invalid: {error}"))?;
+        let count = u64::try_from(count).unwrap_or(0);
+        match ConsumerKind::parse(&kind)? {
+            ConsumerKind::Project => counts.project = count,
+            ConsumerKind::Session => counts.session = count,
+            ConsumerKind::Build => counts.build = count,
+            ConsumerKind::Transfer => counts.transfer = count,
+            ConsumerKind::Mount => counts.mount = count,
+        }
+    }
+    Ok(counts)
+}
+
+/// Every Manifest digest named by a Tag in one repository, sorted.
+pub async fn repository_manifest_digests(
+    conn: &impl ConnectionTrait,
+    repository: &str,
+) -> Result<Vec<String>> {
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT DISTINCT manifest_digest FROM catalog_tags WHERE repository = ? \
+         ORDER BY manifest_digest",
+        vec![repository.into()],
+    )
+    .await?;
+    rows.iter()
+        .map(|row| {
+            row.try_get("", "manifest_digest")
+                .map_err(|error| anyhow::anyhow!("catalog tag is invalid: {error}"))
+        })
+        .collect()
+}
+
+/// Every reachable raw EROFS digest below one root, sorted.
+pub async fn reachable_erofs_digests(
+    conn: &impl ConnectionTrait,
+    root_digest: &str,
+) -> Result<Vec<String>> {
+    let reachable = reachable(conn, &[root_digest.to_string()]).await?;
+    let mut erofs = Vec::new();
+    for digest in reachable {
+        if digest == root_digest {
+            continue;
+        }
+        if let Some(object) = get_object(conn, &digest).await? {
+            if object.kind == ObjectKind::Erofs {
+                erofs.push(digest);
+            }
+        }
+    }
+    erofs.sort();
+    Ok(erofs)
 }
 
 /// Delete one object row and every edge that names it.

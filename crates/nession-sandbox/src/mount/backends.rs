@@ -238,9 +238,12 @@ impl TransientRootfsLease {
                 )));
             }
         } else if nession_erofs::mount::is_mounted(&self.mountpoint) {
+            let mountpoint = self.mountpoint.display().to_string();
+            // A foreign mount at the owned path is unresolved state: keep the
+            // read-only lower registered for the durable record's retry.
+            std::mem::forget(self);
             return Err(SandboxError::Cleanup(format!(
-                "the transient RootFS path {} is a foreign mount; refusing to unmount it",
-                self.mountpoint.display()
+                "the transient RootFS path {mountpoint} is a foreign mount; refusing to unmount it"
             )));
         }
         remove_owned_directory(&self.upper)?;
@@ -330,6 +333,31 @@ impl MountBackend for TransientRootfsBackend {
                 ))
             })?;
         let transient_root = self.execution_dir.join("rootfs-overlay");
+        // Persist the rollback identity before exposing a physical mount. If
+        // the record cannot be written, no mount exists yet: release the
+        // consumer and fail closed rather than owning unrecorded state.
+        let transient_record = crate::exec::TransientRootfsRecord {
+            mountpoint: transient_root.join("merged").display().to_string(),
+            upper: transient_root.join("upper").display().to_string(),
+            work: transient_root.join("work").display().to_string(),
+        };
+        let lower_shared = crate::exec::SharedMountRecord {
+            digest: lower.digest().to_string(),
+            mountpoint: lower.mountpoint().display().to_string(),
+            generation: lower.generation().to_string(),
+        };
+        if let Err(error) = crate::exec::write_recovery_pending(
+            &self.settings,
+            consumer.execution_id(),
+            &self.execution_dir,
+            transient_record,
+            vec![lower_shared],
+        ) {
+            let _ = lower.release();
+            return Err(SandboxError::Prepare(format!(
+                "could not persist the transient RootFS recovery record: {error:#}"
+            )));
+        }
         let setup = (|| -> Result<(PathBuf, PathBuf, PathBuf)> {
             create_owned_directory(&transient_root)?;
             let upper = transient_root.join("upper");
@@ -375,10 +403,35 @@ impl MountBackend for TransientRootfsBackend {
                 } else {
                     true
                 };
+                // The durable recovery record is the rollback owner. Keep it
+                // whenever any owned part — the live Merged View, its lower
+                // consumer, or a temporary directory — could not be released.
+                let mut retained = !unmount_ok;
+                let mut retained_lower = Some(lower);
                 if unmount_ok {
-                    let _ = remove_owned_directory(&transient_root);
+                    if remove_owned_directory(&transient_root).is_ok() {
+                        let released = match retained_lower.take() {
+                            Some(lower) => lower.release().is_ok(),
+                            None => false,
+                        };
+                        if released {
+                            crate::exec::remove_recovery_record(
+                                &self.settings,
+                                consumer.execution_id(),
+                            );
+                        }
+                    } else {
+                        retained = true;
+                    }
                 }
-                let _ = lower.release();
+                if retained {
+                    if let Some(lower) = retained_lower.take() {
+                        // The live Merged View still depends on the read-only
+                        // lower. Keep the consumer registered for the record's
+                        // retry instead of dropping the lease.
+                        std::mem::forget(lower);
+                    }
+                }
                 return Err(error);
             }
         };

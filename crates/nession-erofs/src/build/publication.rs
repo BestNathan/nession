@@ -5,7 +5,7 @@ use sea_orm::DatabaseConnection;
 use serde_json::Map;
 use std::collections::BTreeMap;
 
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::reference::{record_object, record_reference, ObjectKind, StoredObject};
 use crate::catalog::tag::{set_tag, TagExpectation};
 use crate::image::publish::{
@@ -128,7 +128,7 @@ pub fn image_documents_with_runtime(
 /// Publish one verified EROFS layer as a standards-valid image.
 pub async fn publish_layer(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     publication: &LayerPublication,
 ) -> Result<PublishOutcome> {
     store
@@ -235,7 +235,7 @@ pub struct CompositePublishOutcome {
 /// in one transaction. A failure leaves at most private/unreachable bytes.
 pub async fn publish_composite(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     publication: &CompositePublication,
     now: i64,
 ) -> Result<CompositePublishOutcome> {
@@ -425,7 +425,7 @@ mod tests {
     use crate::oci::validation::select_platform;
     use tempfile::tempdir;
 
-    fn layer(store: &BlobStore, hex: char) -> Descriptor {
+    fn layer(store: &FsBlobStore, hex: char) -> Descriptor {
         let stored = store
             .put_bytes(format!("verified erofs bytes {hex}").as_bytes())
             .unwrap();
@@ -445,7 +445,7 @@ mod tests {
     #[tokio::test]
     async fn a_built_layer_publishes_a_standard_manifest_and_tag() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let layer = layer(&store, 'a');
@@ -484,7 +484,7 @@ mod tests {
     #[test]
     fn changed_metadata_changes_the_manifest_but_not_the_layer() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let layer = layer(&store, 'b');
         let platform = host_platform();
         let (config_a, manifest_a) =
@@ -504,7 +504,7 @@ mod tests {
     #[test]
     fn an_index_can_select_the_published_platform() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let layer = layer(&store, 'c');
         let (_, manifest) =
             image_documents(&layer, &host_platform(), &[], &BTreeMap::new()).unwrap();
@@ -532,7 +532,7 @@ mod tests {
     }
 
     fn composite_documents(
-        store: &BlobStore,
+        store: &FsBlobStore,
         metadata: &Descriptor,
         devices: &[Descriptor],
         composite_descriptor: &Descriptor,
@@ -591,7 +591,7 @@ mod tests {
     async fn a_referenced_composite_publishes_its_whole_closure_and_gc_retains_every_device() {
         use crate::oci::composite::CompositeDescriptor;
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
         let metadata = layer(&store, 'm');

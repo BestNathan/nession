@@ -133,11 +133,19 @@ Rules for the converged shape:
   Requirement; its internal/privileged distinction does not change.
 
 A declaration that names both a nonempty `access` object and an executable
-composed-root plan (an image-backed `rootfs`, any `mounts`, or a Workspace
-compiled into that plan) is **structurally representable but not executable**
-in the first implementation. Preflight refuses the unsupported combination at
-the precise field path; it does not silently drop one side. A later mixing
-model requires a separate safety decision and OS-native proof.
+composed-root plan (an image-backed `rootfs`, a `Local` root with `mounts` or a
+Workspace, or a Workspace compiled into that plan) is **structurally
+representable but not executable**. Preflight refuses the unsupported
+combination at the precise field path; it does not silently drop one side. A
+later mixing model requires a separate safety decision and OS-native proof.
+
+A `Local` root with `mounts` and/or a `Workspace` is a **Host-root
+composition** (#3792): the ordinary host root stays read-only at `/`, the
+Workspace is bound at `/workspace`, and every toolchain is mounted read-only
+under a private `/opt`. It needs no Base Runtime image. A read-only host root
+cannot create a missing top-level mountpoint, so the Agent host must provide
+`/workspace` when a Workspace is selected and `/opt` when toolchains are
+selected; otherwise preflight/Enter fails closed with that prerequisite.
 
 ### Concrete examples
 
@@ -346,9 +354,12 @@ refused; unknown fields are rejected rather than ignored.
 - `SandboxFilesystemPolicy` accepts `access` or a prepared `composition`;
   carrying both is refused. A nonempty `access` object cannot be combined with
   an image-backed root, mounts or a prepared Workspace.
-- A composition requires one Base Runtime at `/`, a writable workspace, and
-  zero or more toolchains at exactly `/opt/<lowercase-name>`.
-- The composed root is an empty tmpfs plus the Base Runtime. By default the
+- An image-root composition requires one Base Runtime at `/` and a writable
+  workspace; a Host-root composition may omit the Base and Workspace and
+  carries toolchains at exactly `/opt/<lowercase-name>`. A Host-root
+  composition never carries `base_writable` or `base_env`.
+- An image-root composed root is an empty tmpfs plus the Base Runtime. A
+  Host-root composed root is the read-only host root. By default the
   Base is a read-only bind; when the declaration explicitly sets
   `rootfs.writable`, it is merged with an execution-owned transient
   upper/work that is strictly unmounted and removed by cleanup (#3698). The

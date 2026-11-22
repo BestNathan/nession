@@ -50,6 +50,22 @@ pub(super) fn table() -> std::io::Result<HashMap<u32, ProcessFacts>> {
     Ok(out)
 }
 
+/// Read one process's own and terminal-foreground process groups.
+///
+/// `PROC_PIDTBSDINFO` carries both `pbi_pgid` and `e_tpgid`; no process-table
+/// scan and no tty open are involved. A process with no controlling terminal
+/// reports a non-positive `e_tpgid`, which is returned as `None` rather than
+/// mistaken for a prompt.
+pub(super) fn process_groups(pid: u32) -> Option<(u32, u32)> {
+    let bsd = bsd_info(pid)?;
+    // The libc bindings type both fields as `u32`; `0` means the process has
+    // no group / no controlling terminal, which is unknown rather than a
+    // prompt observation.
+    let own = (bsd.pbi_pgid > 0).then_some(bsd.pbi_pgid)?;
+    let foreground = (bsd.e_tpgid > 0).then_some(bsd.e_tpgid)?;
+    Some((own, foreground))
+}
+
 pub(super) fn details(pid: u32) -> ProcessDetails {
     // The counters themselves come from the two timed samples; this read only
     // distinguishes "denied" from "the platform has no counters".

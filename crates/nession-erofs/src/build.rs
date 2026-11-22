@@ -50,7 +50,7 @@ use std::time::{Duration, Instant};
 
 use crate::digest::DIGEST_PREFIX;
 use crate::git::{self, GitCommandRunner, GitTarget};
-use crate::store::{BlobDigest, BlobStore};
+use crate::store::{BlobDigest, FsBlobStore};
 
 /// The fixed filesystem UUID V1 passes to `mkfs.erofs`.
 ///
@@ -789,7 +789,7 @@ pub struct BuildRequest<'a> {
 pub struct ErofsBuilder {
     pub git: Arc<dyn GitCommandRunner>,
     pub mkfs: Arc<dyn MkfsRunner>,
-    pub blobs: BlobStore,
+    pub blobs: FsBlobStore,
     pub work_root: PathBuf,
     /// The flattened Compose extractor (#3696). Production uses the pinned
     /// `fsck.erofs`; tests substitute a deterministic fake.
@@ -801,7 +801,7 @@ impl ErofsBuilder {
     pub fn new(
         git: Arc<dyn GitCommandRunner>,
         mkfs: Arc<dyn MkfsRunner>,
-        blobs: BlobStore,
+        blobs: FsBlobStore,
         work_root: impl Into<PathBuf>,
     ) -> Result<Self> {
         let work_root = work_root.into();
@@ -1181,7 +1181,7 @@ mod tests {
         ErofsBuilder::new(
             Arc::new(crate::git::ProcessGitRunner::default()),
             mkfs,
-            BlobStore::new(root.join("blobs")).unwrap(),
+            FsBlobStore::new(root.join("blobs")).unwrap(),
             root.join("work"),
         )
         .unwrap()
@@ -1254,7 +1254,7 @@ mod tests {
             Arc::new(ProcessMkfsRunner {
                 binary: root.path().join("missing-mkfs.erofs"),
             }),
-            BlobStore::new(root.path().join("blobs")).unwrap(),
+            FsBlobStore::new(root.path().join("blobs")).unwrap(),
             root.path().join("work"),
         )
         .unwrap();
@@ -1512,7 +1512,7 @@ mod tests {
         let builder = ErofsBuilder::new(
             Arc::new(crate::git::ProcessGitRunner::default()),
             Arc::new(ProcessMkfsRunner::default()),
-            BlobStore::new(root.path().join("blobs")).unwrap(),
+            FsBlobStore::new(root.path().join("blobs")).unwrap(),
             root.path().join("work"),
         )
         .unwrap();

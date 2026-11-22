@@ -38,13 +38,34 @@ fn refusal(id: &str, kind: &str, error: &str) -> HandlerAction {
 }
 
 fn conflict(id: &str, expected_revision: Option<u64>, current_revision: u64) -> HandlerAction {
-    refusal(
+    reply(
         id,
-        "conflict",
-        &format!(
-            "Project membership changed (expected revision {}, current {current_revision})",
-            expected_revision.unwrap_or_default()
-        ),
+        SessionProjectBindingResponse {
+            success: false,
+            project_id: None,
+            // The current token an intentional retry can guard with (#4234).
+            revision: Some(current_revision),
+            error: Some(format!(
+                "Project membership changed (expected revision {}, current {current_revision})",
+                expected_revision.unwrap_or_default()
+            )),
+            error_kind: Some("conflict".to_string()),
+        },
+    )
+}
+
+fn incarnation_conflict(id: &str, current_revision: u64) -> HandlerAction {
+    reply(
+        id,
+        SessionProjectBindingResponse {
+            success: false,
+            project_id: None,
+            revision: Some(current_revision),
+            error: Some(
+                "Session instance changed; reload the membership before saving".to_string(),
+            ),
+            error_kind: Some("conflict".to_string()),
+        },
     )
 }
 
@@ -102,6 +123,33 @@ impl ConnectionHandler {
                     }
                 },
             };
+
+        // An editor that read incarnation A must not write a same-name
+        // replacement B's membership (#4234). The revision alone cannot fence
+        // this after a recreation resets the row's generation.
+        if let Some(expected_instance) = payload.expected_instance_id.as_deref() {
+            if incarnation_id.as_deref() != Some(expected_instance) {
+                let current_revision = match self
+                    .db
+                    .get_session_project_binding(&payload.session_id)
+                    .await
+                {
+                    Ok(binding) => binding.map_or(0, |binding| binding.revision),
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to read project binding for {}: {e:#}",
+                            payload.session_id
+                        );
+                        return Ok(refusal(
+                            &msg.id,
+                            "unavailable",
+                            "Project membership could not be read",
+                        ));
+                    }
+                };
+                return Ok(incarnation_conflict(&msg.id, current_revision));
+            }
+        }
 
         if let Some(project_id) = payload.project_id.as_deref() {
             if !is_valid_project_id(project_id) {

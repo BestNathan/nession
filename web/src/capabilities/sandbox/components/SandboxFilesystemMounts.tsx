@@ -3,7 +3,7 @@ import { Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { FormSection } from '@/components/ui/configuration-form';
-import { shortDigest, type ImageDescriptor } from '@/capabilities/images';
+import { shortDigest, type ImageLibraryEntry } from '@/capabilities/images';
 import type {
   ImageCacheObservation,
   SandboxMount,
@@ -18,11 +18,27 @@ import {
 import { SandboxImageSelectDialog } from './SandboxImageSelectDialog';
 
 export interface SandboxFilesystemMountsProps {
+  sessionId: string | null;
+  targetPlatform: string | null;
   mounts: readonly SandboxMount[];
   observations: Map<string, ImageCacheObservation>;
   onAdd: (mount: SandboxMount) => void;
   onTargetChange: (index: number, target: string) => void;
   onRemove: (index: number) => void;
+}
+
+function toMount(
+  entry: ImageLibraryEntry,
+  target: string | null,
+): SandboxMount | null {
+  if (!entry.image.digest || !target) {
+    return null;
+  }
+  return {
+    source: { kind: 'image', digest: entry.image.digest },
+    target,
+    read_only: true,
+  };
 }
 
 function duplicateTargets(mounts: readonly SandboxMount[]): Set<number> {
@@ -49,6 +65,8 @@ function duplicateTargets(mounts: readonly SandboxMount[]): Set<number> {
  * writable mount or an arbitrary target.
  */
 export function SandboxFilesystemMounts({
+  sessionId,
+  targetPlatform,
   mounts,
   observations,
   onAdd,
@@ -58,21 +76,10 @@ export function SandboxFilesystemMounts({
   const [dialogOpen, setDialogOpen] = useState(false);
   const duplicates = duplicateTargets(mounts);
 
-  const choose = (selected: ImageDescriptor, target: string | null) => {
-    if (!selected.digest || !target) {
-      return;
-    }
-    onAdd({
-      source: { kind: 'image', digest: selected.digest },
-      target,
-      read_only: true,
-    });
-  };
-
   return (
     <FormSection
       title="Mounts"
-      description="Optional read-only image mounts at /opt/<lowercase-name>. The Base Runtime root owns each target directory; mounts are never writable in this version."
+      description="Optional read-only image mounts at /opt/<lowercase-name>. An image-root composition needs the Base Runtime image to own each target directory; a Host-root composition provides a private /opt. Mounts are never writable in this version."
       testId="sandbox-mounts"
     >
       {mounts.length === 0 ? (
@@ -160,10 +167,18 @@ export function SandboxFilesystemMounts({
       </div>
       <SandboxImageSelectDialog
         open={dialogOpen}
-        title="Mount an image"
+        title="Mount a Toolchain image"
+        role="toolchain"
+        sessionId={sessionId}
+        targetPlatform={targetPlatform}
         requireTarget
         submitLabel="Add mount"
-        onSelect={choose}
+        onSelect={(entry, target) => {
+          const mount = toMount(entry, target);
+          if (mount) {
+            onAdd(mount);
+          }
+        }}
         onClose={() => setDialogOpen(false)}
       />
     </FormSection>

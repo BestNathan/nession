@@ -7,6 +7,8 @@ pub mod extension;
 pub mod logging;
 pub mod paths;
 pub mod readiness;
+pub mod session_activity;
+pub mod session_env;
 pub mod system;
 pub mod tmux_socket;
 

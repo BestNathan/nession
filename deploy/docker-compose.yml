@@ -72,6 +72,12 @@ services:
       SERVER_BACKEND: "127.0.0.1:18080"
       # Required for image-default MCP; empty is an intentional fail-closed startup.
       SERVER_AUTH_TOKEN: "${SERVER_AUTH_TOKEN:-}"
+      # Browser clients present an Origin; name the Web UI origin(s) the
+      # browser actually uses (#4066). The local profile is served from
+      # SERVER_HTTP_PORT. Empty refuses every browser origin.
+      SERVER_ALLOWED_ORIGINS: "${SERVER_ALLOWED_ORIGINS:-}"
+      # Deliberately unsafe; only for an intentionally open listener.
+      SERVER_ALLOW_INSECURE_REMOTE: "${SERVER_ALLOW_INSECURE_REMOTE:-false}"
       # The canonical Server data root (#3179). `server-data` is mounted at
       # this exact path below, so the metadata DB, image blobs and build
       # workspace all resolve under the named volume. `SERVER_DB_PATH` is

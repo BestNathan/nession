@@ -228,6 +228,7 @@ fn test_server_session_create_payload() {
         terminal_cols: None,
         sandbox: None,
         managed: None,
+        initial_metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -266,6 +267,8 @@ fn test_agent_command_response_payload() {
         error: None,
         session_name: Some("new-session".to_string()),
         sandbox: None,
+        instance_id: Some("instance-a".to_string()),
+        metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -282,6 +285,8 @@ fn test_agent_command_response_payload_failure() {
         error: Some("session already exists".to_string()),
         session_name: None,
         sandbox: None,
+        instance_id: None,
+        metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: AgentCommandResponsePayload = serde_json::from_str(&json).unwrap();
@@ -301,6 +306,7 @@ fn test_client_session_create_payload() {
         sandbox: None,
         project_id: None,
         managed: None,
+        initial_metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreatePayload = serde_json::from_str(&json).unwrap();
@@ -456,6 +462,71 @@ fn test_session_instance_identity_is_optional_on_updates_and_reports() {
 }
 
 #[test]
+fn session_activity_is_optional_and_independent_on_the_web_projection() {
+    let base = serde_json::json!({
+        "session_id": "a1:s1",
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "detached",
+        "window_count": 1,
+        "attached_clients": 0,
+        "last_activity": "2026-11-18T00:00:00Z",
+    });
+
+    // A legacy Agent reports no activity at all. That is `unknown` to a
+    // consumer, and the wire says so by absence rather than inventing idle.
+    let legacy: WebSessionInfo = serde_json::from_value(base).unwrap();
+    assert!(legacy.activity.is_none());
+
+    let with_activity: WebSessionInfo = serde_json::from_value(serde_json::json!({
+        "session_id": "a1:s1",
+        "agent_id": "a1",
+        "session_name": "s1",
+        "status": "detached",
+        "window_count": 1,
+        "attached_clients": 0,
+        "activity": {
+            "state": "working",
+            "attention": "input_required",
+            "capability_id": "claude-code",
+            "observed_at_ms": 1_700_000_000_000_i64
+        },
+        "last_activity": "2026-11-18T00:00:00Z",
+    }))
+    .unwrap();
+    let activity = with_activity.activity.expect("activity is present");
+    assert_eq!(activity.state, "working");
+    assert_eq!(activity.attention.as_deref(), Some("input_required"));
+    assert_eq!(activity.capability_id.as_deref(), Some("claude-code"));
+
+    // The lifecycle `status` and the activity level are different fields with
+    // different values; the projection does not merge them.
+    assert_eq!(with_activity.status, "detached");
+}
+
+#[test]
+fn agent_session_activity_payload_round_trips_with_its_identity_fence() {
+    let payload = AgentSessionActivityPayload {
+        agent_id: "a1".to_string(),
+        session_name: "s1".to_string(),
+        instance_id: "inc-1".to_string(),
+        epoch: "epoch-1".to_string(),
+        generation: 7,
+        state: "idle".to_string(),
+        attention: None,
+        capability_id: Some("shell".to_string()),
+        observed_at_ms: 1_700_000_000_000,
+    };
+    let json = serde_json::to_value(&payload).unwrap();
+    assert!(
+        json.get("attention").is_none(),
+        "an absent attention is absent"
+    );
+    let decoded: AgentSessionActivityPayload = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, payload);
+}
+
+#[test]
 fn test_client_session_kill_payload() {
     let payload = ClientSessionKillPayload {
         session_id: "agent-1:doomed".to_string(),
@@ -474,6 +545,8 @@ fn test_client_session_create_response_payload() {
         warnings: Vec::new(),
         project_id: None,
         sandbox: None,
+        instance_id: None,
+        metadata: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionCreateResponsePayload = serde_json::from_str(&json).unwrap();
@@ -516,6 +589,98 @@ fn absent_metadata_is_revision_zero_and_old_payloads_stay_readable() {
     assert!(update.description.is_none());
     assert!(update.tags.is_empty());
     assert_eq!(update.expected_revision, 0);
+}
+
+#[test]
+fn initial_metadata_is_input_only_and_rejects_owner_written_fields() {
+    let parsed: SessionInitialMetadata = serde_json::from_value(serde_json::json!({
+        "title": " OAuth implementation ",
+        "description": null,
+        "tags": ["backend", "oauth"]
+    }))
+    .expect("a valid initial metadata object");
+    assert_eq!(parsed.title.as_deref(), Some(" OAuth implementation "));
+    assert!(parsed.description.is_none());
+    assert_eq!(parsed.tags, vec!["backend", "oauth"]);
+
+    for owner_written in [
+        serde_json::json!({ "revision": 3 }),
+        serde_json::json!({ "instance_id": "instance-a" }),
+        serde_json::json!({ "created_at": 1 }),
+        serde_json::json!({ "updated_at": 1 }),
+        serde_json::json!({ "name": "other" }),
+    ] {
+        assert!(
+            serde_json::from_value::<SessionInitialMetadata>(owner_written.clone()).is_err(),
+            "owner-written/unknown field must be refused: {owner_written}"
+        );
+    }
+}
+
+#[test]
+fn initial_metadata_uses_the_shared_normalization_and_bounds() {
+    let normalized = SessionInitialMetadata {
+        title: Some("  Release triage  ".to_string()),
+        description: Some("  Fix staging  ".to_string()),
+        tags: vec![" release ".to_string(), "Staging".to_string()],
+    }
+    .normalized()
+    .expect("valid values");
+    assert_eq!(normalized.title.as_deref(), Some("Release triage"));
+    assert_eq!(normalized.description.as_deref(), Some("Fix staging"));
+    assert_eq!(normalized.tags, vec!["release", "Staging"]);
+
+    let too_long = SessionInitialMetadata {
+        title: Some("x".repeat(SESSION_METADATA_TITLE_MAX_CHARS + 1)),
+        ..SessionInitialMetadata::default()
+    };
+    assert_eq!(
+        too_long.normalized().unwrap_err(),
+        SessionMetadataValidationError::TitleTooLong {
+            max: SESSION_METADATA_TITLE_MAX_CHARS
+        }
+    );
+    let duplicate = SessionInitialMetadata {
+        tags: vec!["same".to_string(), "SAME".to_string()],
+        ..SessionInitialMetadata::default()
+    };
+    assert_eq!(
+        duplicate.normalized().unwrap_err(),
+        SessionMetadataValidationError::DuplicateTag { index: 1 }
+    );
+    let empty_tag = SessionInitialMetadata {
+        tags: vec!["  ".to_string()],
+        ..SessionInitialMetadata::default()
+    };
+    assert_eq!(
+        empty_tag.normalized().unwrap_err(),
+        SessionMetadataValidationError::EmptyTag { index: 0 }
+    );
+}
+
+#[test]
+fn create_payloads_accept_initial_metadata_additively() {
+    // The field is absent for every pre-#4081 caller and round-trips when set.
+    let minimal = serde_json::json!({"name": "work"});
+    let direct: SessionCreatePayload = serde_json::from_value(minimal).unwrap();
+    assert!(direct.initial_metadata.is_none());
+    let web: WebSessionCreatePayload =
+        serde_json::from_value(serde_json::json!({"agent_id": "a", "name": "work"})).unwrap();
+    assert!(web.initial_metadata.is_none());
+
+    let metadata = serde_json::json!({
+        "title": "OAuth implementation",
+        "description": "Goal: implement and validate the OAuth flow.",
+        "tags": ["backend", "oauth"]
+    });
+    let direct: SessionCreatePayload = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "initial_metadata": metadata
+    }))
+    .unwrap();
+    let initial = direct.initial_metadata.expect("initial metadata");
+    assert_eq!(initial.title.as_deref(), Some("OAuth implementation"));
+    assert_eq!(initial.normalized().unwrap().tags.len(), 2);
 }
 
 #[test]
@@ -605,6 +770,246 @@ fn metadata_validation_rejects_invalid_tags() {
         SessionMetadataValidationError::TooManyTags {
             max: SESSION_METADATA_TAG_LIMIT
         }
+    );
+}
+
+#[test]
+fn metadata_patch_distinguishes_omitted_null_and_values() {
+    let current = SessionMetadata {
+        revision: 4,
+        title: Some("Old title".to_string()),
+        description: Some("Old description".to_string()),
+        tags: vec!["alpha".to_string()],
+        created_at: None,
+        updated_at: None,
+    };
+
+    // Omitted fields preserve; explicit null clears; a value replaces.
+    let patch: SessionMetadataPatch =
+        serde_json::from_value(serde_json::json!({ "description": null })).unwrap();
+    assert!(patch.title.is_none(), "omitted title must stay unspecified");
+    assert_eq!(patch.description, Some(None), "null is an explicit clear");
+    assert!(patch.tags.is_none(), "omitted tags preserve the list");
+    assert_eq!(
+        patch.apply(&current),
+        (
+            Some("Old title".to_string()),
+            None,
+            vec!["alpha".to_string()]
+        )
+    );
+
+    let title: SessionMetadataPatch =
+        serde_json::from_value(serde_json::json!({ "title": "New title" })).unwrap();
+    assert_eq!(title.title, Some(Some("New title".to_string())));
+    assert_eq!(
+        title.apply(&current),
+        (
+            Some("New title".to_string()),
+            Some("Old description".to_string()),
+            vec!["alpha".to_string()]
+        )
+    );
+
+    // `[]` clears tags; an omitted tag list is not the same state.
+    let tags: SessionMetadataPatch =
+        serde_json::from_value(serde_json::json!({ "tags": [] })).unwrap();
+    assert_eq!(tags.tags, Some(Vec::new()));
+    assert_eq!(
+        tags.apply(&current),
+        (
+            Some("Old title".to_string()),
+            Some("Old description".to_string()),
+            Vec::new()
+        )
+    );
+
+    let empty: SessionMetadataPatch = serde_json::from_value(serde_json::json!({})).unwrap();
+    assert!(empty.is_empty());
+    assert_eq!(
+        empty.apply(&current),
+        (
+            current.title.clone(),
+            current.description.clone(),
+            current.tags.clone()
+        )
+    );
+
+    let round_trip = serde_json::to_value(&patch).expect("patch json");
+    assert_eq!(round_trip, serde_json::json!({ "description": null }));
+
+    // An unknown patch field is refused rather than silently ignored: a
+    // caller must never believe it changed something the owner never saw.
+    assert!(
+        serde_json::from_value::<SessionMetadataPatch>(serde_json::json!({
+            "title": "New",
+            "unknown_field": true
+        }))
+        .is_err()
+    );
+}
+
+#[test]
+fn metadata_patch_payload_requires_incarnation_and_revision() {
+    let missing: Result<SessionMetadataPatchPayload, _> = serde_json::from_value(
+        serde_json::json!({ "name": "work", "patch": { "description": "Next" } }),
+    );
+    assert!(
+        missing.is_err(),
+        "a partial update without an incarnation/revision has no safe merge base"
+    );
+
+    let payload: SessionMetadataPatchPayload = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "expected_instance_id": "instance-a",
+        "expected_revision": 4,
+        "patch": { "description": "Next" }
+    }))
+    .expect("guarded patch payload");
+    assert_eq!(payload.expected_instance_id, "instance-a");
+    assert_eq!(payload.expected_revision, 4);
+    assert!(payload.patch.title.is_none());
+
+    let web: WebSessionMetadataPatchPayload = serde_json::from_value(serde_json::json!({
+        "session_id": "agent-a:work",
+        "expected_instance_id": "instance-a",
+        "expected_revision": 4,
+        "patch": { "title": null }
+    }))
+    .expect("web patch payload");
+    assert_eq!(web.session_id, "agent-a:work");
+    assert_eq!(web.patch.title, Some(None));
+}
+
+#[test]
+fn metadata_update_precondition_is_optional_and_additive() {
+    // A previously written payload still decodes and keeps the legacy
+    // unguarded behavior.
+    let legacy: SessionMetadataUpdatePayload =
+        serde_json::from_str("{\"name\":\"work\",\"expected_revision\":0}").unwrap();
+    assert!(legacy.expected_instance_id.is_none());
+    let web_legacy: WebSessionMetadataUpdatePayload =
+        serde_json::from_str("{\"session_id\":\"a:work\",\"expected_revision\":0}").unwrap();
+    assert!(web_legacy.expected_instance_id.is_none());
+
+    let guarded: SessionMetadataUpdatePayload = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "expected_revision": 4,
+        "expected_instance_id": "instance-a"
+    }))
+    .unwrap();
+    assert_eq!(guarded.expected_instance_id.as_deref(), Some("instance-a"));
+    let guarded_web: WebSessionMetadataUpdatePayload = serde_json::from_value(serde_json::json!({
+        "session_id": "a:work",
+        "expected_revision": 4,
+        "expected_instance_id": "instance-a"
+    }))
+    .unwrap();
+    assert_eq!(
+        guarded_web.expected_instance_id.as_deref(),
+        Some("instance-a")
+    );
+}
+
+#[test]
+fn metadata_response_carries_the_instance_identity() {
+    let metadata = SessionMetadata {
+        revision: 5,
+        title: Some("Work".to_string()),
+        description: None,
+        tags: Vec::new(),
+        created_at: Some(1),
+        updated_at: Some(2),
+    };
+    let response = SessionMetadataResponse::success_for("instance-a".to_string(), metadata);
+    let json = serde_json::to_value(&response).unwrap();
+    assert_eq!(json["instance_id"], "instance-a");
+    assert_eq!(json["metadata"]["revision"], 5);
+    let decoded: SessionMetadataResponse = serde_json::from_value(json).unwrap();
+    assert_eq!(decoded, response);
+
+    // Older replies and failures omit the identity without failing to decode.
+    let failed: SessionMetadataResponse =
+        serde_json::from_str("{\"success\":false,\"error\":\"nope\",\"error_kind\":\"not_found\"}")
+            .unwrap();
+    assert!(failed.instance_id.is_none());
+}
+
+#[test]
+fn session_list_metadata_availability_is_explicit() {
+    let available: SessionMetadataAvailability = serde_json::from_value(serde_json::json!({
+        "state": "available",
+        "summary": { "revision": 0, "tags": [] }
+    }))
+    .unwrap();
+    assert_eq!(
+        available,
+        SessionMetadataAvailability::available(SessionMetadataSummary {
+            revision: 0,
+            title: None,
+            tags: Vec::new(),
+        })
+    );
+    let unavailable: SessionMetadataAvailability =
+        serde_json::from_value(serde_json::json!({ "state": "unavailable" })).unwrap();
+    assert_eq!(unavailable, SessionMetadataAvailability::unavailable());
+    assert_eq!(
+        serde_json::to_value(&unavailable).unwrap(),
+        serde_json::json!({ "state": "unavailable" })
+    );
+
+    let session: SessionInfo = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "created_at": 0,
+        "window_count": 1,
+        "attached_clients": 0,
+        "width": 80,
+        "height": 24,
+        "foreground_command": null,
+        "metadata": {
+            "state": "available",
+            "summary": { "revision": 2, "title": "Release triage", "tags": ["release"] }
+        }
+    }))
+    .unwrap();
+    assert_eq!(
+        session.metadata,
+        Some(SessionMetadataAvailability::available(
+            SessionMetadataSummary {
+                revision: 2,
+                title: Some("Release triage".to_string()),
+                tags: vec!["release".to_string()],
+            }
+        ))
+    );
+
+    // A legacy entry without the field decodes; the caller treats it as unknown.
+    let legacy: SessionInfo = serde_json::from_value(serde_json::json!({
+        "name": "work",
+        "created_at": 0,
+        "window_count": 1,
+        "attached_clients": 0,
+        "width": 80,
+        "height": 24,
+        "foreground_command": null
+    }))
+    .unwrap();
+    assert!(legacy.metadata.is_none());
+
+    let web: WebSessionInfo = serde_json::from_value(serde_json::json!({
+        "session_id": "a:work",
+        "agent_id": "agent-a",
+        "session_name": "work",
+        "status": "detached",
+        "window_count": 1,
+        "attached_clients": 0,
+        "last_activity": "2026-11-19T00:00:00Z",
+        "metadata": { "state": "unavailable" }
+    }))
+    .unwrap();
+    assert_eq!(
+        web.metadata,
+        Some(SessionMetadataAvailability::unavailable())
     );
 }
 
@@ -796,4 +1201,69 @@ fn unknown_managed_fields_are_refused() {
         toolchain.is_err(),
         "an unknown toolchain key must be refused"
     );
+}
+
+/// #3796: the prepare request carries the user's explicit intent instead of
+/// inferring a download from an observation read, and an unknown field is a
+/// contract error rather than a silently ignored hint.
+#[test]
+fn an_image_prepare_request_carries_an_explicit_intent() {
+    use crate::contracts::image::v1::{ImageCacheObservation, ImageCachePhase};
+
+    let digest = format!("sha256:{}", "a".repeat(64));
+    let payload: ClientSessionSandboxImagePreparePayload =
+        serde_json::from_value(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "resume",
+        }))
+        .expect("a resume request is valid");
+    assert_eq!(payload.intent, SandboxImagePrepareIntent::Resume);
+    assert_eq!(payload.digest, digest);
+    assert_eq!(
+        serde_json::to_value(&payload).unwrap()["intent"],
+        serde_json::json!("resume")
+    );
+
+    assert!(
+        serde_json::from_value::<ClientSessionSandboxImagePreparePayload>(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "prepare",
+            "download": true,
+        }))
+        .is_err(),
+        "an extra field must not silently change a cache mutation"
+    );
+    assert!(
+        serde_json::from_value::<ClientSessionSandboxImagePreparePayload>(serde_json::json!({
+            "session_id": "a1:s1",
+            "digest": digest,
+            "intent": "download",
+        }))
+        .is_err(),
+        "an unknown intent is refused rather than guessed"
+    );
+
+    let observation = ImageCacheObservation {
+        contract_version: crate::contracts::image::v1::IMAGE_CACHE_OBSERVATION_VERSION,
+        digest: format!("sha256:{}", "b".repeat(64)),
+        phase: ImageCachePhase::Verifying,
+        downloaded_bytes: Some(5),
+        total_bytes: Some(10),
+        active: true,
+        updated_at: 1,
+        detail: None,
+    };
+    observation.validate().unwrap();
+    let reply = SandboxImagePrepareResponse {
+        success: true,
+        error: None,
+        error_kind: None,
+        observation: Some(observation.clone()),
+        observations: vec![observation],
+    };
+    let round_trip: SandboxImagePrepareResponse =
+        serde_json::from_value(serde_json::to_value(&reply).unwrap()).unwrap();
+    assert_eq!(round_trip, reply);
 }

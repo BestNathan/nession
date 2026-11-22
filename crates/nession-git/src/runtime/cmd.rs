@@ -16,6 +16,11 @@
 //! decides the repository here, so those variables are stripped from every
 //! child, exactly as `TMUX`/`TMUX_TMPDIR` are for tmux.
 //!
+//! A Session-addressed command also carries that Session's explicit
+//! Environment Binding values (#4080). They are applied first, so the scrubs
+//! and the fixed prompt/locale policy below still win; a binding cannot
+//! redirect the repository or disable the no-prompt rule.
+//!
 //! ## Read-only is enforced, not assumed
 //!
 //! The read path ([`GitCmd::run`]) never runs a mutating subcommand (see
@@ -147,6 +152,10 @@ pub struct GitCmd {
     bin: String,
     workdir: PathBuf,
     timeout: Duration,
+    /// Explicit Session Environment Binding values for the Session this
+    /// command serves (#4080). Applied on top of the inherited Agent
+    /// environment, *before* Nession's own safety variables below.
+    environment: std::collections::BTreeMap<String, String>,
 }
 
 /// One completed git invocation.
@@ -175,7 +184,24 @@ impl GitCmd {
             bin: bin.into(),
             workdir: workdir.into(),
             timeout: DEFAULT_TIMEOUT,
+            environment: std::collections::BTreeMap::new(),
         }
+    }
+
+    /// Apply this Session's explicit Environment Binding values to the child
+    /// (#4080).
+    ///
+    /// These are overrides, not a replacement environment: every other
+    /// variable is inherited from the Agent as before. They are applied ahead
+    /// of the module's fixed rules, so the repository variables scrubbed
+    /// below and Nession's forced prompt/locale policy still win — a Session
+    /// binding cannot redirect the repository a read-only call addresses.
+    pub fn with_environment(
+        mut self,
+        environment: std::collections::BTreeMap<String, String>,
+    ) -> Self {
+        self.environment = environment;
+        self
     }
 
     pub fn workdir(&self) -> &Path {
@@ -262,6 +288,10 @@ impl GitCmd {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
+        // Explicit Session overrides first, so the rules below still win.
+        for (key, value) in &self.environment {
+            cmd.env(key, value);
+        }
         for var in INHERITED_REPO_VARS {
             cmd.env_remove(var);
         }
@@ -620,6 +650,46 @@ mod tests {
         ] {
             assert!(guard(&args).is_err(), "expected {args:?} to be refused");
         }
+    }
+
+    /// #4080: explicit Session values reach the child, but the module's fixed
+    /// repository scrubs and prompt/locale policy still win over any binding.
+    #[test]
+    fn explicit_session_overrides_reach_the_child_and_safety_still_wins() {
+        let mut environment = std::collections::BTreeMap::new();
+        environment.insert("PATH".to_string(), "/session/bin".to_string());
+        environment.insert("GIT_AUTHOR_NAME".to_string(), "Session Author".to_string());
+        environment.insert("GIT_DIR".to_string(), "/elsewhere/.git".to_string());
+        environment.insert("GIT_TERMINAL_PROMPT".to_string(), "1".to_string());
+        let command = GitCmd::new("git", "/repo")
+            .with_environment(environment)
+            .build(&["status"])
+            .expect("read-only status is allowed");
+
+        let envs: std::collections::HashMap<_, _> = command
+            .as_std()
+            .get_envs()
+            .map(|(key, value)| (key.to_os_string(), value.map(OsStr::to_os_string)))
+            .collect();
+        assert_eq!(
+            envs.get(OsStr::new("PATH")),
+            Some(&Some(std::ffi::OsString::from("/session/bin"))),
+            "an explicitly bound value reaches the child"
+        );
+        assert_eq!(
+            envs.get(OsStr::new("GIT_AUTHOR_NAME")),
+            Some(&Some(std::ffi::OsString::from("Session Author")))
+        );
+        assert_eq!(
+            envs.get(OsStr::new("GIT_DIR")),
+            Some(&None),
+            "the repository scrub must win over a Session value"
+        );
+        assert_eq!(
+            envs.get(OsStr::new("GIT_TERMINAL_PROMPT")),
+            Some(&Some(std::ffi::OsString::from("0"))),
+            "the no-prompt policy must win over a Session value"
+        );
     }
 
     #[test]

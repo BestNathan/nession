@@ -200,6 +200,17 @@ async function nativeAttempt(runId, attempt) {
   return { run, jobs: jobs.jobs };
 }
 
+// A positive wake requires the unique protected Staging merge that introduced
+// exactly this SHA AND links this Issue. A convergence batch merge carries no
+// Issue ref, so it can never select an outstanding SC; wrong base, mismatched
+// merge SHA and unmerged PRs are likewise not a protected Staging delivery.
+function issueLinkedStagingMerge(pulls, sha, issueNumber, parsePreMergeIssueNumbers) {
+  return pulls.filter(pr => pr.merged_at &&
+    pr.base?.ref === 'staging' && pr.merge_commit_sha === sha &&
+    parsePreMergeIssueNumbers(pr.body, 'BestNathan', 'nession', pr.title)
+      .includes(issueNumber));
+}
+
 async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
   const { parsePreMergeIssueNumbers } = await import(
     pathToFileURL(path.join(ROOT, 'scripts/requirement-acceptance.mjs')).href);
@@ -232,10 +243,8 @@ async function verifyPositiveWake(parseContents, normalizedPath, verifySource) {
 
     const pulls = await get(resource('/commits/' + row.sha + '/pulls?per_page=100'));
     assert.ok(Array.isArray(pulls) && pulls.length < 100);
-    const linked = pulls.filter(pr => pr.merged_at &&
-      pr.base?.ref === 'staging' && pr.merge_commit_sha === row.sha &&
-      parsePreMergeIssueNumbers(pr.body, 'BestNathan', 'nession', pr.title)
-        .includes(row.issue));
+    const linked = issueLinkedStagingMerge(pulls, row.sha, row.issue,
+      parsePreMergeIssueNumbers);
     assert.equal(linked.length, 1,
       'no unique issue-linked protected Staging merge at wake target');
 
@@ -318,6 +327,36 @@ function selfTestPositiveSelection() {
   }), /duplicate Staging Agent receipt/);
 }
 
+function selfTestStagingMergeLink() {
+  const parse = body => [...String(body ?? '').matchAll(/Refs #([0-9]+)/g)]
+    .map(m => Number(m[1]));
+  const sha = 'c'.repeat(40);
+  const batch = {
+    merged_at: '2026-11-21T00:00:00Z', base: { ref: 'staging' },
+    merge_commit_sha: sha, title: 'integrate main into staging via checked head',
+    body: 'chore(release): integrate main into staging via checked head',
+  };
+  // A convergence batch merge introduces the SHA but links no Issue, so it can
+  // never wake an outstanding SC (the observed #4233/cca0e30d9 no-op selection).
+  assert.deepEqual(issueLinkedStagingMerge([batch], sha, 3072, parse), []);
+  const delivery = { ...batch, body: 'Refs #3072.',
+    title: 'test(acceptance): real Staging integration witness for #3072' };
+  assert.equal(issueLinkedStagingMerge([delivery], sha, 3072, parse).length, 1);
+  // Wrong base, mismatched merge SHA and an unmerged PR are not protected merges.
+  assert.deepEqual(issueLinkedStagingMerge(
+    [{ ...delivery, base: { ref: 'main' } }], sha, 3072, parse), []);
+  assert.deepEqual(issueLinkedStagingMerge(
+    [{ ...delivery, merge_commit_sha: 'd'.repeat(40) }], sha, 3072, parse), []);
+  assert.deepEqual(issueLinkedStagingMerge(
+    [{ ...delivery, merged_at: null }], sha, 3072, parse), []);
+  // Another Issue's ref does not link this criterion's Issue.
+  assert.deepEqual(issueLinkedStagingMerge(
+    [{ ...delivery, body: 'Refs #9999.' }], sha, 3072, parse), []);
+  // Two matching deliveries are ambiguous and must not silently pick one.
+  assert.equal(issueLinkedStagingMerge(
+    [delivery, { ...delivery }], sha, 3072, parse).length, 2);
+}
+
 async function main() {
   const checkout = targetSha();
   const { parseContents, normalizedPath, verifySource } = await import(
@@ -375,6 +414,7 @@ async function main() {
   // The historical source has no matching outstanding Agent SC; that is a
   // required negative fixture, never a positive Issue projection.
   selfTestPositiveSelection();
+  selfTestStagingMergeLink();
   const positive = await verifyPositiveWake(parseContents, normalizedPath, verifySource);
   if (!positive) {
     console.log(JSON.stringify({

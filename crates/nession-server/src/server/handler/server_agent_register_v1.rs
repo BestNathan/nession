@@ -12,10 +12,16 @@ impl ConnectionHandler {
         msg: ProtocolMessage<serde_json::Value>,
     ) -> anyhow::Result<HandlerAction> {
         let payload: AgentRegisterPayload = serde_json::from_value(msg.payload)?;
+        // The contribution manifest is installed after the registration
+        // transition, not as part of it (#3778). Cloned here because the
+        // registration consumes other payload fields below.
+        let mcp_tool_manifest = payload.mcp_tool_manifest.clone();
 
-        // Empty server auth_token means no-auth mode: accept any agent
-        let auth_ok = self.config.server_auth_token.is_empty()
-            || payload.auth_token.as_str() == self.config.server_auth_token;
+        // A disabled verifier means no-auth mode: accept any agent. A
+        // configured token goes through the same constant-time verifier as
+        // every other consumer of the Server Token (#4066 SC-03).
+        let auth_ok = !self.config.server_auth.is_enabled()
+            || self.config.server_auth.verify(payload.auth_token.as_str());
 
         if !auth_ok {
             info!("Agent {} rejected: invalid auth token", payload.agent_id);
@@ -195,6 +201,18 @@ impl ConnectionHandler {
         };
 
         self.agent_registry.register(agent_info).await;
+        // Install this Agent's Extension-contributed MCP Tool manifest (#3778).
+        // A refused manifest does not fail registration: the Agent still serves
+        // its Sessions, but its contributions are not advertised or routed.
+        // The previous valid generation stays live and the reason is logged.
+        if let Some(tools) = self.extension_tools.as_ref() {
+            if let Err(error) = tools.set_manifest(&payload.agent_id, mcp_tool_manifest) {
+                tracing::warn!(
+                    agent = %payload.agent_id,
+                    "MCP Tool manifest refused; keeping the previous valid catalog: {error}"
+                );
+            }
+        }
         // Binding *this connection* to the agent: from here on it is the
         // authority for every agent-originated message it carries, whatever
         // those payloads name (`authorized_agent_id`). The other half of

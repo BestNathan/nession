@@ -55,9 +55,17 @@ test.describe('Server-owned Images in the Sandbox capability (#3181, #3408)', ()
     await expect(page.getByTestId('project-image-picker')).toContainText(
       'Project-specific',
     );
-    await page.getByTestId('project-image-use').first().click();
+    // The canonical fixture is shared across tests: a previous test may
+    // already have bound the first registry image to this Project. Select a
+    // known ready image with a different digest, not an arbitrary first row.
+    const alias = initialDigest.startsWith('sha256:00eb')
+      ? 'fixture-image-233'
+      : 'fixture-image-234';
+    await page.getByTestId('project-image-search').fill(alias);
+    await expect(page.getByTestId('project-image-use')).toHaveCount(1);
+    await page.getByTestId('project-image-use').click();
+    await expect(page.getByTestId('project-image-digest-field')).not.toHaveText(initialDigest);
     const selectedDigest = await page.getByTestId('project-image-digest-field').innerText();
-    expect(selectedDigest).not.toBe(initialDigest);
 
     // A successful build does not auto-bind; the explicit Use this image does.
     await page.getByTestId('project-image-build').click();

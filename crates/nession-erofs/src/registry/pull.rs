@@ -5,19 +5,16 @@
 //! rule and fetched by its digest; the wrong platform is never used as a
 //! fallback. The imported Manifest/Config keep their exact source bytes.
 
-use anyhow::Context;
 use sea_orm::DatabaseConnection;
 
-use super::auth::{ImportScope, RegistryImportAuthorizer};
+use super::auth::RegistryImportAuthorizer;
 use super::client::RegistryClient;
+use super::sdk;
 use super::{RegistryError, RegistryResult, RemoteReference};
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::tag::TagExpectation;
 use crate::image::publish::{publish_manifest, ManifestPublication};
-use crate::oci::{
-    parse_config, parse_index, parse_manifest, select_platform, validate_manifest,
-    validate_manifest_config, Descriptor, ImageConfig, Platform, RawDocument, MEDIA_TYPE_MANIFEST,
-};
+use crate::oci::{Descriptor, Platform};
 
 /// One requested import from an external registry into the local catalog.
 #[derive(Debug, Clone)]
@@ -93,7 +90,7 @@ pub struct RegistryDigestGrant {
 pub async fn pull_image(
     client: &RegistryClient,
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     request: &ImportRequest,
     authorizer: &dyn RegistryImportAuthorizer,
     now: i64,
@@ -102,203 +99,51 @@ pub async fn pull_image(
         .map_err(|error| RegistryError::InvalidReference(format!("{error:#}")))?;
     crate::catalog::tag::validate_tag(&request.local_tag)
         .map_err(|error| RegistryError::InvalidReference(format!("{error:#}")))?;
-    super::validate_remote_repository(&request.repository)?;
-    validate_target_platform(&request.platform)?;
 
-    authorizer.authorize_import(&ImportScope {
-        authority: client.authority(),
-        repository: &request.repository,
-        local_repository: &request.local_repository,
-        local_tag: &request.local_tag,
-        platform: &request.platform,
-    })?;
+    // Host-independent fetch / verification / CAS ingest (#4089 SDK). The Server
+    // adapter only adds the local Catalog tag publication below; an Agent may
+    // call `sdk::ingest_image` directly and retain the pinned OCI objects.
+    let verified = sdk::ingest_image(
+        client,
+        store,
+        &request.repository,
+        &request.reference,
+        &request.platform,
+        authorizer,
+        &request.local_repository,
+        &request.local_tag,
+    )
+    .await?;
 
-    let resolved = client
-        .fetch_manifest(&request.repository, &request.reference)
-        .await?;
-    let source_digest = resolved.digest.clone();
-    let source_media_type = resolved.media_type.clone();
-
-    let (manifest_document, selected_platform) = select_manifest(client, request, resolved).await?;
-
-    let (_, manifest) = parse_manifest(manifest_document.bytes()).map_err(|error| {
-        RegistryError::MalformedManifest(format!("{}: {error:#}", manifest_document.digest()))
-    })?;
-    validate_manifest(&manifest).map_err(|error| {
-        RegistryError::MalformedManifest(format!("{}: {error:#}", manifest_document.digest()))
-    })?;
-
-    let config_document = client
-        .fetch_config(&request.repository, &manifest.config)
-        .await?;
-    let (_, config) = parse_config(config_document.bytes()).map_err(|error| {
-        RegistryError::MalformedConfig(format!("{}: {error:#}", config_document.digest()))
-    })?;
-    validate_manifest_config(&manifest, &config).map_err(|error| {
-        RegistryError::MalformedConfig(format!("{}: {error:#}", config_document.digest()))
-    })?;
-    let config_platform = platform_of_config(&config);
-    if !config_platform.matches(&request.platform) {
-        return Err(RegistryError::UnsupportedPlatform(format!(
-            "Config targets {}/{} variant {:?}, not the requested {}/{} variant {:?}",
-            config_platform.os,
-            config_platform.architecture,
-            config_platform.variant,
-            request.platform.os,
-            request.platform.architecture,
-            request.platform.variant,
-        )));
-    }
-    if let Some(selected) = selected_platform.as_ref() {
-        if selected.os != config_platform.os
-            || selected.architecture != config_platform.architecture
-        {
-            return Err(RegistryError::UnsupportedPlatform(format!(
-                "selected Index child targets {}/{} but its Config targets {}/{}",
-                selected.os,
-                selected.architecture,
-                config_platform.os,
-                config_platform.architecture
-            )));
-        }
-        if let (Some(selected_variant), Some(config_variant)) =
-            (&selected.variant, &config_platform.variant)
-        {
-            if selected_variant != config_variant {
-                return Err(RegistryError::UnsupportedPlatform(format!(
-                    "selected Index child variant {selected_variant:?} disagrees with its Config variant {config_variant:?}"
-                )));
-            }
-        }
-    }
-
-    let layer = manifest
-        .layers
-        .first()
-        .context("validated Manifest has no EROFS layer")
-        .map_err(|error| RegistryError::MalformedManifest(format!("{error:#}")))?
-        .clone();
-    client
-        .download_blob(store, &request.repository, &layer)
-        .await?;
-
-    let config_digest = config_document.digest().to_string();
     let publication = ManifestPublication {
         repository: request.local_repository.clone(),
         tag: request.local_tag.clone(),
         expectation: request.expectation.clone(),
-        layer: layer.clone(),
-        config: config_document,
-        manifest: manifest_document.clone(),
+        layer: verified.layer.clone(),
+        config: verified.config.clone(),
+        manifest: verified.manifest.clone(),
     };
     let published = publish_manifest(conn, store, &publication, now)
         .await
         .map_err(RegistryError::from)?;
-    if published.manifest_digest != manifest_document.digest()
-        || published.config_digest != config_digest
-        || published.layer_digest != layer.digest
+    if published.manifest_digest != verified.manifest_digest()
+        || published.config_digest != verified.config_digest()
+        || published.layer_digest != verified.layer_digest()
     {
         return Err(RegistryError::Local(format!(
             "published identities do not match the imported bytes ({})",
-            manifest_document.digest()
+            verified.manifest_digest()
         )));
     }
     Ok(ImportOutcome {
-        source_digest,
-        source_media_type,
+        source_digest: verified.source_digest,
+        source_media_type: verified.source_media_type,
         manifest_digest: published.manifest_digest,
         config_digest: published.config_digest,
         layer_digest: published.layer_digest,
-        platform: config_platform,
+        platform: verified.platform,
         previous_tag_digest: published.previous_tag_digest,
     })
-}
-
-async fn select_manifest(
-    client: &RegistryClient,
-    request: &ImportRequest,
-    resolved: super::client::FetchedManifest,
-) -> RegistryResult<(RawDocument, Option<Platform>)> {
-    if resolved.media_type == crate::oci::MEDIA_TYPE_INDEX {
-        let (_, index) = parse_index(resolved.document.bytes()).map_err(|error| {
-            RegistryError::MalformedIndex(format!("{}: {error:#}", resolved.digest))
-        })?;
-        let selected = select_platform(&index, &request.platform)
-            .map_err(|error| RegistryError::UnsupportedPlatform(format!("{error:#}")))?;
-        if selected.media_type != MEDIA_TYPE_MANIFEST {
-            return Err(RegistryError::UnsupportedPlatform(format!(
-                "Index child {} is {:?}, not an image manifest",
-                selected.digest, selected.media_type
-            )));
-        }
-        let selected_platform = selected.platform.clone();
-        let child = client
-            .fetch_manifest(
-                &request.repository,
-                &RemoteReference::Digest(selected.digest.clone()),
-            )
-            .await?;
-        if child.media_type != MEDIA_TYPE_MANIFEST {
-            return Err(RegistryError::MediaTypeMismatch {
-                resource: format!("Index child {}", selected.digest),
-                expected: MEDIA_TYPE_MANIFEST.to_string(),
-                actual: child.media_type,
-            });
-        }
-        let child_size = child
-            .document
-            .size()
-            .map_err(|error| RegistryError::MalformedManifest(format!("{error:#}")))?;
-        if child_size != selected.size {
-            return Err(RegistryError::SizeMismatch {
-                resource: format!("Index child {}", selected.digest),
-                expected: selected.size,
-                actual: child_size,
-            });
-        }
-        if child.digest != selected.digest {
-            return Err(RegistryError::DigestMismatch {
-                resource: format!("Index child {}", selected.digest),
-                expected: selected.digest.clone(),
-                actual: child.digest,
-            });
-        }
-        Ok((child.document, selected_platform))
-    } else {
-        Ok((resolved.document, None))
-    }
-}
-
-fn validate_target_platform(platform: &Platform) -> RegistryResult<()> {
-    if platform.os != "linux" {
-        return Err(RegistryError::UnsupportedPlatform(format!(
-            "requested os {:?}: only linux EROFS images are supported",
-            platform.os
-        )));
-    }
-    if platform.architecture.trim().is_empty() {
-        return Err(RegistryError::UnsupportedPlatform(
-            "requested architecture must not be empty".to_string(),
-        ));
-    }
-    if !platform.supports_erofs() {
-        return Err(RegistryError::UnsupportedPlatform(
-            "requested platform must include the erofs os feature".to_string(),
-        ));
-    }
-    Ok(())
-}
-
-fn platform_of_config(config: &ImageConfig) -> Platform {
-    Platform {
-        architecture: config.architecture.clone(),
-        os: config.os.clone(),
-        os_version: config.os_version.clone(),
-        os_features: config.os_features.clone(),
-        variant: config.variant.clone(),
-        features: None,
-        extra: serde_json::Map::new(),
-    }
 }
 
 /// Validate the descriptor shape a caller may hand to a manual import.
@@ -314,8 +159,12 @@ mod tests {
     use crate::catalog::tag;
     use crate::digest::digest_of_bytes;
     use crate::image::publish::tests::{layer, manifest_and_config};
-    use crate::oci::{to_bytes, Index, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST};
-    use crate::registry::auth::{AllowAllImports, DenyAllImports, RegistryCredentialProvider};
+    use crate::oci::{
+        parse_manifest, to_bytes, Index, RawDocument, MEDIA_TYPE_INDEX, MEDIA_TYPE_MANIFEST,
+    };
+    use crate::registry::auth::{
+        AllowAllImports, DenyAllImports, ImportScope, RegistryCredentialProvider,
+    };
     use crate::registry::push::push_image;
     use crate::registry::test_registry::{MockRegistry, PASSWORD, TOKEN, USERNAME};
     use crate::registry::{RegistryAuthority, RegistryCredential};
@@ -388,7 +237,7 @@ mod tests {
         }
     }
 
-    fn fixture(store: &BlobStore, architecture: &str, payload: &[u8]) -> Fixture {
+    fn fixture(store: &FsBlobStore, architecture: &str, payload: &[u8]) -> Fixture {
         let layer = layer(store, payload);
         let (manifest, config) = manifest_and_config(store, &layer, architecture, None, None);
         Fixture {
@@ -429,7 +278,7 @@ mod tests {
 
     fn seed_manifest(
         registry: &MockRegistry,
-        store: &BlobStore,
+        store: &FsBlobStore,
         repository: &str,
         tag_name: &str,
         fixture: &Fixture,
@@ -442,7 +291,7 @@ mod tests {
 
     fn seed_index(
         registry: &MockRegistry,
-        store: &BlobStore,
+        store: &FsBlobStore,
         repository: &str,
         tag_name: &str,
         index: &RawDocument,
@@ -464,9 +313,9 @@ mod tests {
                 .any(|window| window == needle)
     }
 
-    async fn fresh() -> (TempDir, BlobStore, DatabaseConnection) {
+    async fn fresh() -> (TempDir, FsBlobStore, DatabaseConnection) {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn)
             .await

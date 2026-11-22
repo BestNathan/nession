@@ -168,7 +168,16 @@ App-specific rules:
 - respect top/bottom safe areas;
 - prefer touch-target sizes over desktop compactness;
 - use native push/pop or sheets for deeper capability content;
-- nested capability navigation must not fight top-level spatial gestures;
+- the host owns **one** stack header per depth: Back, a two-line primary
+  title/truthful secondary ancestry, at most two capability-contributed priority
+  icons and More. The secondary line may open the optional Stack Sheet; a
+  capability never renders a second bar (#3971);
+- the host owns the Workspace canvas and its semantic content roles
+  (`WorkspaceSurface` / `Section` / `Group` / `Row`). A capability chooses the
+  role; Nession owns the geometry and rhythm (#3971);
+- nested capability navigation must not fight top-level spatial gestures. The
+  same coordinator routes a claimed contact to the capability's guarded inner
+  stack: right Pop, left Forward only to a recorded destination (#3971);
 - capsule placement should support thumb reach without covering critical Terminal rows;
 - Workspace transition should feel spatially continuous with the Session.
 
@@ -265,54 +274,139 @@ role:
 
 | Layer | Owns | Examples |
 |---|---|---|
-| **Experience host** | page/surface geometry, navigation frame, scroll ancestry, safe areas, the one App page header/Back | `WebLayout`, `AppLayout`/`AppLayers`, `ShellMain`, `WorkspacePanel`, `AppPageHeader` |
-| **Semantic layout recipe** | a repeated stable content relationship used by independent consumers | `WorkspaceMasterDetail`, `WorkspaceScrollRegion`; `ResourceDetail`, `ConfigurationForm`, `OperationSurface` |
+| **Experience host** | page/surface geometry, navigation frame, scroll ancestry, safe areas, the one App page header/Back, the single App gesture coordinator | `WebLayout`, `AppLayout`/`AppLayers`, `ShellMain`, `WorkspacePanel`, `AppPageHeader`, `AppHeaderActions`, `AppStackSheet`, `useSwipePager`/`swipeGesture`/`appInnerStackMotion` |
+| **Semantic layout recipe** | a repeated stable content relationship used by independent consumers | `WorkspaceMasterDetail`, `WorkspaceScrollRegion`; `ResourceDetail`, `ConfigurationForm`, `OperationSurface`, `WorkspaceSurface`/`Section`/`Group`/`Row` |
 | **Capability-local composition** | its own content arrangement inside the host | local `flex` / `grid` / `min-w-0` / `min-h-0` / `flex-1`; a capability's internal list or editor |
 
 Rules:
 
 - Capability and product content must not take page geometry (`h-screen`,
-  `min-h-[100dvh]`, `fixed inset-0`, …), render the App page header/Back, or
-  publish Workspace host chrome (`workspace-shell` / `workspace-tool-bar` /
-  `workspace-tool-content` / `workspace-surface-navigation`).
+  `h-dvh`/`h-svh`/`h-lvh`, `min-h-[100dvh]`, `fixed inset-0`, …), render the App
+  page header/Back/actions/Stack Sheet, or publish Workspace host chrome
+  (`workspace-shell` / `workspace-tool-bar` / `workspace-tool-content` /
+  `workspace-surface-navigation`).
+- Capability and product content must not install a second App gesture owner:
+  it contributes inner-stack destinations through `WorkspaceDepthControl`
+  (`setPush`/`setForward`), never imports the pager engine or publishes the
+  shell's swipe/stack markers. `data-swipe-owner` remains the explicit,
+  bounded way for a surface to claim its own gesture.
 - A stable relationship repeated by two independent consumers is promoted to a
   recipe under `web/src/app/workspace/layout/workspaceLayout.tsx`; a consumer
   must not restate the recipe's stable class.
 - Local mechanisms remain legal when they stay inside the component's content.
   `cn('flex min-w-0 flex-col', condition && 'min-h-0 flex-1')` is a valid local
   composition, not a violation.
-- A scroll region that can reach the pane bottom uses `WorkspaceScrollRegion`
-  (or the shared `workspaceScrollClearanceClass` opt-in for a genuinely local
-  inner scroll). It must not create a second page-level scroll owner.
+- A Web scroll region that reaches the pane bottom uses
+  `WorkspaceScrollRegion`. It must not create a second page-level scroll owner.
 - Web vs App is an Experience decision, not a media-width guess: constrained
   Web stays Web, forced App stays App.
+
+### App page scroll ownership (#4115)
+
+The App Workspace host owns the default page scroll. A capability contributes
+content; it does not choose the page's scroll container, calculate the Capsule
+geometry, or add trailing padding to compensate for the floating overlay.
+
+| Role | Owner | Contract |
+|---|---|---|
+| Default App page scroll | `AppWorkspaceScrollRegion` (host) | one bounded `overflow-y-auto` scrollport per depth, in natural document flow; trailing extent measured from the scrollport's own bottom to the floating bar's top |
+| Bounded surface | host adapter `AppWorkspaceBoundedRegion` + a binding declaration `appScroll: 'bounded'` | the capability keeps its internal scroll owners (collection, reader, diff, editor), each rendered through `WorkspaceBoundedScrollport` (or an equivalent declared adapter); it never measures the Capsule |
+| Bottom actions | host `workspace-bottom-actions` slot | capability owns the action semantics; the host positions the band below the scrollport, above the Capsule, and applies the measured safe-area/Capsule inset |
+| Capsule clearance | `useWorkspaceCapsuleClearance` | publishes the whole band and the actions-slot inset, and measures **every declared bounded owner** from that element's own visible bottom to the floating bar's top; safe area is counted once |
+
+Consequences that are part of the contract:
+
+- At rest content may continue behind the translucent Capsule Zone. At the end
+  of scrolling, the final row or control is fully visible and tappable above the
+  Capsule; the scroll end does not reserve a permanent fake footer or shrink the
+  whole canvas.
+- A Host-owned actions row reduces the scrollport's trailing extent to what is
+  actually left below it. Actions are not a capability's floating footer and do
+  not move by capability-specific magic numbers.
+- A capability does not get correct scrolling by opting in: a newly added view
+  with ordinary block/section/row content uses the host scrollport with no
+  clearance class at all. `appScroll: 'bounded'` is the explicit exception for
+  surfaces that genuinely scroll internally.
+- A split bounded surface may have more than one internal scroller (a list plus
+  a pinned footer, an editor plus its warnings/review). Each owner is measured
+  from its own visible bottom, so one shared shell number cannot under- or
+  over-clear a sibling; siblings that already end above the Capsule must not
+  reserve the band again. Nested routes of a bounded capability (a Git section,
+  a GitHub reader, an Env split surface) follow the same rule — a bounded
+  declaration is not satisfied by the root view alone. A capability must not
+  substitute a Capsule-sized fixed `pb-*` band for the measured inset
+  (`layout-ownership` rejects it).
+- **Reusable scrollport recipe (#4222).** A bounded owner renders through
+  `WorkspaceBoundedScrollport`. The recipe puts the scroll role, the stable
+  `min-h-0/flex-1/overflow` constraints and the measured trailing inset on the
+  **viewport**, and the caller's spacing/layout `className` on an **inner
+  content wrapper**. A caller's `p-2`, `pb-6` or `py-3` therefore cannot win
+  Tailwind's merge and erase the host inset. A declared third-party viewport
+  (MessageScroller, CodeMirror, a virtualized list) may keep its own element,
+  but must publish the same marker and spend the inset outside content spacing.
+- **Persistent siblings declare a role.** Ordinary explanation, errors,
+  warnings, status, Load-more and final rows live *inside* their scroll area.
+  Only an intentionally persistent context is a fixed sibling, marked
+  `data-workspace-fixed-role="context"` and listed in the route coverage; the
+  Gate rejects an unregistered fixed footer in capability content.
+
+### Route-complete scroll coverage (#4222)
+
+`web/src/app/workspace/scrollCoverage.ts` is the inventory of every reachable
+App route/depth/tab/section variant for every Workspace view binding, with its
+surface mode and the observable scroll owners a browser Case must exercise.
+It is not a second capability registry: `scrollCoverage.test.ts` proves it is
+exhaustive against `WORKSPACE_VIEW_BINDINGS` and the Claude `AppRoute`,
+Environment, Sandbox section/policy and Git section unions, and that each
+route's mode matches its binding's `appScroll`. The design Gate then rejects a
+reachable union member with no coverage, a bounded route with no owner, a
+document route naming an inner owner, an empty scenario, and an owner
+identifier that appears nowhere in shipped source. Adding a nested route
+without a contract therefore fails deterministically rather than shipping on
+the parent's `appScroll` declaration.
 
 ### Representative inventory
 
 | Surface | Current owner | Expected role | Action |
 |---|---|---|---|
 | Web shell / App layers | `WebLayout`, `AppLayout`/`AppLayers` | Experience frame | keep; page geometry is allowed only in this layer |
-| App page header / Back | `WorkspacePanel` → `AppPageHeader` | Experience host | keep exactly one per depth |
+| App page header / Back | `WorkspacePanel` → `AppPageHeader` | Experience host | keep exactly one per depth; actions/Stack Sheet are host-rendered |
+| App Workspace content roles | `components/ui/workspace-content.tsx` | Semantic recipe | primary/secondary surface, Section/Group/Row; no card-per-row |
+| App inner-stack gesture | `AppLayers` → `useSwipePager` → capability Pop/Forward | Experience host | one coordinator; no second touch owner |
 | Files master/detail (Web) | `FilesWebLayout` | `WorkspaceMasterDetail` | migrated (#3194) |
 | Environment master/detail (Web) | `EnvWebLayout` | `WorkspaceMasterDetail` | migrated |
-| Agent / Session detail | experience workspace maps | `WorkspaceScrollRegion` | migrated; the view no longer owns scroll ancestry |
-| Project Workspace view | `ProjectWorkspaceView` | `WorkspaceScrollRegion` | migrated |
-| Sandbox (App) | `SandboxAppLayout` | `WorkspaceScrollRegion` | migrated |
-| Claude Code / Env / Git inner lists | capability components | local scroll mechanism + shared clearance | keep; not a host geometry claim |
+| Agent / Session detail (App) | `workspaceViews.tsx` | host `AppWorkspaceScrollRegion` | migrated (#4115); the view contributes content only |
+| Project Workspace view (App) | `ProjectWorkspaceView` | host `AppWorkspaceScrollRegion` | migrated (#4115); Web keeps `WorkspaceScrollRegion` |
+| Sandbox (App) | `SandboxAppLayout` | host `AppWorkspaceScrollRegion` | migrated (#4115) |
+| Files / Env / Git / Claude (App) | capability views | bounded adapter + one internal scroller | declared `appScroll: 'bounded'`; spend the host scroll inset at that scroller |
+| Files bulk actions (App) | `AppFilesSelectionBottomBar` content in the host actions slot | host Bottom Actions role | host owns placement and the Capsule/safe-area inset |
 
 ### Enforcement
 
 `design/scripts/layout-ownership.mjs` is part of `design-system-fast`. It
-rejects capability/product page geometry, capability-local App headers, host
-chrome, duplicated master/detail or scroll-owner markers, and raw numeric
-spacing in the shared recipe owner. It accepts local flex/grid composition,
-including the Issue's control sample. It also owns the keyboard-avoidance
-binding from §15: only the App Experience scrollport may publish the keyboard
-scroll owner, and only the App viewport environment may read
-`window.visualViewport`. `layout-ownership.test.mjs` holds the negative and
-positive fixtures. Browser evidence for the single scroll owner, alignment,
-overflow and the one App header lives in `ui-contract-web` /
-`ui-contract-matrix` and the SC-03 Case.
+rejects capability/product page geometry (including `dvh`/`svh`/`lvh`/`dvw`
+utilities and fixed inset variants), capability-local App headers/Back/actions
+/markers, host chrome, a second App gesture owner (pager imports or published
+swipe/stack markers), duplicated master/detail or scroll-owner markers, and raw
+numeric spacing in the shared recipe owner. From #4115 it also rejects a
+capability-owned App page scroll, a capability claiming the host App surface
+marker, and a reintroduction of the retired per-scroller Capsule padding; from
+#4188 it rejects a capability scroll owner that hardcodes a Capsule-sized
+`pb-*` band. From #4222 it rejects a capability/shared consumer that restates
+the bounded clearance class outside `WorkspaceBoundedScrollport` (or the
+documented third-party adapter), an unregistered `shrink-0 border-t` footer in
+capability content, and a scroll-coverage inventory that misses a reachable
+route or owner. It accepts the declared bounded-surface recipe and a local
+list/editor scroller. It
+accepts local flex/grid composition, `data-swipe-owner` surfaces, and the
+Issue's control sample. It also owns the keyboard-avoidance binding from §15:
+only the App Experience scrollport may publish the keyboard scroll owner, and
+only the App viewport environment may read `window.visualViewport`.
+`layout-ownership.test.mjs` holds the negative and positive fixtures. Browser
+evidence for the single scroll owner, alignment, overflow, the one App header
+and the inner-stack gesture lives in `ui-contract-web` / `ui-contract-matrix`
+and the staging Cases for `#3971`; the `#4115` Cases additionally measure the
+last actionable element against the actual Capsule top.
 
 ## 15. App viewport environment and keyboard avoidance (#3523)
 

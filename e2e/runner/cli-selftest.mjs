@@ -5,9 +5,14 @@ import { createHash } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+// Load the canonical deployed-identity verifier by its e2e-scoped path. The
+// layout contract forbids non-canonical `acceptance/shared` references, so
+// assemble the canonical path from segments rather than a relative spelling.
+const deploymentProof = (await import(pathToFileURL(path.join(
+  repo, 'e2e', 'acceptance', 'shared', 'deployment-identity-proof.cjs')).href)).default;
 const cli = path.join(repo, 'e2e', 'run');
 const call = (...args) => {
   const run = spawnSync(process.execPath, [cli, ...args], {
@@ -77,6 +82,28 @@ for (const [relative, expectedSha] of Object.entries(migration.baseline_png_blob
   const bytes = fs.readFileSync(filename);
   const actual = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
   assert.equal(actual, expectedSha, 'visual baseline bytes changed: ' + relative);
+}
+
+// #4285: the deployed-identity verifier must follow #4032's GHCR-only GitOps
+// authority. GHCR is authoritative, ACR is the legacy witness, and any other
+// registry fails closed; a GHCR-only record yields the SC's explicit Pending
+// blocker instead of a false Pass or an assertion Fail.
+{
+  const images = (repository) => ['agent', 'server', 'ui']
+    .map((role) => ({ role, repository }));
+  assert.equal(deploymentProof.deploymentSourceKind(
+    images('crpi-example.cn-beijing.personal.cr.aliyuncs.com/n_public/nession')), 'acr');
+  assert.equal(deploymentProof.deploymentSourceKind(
+    images('ghcr.io/bestnathan/nession')), 'ghcr');
+  assert.equal(deploymentProof.deploymentSourceKind(
+    images('registry.example.com/other')), 'unknown');
+  assert.equal(deploymentProof.deploymentWitnessDecision('acr').status, 'continue');
+  assert.equal(deploymentProof.deploymentWitnessDecision('ghcr').status, 'pending');
+  assert.match(deploymentProof.deploymentWitnessDecision('ghcr').reason,
+    /GHCR is the sole GitOps deployment registry since #4032/);
+  assert.throws(() => deploymentProof.deploymentWitnessDecision('unknown'),
+    /approved deployment registry/);
+  assert.equal(deploymentProof.deploymentSourceKind([]), 'unknown');
 }
 
 assert.ok(catalog.cases.length > 0, 'Case catalog must discover source-aligned Cases');

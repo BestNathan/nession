@@ -90,6 +90,21 @@ if (!capabilities.backend) {
       assert.equal(failure[key], true, message);
     }
 
+    const legacyOutput = runLinuxRuntimeTest(
+      'a_legacy_record_with_a_failed_unmount_is_retained_for_retry',
+    );
+    const legacy = runtimeEvidence(legacyOutput);
+    assert.equal(
+      legacy.legacy_unmount_failure_retained,
+      true,
+      'a failed legacy unmount retained the durable record and occupied directory',
+    );
+    assert.equal(
+      legacy.legacy_unmount_retry_succeeded,
+      true,
+      'a later retry completed the legacy cleanup',
+    );
+
     const kernel = checked('uname', ['-r'], 30000).trim();
     evidence.push({
       type: 'runtime',
@@ -98,11 +113,14 @@ if (!capabilities.backend) {
         'into nession-sandbox::mount::overlay, restart reattach preserved the durable upper; a ' +
         'changed lower, missing upper, symlinked work, foreign owner, competing mount, crashed ' +
         'owner and injected mount/unmount failure each failed closed without data loss; the ' +
-        'last verified unmount released the lower and legacy durable paths stayed readable',
+        'last verified unmount released the lower and legacy durable paths stayed readable; a ' +
+        'legacy record whose strict unmount failed kept its durable record and occupied ' +
+        'directory, and a later retry completed the cleanup',
     });
     return (
-      'The Sandbox-owned Overlay manager preserves verified restart recovery and fails closed ' +
-      'for changed/foreign/missing/failed state without touching durable Workspace bytes'
+      'The Sandbox-owned Overlay manager preserves verified restart recovery, retains a ' +
+      'failed legacy cleanup for retry, and fails closed for changed/foreign/missing/failed ' +
+      'state without touching durable Workspace bytes'
     );
   });
 }

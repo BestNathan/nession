@@ -114,7 +114,10 @@ describe('FixtureApp', () => {
     // One leave, and it is the header's — the viewer's ✕ is gone, so Back and ✕
     // are not two names for the same pop.
     expect(screen.queryByLabelText('Close file')).not.toBeInTheDocument();
-    expect(screen.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+    // The one Back names the real parent directory, and the secondary line
+    // projects the actual ancestry (#3971) rather than a fabricated breadcrumb.
+    expect(screen.getByTestId('app-page-back')).toHaveAccessibleName('Back to src');
+    expect(screen.getByTestId('app-page-subtitle-text')).toHaveTextContent('Files / web / src');
 
     // The capsule stays at this depth too (owner decision 2026-10-03,
     // superseding #1051's dock rule): one *leave* per depth, but the

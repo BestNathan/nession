@@ -1,6 +1,7 @@
 import { FileText, Plus, Undo2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { WorkspaceGroup } from '@/components/ui/workspace-content';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import type { GitRow } from '../state';
@@ -32,6 +33,7 @@ export function GitChangeList({
   busyKey,
   onStage,
   onUnstage,
+  experience = 'web',
 }: {
   rows: readonly GitRow[];
   selectedKey: string | null;
@@ -39,33 +41,66 @@ export function GitChangeList({
   busyKey: string | null;
   onStage: (row: GitRow) => void;
   onUnstage: (row: GitRow) => void;
+  /** App consumes the semantic Collection roles; Web keeps its denser layout. */
+  experience?: 'web' | 'app';
 }) {
+  const app = experience === 'app';
   return (
-    <div data-testid="git-change-list" className="space-y-4 p-3">
+    <div
+      data-testid="git-change-list"
+      data-workspace-surface={app ? 'primary' : undefined}
+      className={app
+        ? 'flex flex-col gap-[var(--nession-rhythm-section-stack)] p-[var(--nession-shell-space-3)]'
+        : 'space-y-4 p-3'}
+    >
       {GROUPS.map((group) => {
         const members = rows.filter((row) => group.matches(row));
         if (members.length === 0) {
           return null;
         }
         return (
-          <section key={group.id} data-testid={`git-group-${group.id}`}>
-            <h2 className={cn('mb-1 px-2 text-muted-foreground', chromeLabelRole())}>
+          <section
+            key={group.id}
+            data-testid={`git-group-${group.id}`}
+            data-workspace-section={app ? '' : undefined}
+            className={app
+              ? 'flex min-w-0 flex-col gap-[var(--nession-rhythm-section-content)]'
+              : undefined}
+          >
+            <h2 className={cn('px-2 text-muted-foreground', chromeLabelRole(), !app && 'mb-1')}>
               {group.title} ({members.length})
             </h2>
-            <div className="space-y-0.5">
-              {members.map((row) => (
-                <GitRowItem
-                  key={row.key}
-                  row={row}
-                  selected={row.key === selectedKey}
-                  busy={busyKey === row.key}
-                  disabled={busyKey !== null}
-                  onSelect={onSelect}
-                  onStage={onStage}
-                  onUnstage={onUnstage}
-                />
-              ))}
-            </div>
+            {app ? (
+              <WorkspaceGroup testId={`git-group-rows-${group.id}`}>
+                {members.map((row) => (
+                  <GitRowItem
+                    key={row.key}
+                    row={row}
+                    selected={row.key === selectedKey}
+                    busy={busyKey === row.key}
+                    disabled={busyKey !== null}
+                    onSelect={onSelect}
+                    onStage={onStage}
+                    onUnstage={onUnstage}
+                  />
+                ))}
+              </WorkspaceGroup>
+            ) : (
+              <div className="space-y-0.5">
+                {members.map((row) => (
+                  <GitRowItem
+                    key={row.key}
+                    row={row}
+                    selected={row.key === selectedKey}
+                    busy={busyKey === row.key}
+                    disabled={busyKey !== null}
+                    onSelect={onSelect}
+                    onStage={onStage}
+                    onUnstage={onUnstage}
+                  />
+                ))}
+              </div>
+            )}
           </section>
         );
       })}
@@ -100,6 +135,7 @@ function GitRowItem({
 
   return (
     <div
+      data-workspace-row=""
       className={cn(
         'flex items-center gap-0.5 rounded-[var(--nession-radius-control)]',
         selected && 'bg-accent text-accent-foreground',
@@ -114,7 +150,7 @@ function GitRowItem({
         aria-current={selected ? 'true' : undefined}
         onClick={() => onSelect(row)}
         className={cn(
-          'flex min-w-0 flex-1 items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+          'flex min-h-[length:var(--nession-control-md)] min-w-0 flex-1 items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
           chromeSansRole('secondary'),
           'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
         )}
@@ -136,7 +172,7 @@ function GitRowItem({
         <Button
           type="button"
           variant="ghost"
-          size="icon-xs"
+          size="icon"
           data-testid={`git-${action.id}`}
           aria-label={action.label}
           title={action.label}

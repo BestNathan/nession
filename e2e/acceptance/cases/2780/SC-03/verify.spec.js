@@ -70,7 +70,7 @@ test('SC-03: full App cross-capability transition at canonical narrow viewports'
       await page.getByTestId(id).click();
     }
     await expect(page.getByTestId('codemirror-editor')).toBeVisible();
-    await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+    await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to src');
     await swipeRight(page);
     await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'workspace');
     await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');

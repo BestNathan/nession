@@ -95,6 +95,13 @@ export const FIXTURE_AGENTS: Agent[] = [
     session_count: 3,
     last_heartbeat: '2026-09-01T08:00:00Z',
     registered_at: '2026-08-01T00:00:00Z',
+    metadata: {
+      tmux_version: '3.6b',
+      os_version: 'Ubuntu 24.04',
+      nession_version: '0.35.0',
+      architecture: 'amd64',
+      os: 'linux',
+    },
     protocols: FIXTURE_MANIFEST,
   },
   {
@@ -107,6 +114,13 @@ export const FIXTURE_AGENTS: Agent[] = [
     session_count: 2,
     last_heartbeat: '2026-09-01T08:00:00Z',
     registered_at: '2026-08-15T00:00:00Z',
+    metadata: {
+      tmux_version: '3.6b',
+      os_version: 'macOS 27.2',
+      nession_version: '0.35.0',
+      architecture: 'arm64',
+      os: 'darwin',
+    },
     protocols: FIXTURE_MANIFEST,
   },
   {

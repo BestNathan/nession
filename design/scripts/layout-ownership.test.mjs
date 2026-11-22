@@ -3,13 +3,16 @@ import test from 'node:test';
 
 import {
   APP_VIEWPORT_OWNER_ROOT,
+  checkScrollCoverageContract,
   KEYBOARD_SCROLL_OWNER_FILE,
   KEYBOARD_SCROLL_OWNER_MARKER,
   LAYOUT_RECIPE_OWNER,
   MASTER_DETAIL_MARKER,
+  parseScrollCoverageSource,
   SCROLL_OWNER_MARKER,
   scanLayoutSource,
   scanRepository,
+  WORKSPACE_SCROLLPORT_OWNER,
 } from './layout-ownership.mjs';
 
 const rules = (violations) => violations.map((violation) => violation.kind).sort();
@@ -28,8 +31,103 @@ test('capability content cannot take page geometry or the App header', () => {
   assert.deepEqual(rules(violations), [
     'no-capability-app-header',
     'no-capability-frame-geometry',
+    'no-capability-frame-geometry',
   ]);
   assert.ok(violations.every((violation) => violation.owner && violation.repair));
+});
+
+test('the App host owns page scrolling and Capsule clearance (#4115)', () => {
+  // Negative: a capability reintroducing the retired per-scroller clearance is
+  // compensating for the host overlay itself.
+  for (const source of [
+    "<div className={cn('overflow-y-auto', workspaceScrollClearanceClass)} />",
+    '<div className="pb-[var(--nession-local-workspace-content-bottom-inset,0px)]" />',
+  ]) {
+    assert.deepEqual(
+      rules(scanLayoutSource(source, 'web/src/capabilities/bad/components/Bad.tsx')),
+      ['no-capability-capsule-clearance-opt-in'],
+      source,
+    );
+  }
+
+  // Negative: a capability layout root carrying its own page scroll.
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div data-testid="bad-app-layout" className="h-full min-h-0 overflow-y-auto" />',
+      'web/src/capabilities/bad/components/Bad.tsx',
+    )),
+    ['no-capability-app-page-scroll'],
+  );
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div className="flex-1 overflow-auto" data-testid="bad-app-workspace" />',
+      'web/src/product/bad/Bad.tsx',
+    )),
+    ['no-capability-app-page-scroll'],
+  );
+
+  // Negative: a capability claiming the host's surface marker.
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div data-workspace-app-surface="document" />',
+      'web/src/capabilities/bad/components/Bad.tsx',
+    )),
+    ['no-capability-app-surface-owner'],
+  );
+
+  // Negative: a nested capability scroll owner hardcoding a Capsule-sized band
+  // instead of spending the host's measured inset (#4188).
+  assert.deepEqual(
+    rules(scanLayoutSource(
+      '<div data-testid="github-actions" className="min-h-0 flex-1 overflow-y-auto p-3 pb-16" />',
+      'web/src/capabilities/bad/components/Bad.tsx',
+    )),
+    ['no-capability-fixed-scroll-clearance'],
+  );
+
+  // Positive: a small padding on a scroller is content spacing, and a fixed
+  // band on a non-scrolling box is not a second clearance owner.
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div className="overflow-y-auto pb-2" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div className="overflow-hidden p-4 pb-16" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+  );
+
+  // Positive: the declared bounded recipe spends the host's scroll value and a
+  // local list/editor remains a legal inner scroll.
+  assert.deepEqual(
+    scanLayoutSource(
+      '<WorkspaceBoundedScrollport viewportClassName="min-h-0 flex-1 overflow-y-auto" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div data-testid="files-app-list" className="h-full min-h-0 overflow-y-auto" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+    'an inner list scroller is not an App layout root',
+  );
+
+  // The host recipe is the one owner of the surface marker and document scroll.
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div data-workspace-scroll-owner="true" data-workspace-app-surface="document" className="overflow-y-auto" />',
+      LAYOUT_RECIPE_OWNER,
+    ),
+    [],
+  );
 });
 
 test('capability content cannot publish host Workspace chrome', () => {
@@ -56,6 +154,93 @@ test('local flex/grid composition and the issue example stay legal', () => {
     scanLayoutSource('<div className="h-[100dvh]" />', 'web/src/app/experiences/app/AppLayers.tsx'),
     [],
     'the Experience frame owns page geometry',
+  );
+});
+
+test('only the App Experience owns gesture arbitration (#3971)', () => {
+  const badImport = [
+    "import { useSwipePager } from '@/app/experiences/app/useSwipePager';",
+    "import { edgeBandSide } from '@/app/experiences/app/edgeBand';",
+  ].join('\n');
+  assert.deepEqual(
+    rules(scanLayoutSource(badImport, 'web/src/capabilities/bad/components/Bad.tsx')),
+    ['no-capability-gesture-ownership', 'no-capability-gesture-ownership'],
+  );
+
+  const badMarkers =
+    '<div data-swipe-phase="navigation" data-swipe-inner="pop" data-workspace-stack-pop="Root" />';
+  const violations = scanLayoutSource(
+    badMarkers,
+    'web/src/product/bad/Bad.tsx',
+  );
+  assert.deepEqual(rules(violations), [
+    'no-capability-gesture-ownership',
+    'no-capability-gesture-ownership',
+    'no-capability-gesture-ownership',
+  ]);
+  assert.ok(violations.every((violation) => violation.owner && violation.repair));
+
+  assert.deepEqual(
+    scanLayoutSource(
+      '<button data-swipe-owner="true" onClick={() => page()} />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+    'the explicit surface-owned escape hatch remains legal',
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div data-swipe-phase="navigation" data-workspace-stack-forward="Detail" />',
+      'web/src/app/experiences/app/AppLayers.tsx',
+    ),
+    [],
+    'the App coordinator publishes the markers',
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      "import { useSwipePager } from './useSwipePager';",
+      'web/src/app/experiences/app/AppLayers.tsx',
+    ),
+    [],
+  );
+});
+
+test('capability content cannot re-create an App header through a marker or Back control', () => {
+  for (const source of [
+    '<AppBackButton testid="app-tool-back" label="Back" onClick={() => noop()} />',
+    '<div data-testid="app-tool-header" />',
+    '<button data-testid="app-page-action-search" />',
+    '<div data-testid="files-app-nav" />',
+  ]) {
+    assert.deepEqual(
+      rules(scanLayoutSource(source, 'web/src/capabilities/bad/components/Bad.tsx')),
+      ['no-capability-app-header'],
+      source,
+    );
+  }
+});
+
+test('viewport-unit and fixed page geometry stays with the Experience frame', () => {
+  for (const source of [
+    '<div className="h-dvh" />',
+    '<div className="min-h-svh" />',
+    '<div className="h-[100lvh]" />',
+    '<div className="w-[100dvw]" />',
+    '<div className="fixed inset-y-0" />',
+  ]) {
+    assert.deepEqual(
+      rules(scanLayoutSource(source, 'web/src/capabilities/bad/components/Bad.tsx')),
+      ['no-capability-frame-geometry'],
+      source,
+    );
+  }
+  assert.deepEqual(
+    scanLayoutSource(
+      '<div className="absolute inset-0 flex min-h-0" />',
+      'web/src/capabilities/good/components/Good.tsx',
+    ),
+    [],
+    'a local layer/overlay position is not page geometry',
   );
 });
 
@@ -112,6 +297,45 @@ test('the shared recipes do not encode raw numeric spacing', () => {
   );
 });
 
+test('Nession-owned shared recipes require token-backed visual metrics (#4050)', () => {
+  const recipe = 'web/src/components/ui/resource-detail.tsx';
+  const form = 'web/src/components/ui/configuration-formStyles.ts';
+
+  const bad = 'className="flex gap-3 p-2.5 -mt-4 w-6 gap-[12px] gap-[calc(1rem+var(--nession-rhythm-inline))]"';
+  const violations = scanLayoutSource(bad, recipe);
+  assert.equal(violations.length, 6);
+  assert.ok(violations.every(v => v.kind === 'no-recipe-raw-spacing' && v.owner && v.repair));
+  assert.ok(violations.some(v => v.actual.includes('gap-[calc(1rem')));
+
+  assert.deepEqual(
+    rules(scanLayoutSource("export const formRowClass = 'gap-2 p-3';", form)),
+    ['no-recipe-raw-spacing', 'no-recipe-raw-spacing'],
+    'a shared style-string owner is still a Recipe',
+  );
+  assert.deepEqual(
+    rules(scanLayoutSource('<div style={{ padding: 12 }} />', recipe)),
+    ['no-recipe-raw-spacing'],
+    'inline non-token visual lengths cannot bypass the class check',
+  );
+});
+
+test('Nession recipe tokens and structural layout remain legal (#4050)', () => {
+  const source =
+    '<div className="flex min-w-0 grid-cols-1 gap-0 p-0 gap-[var(--nession-rhythm-inline)] p-[var(--nession-shell-space-3)]" />';
+  for (const recipe of [
+    'web/src/components/ui/resource-detail.tsx',
+    'web/src/components/ui/configuration-form.tsx',
+    'web/src/components/ui/operation-surface.tsx',
+  ]) {
+    assert.deepEqual(scanLayoutSource(source, recipe), [], recipe);
+  }
+  assert.deepEqual(
+    scanLayoutSource('<div className="flex gap-3 p-3" />', 'web/src/components/ui/label.tsx'),
+    [],
+    'upstream Label interior geometry is not blanket-ported to Nession recipe ownership',
+  );
+});
+
 test('only the App Experience owns the keyboard-avoidance scroll ancestor', () => {
   const marker = `data-keyboard-avoidance-scrollport=""`;
   assert.deepEqual(
@@ -156,6 +380,141 @@ test('only the App viewport environment reads window.visualViewport', () => {
     ['no-foreign-visual-viewport'],
     'a second visual-viewport reader outside AppLayout is a competing owner',
   );
+});
+
+test('a bounded scrollport cannot couple content spacing with the measured inset (#4222)', () => {
+  const coupled = [
+    'const Bad = () => (',
+    "  <div className={cn('min-h-0 flex-1 overflow-y-auto p-2', workspaceBoundedScrollClearanceClass)} />",
+    ');',
+  ].join('\n');
+  assert.deepEqual(
+    rules(scanLayoutSource(coupled, 'web/src/capabilities/files/components/Pane.tsx')),
+    ['no-coupled-bounded-scrollport'],
+  );
+  assert.deepEqual(
+    scanLayoutSource(coupled, WORKSPACE_SCROLLPORT_OWNER),
+    [],
+    'the recipe owner is the one element that spends the viewport clearance',
+  );
+  const recipe = [
+    'const Good = () => (',
+    "  <WorkspaceBoundedScrollport viewportClassName=\"h-full\" className=\"p-2\" />",
+    ');',
+  ].join('\n');
+  assert.deepEqual(
+    scanLayoutSource(recipe, 'web/src/capabilities/files/components/Pane.tsx'),
+    [],
+    'content spacing inside the recipe is the accepted repair',
+  );
+});
+
+test('a persistent capability footer must be declared (#4222)', () => {
+  const undeclared = '<p className="shrink-0 border-t px-4 py-2">Read-only</p>';
+  assert.deepEqual(
+    rules(scanLayoutSource(undeclared, 'web/src/capabilities/claude-code/components/Surface.tsx')),
+    ['no-unregistered-fixed-workspace-footer'],
+  );
+  assert.deepEqual(
+    scanLayoutSource(
+      '<p data-workspace-fixed-role="context" className="shrink-0 border-t px-4 py-2">Read-only</p>',
+      'web/src/capabilities/claude-code/components/Surface.tsx',
+    ),
+    [],
+    'an intentional fixed context declares its role',
+  );
+  assert.deepEqual(
+    scanLayoutSource(undeclared, 'web/src/app/experiences/app/ShellFoot.tsx'),
+    [],
+    'the host composition is not capability content',
+  );
+});
+
+test('scroll coverage rejects a missing route, mode and owner (#4222 SC-03)', () => {
+  const valid = [
+    {
+      capability: 'claude-code',
+      routes: [
+        {
+          route: 'conversation',
+          mode: 'bounded',
+          scrollers: ['conversation-transcript-scroll'],
+          fixed: ['claude-app-read-only-note'],
+          scenario: 'fixture-app/claude-conversation',
+        },
+      ],
+    },
+  ];
+  const expected = { 'claude-code': ['conversation'] };
+  assert.deepEqual(checkScrollCoverageContract(valid, expected), []);
+
+  const missingRoute = [
+    {
+      capability: 'claude-code',
+      routes: [
+        {
+          route: 'conversations',
+          mode: 'bounded',
+          scrollers: ['claude-app-conversations-scroll'],
+          scenario: 'fixture-app/claude-conversations',
+        },
+      ],
+    },
+  ];
+  assert.match(
+    checkScrollCoverageContract(missingRoute, expected).join('\n'),
+    /reachable route lacks coverage: claude-code\/conversation/,
+  );
+
+  const noOwner = structuredClone(valid);
+  noOwner[0].routes[0].scrollers = [];
+  assert.match(
+    checkScrollCoverageContract(noOwner, expected).join('\n'),
+    /bounded route has no scroll owner/,
+  );
+
+  const documentWithInnerOwner = structuredClone(valid);
+  documentWithInnerOwner[0].routes[0].mode = 'document';
+  assert.match(
+    checkScrollCoverageContract(documentWithInnerOwner, expected).join('\n'),
+    /document route names a non-page scroll owner/,
+  );
+
+  const noScenario = structuredClone(valid);
+  noScenario[0].routes[0].scenario = '';
+  assert.match(
+    checkScrollCoverageContract(noScenario, expected).join('\n'),
+    /route has no executable scenario/,
+  );
+
+  const staleRoute = structuredClone(valid);
+  staleRoute[0].routes.push({
+    ...staleRoute[0].routes[0],
+    route: 'removed-depth',
+  });
+  assert.match(
+    checkScrollCoverageContract(staleRoute, expected).join('\n'),
+    /coverage names a route the union no longer reaches: claude-code\/removed-depth/,
+  );
+});
+
+test('scroll coverage parsing keeps one route contract per declared variant', () => {
+  const source = [
+    'export const COVERAGE = [',
+    "  { capability: 'git', routes: [",
+    "    { route: 'changes', mode: 'bounded', scrollers: ['git-diff-body'], scenario: 'fixture-git/changes' },",
+    "    { route: 'history', mode: 'bounded', scrollers: ['git-commit-list', 'git-commit-detail'], scenario: 'fixture-git/history' },",
+    '  ] },',
+    "  { capability: 'session', routes: [",
+    "    { route: 'details', mode: 'document', scrollers: ['app-workspace-scrollport'], scenario: 'fixture-app/session' },",
+    '  ] },',
+    '];',
+  ].join('\n');
+  const entries = parseScrollCoverageSource(source);
+  assert.deepEqual(entries.map((entry) => entry.capability), ['git', 'session']);
+  assert.deepEqual(entries[0].routes.map((route) => route.route), ['changes', 'history']);
+  assert.deepEqual(entries[0].routes[1].scrollers, ['git-commit-list', 'git-commit-detail']);
+  assert.equal(entries[1].routes[0].mode, 'document');
 });
 
 test('the committed tree satisfies layout ownership', () => {

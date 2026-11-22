@@ -61,13 +61,90 @@ foreground_command?: string | null, working_dir?: string | null,
  */
 instance_id?: string | null, 
 /**
+ * Bounded work-context summary (#4007), projected from the Agent that
+ * owns the Session. `available` is the Agent's answer; `unavailable` is a
+ * failed lookup and is never an empty task. Omitted when the Server has
+ * no report from a current Agent (legacy or stale).
+ */
+metadata?: SessionMetadataAvailability | null, 
+/**
  * The focused Session's Server-owned Project membership (#3082).
  *
  * Absent for a Session with no Project. This is durable membership, not an
  * inference from cwd, Git or the Agent; a newer Session incarnation that
  * reuses the same `agent_id:session_name` does not inherit it.
  */
-project_id?: string | null, last_activity: string, };
+project_id?: string | null, 
+/**
+ * The membership revision the caller observed (#4234).
+ *
+ * Echo it as `expected_revision` on the next association, change or
+ * removal so a stale editor conflicts instead of silently overwriting a
+ * newer committed membership. `0` is the unassociated token. It is scoped
+ * to the current Session incarnation: a same-name replacement whose
+ * previous binding was invalidated reports `0` for its own absent
+ * membership. Absent from a Server that predates this field; a caller then
+ * omits `expected_revision` and keeps the documented last-writer-wins
+ * compatibility.
+ */
+project_revision?: number | null, 
+/**
+ * The Agent's current Session Activity level (#3804).
+ *
+ * A fourth, independent dimension; it never rewrites `status`,
+ * connectivity, attachment or `last_activity`. Absent means this Agent has
+ * not reported Activity (a legacy Agent, or one that has not reconciled
+ * yet), which consumers must render as `unknown`, never `idle`. A present
+ * `working` states the Agent's current observation; a Web client still
+ * treats it as unknown when that Agent is offline or stale.
+ */
+activity?: SessionActivityView | null, last_activity: string, };
+export type SessionMetadataAvailability = { 
+/**
+ * `available` when the Agent read the metadata; `unavailable` when the
+ * lookup failed. Never render `unavailable` as an empty task.
+ */
+state: SessionMetadataState, 
+/**
+ * The bounded summary. Present only when `state` is `available`.
+ */
+summary?: SessionMetadataSummary | null, };
+export type SessionMetadataState = "available" | "unavailable";
+export type SessionMetadataSummary = { 
+/**
+ * 0 means confirmed-empty (a legacy Session), not unavailable.
+ */
+revision: number, 
+/**
+ * The display title; absent falls back to the tmux Session name.
+ */
+title?: string | null, 
+/**
+ * The Session's labels, in their stored order.
+ */
+tags: Array<string>, };
+export type SessionActivityView = { 
+/**
+ * `working`, `idle` or `unknown`.
+ *
+ * A `String` rather than an enum, matching `status`'s treatment on the
+ * adjacent payload: the Server validates the value and refuses anything
+ * else, so a closed enum here would describe validation that lives
+ * elsewhere.
+ */
+state: string, 
+/**
+ * `input_required` when the owning capability needs the user, else absent.
+ */
+attention?: string | null, 
+/**
+ * The capability that owns the Pane whose level produced this aggregate.
+ */
+capability_id?: string | null, 
+/**
+ * When the Agent observed this level (Unix milliseconds).
+ */
+observed_at_ms: number, };
 export type SessionRefusal = { 
 /**
  * Always `"error"` today. A string rather than an enum because nothing

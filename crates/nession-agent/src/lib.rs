@@ -7,7 +7,9 @@
 //! - Watches for tmux session changes and syncs them to the server
 
 pub mod claude_binding;
+pub mod claude_control;
 pub mod claude_session_context;
+pub mod claude_workspace_trust;
 pub mod config;
 pub mod connection;
 pub mod env;
@@ -22,12 +24,16 @@ pub mod memory;
 pub mod netdetect;
 pub mod netwatch;
 pub mod p2p_auth;
+pub mod peer_registry;
 pub mod protocol;
+pub mod registry;
 pub mod runtime;
 pub mod sandbox_images;
 pub mod sandbox_runtime;
 pub mod server;
 pub mod session;
+pub mod session_created;
+pub mod session_env;
 pub mod sync;
 pub mod tmux;
 pub mod token;

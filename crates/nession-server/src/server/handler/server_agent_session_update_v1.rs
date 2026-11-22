@@ -100,6 +100,14 @@ impl ConnectionHandler {
                 .and_then(serde_json::Value::as_str)
                 .filter(|id| !id.is_empty())
                 .map(std::string::ToString::to_string),
+            // An incremental state report carries no metadata summary; the
+            // registry preserves the last one for the same incarnation.
+            metadata: None,
+            // Inventory does not carry Activity; `update_session` preserves a
+            // same-incarnation level from the registry.
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
         };
 
         info!(

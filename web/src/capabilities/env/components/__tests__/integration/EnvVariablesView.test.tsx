@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { EnvVariablesView } from '@/capabilities/env/components/EnvVariablesView';
 import { MASKED_VALUE } from '@/capabilities/env/model/sensitive';
+import { WORKSPACE_BOUNDED_SCROLL_MARKER } from '@/shared/lib/workspaceScrollClearance';
 
 vi.mock('sonner', () => ({
   toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
@@ -147,5 +148,26 @@ describe('EnvVariablesView', () => {
     const section = screen.getByTestId('env-var-warnings');
     expect(section).toHaveTextContent('1 line skipped');
     expect(section).toHaveTextContent('line 3: no equals sign');
+  });
+
+  it('makes the pinned warnings footer its own bounded scroll owner (#4188)', () => {
+    // The footer stays pinned below the list, but a long skipped-line list was
+    // clipped by the App bounded region because the footer itself never
+    // scrolled. It now owns the scroll (and the measured inset) without
+    // reserving a footer while short.
+    render(
+      <EnvVariablesView
+        vars={vars(['A', '1'])}
+        warnings={Array.from({ length: 24 }, (_, index) => `line ${index + 2}: skipped`)}
+      />,
+    );
+
+    const warnings = screen.getByTestId('env-var-warnings');
+    expect(warnings.className).toContain(WORKSPACE_BOUNDED_SCROLL_MARKER);
+    expect(warnings.className).toContain('overflow-y-auto');
+    expect(warnings.className).toContain('max-h-[40%]');
+    expect(warnings).toContainElement(screen.getByText('line 25: skipped'));
+    // It is a sibling of the list scroller, not nested inside it.
+    expect(screen.getByTestId('env-variable-list-scroll')).not.toContainElement(warnings);
   });
 });
