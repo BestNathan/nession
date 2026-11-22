@@ -81,6 +81,14 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha }}
           path: candidate-catalog
           persist-credentials: false
+      - name: Install pinned-platform Git HTTPS build prerequisites (uncredentialed runner only)
+        if: matrix.tool == 'git' && matrix.version == '2.56.0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libcurl4-openssl-dev zlib1g-dev libssl-dev
+          command -v curl-config
       - name: Prepare and independently verify on native Linux runner
         shell: bash
         env:

@@ -105,6 +105,14 @@ jobs:
           ref: ${{ inputs.source_sha }}
           path: toolchain-catalog
           persist-credentials: false
+      - name: Install Git HTTPS build prerequisites (uncredentialed native prepare only)
+        if: inputs.tool == 'git' && inputs.version == '2.56.0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libcurl4-openssl-dev zlib1g-dev libssl-dev
+          command -v curl-config
       - name: Build source-pinned payload and execute its own version probe (no GHCR token)
         env:
           TOOL: ${{ inputs.tool }}
