@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import { GitBranch, RefreshCw, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { Button } from '@/components/ui/button';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { WorkspaceSurface } from '@/components/ui/workspace-content';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type {
@@ -45,8 +45,8 @@ import { GithubHostingView } from './GithubHostingView';
  * `workspace-navigation.md` allows segments in — this chooses what the
  * capability shows, and is not a second navigation shell.
  */
-type GitSection = 'changes' | 'history' | 'branches' | 'worktrees';
-type GitSurface = 'repository' | 'github';
+export type GitSection = 'changes' | 'history' | 'branches' | 'worktrees';
+export type GitSurface = 'repository' | 'github';
 
 /**
  * The file the entry said to open, if any (`#826`).
@@ -243,10 +243,10 @@ function GitHeader({
           className="shrink-0"
         >
           <TabsList>
-            <TabsTrigger value="changes">Changes</TabsTrigger>
-            <TabsTrigger value="history">History</TabsTrigger>
-            <TabsTrigger value="branches">Branches</TabsTrigger>
-            <TabsTrigger value="worktrees">Worktrees</TabsTrigger>
+            <TabsTrigger value="changes" data-testid="git-section-changes">Changes</TabsTrigger>
+            <TabsTrigger value="history" data-testid="git-section-history">History</TabsTrigger>
+            <TabsTrigger value="branches" data-testid="git-section-branches">Branches</TabsTrigger>
+            <TabsTrigger value="worktrees" data-testid="git-section-worktrees">Worktrees</TabsTrigger>
           </TabsList>
         </Tabs>
       ) : null}
@@ -407,7 +407,7 @@ function GitBody({
             onCommit={mutations.commit}
           />
         ) : null}
-        <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}>
+        <WorkspaceBoundedScrollport>
           <GitChangeList
             rows={rows}
             selectedKey={selection.selectedKey}
@@ -417,7 +417,7 @@ function GitBody({
             onUnstage={mutations.unstage}
             experience={experience}
           />
-        </div>
+        </WorkspaceBoundedScrollport>
       </aside>
       <main className="flex min-h-0 flex-1 flex-col lg:flex-none">
         {selection.mode === 'preview' ? (
@@ -494,7 +494,7 @@ function GitAppCollection({
           onCommit={mutations.commit}
         />
       ) : null}
-      <div className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}>
+      <WorkspaceBoundedScrollport>
         <GitChangeList
           rows={rows}
           selectedKey={selection.selectedKey}
@@ -504,7 +504,7 @@ function GitAppCollection({
           onUnstage={mutations.unstage}
           experience="app"
         />
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

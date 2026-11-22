@@ -10,7 +10,7 @@ import {
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { parseTranscriptRecord, type ParsedTranscriptRecord } from '../model/transcriptRecord';
 import { formatSize } from '../format';
 import { TranscriptRecordDetail } from './TranscriptRecordDetail';
@@ -182,10 +182,7 @@ export function TranscriptTimeline({
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-timeline">
-      <div
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
-        data-testid="transcript-timeline-scroll"
-      >
+      <WorkspaceBoundedScrollport data-testid="transcript-timeline-scroll">
         {records.length === 0 ? (
           <p
             className={cn('px-3 py-6 text-muted-foreground', chromeSansRole('secondary'))}
@@ -223,9 +220,10 @@ export function TranscriptTimeline({
             {loadingOlder ? 'Loading…' : 'Load earlier'}
           </button>
         ) : null}
-      </div>
+      </WorkspaceBoundedScrollport>
       {partialTail ? (
         <p
+          data-workspace-fixed-role="context"
           className={cn('px-3 py-1 text-muted-foreground', chromeSansRole('metadata'))}
           data-testid="transcript-partial"
         >

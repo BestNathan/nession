@@ -95,6 +95,30 @@ const APP_PAGE_SCROLL_RE =
  * than contributing content to it.
  */
 const APP_SURFACE_MARKER = 'data-workspace-app-surface';
+/**
+ * The reusable bounded scrollport recipe (#4222 SC-01).
+ *
+ * The measured clearance lives on the scrolling viewport, never on the same
+ * element as caller content spacing: `p-2` and `pb-6` would otherwise win
+ * Tailwind's merge and erase the host inset. Capability code consumes the
+ * recipe; only its owner and the documented third-party viewport adapter may
+ * name the class directly.
+ */
+export const WORKSPACE_SCROLLPORT_OWNER =
+  'web/src/components/ui/workspace-scrollport.tsx';
+const BOUNDED_CLEARANCE_ADAPTERS = new Set([
+  WORKSPACE_SCROLLPORT_OWNER,
+  LAYOUT_RECIPE_OWNER,
+  'web/src/shared/lib/workspaceScrollClearance.ts',
+  // A virtualized/third-party viewport that owns its own scroll machinery but
+  // still spends the Workspace inset (MessageScroller is the canonical one).
+  'web/src/shared/ai-conversation/components/ConversationTranscript.tsx',
+]);
+const BOUNDED_CLEARANCE_RE =
+  /\bworkspaceBoundedScrollClearanceClass\b|pb-\[var\(--nession-local-workspace-scroll-bottom-inset/g;
+/** A persistent sibling outside the scroll area, declared to the host (#4222). */
+const FIXED_ROLE_MARKER = 'data-workspace-fixed-role';
+const SCROLL_COVERAGE_FILE = 'web/src/app/workspace/scrollCoverage.ts';
 const FRAME_UTILITY_RE =
   /\b(?:h-screen|min-h-screen|w-screen|h-dvh|min-h-dvh|h-svh|min-h-svh|h-lvh|min-h-lvh|w-dvw|h-\[100dvh\]|min-h-\[100dvh\]|h-\[100svh\]|min-h-\[100svh\]|h-\[100lvh\]|min-h-\[100lvh\]|w-\[100dvw\]|fixed\s+inset-0|fixed\s+inset-x-0|fixed\s+inset-y-0)(?![\w-])/g;
 const HEADER_MARKER_RE =
@@ -213,6 +237,22 @@ const RULES = {
     repair:
       'remove the page-level scroll from the App layout root; let the host scroll the page, or declare the view appScroll: "bounded" and put a marked internal scroller inside it',
   },
+  'no-coupled-bounded-scrollport': {
+    expected:
+      'a bounded scroll owner spends the host-measured inset on its viewport, never on the same element as caller content spacing',
+    owner:
+      'web/src/components/ui/workspace-scrollport.tsx + web/src/shared/lib/workspaceScrollClearance.ts',
+    repair:
+      'render <WorkspaceBoundedScrollport viewportClassName={...} className={...}> so content padding cannot override the measured bottom inset; keep the class only in the recipe owner or a declared third-party viewport adapter',
+  },
+  'no-unregistered-fixed-workspace-footer': {
+    expected:
+      'a persistent sibling footer is declared to the host, which measures and clears it; ordinary notes and status rows live inside the scroll area',
+    owner:
+      'web/src/app/workspace/scrollCoverage.ts + web/src/app/workspace/hooks/useWorkspaceCapsuleClearance.ts',
+    repair:
+      'move the note/status inside the bounded scroller, or mark an intentionally fixed context with data-workspace-fixed-role="context" and list it in the route coverage',
+  },
   'no-capability-app-surface-owner': {
     expected: 'the App Workspace surface marker is published by the host layout recipe',
     owner: LAYOUT_RECIPE_OWNER,
@@ -302,6 +342,19 @@ export function scanLayoutSource(source, file = '<fixture>') {
       file,
       rule: 'no-capability-capsule-clearance-opt-in',
     });
+    // #4222: a persistent sibling footer must declare itself; an ordinary
+    // note/status row belongs inside the scroll area where it is reachable.
+    for (const tag of masked.matchAll(JSX_TAG_RE)) {
+      if (!/\bshrink-0\b/.test(tag[0]) || !/\bborder-t\b/.test(tag[0])) continue;
+      if (tag[0].includes(FIXED_ROLE_MARKER)) continue;
+      violations.push({
+        file,
+        line: lineNumber(masked, tag.index),
+        kind: 'no-unregistered-fixed-workspace-footer',
+        actual: tag[0].slice(0, 80),
+        ...RULES['no-unregistered-fixed-workspace-footer'],
+      });
+    }
     // #4188: a scroll owner that hardcodes a Capsule-sized band is a second
     // clearance owner. Checked per element so a small padding elsewhere or on
     // a non-scrolling box stays legal.
@@ -361,6 +414,17 @@ export function scanLayoutSource(source, file = '<fixture>') {
         ...RULES['no-duplicated-scroll-owner'],
       });
     }
+  }
+
+  // #4222: one reusable bounded scrollport. A file that restates the measured
+  // clearance on the same element as content spacing is restoring the defect
+  // the recipe removes; third-party viewports and the recipe owner are the
+  // declared exceptions.
+  if (!BOUNDED_CLEARANCE_ADAPTERS.has(file)) {
+    pushOccurrences(violations, masked, BOUNDED_CLEARANCE_RE, {
+      file,
+      rule: 'no-coupled-bounded-scrollport',
+    });
   }
 
   if (isTokenOwnedRecipe(file)) {
@@ -432,11 +496,194 @@ function format(violation) {
   });
 }
 
+/**
+ * Parse the scroll-coverage inventory (#4222 SC-03).
+ *
+ * The inventory is TypeScript the Gate cannot import, so the parser reads only
+ * the shapes that file deliberately keeps regular: one `capability` per entry,
+ * then one flat route object per reachable variant.
+ */
+export function parseScrollCoverageSource(source) {
+  const entries = [];
+  const capabilityMatches = [...source.matchAll(/capability:\s*'([^']+)'/g)];
+  for (let index = 0; index < capabilityMatches.length; index += 1) {
+    const start = capabilityMatches[index].index;
+    const end = index + 1 < capabilityMatches.length
+      ? capabilityMatches[index + 1].index
+      : source.length;
+    const block = source.slice(start, end);
+    const routeMatches = [...block.matchAll(/route:\s*'([^']+)'/g)];
+    const routes = [];
+    for (let routeIndex = 0; routeIndex < routeMatches.length; routeIndex += 1) {
+      const routeStart = routeMatches[routeIndex].index;
+      const routeEnd = routeIndex + 1 < routeMatches.length
+        ? routeMatches[routeIndex + 1].index
+        : block.length;
+      const routeBlock = block.slice(routeStart, routeEnd);
+      routes.push({
+        route: routeMatches[routeIndex][1],
+        mode: /mode:\s*'([^']+)'/.exec(routeBlock)?.[1] ?? '',
+        scenario: /scenario:\s*'([^']+)'/.exec(routeBlock)?.[1] ?? '',
+        scrollers: stringArray(routeBlock, 'scrollers'),
+        fixed: stringArray(routeBlock, 'fixed'),
+      });
+    }
+    entries.push({ capability: capabilityMatches[index][1], routes });
+  }
+  return entries;
+}
+
+function stringArray(block, key) {
+  const match = new RegExp(`${key}:\\s*\\[([^\\]]*)\\]`).exec(block);
+  if (!match) return [];
+  return [...match[1].matchAll(/'([^']+)'/g)].map((item) => item[1]);
+}
+
+function quotedUnion(source, typeName, pattern = null) {
+  const declaration = pattern
+    ? new RegExp(pattern).exec(source)?.[1] ?? ''
+    : new RegExp(`type\\s+${typeName}\\s*=([^;]+);`).exec(source)?.[1] ?? '';
+  return [...declaration.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+}
+
+function arrayIds(source, arrayName) {
+  const body = new RegExp(`${arrayName}\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*as const`).exec(source)?.[1] ?? '';
+  return [...body.matchAll(/id:\s*'([^']+)'/g)].map((match) => match[1]);
+}
+
+const GIT_SECTION_ROUTES = {
+  changes: 'changes',
+  history: 'history',
+  branches: 'history-branches',
+  worktrees: 'history-worktrees',
+};
+const GITHUB_SECTION_ROUTES = {
+  issues: 'github-issues',
+  'pull-requests': 'github-pull-requests',
+  actions: 'github-actions',
+};
+
+/** Everything the current capability unions make reachable (#4222 SC-03). */
+export function expectedScrollRoutes(root = ROOT) {
+  const read = (path) => readFileSync(join(root, path), 'utf8');
+  const claudeModel = read('web/src/capabilities/claude-code/components/claude-app/model.ts');
+  const claudeKinds = [...claudeModel.matchAll(/kind:\s*'([^']+)'/g)]
+    .map((match) => match[1]);
+  const env = quotedUnion(
+    read('web/src/capabilities/env/hooks/useEnvironmentScreen.ts'),
+    'EnvironmentView',
+  );
+  const sandbox = read('web/src/capabilities/sandbox/components/SandboxSectionNav.tsx');
+  const policies = read('web/src/capabilities/sandbox/components/SandboxPolicyTabs.tsx');
+  const git = read('web/src/capabilities/git/components/GitWorkspace.tsx');
+  const github = read('web/src/capabilities/git/components/GithubHostingView.tsx');
+  return {
+    'claude-code': claudeKinds,
+    env: [...env, 'profile-editor'],
+    sandbox: [
+      ...arrayIds(sandbox, 'SANDBOX_SECTIONS'),
+      ...arrayIds(policies, 'SANDBOX_POLICY_TABS').map((id) => `policy-${id}`),
+      'enter',
+    ],
+    git: [
+      ...quotedUnion(git, 'GitSection').map((section) => GIT_SECTION_ROUTES[section] ?? section),
+      ...quotedUnion(github, 'GithubSection').map((section) => GITHUB_SECTION_ROUTES[section] ?? section),
+    ],
+  };
+}
+
+/**
+ * The #4222 SC-03 contract, as a pure function over a coverage inventory and
+ * the union-derived route map. Exported so the design source tests can prove
+ * both the reject and the accept side without a repository mutation.
+ */
+export function checkScrollCoverageContract(entries, expectedRoutes) {
+  const problems = [];
+  const byCapability = new Map();
+  for (const entry of entries) {
+    if (byCapability.has(entry.capability)) {
+      problems.push(`duplicate capability coverage: ${entry.capability}`);
+    }
+    byCapability.set(entry.capability, entry);
+    const routes = new Set();
+    for (const route of entry.routes) {
+      const key = `${entry.capability}/${route.route}`;
+      if (routes.has(route.route)) problems.push(`duplicate route coverage: ${key}`);
+      routes.add(route.route);
+      if (route.scenario.trim() === '') problems.push(`route has no executable scenario: ${key}`);
+      if (route.mode === 'bounded') {
+        if (route.scrollers.length === 0) problems.push(`bounded route has no scroll owner: ${key}`);
+      } else if (route.mode === 'document') {
+        if (route.scrollers.some((owner) => owner !== 'app-workspace-scrollport')) {
+          problems.push(`document route names a non-page scroll owner: ${key}`);
+        }
+      } else {
+        problems.push(`unknown scroll mode: ${key}`);
+      }
+    }
+  }
+  for (const [capability, expected] of Object.entries(expectedRoutes)) {
+    const entry = byCapability.get(capability);
+    if (!entry) {
+      problems.push(`capability has no route coverage: ${capability}`);
+      continue;
+    }
+    const routes = new Set(entry.routes.map((route) => route.route));
+    for (const route of expected) {
+      if (!routes.has(route)) {
+        problems.push(`reachable route lacks coverage: ${capability}/${route}`);
+      }
+    }
+    // A route removed from the capability's own union must also leave the
+    // coverage; a stale owner would otherwise keep a dead endpoint "proven".
+    const expectedSet = new Set(expected);
+    for (const route of routes) {
+      if (!expectedSet.has(route)) {
+        problems.push(`coverage names a route the union no longer reaches: ${capability}/${route}`);
+      }
+    }
+  }
+  return problems;
+}
+
+function scanScrollCoverage(root = ROOT) {
+  const coveragePath = join(root, SCROLL_COVERAGE_FILE);
+  const entries = parseScrollCoverageSource(readFileSync(coveragePath, 'utf8'));
+  const problems = checkScrollCoverageContract(entries, expectedScrollRoutes(root));
+  // A declared owner that appears nowhere in shipped source is stale coverage.
+  const literals = [];
+  for (const path of walk(join(root, 'web', 'src'))) {
+    if (!['.ts', '.tsx', '.js', '.jsx'].includes(extname(path))) continue;
+    const file = relative(root, path).replaceAll('\\', '/');
+    if (isTestSource(file)) continue;
+    literals.push(readFileSync(path, 'utf8'));
+  }
+  const source = literals.join('\n');
+  for (const entry of entries) {
+    for (const route of entry.routes) {
+      for (const owner of [...route.scrollers, ...route.fixed]) {
+        if (!source.includes(owner)) {
+          problems.push(`scroll owner is not published in source: ${entry.capability}/${route.route} -> ${owner}`);
+        }
+      }
+    }
+  }
+  return problems;
+}
+
 function main() {
   const violations = scanRepository(ROOT);
+  const coverageProblems = scanScrollCoverage(ROOT);
+  for (const problem of coverageProblems) {
+    process.stderr.write(`✗ layout-ownership/scroll-coverage: ${problem}\n`);
+  }
   if (violations.length > 0) {
     for (const violation of violations) process.stderr.write(`${format(violation)}\n\n`);
-    process.stderr.write(`✗ ${violations.length} layout ownership violation(s)\n`);
+  }
+  if (violations.length > 0 || coverageProblems.length > 0) {
+    process.stderr.write(
+      `✗ ${violations.length + coverageProblems.length} layout ownership violation(s)\n`,
+    );
     process.exitCode = 1;
     return;
   }

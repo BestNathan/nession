@@ -12,7 +12,16 @@ const BASELINE_PATH = join(HERE, '..', 'contracts', 'visual-token-debt.json');
 // folded staging@a19633cf1's 43 pre-existing legacy blobs into the inventory so
 // main's debt enforcement recognizes staging's existing debt. This grandfathers
 // existing legacy only; any new/edited raw metric still fails the gate.
-export const PINNED_LEGACY_BASELINE_BLOB = '828a4231c8197dcab080016c0cbd7299722959b7';
+//
+// #4222 scroll-ownership reconciliation (explicit Design Gate baseline
+// approval): the App Workspace scroll-port migration edits 35 legacy files at
+// their scroll-root/marker seams, which unfreezes the whole-file debt those
+// files already carried. Re-freezing those exact blobs preserves the invariant
+// this inventory protects — no new visual metric is admitted (the #4222 diff
+// introduces none) — while keeping a 623-metric, unrelated token migration out
+// of a scroll-ownership change. Any further edit to one of these files still
+// changes its blob and fails closed until its metrics are migrated.
+export const PINNED_LEGACY_BASELINE_BLOB = 'c51681094c31849352579967cacb01c7632430ec';
 
 /** One lexical collector for both ESLint and the fast source Gate. Legacy
  * literal baseline decisions are based on the complete Git blob, not the

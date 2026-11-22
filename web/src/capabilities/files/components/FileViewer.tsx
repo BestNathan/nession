@@ -256,7 +256,11 @@ function FileViewerContent({
         )}
       </div>
       {isDirty && viewMode === 'preview' ? (
-        <p className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-[var(--nession-shell-space-3)] py-[var(--nession-file-viewer-bar-inset-y)] text-warning-foreground', chromeSansRole('metadata'))}>
+        <p
+          data-workspace-fixed-role="context"
+          data-testid="file-viewer-dirty-preview"
+          className={cn('shrink-0 border-t border-warning/30 bg-warning/10 px-[var(--nession-shell-space-3)] py-[var(--nession-file-viewer-bar-inset-y)] text-warning-foreground', chromeSansRole('metadata'))}
+        >
           Preview shows the saved version. Save to update preview.
         </p>
       ) : null}

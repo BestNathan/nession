@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { RefreshCw, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Markdown } from '@/shared/markdown';
@@ -155,12 +155,9 @@ function IssuesListBody({
   onLoadMore: () => void;
 }) {
   return (
-    <div
+    <WorkspaceBoundedScrollport
       data-testid="github-issue-list-scroll"
-      className={cn(
-        'min-h-0 flex-1 overflow-y-auto overscroll-contain p-2',
-        workspaceBoundedScrollClearanceClass,
-      )}
+      className="p-2"
     >
       {error ? (
         <GithubNotice error={error} testId="github-issues-error" onRetry={onRefresh} />
@@ -196,7 +193,7 @@ function IssuesListBody({
           </Button>
         </div>
       ) : null}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 

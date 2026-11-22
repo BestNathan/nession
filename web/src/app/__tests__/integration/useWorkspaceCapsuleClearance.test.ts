@@ -105,6 +105,66 @@ describe('useWorkspaceCapsuleClearance', () => {
     expect(shell.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
   });
 
+  it('measures every declared bounded scrollport at its own bottom (#4222 SC-02)', () => {
+    const { shell } = workspaceDom({ withBar: true }); // floating top = 340
+    const scrollport = (bottom: number, scrolls: boolean, label: string) => {
+      const element = document.createElement('div');
+      element.className = WORKSPACE_BOUNDED_SCROLL_MARKER;
+      element.setAttribute('data-testid', label);
+      Object.defineProperty(element, 'scrollHeight', {
+        configurable: true,
+        value: scrolls ? 600 : 100,
+      });
+      Object.defineProperty(element, 'clientHeight', {
+        configurable: true,
+        value: 200,
+      });
+      vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rect(bottom - 200, 200));
+      shell.appendChild(element);
+      return element;
+    };
+    // Two owners ending at different coordinates, plus one already above the
+    // bar. A single inherited shell number would be wrong for both split
+    // readers; a constrained owner that already clears the bar takes zero.
+    const upper = scrollport(300, true, 'upper');
+    const lower = scrollport(380, true, 'lower');
+    const aboveBar = scrollport(330, false, 'above-bar');
+    // A renderer inside the lower owner is not an independent surface: it
+    // inherits the owner's published value instead of measuring its own
+    // content-height bottom (a CodeMirror host inside a preview body).
+    const nested = document.createElement('div');
+    nested.className = WORKSPACE_BOUNDED_SCROLL_MARKER;
+    Object.defineProperty(nested, 'scrollHeight', { configurable: true, value: 600 });
+    Object.defineProperty(nested, 'clientHeight', { configurable: true, value: 200 });
+    vi.spyOn(nested, 'getBoundingClientRect').mockReturnValue(rect(600, 200));
+    lower.appendChild(nested);
+
+    renderHook(() => useWorkspaceCapsuleClearance({ current: shell }));
+
+    expect(upper.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
+    expect(lower.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('40px');
+    expect(aboveBar.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('0px');
+    expect(nested.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET), 'nested renderer inherits, not measures').toBe('');
+    // The document surface's shell-wide value is unchanged.
+    expect(shell.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('60px');
+  });
+
+  it('removes per-scrollport measurements on unmount (#4222 SC-02)', () => {
+    const { shell } = workspaceDom({ withBar: true });
+    const element = document.createElement('div');
+    element.className = WORKSPACE_BOUNDED_SCROLL_MARKER;
+    Object.defineProperty(element, 'scrollHeight', { configurable: true, value: 600 });
+    Object.defineProperty(element, 'clientHeight', { configurable: true, value: 200 });
+    vi.spyOn(element, 'getBoundingClientRect').mockReturnValue(rect(180, 200));
+    shell.appendChild(element);
+
+    const { unmount } = renderHook(() => useWorkspaceCapsuleClearance({ current: shell }));
+    expect(element.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('40px');
+
+    unmount();
+    expect(element.style.getPropertyValue(WORKSPACE_SCROLL_BOTTOM_INSET)).toBe('');
+  });
+
   it('counts the App safe area once when no bar is drawn', () => {
     const { shell } = workspaceDom({ withBar: false });
     // The App viewport environment publishes the safe-area bottom as a

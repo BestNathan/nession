@@ -50,7 +50,7 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { formatSchema } from '../format';
 import { serverApi } from '@/platform/server';
 import type {
@@ -403,7 +403,7 @@ function ServerList({
           </Button>
         </div>
       </div>
-      <div className={cn('min-h-0 flex-1 overflow-y-auto p-1', workspaceBoundedScrollClearanceClass)}>
+      <WorkspaceBoundedScrollport className="p-1" data-testid="claude-code-mcp-list">
         {servers.length === 0 ? (
           <div className="p-3">
             <DetailEmpty>
@@ -426,7 +426,7 @@ function ServerList({
           </div>
         )}
         <SourceList mcp={mcp} />
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }
@@ -553,9 +553,9 @@ function ServerDetail({
 }) {
   const canEdit = !entry.read_only && (entry.scope === 'local' || entry.scope === 'project');
   return (
-    <div
+    <WorkspaceBoundedScrollport
       data-testid="claude-code-mcp-detail"
-      className={cn('min-h-0 flex-1 overflow-y-auto p-4', workspaceBoundedScrollClearanceClass)}
+      className="p-4"
     >
       {isApp && showBack ? (
         <Button
@@ -606,7 +606,7 @@ function ServerDetail({
         </DetailSection>
         {mcp.probe ? <ProbeSection probe={mcp.probe} onOpenTool={onOpenTool} /> : null}
       </DetailSurface>
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 

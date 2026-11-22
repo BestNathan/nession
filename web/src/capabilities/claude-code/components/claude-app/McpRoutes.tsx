@@ -69,7 +69,7 @@ export function McpToolRoute({
         title={tool.name}
         description={`${serverName} · read-only inspection`}
       />
-      <ScrollBody className="px-4 py-3">
+      <ScrollBody className="px-4 py-3" testId="claude-app-mcp-tool-scroll">
         {tool.description ? (
           <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
             {tool.description}

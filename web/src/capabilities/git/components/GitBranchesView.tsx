@@ -1,6 +1,6 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { useGitBranches } from '../hooks/useGitBranches';
 import { describeUnavailable, formatBytes } from '../state';
 import { GitNotice } from './GitNotice';
@@ -79,12 +79,10 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
           (GitWorkspace), so this list is the internal scroll owner. It spends
           the host-measured inset here instead of leaving a long ref listing
           clipped by the bounded region with no way to reach its end. */}
-      <div
+      <WorkspaceBoundedScrollport
         data-testid="git-branch-list"
-        className={cn(
-          'flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain p-1',
-          workspaceBoundedScrollClearanceClass,
-        )}
+        viewportClassName="flex flex-col"
+        className="p-1"
       >
         {rows.map((branch) => (
           <BranchRow key={branch.name} branch={branch} />
@@ -106,7 +104,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
             Branch listing truncated — {formatBytes(truncated_bytes)} not read.
           </p>
         ) : null}
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

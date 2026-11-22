@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -196,11 +196,8 @@ function EditorBody({
           warning list or an expanded diff stays reachable above the Capsule
           without taking scroll ownership away from the editor. */}
       {warnings.length > 0 || hasDiff ? (
-        <div
-          className={cn(
-            'max-h-[40%] min-h-0 shrink-0 overflow-y-auto overscroll-contain border-t',
-            workspaceBoundedScrollClearanceClass,
-          )}
+        <WorkspaceBoundedScrollport
+          viewportClassName="max-h-[40%] flex-none border-t"
           data-testid="env-editor-feedback"
         >
           {warnings.length > 0 ? (
@@ -227,7 +224,7 @@ function EditorBody({
               </div>
             </details>
           ) : null}
-        </div>
+        </WorkspaceBoundedScrollport>
       ) : null}
     </>
   );
@@ -382,10 +379,20 @@ export function EnvProfileEditor({
         onRetry={() => void reload()}
       />
       {flow.error ? (
-        <p className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'))}>{flow.error}</p>
+        <p
+          data-workspace-fixed-role="context"
+          data-testid="env-editor-error-note"
+          className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'))}
+        >
+          {flow.error}
+        </p>
       ) : null}
       {!draft.nameValid && draft.isNew ? (
-        <p className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
+        <p
+          data-workspace-fixed-role="context"
+          data-testid="env-editor-name-note"
+          className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'))}
+        >
           Name the environment to save it.
         </p>
       ) : null}

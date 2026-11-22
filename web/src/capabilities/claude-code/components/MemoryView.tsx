@@ -8,7 +8,7 @@ import {
   chromeMonoRole,
   chromeSansRole,
 } from '@/shared/typography/chromeRoles';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import type { MemoryState } from '../hooks/useMemory';
 import { resolveMemoryLink, type MemoryLinkResolution } from '../model/memoryLink';
 import { useMemoryFragmentScroll } from '../hooks/useMemoryFragmentScroll';
@@ -235,17 +235,14 @@ function MemoryReady({
         ) : (
           <>
             <MemorySource response={response} />
-            <div
-              className={cn('min-h-0 flex-1 overflow-y-auto p-2', workspaceBoundedScrollClearanceClass)}
-              data-testid="claude-code-memory-list"
-            >
+            <WorkspaceBoundedScrollport className="p-2" data-testid="claude-code-memory-list">
               <MemoryFileRows
                 memory={memory}
                 response={response}
                 onOpenFile={onOpenFile}
                 touch
               />
-            </div>
+            </WorkspaceBoundedScrollport>
           </>
         )}
       </div>
@@ -256,11 +253,10 @@ function MemoryReady({
     <div data-testid="claude-code-memory" className="flex min-h-0 flex-1 flex-col" data-state="ready">
       <MemorySource response={response} />
       <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
-        <aside
-          className={cn(
-            'max-h-48 shrink-0 overflow-y-auto border-b p-2 md:max-h-none md:min-h-0 md:border-b-0 md:border-r',
-            workspaceBoundedScrollClearanceClass,
-          )}
+        <WorkspaceBoundedScrollport
+          viewportClassName="max-h-48 flex-none border-b md:max-h-none md:border-b-0 md:border-r"
+          className="p-2"
+          role="complementary"
           data-testid="claude-code-memory-list"
         >
           <MemoryFileRows
@@ -269,7 +265,7 @@ function MemoryReady({
             onOpenFile={onOpenFile}
             touch={false}
           />
-        </aside>
+        </WorkspaceBoundedScrollport>
         <main className="flex min-h-0 flex-col">
           <MemoryContent
             memory={memory}
@@ -501,10 +497,10 @@ function MemoryDocument({
   onRetryRead: () => void;
 }) {
   return (
-    <div
+    <WorkspaceBoundedScrollport
       ref={contentRef}
       data-testid="claude-code-memory-content"
-      className={cn('min-h-0 flex-1 overflow-y-auto py-4', workspaceBoundedScrollClearanceClass)}
+      className="py-4"
     >
       {notice ? (
         <p
@@ -558,7 +554,7 @@ function MemoryDocument({
       ) : memory.readLoading ? null : (
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>(empty)</p>
       )}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 

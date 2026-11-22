@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
-import { workspaceBoundedScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { formatSize, transcriptLabel } from '../format';
 import { parseTranscriptRecord } from '../model/transcriptRecord';
 import { useTranscriptViewState } from '../hooks/useTranscriptViewState';
@@ -66,10 +66,8 @@ export function TranscriptList({
           No transcripts at this working directory.
         </p>
       ) : null}
-      <ul
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
-        data-testid="transcript-list-scroll"
-      >
+      <WorkspaceBoundedScrollport data-testid="transcript-list-scroll">
+        <ul>
         {list.transcripts.map((transcript: ClaudeCodeTranscriptItem) => (
           <li key={transcript.id}>
             <button
@@ -98,8 +96,9 @@ export function TranscriptList({
               </div>
             </button>
           </li>
-        ))}
-      </ul>
+          ))}
+        </ul>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }
@@ -146,10 +145,7 @@ function PushedRecord({
         <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
         Transcript
       </button>
-      <div
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceBoundedScrollClearanceClass)}
-        data-testid="transcript-record-push-scroll"
-      >
+      <WorkspaceBoundedScrollport data-testid="transcript-record-push-scroll">
         <div className="flex items-center gap-2 border-b px-3 py-2">
           <span className={cn('min-w-0 truncate', chromeSansRole('secondary'))}>{label}</span>
           <span className={cn('ml-auto shrink-0 text-muted-foreground', chromeMonoRole('caption'))}>
@@ -179,7 +175,7 @@ function PushedRecord({
             )}
           </div>
         </div>
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

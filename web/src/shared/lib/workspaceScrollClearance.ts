@@ -17,10 +17,15 @@
  *   measured inset itself;
  * - a capability view that genuinely owns an internal/fill scroll surface
  *   (a virtualized list, a diff reader, a transcript, an editor) is declared
- *   `appScroll: 'bounded'` on its binding and spends
- *   {@link workspaceBoundedScrollClearanceClass} at that internal scroll owner;
- * - neither kind computes a Capsule value. The value is measured once, by
- *   `useWorkspaceCapsuleClearance`, against the element that really scrolls.
+ *   `appScroll: 'bounded'` on its binding and renders that owner through
+ *   `WorkspaceBoundedScrollport` (#4222). The recipe keeps
+ *   {@link workspaceBoundedScrollClearanceClass} on the **viewport**, separate
+ *   from the caller's content spacing, so `p-2`/`pb-6` cannot override the
+ *   measured bottom inset;
+ * - neither kind computes a Capsule value. The value is measured by
+ *   `useWorkspaceCapsuleClearance`; every marked bounded owner is measured from
+ *   its own visible bottom (#4222 SC-02), so split readers at different
+ *   coordinates each get their own inset.
  *
  * ## The three published values
  *
