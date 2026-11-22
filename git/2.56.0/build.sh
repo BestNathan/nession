@@ -40,12 +40,14 @@ if [[ "$mode" == prepare ]]; then
     rm -- "$link"
     mv -- "$link.nession-copy" "$link"
   done < <(find "$rootfs" -type l -print0)
-  # Mirror the publisher's per-file byte accounting (including hardlinks)
-  # here so an oversized Git distro fails uncredentialed candidate proof,
-  # not the trusted GHCR uploader after a time-consuming native compile.
-  payload_bytes="$(find "$rootfs" -type f -printf '%s\n' | awk '{sum += $1} END {printf "%.0f",sum+0}')"
-  [[ "$payload_bytes" -le 2147483648 ]] || { echo "Git prepared rootfs exceeds EROFS 2GiB image source bound: $payload_bytes" >&2; exit 1; }
 fi
+# Verify the source byte bound both after prepare and after remote EROFS extraction;
+# this is the same check used before Git is built into an OCI layer.
+# Mirror the publisher's per-file byte accounting (including hardlinks)
+# here so an oversized Git distro fails uncredentialed candidate proof,
+# not the trusted GHCR uploader after a time-consuming native compile.
+payload_bytes="$(find "$rootfs" -type f -printf '%s\n' | awk '{sum += $1} END {printf "%.0f",sum+0}')"
+[[ "$payload_bytes" -le 2147483648 ]] || { echo "Git prepared rootfs exceeds EROFS 2GiB image source bound: $payload_bytes" >&2; exit 1; }
 [[ -x "$rootfs/bin/git" ]] || { echo 'missing Git binary' >&2; exit 1; }
 [[ "$("$rootfs/bin/git" --version)" == "git version ${version}" ]] || { echo 'incorrect Git version' >&2; exit 1; }
 [[ -x "$rootfs/libexec/git-core/git-remote-https" ]] || { echo 'Git HTTPS transport helper absent' >&2; exit 1; }
