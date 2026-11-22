@@ -109,11 +109,11 @@ test('SC-01: a stale membership editor conflicts, keeps its selection and retrie
   await openEditor(page, BOUND_ID);
   await chooseProject(page, 'Nession');
   await page.evaluate(
-    (id) => {
+    ([id, projectId]) => {
       window.fixtureSessionProject?.simulateRemoteChange(id, null);
-      window.fixtureSessionProject?.simulateRemoteChange(id, PROJECT_TWO);
+      window.fixtureSessionProject?.simulateRemoteChange(id, projectId);
     },
-    BOUND_ID,
+    [BOUND_ID, PROJECT_TWO],
   );
   await page.getByTestId('session-project-save').click();
 
