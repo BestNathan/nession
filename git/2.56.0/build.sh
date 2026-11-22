@@ -13,6 +13,8 @@ if [[ "$mode" == prepare ]]; then
   [[ -z "$(find "$rootfs" -mindepth 1 -print -quit)" ]] || { echo 'rootfs must be empty' >&2; exit 2; }
   command -v cc >/dev/null && command -v make >/dev/null || { echo 'native C compiler and make required' >&2; exit 2; }
   command -v curl-config >/dev/null || { echo 'libcurl development headers required for Git HTTPS transport' >&2; exit 2; }
+  # #4271: trusted native prepare jobs supply libcurl4-openssl-dev, zlib1g-dev
+  # and libssl-dev on Ubuntu 24.04; the uncredentialed recipe never invokes sudo.
   tmp="$(mktemp -d)"; trap 'rm -rf -- "$tmp"' EXIT
   curl -fLSs --retry 3 --max-time 300 "https://www.kernel.org/pub/software/scm/git/git-${version}.tar.xz" -o "$tmp/git.tar.xz"
   printf '%s  %s\n' "$digest" "$tmp/git.tar.xz" | sha256sum --check --status || { echo 'official Git source SHA256 mismatch' >&2; exit 1; }
