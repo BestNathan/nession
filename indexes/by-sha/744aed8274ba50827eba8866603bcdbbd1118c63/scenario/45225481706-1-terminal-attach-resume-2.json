@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45225481706,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/peer-naming-flood-admission",
+    "target_sha": "744aed8274ba50827eba8866603bcdbbd1118c63",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45225481706",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "fbec6d66775ee32c897e1d90f5a4ad69b939d21e26bc485e7009d97c556122ae"
+  },
+  "record": "runs/2026-11-23/45225481706-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "e468dca5d6fd74bb7ca0c2283be120bd6e2e867652116e9e10a36e5128f79553"
+}
