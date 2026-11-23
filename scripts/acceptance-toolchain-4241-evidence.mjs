@@ -163,8 +163,8 @@ export function attest4297OwnerManualDispatch(comment, ack, manual, jobs, log, a
     log.includes('Reconstructed authorized accept request for Issue #4241, comment '+
       OWNER_ACCEPT_COMMENT),
     'missing source-authenticated native Owner request log');
-  const lines=log.split(/\\r?\\n/).map(line=>
-    /^\\d{4}-\\d{2}-\\d{2}T[^ ]+Z (\\{.*\\})$/.exec(line)?.[1])
+  const lines=log.split(/\r?\n/).map(line=>
+    /^\d{4}-\d{2}-\d{2}T[^ ]+Z (\{.*\})$/.exec(line)?.[1])
     .filter(line=>line?.startsWith('{"action":'));
   denied(lines.length===1,'missing or ambiguous native dispatch result');
   let outcome;
@@ -518,7 +518,7 @@ export function selfTestToolchain4241() {
   const ownerAck={id:OWNER_ACCEPT_ACK,issue_url:issueUrl,
     body:'Comment command `'+command+'` accepted for Issue #4241. '+
       '[Actions run](https://github.com/'+REPO+'/actions/runs/'+OWNER_ACCEPT_RUN+
-      '). This request is not an Acceptance Pass.\\n\\n'+
+      '). This request is not an Acceptance Pass.\n\n'+
       '<!-- nession-command-comment:'+OWNER_ACCEPT_COMMENT+' -->',
     user:{login:'github-actions[bot]',type:'Bot'},
     created_at:ackTime,updated_at:ackTime};
@@ -537,7 +537,7 @@ export function selfTestToolchain4241() {
       .map(name=>({name,status:'completed',conclusion:'success'}))};
   const manualJobs={jobs:[requestJob]};
   const dispatchLog='2026-11-23T03:16:13.0077356Z Reconstructed authorized '+
-    'accept request for Issue #4241, comment '+OWNER_ACCEPT_COMMENT+'\\n'+
+    'accept request for Issue #4241, comment '+OWNER_ACCEPT_COMMENT+'\n'+
     '2026-11-23T03:16:51.8532976Z '+
     JSON.stringify({action:'dispatched',
       reason:'authenticated orphan catalog and publisher evidence',
@@ -563,7 +563,7 @@ export function selfTestToolchain4241() {
     [ownerComment,ownerAck,ownerManual,manualJobs,
       dispatchLog.replace('"action":"dispatched"','"action":"pending"'),acceptance],
     [ownerComment,ownerAck,ownerManual,manualJobs,
-      dispatchLog+'\\n'+dispatchLog.split('\\n')[1],acceptance],
+      dispatchLog+'\n'+dispatchLog.split('\n')[1],acceptance],
     [ownerComment,ownerAck,ownerManual,manualJobs,
       dispatchLog.replace(MAIN_ANCHOR,'a'.repeat(40)),acceptance],
     [ownerComment,ownerAck,ownerManual,manualJobs,
