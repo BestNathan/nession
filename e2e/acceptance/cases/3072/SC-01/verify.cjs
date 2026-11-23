@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { targetSha } = require('../../../shared/control-mode-cases.cjs');
+const { readCaptured } = require('../github-snapshot.cjs');
 
 const ROOT = path.resolve(__dirname, '../../../../..');
 const REPO = 'BestNathan/nession';
@@ -19,6 +20,13 @@ const API = 'https://api.github.com';
 
 async function read(route, { allowMissing = false } = {}) {
   assert.match(route, /^\/repos\/BestNathan\/nession\//);
+  const captured = readCaptured(route);
+  if (captured) {
+    if (allowMissing && captured.status === 404) return null;
+    assert.equal(captured.status, 200, 'trusted GitHub read is not successful');
+    assert.equal(captured.format, 'json');
+    return captured.value;
+  }
   const response = await fetch(API + route, {
     headers: {
       Accept: 'application/vnd.github+json',

@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { targetSha } = require('../../../shared/control-mode-cases.cjs');
+const { readCaptured } = require('../github-snapshot.cjs');
 
 const REPO = 'BestNathan/nession';
 const ROOT = path.resolve(__dirname, '../../../../..');
@@ -21,6 +22,12 @@ async function get(route) {
   assert.ok(route.startsWith('/repos/' + REPO + '/') ||
     route.startsWith('/search/issues?q=' + encodeURIComponent('repo:' + REPO + ' ')),
   'unexpected GitHub read-only route');
+  const captured = readCaptured(route);
+  if (captured) {
+    assert.equal(captured.status, 200, 'trusted GitHub read is not successful');
+    assert.equal(captured.format, 'json');
+    return captured.value;
+  }
   const response = await fetch('https://api.github.com' + route, {
     headers: {
       Accept: 'application/vnd.github+json',
@@ -374,6 +381,13 @@ const OBSERVED_WAKE = Object.freeze({
 
 async function publicJobLog(jobId) {
   assert.ok(Number.isSafeInteger(jobId) && jobId > 0);
+  const captured = readCaptured(resource('/actions/jobs/' + jobId + '/logs'));
+  if (captured) {
+    assert.equal(captured.status, 200);
+    assert.equal(captured.format, 'text');
+    assert.ok(captured.value.length > 0 && captured.value.length < 2000000);
+    return captured.value;
+  }
   const response = await fetch('https://api.github.com' +
     resource('/actions/jobs/' + jobId + '/logs'), {
     headers: {
@@ -552,8 +566,8 @@ async function main() {
   // required negative fixture, never a positive Issue projection.
   selfTestPositiveSelection();
   selfTestStagingMergeLink();
-  const positive = await verifyPositiveWake(parseContents, normalizedPath, verifySource) ||
-    await verifyObservedWake(parseContents, normalizedPath, verifySource);
+  const positive = await verifyObservedWake(parseContents, normalizedPath, verifySource) ||
+    await verifyPositiveWake(parseContents, normalizedPath, verifySource);
   if (!positive) {
     console.log(JSON.stringify({
       status: 'pending',
