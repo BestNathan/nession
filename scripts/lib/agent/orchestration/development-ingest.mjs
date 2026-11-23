@@ -331,7 +331,7 @@ export function resolveTrustedIngestSource({environment,event}){
 export function assertQwen4065RepairReplaySource({run,claim}){
   const f=QWEN_4065_REINGEST_SOURCE;
   if(run?.id!==f.run_id||run.run_attempt!==1||
-     run.head_sha!==f.run_sha||claim?.inputs?.issue_number!=f.issue||
+     run.head_sha!==f.run_sha||Number(claim?.inputs?.issue_number)!==f.issue||
      claim.inputs.agent_id!=='dev-qwen-01'||
      claim.inputs.task!=='repair'||claim.inputs.action_id!==f.action_id||
      claim.inputs.input_sha!==f.source_sha)
