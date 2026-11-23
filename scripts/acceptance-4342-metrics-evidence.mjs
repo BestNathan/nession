@@ -155,8 +155,23 @@ export function verified4342AuditCriterion(context,normalized) {
       summary:'GitHub-authenticated dynamic-name Audit execution was persisted immutably and independently read back with writer receipt and aggregate',
     })};
 }
+export function ghApiArgs4342(endpoint,format='json'){
+  if(!/^actions\/(runs|jobs)\/[0-9]+(?:\/.*)?$/.test(endpoint) &&
+     !/^contents\/[a-z0-9./_-]+\?ref=[a-f0-9]{40}$/.test(endpoint) &&
+     endpoint!=='git/ref/heads/metrics')
+    reject('untrusted GitHub endpoint');
+  // `gh api` (2026-11) refuses raw logs containing ANSI escape sequences
+  // unless explicitly opted in; this is safe only for READ-ONLY text logs.
+  // JSON provenance and immutable Store reads keep strict default decoding.
+  const args=['api'];
+  if(format==='text' && /^actions\/jobs\/[0-9]+\/logs$/.test(endpoint))
+    args.push('--allow-escape-sequences');
+  else if(format!=='json')
+    reject('raw text access restricted to trusted job logs');
+  return [...args,'repos/'+REPO+'/'+endpoint];
+}
 function gh(endpoint,format='json'){
-  const args=['api','repos/'+REPO+'/'+endpoint];
+  const args=ghApiArgs4342(endpoint,format);
   const data=execFileSync('gh',args,{encoding:'utf8',timeout:30000,
     maxBuffer:9*1024*1024,stdio:['ignore','pipe','pipe']});
   return format==='text'?data:JSON.parse(data);
@@ -220,6 +235,19 @@ function collect(file,targetSha) {
     ', writer '+proof.writer_run_id+', metrics '+proof.metrics_commit_sha);
 }
 function selfTest(){
+  assert.deepEqual(ghApiArgs4342('actions/jobs/137671336114/logs','text'),[
+    'api','--allow-escape-sequences',
+    'repos/'+REPO+'/actions/jobs/137671336114/logs',
+  ]);
+  assert.deepEqual(ghApiArgs4342('actions/runs/'+PROOF.source_run_id),[
+    'api','repos/'+REPO+'/actions/runs/'+PROOF.source_run_id,
+  ]);
+  for(const [endpoint,format] of [
+    ['actions/jobs/137671336114/logs','raw'],
+    ['actions/runs/'+PROOF.source_run_id,'text'],
+    ['actions/jobs/137671336114/logs?ref=main','text'],
+    ['../attacker','json'],
+  ])assert.throws(()=>ghApiArgs4342(endpoint,format),/untrusted|restricted/);
   const raw=buildAgentWorkflowTelemetry({
     workflow_id:'issue-audit',github_run_id:PROOF.source_run_id,github_run_attempt:1,
     github_workflow:'Agent / Issue Audit',repository:REPO,event:'issues',
