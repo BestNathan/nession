@@ -3,7 +3,9 @@
 // immutable audit record and cannot block a later signed Repair publication.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {REVIEWER_PREMODEL_FAILURE as F,validateDevelopmentState,
+import {REVIEWER_PREMODEL_FAILURE as F,
+  REVIEWER_PREMODEL_FAILURE_4065 as P4065,
+  REVIEWER_TOOL_FAILURE_4065 as T4065,validateDevelopmentState,
   hasOnlyRetiredReviewerForQwenRepair,acceptAttestedQwenRepairPublication}
   from './outbox.mjs';
 import {attestQwenRepairReconciliationIntent}
@@ -156,5 +158,28 @@ assert.throws(()=>validateDevelopmentState({
     i===acceptedRecovery.transitions.length-1
       ?{...t,write_ahead_publisher_run_id:newerRun}
       :t)}),/invalid cross-Run/);
+
+// #4211: a separately attested tool-policy denial is retired history,
+// not a live Reviewer. The #4065 Publisher must admit exactly the two
+// independently pinned failures, without accepting a forged or active entry.
+const retired4065=f=>({id:f.action_id,task:{type:'dispatch',role:'reviewer',
+  task:'review',sha:f.source_sha,agent_id:'review-qwen-01'},
+  status:'failed',attempts:1,receipt:{status:'failed',
+    dispatch_id:f.action_id,source_run_id:f.run_id,source_attempt:1,
+    failure_code:f.failure_code}});
+const pre4065=retired4065(P4065),tool4065=retired4065(T4065);
+const history4065={issue:4065,outbox:[pre4065,tool4065]};
+assert.equal(hasOnlyRetiredReviewerForQwenRepair(history4065),true);
+for(const invalid of [
+  {...tool4065,status:'dispatched'},
+  {...tool4065,receipt:{...tool4065.receipt,source_run_id:T4065.run_id+1}},
+  {...tool4065,receipt:{...tool4065.receipt,failure_code:'forged'}},
+  {...tool4065,task:{...tool4065.task,sha:'f'.repeat(40)}},
+])assert.equal(hasOnlyRetiredReviewerForQwenRepair({issue:4065,
+  outbox:[pre4065,invalid]}),false);
+assert.equal(hasOnlyRetiredReviewerForQwenRepair({issue:4065,
+  outbox:[pre4065,tool4065,tool4065]}),false);
+assert.equal(hasOnlyRetiredReviewerForQwenRepair({
+  ...history4065,issue:4066}),false);
 
 console.log('✓ signed Qwen Repair A->B: exact terminal Reviewer failure retained; active, forged, duplicate and unrelated Reviewer denied');
