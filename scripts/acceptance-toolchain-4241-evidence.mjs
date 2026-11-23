@@ -105,6 +105,67 @@ function attestRecipe(file,fingerprint,name) {
 }
 // Reuse the existing fully authenticated release proof for the specific
 // closure Bug. No other Issue gets orphan-source or registry evidence.
+// #4297 SC-03 is a HISTORICAL source-lane test. #4241 was correctly
+// closed after implementation PR #4308 merged, not after every later PR
+// that merely improves the independent evidence reader. Verify that
+// temporal ordering from GitHub's native source APIs, never Issue prose.
+export function attest4297OwnerTimeline(pr,commit,pulls,comment,manualRun,
+  acceptanceRun,parent,sourceReachable) {
+  denied(sourceReachable===true&&pr?.number===4308&&
+    pr.state==='closed'&&typeof pr.merged_at==='string'&&
+    pr.merge_commit_sha===SOURCE_ACCEPT_HEAD&&repoOwned(pr)&&
+    pr.base.ref==='main'&&/(?:^|\n)Implements #4297\b/.test(pr.body??''),
+    'unverified #4297 implementing main merge');
+  denied(commit?.sha===SOURCE_ACCEPT_HEAD&&
+    Array.isArray(commit.parents)&&commit.parents.length===2&&
+    commit.parents.every(p=>SHA.test(p?.sha))&&
+    commit.parents[0].sha!==commit.parents[1].sha,
+    'implementation source not a two-parent merge');
+  denied(Array.isArray(pulls)&&pulls.length>0&&pulls.length<=10&&
+    pulls.some(x=>x?.number===4308&&x.merge_commit_sha===SOURCE_ACCEPT_HEAD&&
+      x.merged_at&&x.base?.ref==='main'&&repoOwned(x)),
+    'GitHub commit-to-implementation PR association missing');
+  denied(comment?.id===7090587994&&comment.user?.login==='BestNathan'&&
+    comment.user?.type==='User'&&comment.author_association==='OWNER'&&
+    comment.issue_url==='https://api.github.com/repos/'+REPO+'/issues/4241'&&
+    comment.body==='/accept post-merge '+MAIN_ANCHOR&&
+    typeof comment.created_at==='string',
+    'original owner /accept request unverified');
+  denied(manualRun?.id===45104919638&&manualRun.run_attempt===1&&
+    manualRun.name==='Comment Accept #4241 comment:7090587994'&&
+    manualRun.path==='.github/workflows/acceptance-manual-request.yml'&&
+    manualRun.event==='workflow_dispatch'&&manualRun.head_branch==='main'&&
+    manualRun.head_sha===SOURCE_ACCEPT_HEAD&&
+    manualRun.repository?.full_name===REPO&&
+    manualRun.head_repository?.full_name===REPO&&
+    manualRun.status==='completed'&&manualRun.conclusion==='success',
+    'original main-owned manual dispatcher unverified');
+  denied(acceptanceRun?.id===SOURCE_ACCEPT_RUN&&
+    acceptanceRun.head_sha===SOURCE_ACCEPT_HEAD&&
+    typeof acceptanceRun.created_at==='string'&&
+    typeof acceptanceRun.updated_at==='string'&&
+    parent?.state==='closed'&&parent.state_reason==='completed'&&
+    pr.merged_at<comment.created_at&&
+    comment.created_at<=manualRun.created_at&&
+    manualRun.created_at<acceptanceRun.created_at&&
+    acceptanceRun.created_at<parent.closed_at&&
+    parent.closed_at<=acceptanceRun.updated_at,
+    'original implementation/manual/Agent/projector chronology invalid');
+  return {
+    kind:'verified_4297_historical_owner_acceptance_sequence',
+    implementation_pr:4308,implementation_merge_sha:SOURCE_ACCEPT_HEAD,
+    implementation_merged_at:pr.merged_at,
+    owner_comment_id:comment.id,owner_request_at:comment.created_at,
+    trusted_manual_run:manualRun.id,manual_run_attempt:1,
+    trusted_agent_run:acceptanceRun.id,trusted_agent_head_sha:acceptanceRun.head_sha,
+    trusted_agent_target_sha:MAIN_ANCHOR,
+    issue_closed_at:parent.closed_at,
+    source_ancestor_of_current_target:true,
+    ordering:'implementation merged -> owner /accept -> trusted manual request -> independent SC evaluator -> deterministic Issue closure',
+    scope:'historical #4241 closure through #4308 implementation, not a new closure at later #4329 evidence-only SHA',
+    maximum_authority:'read_only_evidence',
+  };
+}
 export function shouldCollectToolchain4241(stage,issue) {
   return stage==='post-merge'&&['4241','4297'].includes(String(issue));
 }
@@ -291,6 +352,18 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
       process.env.GH_TOKEN??process.env.GITHUB_TOKEN);
     linkedClosure=attest4297ParentClosure(parent,events,run,jobs,matches[0],
       result,ancestor(comparison,SOURCE_ACCEPT_HEAD),{published:accepted});
+    // The actual source lane was live before #4241 closed. Re-attest the
+    // implementing merge, owner request and original main-only dispatcher.
+    const [sourcePr,sourceCommit,sourcePulls,ownerComment,manualRun]=await Promise.all([
+      read(PREFIX+'/pulls/4308'),
+      read(PREFIX+'/commits/'+SOURCE_ACCEPT_HEAD),
+      read(PREFIX+'/commits/'+SOURCE_ACCEPT_HEAD+'/pulls?per_page=10'),
+      read(PREFIX+'/issues/comments/7090587994'),
+      read(PREFIX+'/actions/runs/45104919638'),
+    ]);
+    linkedClosure.verified_source_timeline=attest4297OwnerTimeline(
+      sourcePr,sourceCommit,sourcePulls,ownerComment,manualRun,run,parent,
+      ancestor(comparison,SOURCE_ACCEPT_HEAD));
   }
   return {kind:'verified_toolchain_4241_readonly',issue:4241,target_sha:targetSha,
     ...(linkedClosure ? {verified_4297_parent_closure:linkedClosure} : {}),
