@@ -138,6 +138,114 @@ function ghJson(endpoint){
   });
   return JSON.parse(output);
 }
+// #4342 SC-05: bounded cross-page recovery of the historical 2026-11-09 gap.
+// The schedule rotates exactly one Catalog source, one historical page and at
+// most 12 attempt-scoped artifact queries per tick. No caller-selected ref,
+// source, date or SHA obtains the Metrics writer; normal recent replay remains.
+export const HISTORY_START='2026-11-09';
+const HISTORY_PROBE_LIMIT=12;
+export function historicalPagePlan(total,runNumber,sourceCount=SOURCES.length){
+  if(!Number.isSafeInteger(total)||total<0||!positive(runNumber)||
+     !positive(sourceCount))fail('invalid historical scan bounds');
+  const source_index=(runNumber-1)%sourceCount;
+  const iteration=Math.floor((runNumber-1)/sourceCount);
+  const page_count=Math.ceil(total/MAX_RUNS);
+  if(!page_count)return {source_index,page:null,offset:0,page_count:0,truncated:false};
+  // The historical window's oldest pages get sampled first; explicitly
+  // announce any portion beyond the per-source 50-page audit budget.
+  const budget=Math.min(page_count,50);
+  const page=page_count-(iteration%budget);
+  const offset=(Math.floor(iteration/budget)%Math.ceil(MAX_RUNS/HISTORY_PROBE_LIMIT))*
+    HISTORY_PROBE_LIMIT;
+  return {source_index,page,offset,page_count,truncated:page_count>budget};
+}
+export function classifyHistoricalArtifact(run,source,listing,recorded){
+  if(!trustedSource(run,source))return {status:'invalid_source',published:0,recorded};
+  if(!Number.isSafeInteger(recorded)||recorded<0)fail('invalid stored count');
+  let published;
+  try{published=countArtifactSummaries(listing,run);}
+  catch{return {status:'invalid_artifact',published:0,recorded};}
+  if(published>recorded)return {status:'missing_recoverable',published,recorded};
+  // A formerly persisted source remains already-stored even when GitHub
+  // subsequently expires its original Artifact ZIP. The immutable Git bytes
+  // are authoritative for stored history; expiration cannot erase that proof.
+  if(recorded>0||published>0)
+    return {status:'already_stored',published,recorded};
+  const suffix='-'+run.id+'-'+run.run_attempt;
+  const relevant=listing.artifacts.filter(a=>typeof a.name==='string'&&
+    a.name.startsWith('agent-telemetry-')&&a.name.endsWith(suffix));
+  if(relevant.some(a=>a.expired===true))
+    return {status:'expired_unrecoverable',published:0,recorded};
+  // No currently listed Artifact is NOT proof that no Agent ever ran.
+  // This state deliberately covers no-model and an expired/unlisted ZIP.
+  return {status:'unobserved_no_artifact',published:0,recorded};
+}
+export async function scanHistoricalScope({source,runNumber,summaryCounts,listing,artifacts}){
+  if(!source||!positive(runNumber)||!(summaryCounts instanceof Map)||
+     typeof listing!=='function'||typeof artifacts!=='function')
+    fail('invalid historical scan context');
+  const end=new Date().toISOString().slice(0,10);
+  if(end<HISTORY_START)fail('historical scan before start');
+  const query='actions/workflows/'+source.file+'/runs?status=completed&created='+
+    HISTORY_START+'..'+end+'&per_page='+MAX_RUNS;
+  const first=await listing(query+'&page=1');
+  if(!Number.isSafeInteger(first?.total_count)||first.total_count<0||
+     !Array.isArray(first.workflow_runs)||first.workflow_runs.length>MAX_RUNS)
+    fail('untrusted historical workflow inventory');
+  const plan=historicalPagePlan(first.total_count,runNumber);
+  const pageData=plan.page===null?{workflow_runs:[]}:
+    plan.page===1?first:await listing(query+'&page='+plan.page);
+  const runs=pageData.workflow_runs;
+  if(!Array.isArray(runs)||runs.length>MAX_RUNS)
+    fail('unbounded historical workflow page');
+  const sampled=runs.slice(plan.offset,plan.offset+HISTORY_PROBE_LIMIT);
+  const observations=[];
+  let selected=null;
+  for(const run of sampled){
+    const key=source.id+'/'+run.id+'/'+run.run_attempt;
+    const recorded=summaryCounts.get(key)??0;
+    let classification;
+    if(!trustedSource(run,source) ||
+       !Number.isFinite(Date.parse(run.created_at??'')) ||
+       run.created_at.slice(0,10)<HISTORY_START ||
+       run.created_at.slice(0,10)>end){
+      classification={status:'invalid_source',published:0,recorded};
+    }else{
+      let result;
+      try{result=await artifacts(run);}
+      catch{classification={status:'invalid_artifact',published:0,recorded};}
+      if(result)classification=classifyHistoricalArtifact(run,source,result,recorded);
+    }
+    observations.push({run_id:run.id,attempt:run.run_attempt,
+      source_sha:run.head_sha,status:classification.status,
+      published:classification.published,recorded:classification.recorded});
+    if(!selected&&classification.status==='missing_recoverable')
+      selected={run_id:run.id,run_attempt:run.run_attempt,source_path:run.path,
+        target_sha:run.head_sha,recorded,published:classification.published};
+  }
+  return {schema_version:1,kind:'agent_metrics_historical_recovery_scope',
+    created_at:new Date().toISOString(),repository:REPO,start_date:HISTORY_START,
+    end_date:end,source_workflow_key:source.key,telemetry_group_id:source.id,
+    workflow_path:'.github/workflows/'+source.file,
+    page:plan.page,total_pages:plan.page_count,page_offset:plan.offset,
+    total_runs_in_date_window:first.total_count,
+    truncated:plan.truncated,probe_limit:HISTORY_PROBE_LIMIT,
+    observations,
+    counts:Object.fromEntries(['invalid_source','invalid_artifact','already_stored',
+      'missing_recoverable','expired_unrecoverable','unobserved_no_artifact']
+      .map(status=>[status,observations.filter(item=>item.status===status).length])),
+    selected,selected_persisted:false,recovered_count:0};
+}
+export function finalizeHistoricalReport(report,summaryCounts){
+  if(report?.kind!=='agent_metrics_historical_recovery_scope'||
+     !(summaryCounts instanceof Map))fail('invalid historical finalization');
+  const picked=report.selected;
+  if(!picked)return {...report,selected_persisted:false,recovered_count:0};
+  const key=report.telemetry_group_id+'/'+picked.run_id+'/'+picked.run_attempt;
+  const persisted=(summaryCounts.get(key)??0)>=picked.published;
+  return {...report,selected_persisted:persisted,recovered_count:persisted?1:0};
+}
+
 export function validateReconciliationContext(env){
   if(env.GITHUB_REPOSITORY!==REPO||
      env.GITHUB_REF!=='refs/heads/main')
@@ -148,21 +256,41 @@ export function validateReconciliationContext(env){
 async function select(store){
   validateReconciliationContext(process.env);
   if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
-  const summaryCounts=indexedSourceSummaries(store),runsBySource=new Map();
-  for(const source of SOURCES){
-    const response=ghJson('actions/workflows/'+source.file+
-      '/runs?status=completed&per_page='+MAX_RUNS);
-    if(!Array.isArray(response.workflow_runs))fail('malformed GitHub workflow run listing');
-    runsBySource.set(source.file,response.workflow_runs);
-  }
-  // GitHub run_number is main-owned; rotation is not client/dispatch input.
+  const summaryCounts=indexedSourceSummaries(store);
   const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
   if(!positive(runNumber))fail('trusted schedule run_number required for fairness');
-  const result=await chooseMissing(runsBySource,summaryCounts,async run=>{
-    const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
-    return countArtifactSummaries(artifacts,run);
-  },runNumber%SOURCES.length);
+  const source=SOURCES[(runNumber-1)%SOURCES.length];
+  const report=await scanHistoricalScope({source,runNumber,summaryCounts,
+    listing:async endpoint=>ghJson(endpoint),
+    artifacts:async run=>ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS)});
+  const reportPath=process.env.RECOVERY_REPORT_PATH;
+  if(!path.isAbsolute(reportPath??'')||!reportPath.endsWith('.json'))
+    fail('absolute historical report output required');
+  fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+  // Prioritize the selected authentic gap source; ordinary 14-source bounded
+  // discovery still runs when no old missing artifact was observed.
+  let result=report.selected;
+  if(!result){
+    const runsBySource=new Map();
+    for(const candidate of SOURCES){
+      const response=ghJson('actions/workflows/'+candidate.file+
+        '/runs?status=completed&per_page='+MAX_RUNS);
+      if(!Array.isArray(response.workflow_runs))fail('malformed workflow run listing');
+      runsBySource.set(candidate.file,response.workflow_runs);
+    }
+    result=await chooseMissing(runsBySource,summaryCounts,async run=>{
+      const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
+      return countArtifactSummaries(artifacts,run);
+    },runNumber%SOURCES.length);
+  }
   console.log(JSON.stringify(result??{run_id:null}));
+}
+function finalize(store,reportPath){
+  validateReconciliationContext(process.env);
+  if(!path.isAbsolute(store)||!path.isAbsolute(reportPath))fail('absolute finalization paths required');
+  const report=JSON.parse(fs.readFileSync(reportPath,'utf8'));
+  fs.writeFileSync(reportPath,JSON.stringify(
+    finalizeHistoricalReport(report,indexedSourceSummaries(store)),null,2)+'\n');
 }
 // The scheduled replay is allowed only through trusted main-selected workflow
 // code; an arbitrary-ref workflow_dispatch cannot obtain the metrics writer.
@@ -328,6 +456,23 @@ function selfTest(){
   assert.equal(new Set(SOURCES.map(s=>s.file)).size,14);
   assert.equal(SOURCES.filter(s=>s.id==='requirement-acceptance').length,3);
   assert.equal(SOURCES[0].key,'agent-provider-smoke');
+  assert.deepEqual(historicalPagePlan(0,1),{source_index:0,page:null,
+    offset:0,page_count:0,truncated:false});
+  assert.equal(historicalPagePlan(250,1).page,3);
+  assert.equal(historicalPagePlan(250,1+SOURCES.length).page,2);
+  assert.equal(historicalPagePlan(250,1+3*SOURCES.length).offset,12);
+  const historicalSample=classifyHistoricalArtifact(run,source,
+    {total_count:1,artifacts:[{name:'agent-telemetry-test-321-1',
+       size_in_bytes:100,expired:true}]},0);
+  assert.equal(historicalSample.status,'expired_unrecoverable');
+  assert.equal(classifyHistoricalArtifact(run,source,
+    {total_count:1,artifacts:[{name:'agent-telemetry-test-321-1',
+      size_in_bytes:100,expired:true}]},1).status,'already_stored');
+  assert.equal(classifyHistoricalArtifact(run,source,
+    {total_count:0,artifacts:[]},0).status,'unobserved_no_artifact');
+  assert.equal(finalizeHistoricalReport({kind:'agent_metrics_historical_recovery_scope',
+    telemetry_group_id:source.id,selected:{run_id:321,run_attempt:1,published:1}},
+    new Map([[source.id+'/321/1',1]])).selected_persisted,true);
   const auditSource=SOURCES.find(item=>item.file==='agent-issue-audit.yml');
   assert.ok(auditSource);
   for(const [name,event] of [
@@ -383,6 +528,15 @@ function selfTest(){
     const alternate={...run,id:400,path:'.github/workflows/'+nextSource.file,
       name:nextSource.name,event:nextSource.events[0]};
     const rotationRuns=new Map([[source.file,[run]],[nextSource.file,[alternate]]]);
+    const historical=await scanHistoricalScope({
+      source,runNumber:1,summaryCounts:new Map(),
+      listing:async query=>({total_count:1,workflow_runs:[{...run,
+        created_at:'2026-11-10T00:00:00Z'}]}),
+      artifacts:async()=>({total_count:1,artifacts:[{...attempt1}]}),
+    });
+    assert.equal(historical.selected.run_id,321);
+    assert.equal(historical.counts.missing_recoverable,1);
+    assert.equal(historical.counts.expired_unrecoverable,0);
     assert.equal((await chooseMissing(rotationRuns,new Map(),async()=>1,1)).run_id,400,
       'round-robin recovery must not permanently prioritize Provider');
     await assert.rejects(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
@@ -407,6 +561,7 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   const cmd=process.argv[2];
   const operation=cmd==='self-test'?selfTest():
     cmd==='select'?select(process.argv[3]):
+    cmd==='history-finalize'?Promise.resolve().then(()=>finalize(process.argv[3],process.argv[4])):
     cmd==='artifact-count'?Promise.resolve().then(()=>{
       const [file,id,attempt]=process.argv.slice(3);
       if(!file || !/^[1-9][0-9]*$/.test(id??'') || !/^[1-9][0-9]*$/.test(attempt??''))

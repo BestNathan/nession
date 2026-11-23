@@ -160,6 +160,7 @@ jobs:
         working-directory: trusted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECOVERY_REPORT_PATH: ${{ runner.temp }}/agent-metrics-history.json
         run: |
           set -euo pipefail
           node scripts/agent-telemetry-reconcile.mjs select \
@@ -385,6 +386,27 @@ jobs:
           path: ${{ runner.temp }}/run-store-receipts
           if-no-files-found: ignore
           retention-days: 14
+
+      # The historical report describes ONLY the 12 bounded candidates actually
+      # checked in this main-owned schedule run. It is a read-only observation;
+      # source records are persisted by the existing immutable Metrics writer.
+      - name: Finalize bounded historical recovery report
+        if: success() && github.event_name == 'schedule'
+        working-directory: trusted
+        run: |
+          node scripts/agent-telemetry-reconcile.mjs history-finalize \
+            "${GITHUB_WORKSPACE}/metrics-store" "${RUNNER_TEMP}/agent-metrics-history.json"
+          jq '{source_workflow_key,total_runs_in_date_window,page,page_offset,counts,selected,selected_persisted,recovered_count,truncated}' \
+            "${RUNNER_TEMP}/agent-metrics-history.json" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload scoped historical recovery and expiry inventory
+        if: always() && github.event_name == 'schedule'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-metrics-history-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-metrics-history.json
+          if-no-files-found: ignore
+          retention-days: 30
 
       # A wake-up, not an Acceptance verdict; never loop on Acceptance telemetry.
       - name: Notify Acceptance of durable Provider evidence
