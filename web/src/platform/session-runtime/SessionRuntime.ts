@@ -323,6 +323,14 @@ export class SessionRuntime {
   private agentTokenRejected = false;
   /** Single-flight token refetch through the authenticated attach. */
   private agentTokenRefresh: Promise<boolean> | null = null;
+  /**
+   * Monotonic attach-context generation fencing an in-flight token refetch
+   * (#4290). Bumped whenever a newer attach context invalidates the cached
+   * token, so a `requestFreshAttach` result that resolves *after* the rotation
+   * cannot publish a stale credential over the newer one, nor clear a newer
+   * refresh's single-flight pointer. Mirrors the `reconcileEpoch` fence idiom.
+   */
+  private agentTokenEpoch = 0;
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -1919,8 +1927,18 @@ export class SessionRuntime {
     return this.config.attachInfo?.agent_token;
   }
 
-  /** Drop the cached token and fence any refetch still in flight. */
+  /**
+   * Drop the cached token and fence any refetch still in flight (#4290).
+   *
+   * The generation bump is what makes the fence real: a `requestFreshAttach`
+   * continuation captured the prior generation, so when it resolves it can
+   * neither publish its (now stale) token over the newer attach context nor
+   * clear a newer refresh's single-flight pointer. Resetting the fields alone
+   * left the running Promise free to overwrite the rotation it was meant to
+   * defer to.
+   */
   private invalidateAgentToken(): void {
+    this.agentTokenEpoch += 1;
     this.agentToken = null;
     this.agentTokenSessionId = null;
     this.agentTokenRejected = false;
@@ -1942,11 +1960,21 @@ export class SessionRuntime {
     if (!reissue) {
       return Promise.resolve(false);
     }
+    // Capture the attach-context generation and this request's own pointer
+    // identity. A newer attach context (invalidateAgentToken) bumps the
+    // generation and may hand the pointer to a newer refresh; this continuation
+    // must then publish nothing and clean up nothing that is not its own (#4290).
+    // `flight.current` holds this request's promise so the closure can compare
+    // ownership without referencing the const it is still initializing.
+    const epoch = this.agentTokenEpoch;
+    const flight: { current: Promise<boolean> | null } = { current: null };
     const refresh = (async (): Promise<boolean> => {
       try {
         const fresh = await reissue(this.config.sessionId);
         if (
           this.disposed
+          || epoch !== this.agentTokenEpoch
+          || this.agentTokenRefresh !== flight.current
           || fresh.mode !== 'p2p'
           || fresh.session_id !== this.config.sessionId
           || !fresh.agent_token
@@ -1960,9 +1988,14 @@ export class SessionRuntime {
       } catch {
         return false;
       } finally {
-        this.agentTokenRefresh = null;
+        // Only the request that still owns the single-flight pointer may clear
+        // it; a superseded request must not erase a newer refresh's ownership.
+        if (this.agentTokenRefresh === flight.current) {
+          this.agentTokenRefresh = null;
+        }
       }
     })();
+    flight.current = refresh;
     this.agentTokenRefresh = refresh;
     return refresh;
   }

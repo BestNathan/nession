@@ -2219,7 +2219,14 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
                 };
-                match ctx.tmux.kill_session(&payload.name).await {
+                // #4302: the guarded check and the kill run in this one keyed
+                // lane work item, serialized against a same-name create, so a
+                // stale caller cannot terminate a replacement incarnation.
+                match ctx
+                    .tmux
+                    .kill_session_guarded(&payload.name, payload.expected_instance_id.as_deref())
+                    .await
+                {
                     Ok(()) => {
                         // The tmux Session is gone; an attachment left behind
                         // would answer the next attach with a dead backend.
@@ -2233,7 +2240,18 @@ p2p_routes! { ctx, msg_type, payload_value;
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
                     }
-                    Err(e) => ctx.err("kill_failed", &e.to_string()),
+                    Err(e) => {
+                        // A guarded refusal carries the Session domain's stable
+                        // classification; the legacy name-only kill keeps its
+                        // historical error code and sentence.
+                        if payload.expected_instance_id.is_some() {
+                            let (kind, detail) =
+                                crate::session::metadata::error_kind_and_detail(&e);
+                            ctx.err(kind, &detail)
+                        } else {
+                            ctx.err("kill_failed", &e.to_string())
+                        }
+                    }
                 }
             }
             "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => P2pAccess::Authenticated => Key(session_by(payload_value)) => {
@@ -3278,12 +3296,16 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let resp = WebSessionKillResponse {
                             success: false,
                             error: Some(e.to_string()),
+                            error_kind: None,
                         };
                         return serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default();
                     }
                 };
                 let session_name = extract_session_name(&payload.session_id);
+                // The legacy Web-direct kill stays name-addressed (#4302): the
+                // incarnation precondition is the AI/MCP contract, not this
+                // compatibility surface.
                 match ctx.tmux.kill_session(&session_name).await {
                     Ok(()) => {
                         ctx.sessions
@@ -3295,6 +3317,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let resp = WebSessionKillResponse {
                             success: true,
                             error: None,
+                            error_kind: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -3303,6 +3326,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                         let resp = WebSessionKillResponse {
                             success: false,
                             error: Some(e.to_string()),
+                            error_kind: None,
                         };
                         serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                             .unwrap_or_default()
@@ -6365,9 +6389,10 @@ mod tests {
         assert_eq!(create_resp.msg_type, msg_types::OK);
         assert_eq!(create_resp.payload.name, session_name);
 
-        // Kill the session.
+        // Kill the session (legacy name-addressed wire).
         let kill_payload = SessionKillPayload {
             name: session_name.clone(),
+            expected_instance_id: None,
         };
         let kill_req = new_message(msg_types::SESSION_KILL, kill_payload);
         let kill_resp: Message<SessionKillResponse> =

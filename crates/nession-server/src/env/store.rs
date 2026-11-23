@@ -83,13 +83,22 @@ impl EnvStore {
 
     /// Write (create/overwrite) a file. When `overwrite` is false and the file
     /// exists, returns `Ok(false)` without writing.
+    ///
+    /// Create-only (`overwrite == false`) is a single database-atomic
+    /// insert-if-absent (#4300): the existence check and the insert cannot be
+    /// interleaved by a competing creator, so exactly one concurrent writer
+    /// receives `Ok(true)` and the others receive the existing-file refusal
+    /// `Ok(false)`. The previous read-then-upsert sequence let two creators both
+    /// observe "absent" and silently clobber each other. Explicit
+    /// `overwrite == true` keeps the upsert path.
     pub async fn write(&self, name: &str, content: &str, overwrite: bool) -> Result<bool> {
         validate_name(name)?;
-        if !overwrite && self.db.get_env_file(name).await?.is_some() {
-            return Ok(false);
+        if overwrite {
+            self.db.upsert_env_file(name, content).await?;
+            Ok(true)
+        } else {
+            self.db.insert_env_file_if_absent(name, content).await
         }
-        self.db.upsert_env_file(name, content).await?;
-        Ok(true)
     }
 
     /// Delete a file. Missing file is treated as success (idempotent).
@@ -175,6 +184,94 @@ mod tests {
         // overwrite=true replaces.
         assert!(s.write("a.env", "X=3", true).await.unwrap());
         assert_eq!(s.read("a.env").await.unwrap(), "X=3");
+    }
+
+    #[tokio::test]
+    async fn create_only_refusal_preserves_row_and_overwrite_replaces() {
+        let s = store().await;
+        assert!(s.write("ctl.env", "OWNER=A\n", false).await.unwrap());
+        let before = s.db.get_env_file("ctl.env").await.unwrap().unwrap();
+
+        // Create-only against an existing file refuses without mutating content
+        // or timestamps (SC-02).
+        assert!(!s.write("ctl.env", "OWNER=B\n", false).await.unwrap());
+        let after = s.db.get_env_file("ctl.env").await.unwrap().unwrap();
+        assert_eq!(after.content, "OWNER=A\n");
+        assert_eq!(after.created_at, before.created_at);
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(s.read("ctl.env").await.unwrap(), "OWNER=A\n");
+        assert!(s.exists("ctl.env").await.unwrap());
+        assert_eq!(s.list().await.unwrap().len(), 1);
+
+        // Explicit overwrite still replaces the content.
+        assert!(s.write("ctl.env", "OWNER=C\n", true).await.unwrap());
+        assert_eq!(s.read("ctl.env").await.unwrap(), "OWNER=C\n");
+
+        // read/list/delete remain unchanged; delete is idempotent.
+        s.delete("ctl.env").await.unwrap();
+        assert!(!s.exists("ctl.env").await.unwrap());
+        assert!(s.list().await.unwrap().is_empty());
+        s.delete("ctl.env").await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_create_only_yields_exactly_one_winner() {
+        // #4300 regression (SC-01): several writers race to create the same
+        // absent name with overwrite=false. Each EnvStore backs a real SQLite
+        // connection onto one shared WAL file, so the writer lock is genuine
+        // between them. Exactly one creation may succeed; every other writer
+        // must receive the explicit existing-file refusal Ok(false), and the
+        // winner's credential-bearing content must remain intact.
+        //
+        // On the pre-fix read-then-upsert code every writer observes "absent"
+        // before any upsert lands, so all return Ok(true) and the last silently
+        // clobbers the rest — this test fails there. Connections are opened
+        // sequentially first (migrations applied once); only the writes race.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("race.db");
+        let path = path.to_str().unwrap();
+        const WRITERS: usize = 8;
+        let mut stores = Vec::new();
+        for _ in 0..WRITERS {
+            let db = Arc::new(Database::new(path).await.unwrap());
+            stores.push(EnvStore::new(db));
+        }
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(WRITERS));
+        let mut handles = Vec::new();
+        for (i, store) in stores.iter().enumerate() {
+            let store = store.clone();
+            let barrier = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                store
+                    .write("race.env", &format!("OWNER={i}\n"), false)
+                    .await
+                    .unwrap()
+            }));
+        }
+        let mut winners = Vec::new();
+        let mut refusals = 0usize;
+        for (i, handle) in handles.into_iter().enumerate() {
+            if handle.await.unwrap() {
+                winners.push(i);
+            } else {
+                refusals += 1;
+            }
+        }
+        assert_eq!(
+            winners.len(),
+            1,
+            "exactly one create-only writer may succeed"
+        );
+        assert_eq!(refusals, WRITERS - 1, "every other writer is refused");
+        assert_eq!(
+            stores[0].read("race.env").await.unwrap(),
+            format!("OWNER={}\n", winners[0])
+        );
+        let list = stores[0].list().await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].name, "race.env");
     }
 
     #[tokio::test]
