@@ -3974,10 +3974,8 @@ mod tests {
         let ratio = AGENT_LEG_IDLE_TIMEOUT.as_secs_f64() / AGENT_LEG_PROBE_INTERVAL.as_secs_f64();
         assert!(
             ratio >= 2.0,
-            "AGENT_LEG_IDLE_TIMEOUT ({:?}) must be at least 2× AGENT_LEG_PROBE_INTERVAL ({:?}) \
-             to avoid spuriously disconnecting slow but responsive Agents; got ratio {ratio:.2}",
-            AGENT_LEG_IDLE_TIMEOUT,
-            AGENT_LEG_PROBE_INTERVAL
+            "AGENT_LEG_IDLE_TIMEOUT ({AGENT_LEG_IDLE_TIMEOUT:?}) must be at least 2× AGENT_LEG_PROBE_INTERVAL ({AGENT_LEG_PROBE_INTERVAL:?}) \
+             to avoid spuriously disconnecting slow but responsive Agents; got ratio {ratio:.2}"
         );
     }
 
@@ -3997,10 +3995,8 @@ mod tests {
         let max_acceptable = std::time::Duration::from_secs(60);
         assert!(
             AGENT_LEG_IDLE_TIMEOUT <= max_acceptable,
-            "AGENT_LEG_IDLE_TIMEOUT ({:?}) must not exceed {:?}; a wider bound \
-             delays half-open detection beyond the documented 45s threshold",
-            AGENT_LEG_IDLE_TIMEOUT,
-            max_acceptable
+            "AGENT_LEG_IDLE_TIMEOUT ({AGENT_LEG_IDLE_TIMEOUT:?}) must not exceed {max_acceptable:?}; a wider bound \
+             delays half-open detection beyond the documented 45s threshold"
         );
     }
 
@@ -4016,11 +4012,9 @@ mod tests {
     fn probe_interval_is_shorter_than_idle_timeout() {
         assert!(
             AGENT_LEG_PROBE_INTERVAL < AGENT_LEG_IDLE_TIMEOUT,
-            "AGENT_LEG_PROBE_INTERVAL ({:?}) must be strictly less than \
-             AGENT_LEG_IDLE_TIMEOUT ({:?}) so at least one probe is sent before \
-             the idle deadline fires",
-            AGENT_LEG_PROBE_INTERVAL,
-            AGENT_LEG_IDLE_TIMEOUT
+            "AGENT_LEG_PROBE_INTERVAL ({AGENT_LEG_PROBE_INTERVAL:?}) must be strictly less than \
+             AGENT_LEG_IDLE_TIMEOUT ({AGENT_LEG_IDLE_TIMEOUT:?}) so at least one probe is sent before \
+             the idle deadline fires"
         );
     }
 
@@ -4057,8 +4051,7 @@ mod tests {
         // The relay should not have completed (the stream is pending).
         assert!(
             result.is_err(),
-            "the relay should still be running (pending stream), but it completed: {:?}",
-            result
+            "the relay should still be running (pending stream), but it completed: {result:?}"
         );
 
         // At least one probe ping should have been sent.
@@ -4163,9 +4156,7 @@ mod tests {
         // Allow some margin for scheduling overhead.
         assert!(
             elapsed >= idle_timeout,
-            "detection happened too fast: {:?} < {:?}",
-            elapsed,
-            idle_timeout
+            "detection happened too fast: {elapsed:?} < {idle_timeout:?}"
         );
         assert!(
             elapsed < idle_timeout + std::time::Duration::from_millis(50),
