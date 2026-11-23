@@ -9,7 +9,8 @@ import {execFileSync} from 'node:child_process';
 import {assertQwenBotWakeSource,isWorkerMainAncestor,
   resolveTrustedIngestSource,NATIVE_RECOVERY_ACTION,
   NATIVE_RECOVERY_RUN,NATIVE_RECOVERY_SHA,NATIVE_RECOVERY_INGEST_COMMAND,
-  QWEN_3784_INGEST_COMMENT}
+  QWEN_3784_INGEST_COMMENT,QWEN_4065_REINGEST_COMMENT,
+  assertQwen4065RepairReplaySource}
   from './development-ingest.mjs';
 const runId=39288961865;
 const environment={
@@ -228,6 +229,49 @@ for(const bad of [
 ])assert.throws(()=>resolveTrustedIngestSource({
   environment:qwenEnv,event:recovered3784,...bad}),
   /owner|exact|trusted|Ingest/);
+
+// #4174: never replay the consumed Developer Action; this existing signed
+// Repair Run is read-only re-ingested to wake the already authenticated
+// Publisher. Exact Owner command, Issue, Run, Action and source SHA only.
+const recovered4065={...qwenV2Issue,issue:{number:4065,state:'open'},
+  comment:{...qwenV2Issue.comment,body:QWEN_4065_REINGEST_COMMENT}};
+assert.deepEqual(resolveTrustedIngestSource({
+  environment:qwenEnv,event:recovered4065}),
+  {run_id:44928066276,source:null,qwen_recovery:true,
+    issue:4065,attempt:1});
+for(const bad of [
+  {event:{...recovered4065,issue:{number:4065,state:'closed'}}},
+  {event:{...recovered4065,issue:{number:4065,state:'open',pull_request:{}}}},
+  {event:{...recovered4065,issue:{number:4066,state:'open'}}},
+  {event:{...recovered4065,action:'edited'}},
+  {event:{...recovered4065,comment:{...recovered4065.comment,
+    body:QWEN_4065_REINGEST_COMMENT+' '}}},
+  {event:{...recovered4065,comment:{...recovered4065.comment,
+    body:QWEN_4065_REINGEST_COMMENT.replace('44928066276','44928066277')}}},
+  {event:{...recovered4065,comment:{...recovered4065.comment,
+    user:{login:'other'}}}},
+  {environment:{...qwenEnv,GITHUB_ACTOR:'other'}},
+  {environment:{...qwenEnv,GITHUB_REF:'refs/heads/staging'}},
+])assert.throws(()=>resolveTrustedIngestSource({
+  environment:qwenEnv,event:recovered4065,...bad}),
+  /owner|exact|trusted|Ingest/);
+const source4065={id:44928066276,run_attempt:1,
+  head_sha:'0d3a60b60e9941ad94fc1ffb62d4213463526d86'};
+const claim4065={inputs:{issue_number:'4065',agent_id:'dev-qwen-01',
+  task:'repair',action_id:'08dbdc61abbe8abd1354500cdb902de4f91661a10a9d0d17f9074137e2e27d4e',
+  input_sha:'8d512ec934770944a208c9e1a797bc155a7a46d2'}};
+assert.doesNotThrow(()=>assertQwen4065RepairReplaySource({
+  run:source4065,claim:claim4065}));
+for(const pair of [
+  {run:{...source4065,id:44928066277},claim:claim4065},
+  {run:{...source4065,run_attempt:2},claim:claim4065},
+  {run:{...source4065,head_sha:'f'.repeat(40)},claim:claim4065},
+  ...[{issue_number:'4066'},{task:'implement'},
+    {agent_id:'other'},{action_id:'f'.repeat(64)},
+    {input_sha:'f'.repeat(40)}].map(x=>({
+    run:source4065,claim:{inputs:{...claim4065.inputs,...x}}})),
+])assert.throws(()=>assertQwen4065RepairReplaySource(pair),
+  /original Worker|Run\/Action\/SHA/);
 
 // Execute the actual git ancestry gate on real, isolated Git commit objects,
 // not merely a mocked Boolean: same branch and older-main pass, an unrelated
