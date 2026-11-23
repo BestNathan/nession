@@ -4,7 +4,8 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {downloadedResult} from './acceptance-cross-issue-receipt.mjs';
-import {extractSection,parseSuccessCriteria,parseAcceptanceReport,validateAcceptancePlan} from './requirement-acceptance.mjs';
+import {extractSection,parseSuccessCriteria,parseAcceptanceReport} from './requirement-acceptance.mjs';
+import {validateAcceptancePlan} from './acceptance-plan.mjs';
 
 const REPO='BestNathan/nession', PREFIX='/repos/'+REPO;
 const SHA=/^[a-f0-9]{40}$/, DIGEST=/^[a-f0-9]{64}$/;
