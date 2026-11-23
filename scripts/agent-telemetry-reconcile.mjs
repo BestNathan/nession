@@ -166,13 +166,19 @@ export function classifyHistoricalArtifact(run,source,listing,recorded){
   try{published=countArtifactSummaries(listing,run);}
   catch{return {status:'invalid_artifact',published:0,recorded};}
   if(published>recorded)return {status:'missing_recoverable',published,recorded};
-  if(published>0)return {status:'already_stored',published,recorded};
+  // A formerly persisted source remains already-stored even when GitHub
+  // subsequently expires its original Artifact ZIP. The immutable Git bytes
+  // are authoritative for stored history; expiration cannot erase that proof.
+  if(recorded>0||published>0)
+    return {status:'already_stored',published,recorded};
   const suffix='-'+run.id+'-'+run.run_attempt;
   const relevant=listing.artifacts.filter(a=>typeof a.name==='string'&&
     a.name.startsWith('agent-telemetry-')&&a.name.endsWith(suffix));
   if(relevant.some(a=>a.expired===true))
     return {status:'expired_unrecoverable',published:0,recorded};
-  return {status:'no_agent_artifact',published:0,recorded};
+  // No currently listed Artifact is NOT proof that no Agent ever ran.
+  // This state deliberately covers no-model and an expired/unlisted ZIP.
+  return {status:'unobserved_no_artifact',published:0,recorded};
 }
 export async function scanHistoricalScope({source,runNumber,summaryCounts,listing,artifacts}){
   if(!source||!positive(runNumber)||!(summaryCounts instanceof Map)||
@@ -226,7 +232,7 @@ export async function scanHistoricalScope({source,runNumber,summaryCounts,listin
     truncated:plan.truncated,probe_limit:HISTORY_PROBE_LIMIT,
     observations,
     counts:Object.fromEntries(['invalid_source','invalid_artifact','already_stored',
-      'missing_recoverable','expired_unrecoverable','no_agent_artifact']
+      'missing_recoverable','expired_unrecoverable','unobserved_no_artifact']
       .map(status=>[status,observations.filter(item=>item.status===status).length])),
     selected,selected_persisted:false,recovered_count:0};
 }
@@ -459,6 +465,11 @@ function selfTest(){
     {total_count:1,artifacts:[{name:'agent-telemetry-test-321-1',
        size_in_bytes:100,expired:true}]},0);
   assert.equal(historicalSample.status,'expired_unrecoverable');
+  assert.equal(classifyHistoricalArtifact(run,source,
+    {total_count:1,artifacts:[{name:'agent-telemetry-test-321-1',
+      size_in_bytes:100,expired:true}]},1).status,'already_stored');
+  assert.equal(classifyHistoricalArtifact(run,source,
+    {total_count:0,artifacts:[]},0).status,'unobserved_no_artifact');
   assert.equal(finalizeHistoricalReport({kind:'agent_metrics_historical_recovery_scope',
     telemetry_group_id:source.id,selected:{run_id:321,run_attempt:1,published:1}},
     new Map([[source.id+'/321/1',1]])).selected_persisted,true);
