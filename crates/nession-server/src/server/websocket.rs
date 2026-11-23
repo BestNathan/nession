@@ -2026,57 +2026,15 @@ where
     // the Agent-leg writer (#4065).
     let mut agent_half_open = false;
     let agent_to_client = async {
-        loop {
-            // Bounded wait: if no frame — terminal payload, pong, close, or
-            // error — arrives within the idle deadline, the leg is half-open.
-            // Any frame resets the clock, so a slow but responsive Agent that
-            // answers the probe inside the window is never spuriously torn
-            // down.
-            let next = match tokio::time::timeout(AGENT_LEG_IDLE_TIMEOUT, agent_read.next()).await
-            {
-                Ok(next) => next,
-                Err(_) => {
-                    // No frame within the deadline, including no pong for the
-                    // probe pings `forward_client_to_agent` has been sending.
-                    // The Agent leg is silent; the relay cannot make progress.
-                    agent_half_open = true;
-                    break;
-                }
-            };
-            let msg = match next {
-                Some(Ok(msg)) => msg,
-                Some(Err(e)) => {
-                    error!("Error reading from agent: {}", e);
-                    // The Agent's end of the tunnel failed while the client was
-                    // still attached: the terminal will never produce again,
-                    // and no frame says so (#2179).
-                    agent_ended = true;
-                    break;
-                }
-                // The Agent's stream ended (its socket closed). That is not the
-                // client asking to stop — those paths end `client_to_agent`
-                // instead — so the client must learn about it from the close.
-                None => {
-                    agent_ended = true;
-                    break;
-                }
-            };
-            if is_agent_forged_relay_ready(&msg) {
-                warn!("Dropped Agent-forged Relay ready notification after attach");
-                continue;
+        match relay_agent_to_client(&mut agent_read, &sender, AGENT_LEG_IDLE_TIMEOUT).await {
+            AgentToClient::HalfOpen => {
+                agent_half_open = true;
             }
-            match sender.send_terminal(msg).await {
-                Ok(()) => {}
-                Err(crate::server::outbound::OutboundError::Stalled) => {
-                    stalled = true;
-                    break;
-                }
-                // The client's own connection is gone; the caller has nothing
-                // left to close.
-                Err(e) => {
-                    error!("Failed to forward agent message to client: {}", e);
-                    break;
-                }
+            AgentToClient::Errored | AgentToClient::Ended => {
+                agent_ended = true;
+            }
+            AgentToClient::Stalled => {
+                stalled = true;
             }
         }
     };
@@ -2829,6 +2787,91 @@ where
     }
 
     ClientToAgent::Ended
+}
+
+/// Why the agent → client half of the relay stopped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AgentToClient {
+    /// The agent's stream ended cleanly.
+    Ended,
+    /// The agent's stream errored.
+    Errored,
+    /// The client's outbound queue stalled.
+    Stalled,
+    /// The agent leg went half-open: no frame within the idle deadline (#4065).
+    HalfOpen,
+}
+
+/// Relay frames from the agent to the client until the agent's stream ends or
+/// the idle timeout fires (#4065).
+///
+/// Extracted from [`relay_bidirectional_via_channel`] so the half-open
+/// detection logic can be tested directly. The agent read stream is wrapped in
+/// a bounded timeout: if no frame (terminal payload, pong, close, or error)
+/// arrives within `agent_idle_timeout`, the leg is declared half-open and the
+/// relay terminates.
+///
+/// The `agent_idle_timeout` parameter allows tests to use a short timeout
+/// (e.g., 100ms) to verify the half-open detection without wall-clock delays.
+/// Production passes [`AGENT_LEG_IDLE_TIMEOUT`].
+async fn relay_agent_to_client<RS, E>(
+    agent_read: &mut RS,
+    sender: &crate::server::outbound::WsMessageSender,
+    agent_idle_timeout: std::time::Duration,
+) -> AgentToClient
+where
+    RS: futures_util::Stream<Item = Result<WsFrame, E>> + Unpin,
+    E: std::fmt::Display,
+{
+    use futures_util::StreamExt;
+
+    loop {
+        // Bounded wait: if no frame — terminal payload, pong, close, or
+        // error — arrives within the idle deadline, the leg is half-open.
+        // Any frame resets the clock, so a slow but responsive Agent that
+        // answers the probe inside the window is never spuriously torn down.
+        let next = match tokio::time::timeout(agent_idle_timeout, agent_read.next()).await {
+            Ok(next) => next,
+            Err(_) => {
+                // No frame within the deadline, including no pong for the
+                // probe pings `forward_client_to_agent` has been sending.
+                // The Agent leg is silent; the relay cannot make progress.
+                return AgentToClient::HalfOpen;
+            }
+        };
+        let msg = match next {
+            Some(Ok(msg)) => msg,
+            Some(Err(e)) => {
+                error!("Error reading from agent: {}", e);
+                // The Agent's end of the tunnel failed while the client was
+                // still attached: the terminal will never produce again,
+                // and no frame says so (#2179).
+                return AgentToClient::Errored;
+            }
+            // The Agent's stream ended (its socket closed). That is not the
+            // client asking to stop — those paths end `client_to_agent`
+            // instead — so the client must learn about it from the close.
+            None => {
+                return AgentToClient::Ended;
+            }
+        };
+        if is_agent_forged_relay_ready(&msg) {
+            warn!("Dropped Agent-forged Relay ready notification after attach");
+            continue;
+        }
+        match sender.send_terminal(msg).await {
+            Ok(()) => {}
+            Err(crate::server::outbound::OutboundError::Stalled) => {
+                return AgentToClient::Stalled;
+            }
+            // The client's own connection is gone; the caller has nothing
+            // left to close.
+            Err(e) => {
+                error!("Failed to forward agent message to client: {}", e);
+                return AgentToClient::Ended;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -3949,6 +3992,87 @@ mod tests {
             "expected no probe pings when client is active, got {ping_count}; \
              sent frames: {:?}",
             agent_write.sent
+        );
+    }
+
+    /// SC-01 behavioral regression: half-open agent leg is detected within the
+    /// idle timeout (#4065).
+    ///
+    /// When the agent's read stream produces no frames (simulating a half-open
+    /// TCP connection where the agent is silently partitioned), the relay must
+    /// detect this within the idle timeout and return `AgentToClient::HalfOpen`.
+    /// This test uses a 100ms timeout to verify the detection without
+    /// wall-clock delays.
+    #[tokio::test]
+    async fn half_open_agent_leg_detected_within_idle_timeout() {
+        // Create a pending stream that never yields (simulates half-open agent).
+        let mut agent_read = futures_util::stream::pending::<Result<WsFrame, std::io::Error>>();
+        let (sender, _rx) = crate::server::outbound::WsMessageSender::new();
+        let idle_timeout = std::time::Duration::from_millis(100);
+
+        let start = std::time::Instant::now();
+        let outcome = relay_agent_to_client(&mut agent_read, &sender, idle_timeout).await;
+        let elapsed = start.elapsed();
+
+        // The relay should detect half-open and return.
+        assert_eq!(
+            outcome,
+            AgentToClient::HalfOpen,
+            "expected HalfOpen when agent produces no frames"
+        );
+
+        // The detection should happen within roughly the idle timeout.
+        // Allow some margin for scheduling overhead.
+        assert!(
+            elapsed >= idle_timeout,
+            "detection happened too fast: {:?} < {:?}",
+            elapsed,
+            idle_timeout
+        );
+        assert!(
+            elapsed < idle_timeout + std::time::Duration::from_millis(50),
+            "detection took too long: {:?} >= {:?}",
+            elapsed,
+            idle_timeout + std::time::Duration::from_millis(50)
+        );
+    }
+
+    /// SC-03 behavioral regression: a responsive agent that sends frames
+    /// before the idle timeout is not declared half-open (#4065).
+    ///
+    /// When the agent's read stream produces frames within the idle timeout,
+    /// the relay should forward them and not declare the leg half-open. This
+    /// test verifies that a slow but responsive agent (sending frames just
+    /// before the timeout) remains connected.
+    #[tokio::test]
+    async fn slow_but_responsive_agent_not_declared_half_open() {
+        // Create a stream that yields one frame after 80ms (within 100ms timeout).
+        let frames = vec![frame("agent.terminal.output", "slow-response")];
+        let items: Vec<Result<WsFrame, std::io::Error>> = frames.into_iter().map(Ok).collect();
+
+        // Wrap the stream in a delay to simulate slow response.
+        let mut agent_read = futures_util::stream::once(async {
+            tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+            items.into_iter().next().unwrap()
+        });
+
+        let (sender, mut rx) = crate::server::outbound::WsMessageSender::new();
+        let idle_timeout = std::time::Duration::from_millis(100);
+
+        let outcome = relay_agent_to_client(&mut agent_read, &sender, idle_timeout).await;
+
+        // The relay should complete normally (agent ended after sending one frame).
+        assert_eq!(
+            outcome,
+            AgentToClient::Ended,
+            "expected Ended when agent sends a frame within the timeout"
+        );
+
+        // The frame should have been forwarded.
+        let queued = rx.try_recv();
+        assert!(
+            queued.is_ok(),
+            "expected the agent's frame to be queued for the client"
         );
     }
 }
