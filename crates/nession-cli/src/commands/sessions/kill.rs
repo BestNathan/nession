@@ -15,9 +15,14 @@ pub async fn kill_session(server_url: &str, auth_token: &str, session_id: &str) 
     let mut client = connect(server_url, auth_token).await?;
     println!("Killing session '{session_name}' on agent '{agent_id}'...");
 
-    let reply = client.kill_session(session_id).await.with_context(|| {
-        format!("Failed to kill session '{session_name}' on agent '{agent_id}'")
-    })?;
+    // The CLI keeps the legacy name-addressed kill (#4302): it has no
+    // caller-observed incarnation to bind, and its semantics are unchanged.
+    let reply = client
+        .kill_session(session_id, None)
+        .await
+        .with_context(|| {
+            format!("Failed to kill session '{session_name}' on agent '{agent_id}'")
+        })?;
     client.close().await.ok();
 
     if !reply.success {

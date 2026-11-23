@@ -251,11 +251,25 @@ fn test_server_session_kill_payload() {
     let payload = ServerSessionKillPayload {
         request_id: "req-2".to_string(),
         name: "doomed".to_string(),
+        expected_instance_id: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ServerSessionKillPayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.request_id, "req-2");
     assert_eq!(decoded.name, "doomed");
+    assert!(
+        !json.contains("expected_instance_id"),
+        "an absent precondition stays absent on the legacy wire"
+    );
+
+    // #4302: a guarded kill carries the caller-observed incarnation.
+    let guarded = ServerSessionKillPayload {
+        expected_instance_id: Some("instance-a".to_string()),
+        ..payload
+    };
+    let json = serde_json::to_string(&guarded).unwrap();
+    let decoded: ServerSessionKillPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.expected_instance_id.as_deref(), Some("instance-a"));
 }
 
 #[test]
@@ -530,10 +544,28 @@ fn agent_session_activity_payload_round_trips_with_its_identity_fence() {
 fn test_client_session_kill_payload() {
     let payload = ClientSessionKillPayload {
         session_id: "agent-1:doomed".to_string(),
+        expected_instance_id: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionKillPayload = serde_json::from_str(&json).unwrap();
     assert_eq!(decoded.session_id, "agent-1:doomed");
+    assert!(
+        !json.contains("expected_instance_id"),
+        "an absent precondition stays absent on the legacy wire"
+    );
+
+    // #4302: a legacy payload without the field still decodes, and a guarded
+    // one round-trips its precondition.
+    let legacy: ClientSessionKillPayload =
+        serde_json::from_str(r#"{"session_id":"agent-1:doomed"}"#).unwrap();
+    assert_eq!(legacy.expected_instance_id, None);
+    let guarded = ClientSessionKillPayload {
+        expected_instance_id: Some("instance-a".to_string()),
+        ..payload
+    };
+    let json = serde_json::to_string(&guarded).unwrap();
+    let decoded: ClientSessionKillPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.expected_instance_id.as_deref(), Some("instance-a"));
 }
 
 #[test]
@@ -559,10 +591,72 @@ fn test_client_session_kill_response_payload() {
     let payload = ClientSessionKillResponsePayload {
         success: true,
         error: None,
+        error_kind: None,
     };
     let json = serde_json::to_string(&payload).unwrap();
     let decoded: ClientSessionKillResponsePayload = serde_json::from_str(&json).unwrap();
     assert!(decoded.success);
+    assert!(
+        !json.contains("error_kind"),
+        "a success carries no refusal classification"
+    );
+
+    // #4302: a guarded refusal classifies itself; a legacy refusal decodes
+    // without the field.
+    let refused = ClientSessionKillResponsePayload {
+        success: false,
+        error: Some("expected instance a, current instance b".to_string()),
+        error_kind: Some("conflict".to_string()),
+    };
+    let json = serde_json::to_string(&refused).unwrap();
+    let decoded: ClientSessionKillResponsePayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.error_kind.as_deref(), Some("conflict"));
+    let legacy: ClientSessionKillResponsePayload =
+        serde_json::from_str(r#"{"success":false,"error":"nope"}"#).unwrap();
+    assert_eq!(legacy.error_kind, None);
+}
+
+#[test]
+fn agent_session_kill_payload_carries_an_optional_incarnation_precondition() {
+    // #4302: the Agent wire's kill request stays name-addressed for legacy
+    // callers and carries the caller-observed instance for guarded ones.
+    let legacy: SessionKillPayload = serde_json::from_str(r#"{"name":"dev"}"#).unwrap();
+    assert_eq!(legacy.name, "dev");
+    assert_eq!(legacy.expected_instance_id, None);
+    let json = serde_json::to_string(&legacy).unwrap();
+    assert!(!json.contains("expected_instance_id"));
+
+    let guarded = SessionKillPayload {
+        name: "dev".to_string(),
+        expected_instance_id: Some("instance-a".to_string()),
+    };
+    let json = serde_json::to_string(&guarded).unwrap();
+    let decoded: SessionKillPayload = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.expected_instance_id.as_deref(), Some("instance-a"));
+}
+
+#[test]
+fn web_session_kill_response_classifies_a_guarded_refusal() {
+    // #4302: the Server-side declaration of the same kill reply wire carries
+    // the identical optional classification.
+    let legacy: WebSessionKillResponse =
+        serde_json::from_str(r#"{"success":false,"error":"nope"}"#).unwrap();
+    assert_eq!(legacy.error_kind, None);
+    let refused = WebSessionKillResponse {
+        success: false,
+        error: Some("expected instance a, current instance b".to_string()),
+        error_kind: Some("conflict".to_string()),
+    };
+    let json = serde_json::to_string(&refused).unwrap();
+    let decoded: WebSessionKillResponse = serde_json::from_str(&json).unwrap();
+    assert_eq!(decoded.error_kind.as_deref(), Some("conflict"));
+    let success = WebSessionKillResponse {
+        success: true,
+        error: None,
+        error_kind: None,
+    };
+    let json = serde_json::to_string(&success).unwrap();
+    assert!(!json.contains("error_kind"));
 }
 
 // ---------------------------------------------------------------------------

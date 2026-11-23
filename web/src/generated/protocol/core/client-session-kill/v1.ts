@@ -22,7 +22,14 @@ export const VERSION = 1;
 // ── Shapes ──
 
 export type WebSessionKillPayload = { session_id: string, };
-export type WebSessionKillResponse = { success: boolean, error: string | null, };
+export type WebSessionKillResponse = { success: boolean, error: string | null, 
+/**
+ * The actionable classification of a refusal (#4302): `conflict` when a
+ * supplied `expected_instance_id` no longer names the current instance,
+ * `not_found` or `unavailable` for the other guarded failures. Absent on
+ * success and on every legacy name-only refusal, whose wire is unchanged.
+ */
+error_kind?: string | null, };
 
 // ── Operations ──
 
@@ -30,5 +37,12 @@ export type WebSessionKillResponse = { success: boolean, error: string | null, }
 export type ClientSessionKillCall = { session_id: string, };
 
 /** The payload the provider answers with. */
-export type ClientSessionKillReply = { success: boolean, error: string | null, };
+export type ClientSessionKillReply = { success: boolean, error: string | null, 
+/**
+ * The actionable classification of a refusal (#4302): `conflict` when a
+ * supplied `expected_instance_id` no longer names the current instance,
+ * `not_found` or `unavailable` for the other guarded failures. Absent on
+ * success and on every legacy name-only refusal, whose wire is unchanged.
+ */
+error_kind?: string | null, };
 
