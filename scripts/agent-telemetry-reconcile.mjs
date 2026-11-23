@@ -21,6 +21,10 @@ const SOURCES=Object.freeze([
     events:['workflow_run'],branches:['main']},
   {file:'agent-review.yml',name:'Agent / Review',id:'agent-review',
     events:['workflow_dispatch'],branches:['main']},
+  {file:'agent-e2e-failure-analysis.yml',name:'Agent / E2E Failure Analysis',id:'agent-e2e-failure-analysis',
+    events:['workflow_dispatch'],branches:['main']},
+  {file:'agent-staging-convergence-review.yml',name:'Agent / Staging Convergence Review',id:'agent-staging-convergence-review',
+    events:['workflow_dispatch','push'],branches:['main']},
   {file:'agent-cursor-resume-seed.yml',name:'Agent / Cursor Resume Seed',id:'agent-cursor-resume-seed',
     events:['push','workflow_dispatch'],branches:['main']},
   {file:'agent-cursor-resume-verify.yml',name:'Agent / Cursor Resume Verify',id:'agent-cursor-resume-verify',
@@ -44,7 +48,7 @@ export function trustedSource(run,source){
   if(!run||typeof run!=='object'||Array.isArray(run))return false;
   if(!positive(run.id)||!positive(run.run_attempt)||!SHA.test(run.head_sha??'')||
      run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
-     run.path!=='.github/workflows/'+source.file||run.name!==source.name||
+     run.path!=='.github/workflows/'+source.file||
      run.status!=='completed'||!['success','failure'].includes(run.conclusion)||
      !source.events.includes(run.event))return false;
   // Agent source workflows with credentials must be pinned to main. The
@@ -174,9 +178,12 @@ export function validateRecoveryRouting(workflow){
   if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
      !job.includes("github.repository == 'BestNathan/nession'"))
     fail('missing trusted main schedule guard');
+  // Display names are subscription labels only; never authenticate REST Runs.
+  if(job.includes('github.event.workflow_run.name =='))
+    fail('runtime source display-name authorization is forbidden');
   for(const source of SOURCES){
     if(!trigger.includes('      - '+source.name)||
-       !job.includes("github.event.workflow_run.name == '"+source.name+"'"))
+       !job.includes("github.event.workflow_run.path == '.github/workflows/"+source.file+"'"))
       fail('unclassified or unregistered Agent source: '+source.name);
   }
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
@@ -292,6 +299,11 @@ function selfTest(){
   )),/attempt-scoped/);
 
 
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    "github.event.workflow_run.path == '.github/workflows/agent-issue-audit.yml'",
+    "github.event.workflow_run.name == 'Agent / Issue Audit'"
+  )),/display-name authorization/);
+
   const source=SOURCES[0],sha='a'.repeat(40);
   const run={id:321,run_attempt:1,head_sha:sha,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
@@ -299,6 +311,20 @@ function selfTest(){
     status:'completed',conclusion:'success',event:'push',head_branch:'main',
     created_at:'2026-10-14T00:00:00Z'};
   assert.equal(trustedSource(run,source),true);
+  assert.equal(SOURCES.length,14);
+  const auditSource=SOURCES.find(item=>item.file==='agent-issue-audit.yml');
+  assert.ok(auditSource);
+  for(const [name,event] of [
+    ['Issue Audit #4297','issues'],
+    ['Comment Audit #4230 comment:7090927541','workflow_dispatch'],
+  ]){
+    const auditRun={...run,path:'.github/workflows/'+auditSource.file,
+      name,event};
+    assert.equal(trustedSource(auditRun,auditSource),true);
+    assert.equal(trustedSource({...auditRun,head_repository:{full_name:'attacker/fork'}},auditSource),false);
+    assert.equal(trustedSource({...auditRun,path:'.github/workflows/evil.yml'},auditSource),false);
+    assert.equal(trustedSource({...auditRun,head_branch:'feature'},auditSource),false);
+  }
   for(const malicious of [
     {...run,repository:{full_name:'attacker/fork'}},
     {...run,head_repository:{full_name:'attacker/fork'}},
