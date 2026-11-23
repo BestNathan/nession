@@ -225,6 +225,17 @@ export const V2_INGEST_COMMAND='/nession ingest issue=1997 action='+CONTROLLED_V
   ' worker_run='+V2_INGEST_WORKER_RUN;
 export const QWEN_3784_INGEST_COMMENT=
   '/nession ingest-qwen issue=3784 worker_run=44259490499';
+// #4174: authenticated, read-only re-ingest of a committed #4065 Repair
+// after the separately fixed trusted Publisher rejects retired Reviewer history.
+// This locates ONE original Worker; never reruns the model or grants PR writes.
+export const QWEN_4065_REINGEST_COMMENT=
+  '/nession ingest-qwen issue=4065 worker_run=44928066276';
+const QWEN_4065_REINGEST_SOURCE=Object.freeze({
+  issue:4065,run_id:44928066276,
+  run_sha:'0d3a60b60e9941ad94fc1ffb62d4213463526d86',
+  action_id:'08dbdc61abbe8abd1354500cdb902de4f91661a10a9d0d17f9074137e2e27d4e',
+  source_sha:'8d512ec934770944a208c9e1a797bc155a7a46d2',
+});
 const REPAIR_INGEST_PATTERN=/^\/nession ingest-repair issue=1997 action=(?:d899dfc9367cdc9d98a6dcbcd7e55ce2d962f1d72e54abf0d61b0dd7e308009d|ed14323e0466b23ec739a712ab63bfc16cbbbe225b1118a4cbeab64e419574a5) worker_run=[1-9][0-9]{0,14}$/;
 // The lack of a workflow_run delivery must not allow a result to be promoted
 // by editing a Store file or by supplying an arbitrary Run ID. This manual
@@ -258,7 +269,7 @@ export function resolveTrustedIngestSource({environment,event}){
     return {run_id:source.id,source};
   }
   if(environment.GITHUB_EVENT_NAME==='issue_comment'&&
-     [2817,2906,2912,2946,2951,2961,3001,3433,3784].includes(event?.issue?.number)){
+     [2817,2906,2912,2946,2951,2961,3001,3433,3784,4065].includes(event?.issue?.number)){
     // Owner/main-only replay when GitHub suppresses a workflow_run delivery.
     // The exact Worker Run is re-read and re-verified by the live Ingest
     // before any Store writer is used; this comment only locates it.
@@ -282,6 +293,10 @@ export function resolveTrustedIngestSource({environment,event}){
         (event.issue.state!=='open'||
          event.comment.body!==QWEN_3784_INGEST_COMMENT))
       fail('Owner Qwen Ingest must bind exact completed #3784 Worker Run');
+    if(event.issue.number===4065&&
+       (event.issue.state!=='open'||
+        event.comment.body!==QWEN_4065_REINGEST_COMMENT))
+      fail('Owner #4065 Repair Ingest requires exact original Worker');
     return {run_id:Number(command[2]),source:null,qwen_recovery:true,
       issue:event.issue.number,attempt:1};
   }
@@ -309,6 +324,18 @@ export function resolveTrustedIngestSource({environment,event}){
       ...(REPAIR_INGEST_PATTERN.test(event.comment.body)?{repair_recovery:true}:{})};
   }
   fail('unsupported Ingest trigger');
+}
+
+// #4174: a replay may re-read the same existing signed Repair Result, but
+// cannot switch to another Run/Attempt/Action/SHA or a different task.
+export function assertQwen4065RepairReplaySource({run,claim}){
+  const f=QWEN_4065_REINGEST_SOURCE;
+  if(run?.id!==f.run_id||run.run_attempt!==1||
+     run.head_sha!==f.run_sha||Number(claim?.inputs?.issue_number)!==f.issue||
+     claim.inputs.agent_id!=='dev-qwen-01'||
+     claim.inputs.task!=='repair'||claim.inputs.action_id!==f.action_id||
+     claim.inputs.input_sha!==f.source_sha)
+    fail('Owner #4065 Repair replay source Run/Action/SHA mismatch');
 }
 
 // #3885: signed Implement source SHA is a trusted *main ancestor* of the
@@ -416,6 +443,8 @@ async function main(){
   if(authority.qwen_recovery&&authority.issue===3433&&
      (run.id!==43677482758||claim.inputs?.task!=='repair'))
     fail('owner Repair Ingest differs from authenticated signed Worker action');
+  if(authority.qwen_recovery&&authority.issue===4065)
+    assertQwen4065RepairReplaySource({run,claim});
   if(authority.bot_qwen_wake||authority.qwen_recovery)
     assertQwenBotWakeSource({run,claim});
   const resultZip=fs.readFileSync(process.argv[4]);
