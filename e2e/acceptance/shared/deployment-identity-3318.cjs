@@ -56,13 +56,16 @@ function kubernetesFixtures() {
           generation: 9,
           labels: { app: 'nession', env: 'staging' },
         },
-        spec: { template: { spec: { containers: [{
+        // #4354: the collector binds pod imageIDs only after the desired
+        // revision has fully rolled out; the base fixture is converged.
+        spec: { replicas: 1, template: { spec: { containers: [{
           name: role,
           image: 'ghcr.io/bestnathan/nession:' + role + '-abcdef1',
         }] } } },
         status: {
           observedGeneration: 9,
           replicas: 1,
+          updatedReplicas: 1,
           availableReplicas: 1,
           conditions: [{ type: 'Available', status: 'True' }],
         },
