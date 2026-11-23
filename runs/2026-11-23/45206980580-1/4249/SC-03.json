@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1d20670e333952c14897f6553b4649dcfb75120ad5e3dffa59c2a91c798673f9",
+  "run_id": 45206980580,
+  "run_attempt": 1,
+  "issue": 4249,
+  "criterion": "SC-03",
+  "criterion_text": "At an exact merged staging SHA, the same pinned artifact is reused after Agent restart and an interrupted/denied peer source triggers fallback only to an authorized source for the identical digest, with consistent cache Ready/lease/recovery/cleanup state, and without consuming any partial bytes.",
+  "stage": "staging",
+  "target_sha": "dcb2b5785dd43bdd68b76485fa699b130548940b",
+  "contract_sha256": "91a3ea3b468a6ad33d1213e83f6b0c003b65dac092e648da465fa8df3b7f7f60",
+  "case_revision": "dcb2b5785dd43bdd68b76485fa699b130548940b",
+  "case_tree_sha": "4d37a397cd4bea08f5b1475664b05c59fe639770",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T15:40:54.244Z",
+  "finished_at": "2026-11-23T15:41:40.528Z",
+  "duration_ms": 46284,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "EROFS/FUSE helpers installed and the native mount capability measured on the runner",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA dcb2b5785dd43bdd68b76485fa699b130548940b setup: platform=linux backend=linux-bwrap namespaces={\"cgroup\":true,\"ipc\":true,\"net\":true,\"pid\":true,\"user\":true,\"uts\":true} seccomp=true filesystem=true erofs=true erofs_overlay=true network_deny=true network_restricted=true cgroup_v2=[\"cpu\",\"cpuset\",\"io\",\"memory\",\"pids\"]"
+        }
+      ],
+      "duration_ms": 2759,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "build.cjs",
+      "result": "Pass",
+      "summary": "The integrated GHCR consumer-chain proof binary compiled at the exact target SHA",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA dcb2b5785dd43bdd68b76485fa699b130548940b: nession-agent toolchain_chain proof binary compiled"
+        }
+      ],
+      "duration_ms": 793,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "execute.cjs",
+      "result": "Pass",
+      "summary": "The pinned GHCR artifact survived Agent restart on the warm verified cache, adopted its crashed mount consumer, and fell back only to an authorized source for the identical digest",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA dcb2b5785dd43bdd68b76485fa699b130548940b on Linux kernel 7.0.0-1017-azure: pinned GHCR Manifest sha256:0a922f17a02b48d58b2c4595da9cef0aa0909891d9a232dc394e2738c88d580d (EROFS sha256:7ad4db01530282b6c49e692a221cd6b87ba428448894385f7d2713c3a899c609) prepared cold with 3 transfers, then reused after Agent restart with fetch_count=0 and a Verified observation"
+        },
+        {
+          "type": "runtime",
+          "value": "the crashed consumer f546cf5b-b8c7-4493-908a-8f9746ced651 was adopted by the reopened MountManager; one physical mount served a second `gh version` execution and was reclaimed after the last consumer released"
+        },
+        {
+          "type": "runtime",
+          "value": "the authorized peer served the exact published layer with zero Server blob bytes; after revocation the fallback went only to the authorized Server for the identical pinned digest"
+        },
+        {
+          "type": "runtime",
+          "value": "corrupted EROFS bytes never became Ready and the aggregate identity was not mount-ready; a pinned blob refused eviction until its pin released; capabilities: platform=linux backend=linux-bwrap namespaces={\"cgroup\":true,\"ipc\":true,\"net\":true,\"pid\":true,\"user\":true,\"uts\":true} seccomp=true filesystem=true erofs=true erofs_overlay=true network_deny=true network_restricted=true cgroup_v2=[\"cpu\",\"cpuset\",\"io\",\"memory\",\"pids\"]"
+        }
+      ],
+      "duration_ms": 36830,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45206980580,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "dcb2b5785dd43bdd68b76485fa699b130548940b",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45206980580",
+    "record_path": "runs/2026-11-23/45206980580-1/4249/SC-03.json",
+    "source_result_sha256": "e795c37b62a48a5c03ce22f005623fed41ca30d28b66145dd5fc6ac1be201cba"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45206980580-1",
+    "sha256": "e795c37b62a48a5c03ce22f005623fed41ca30d28b66145dd5fc6ac1be201cba",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45206980580",
+    "durability": "time-limited; object archival not configured"
+  }
+}
