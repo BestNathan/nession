@@ -4326,3 +4326,85 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     .await?;
     Ok(())
 }
+
+
+/// #4065 SC-01: a *responsive* idle Agent leg must survive more than the
+/// production 45-second watchdog, not only a 100ms model-time Unit fixture.
+/// Real tungstenite peers process ping/pong while both connections are idle.
+/// A terminal frame sent after 50 seconds must still reach the same Agent.
+#[tokio::test]
+async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (_db_dir, server, _handle) =
+        start_ownership_server("test_ws_agent_idle_healthy_4065.db").await?;
+    let mut endpoint = start_mock_agent_endpoint().await?;
+    let mut agent = connect_agent_on_port(server, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+
+    let mut browser = connect_client(server).await?;
+    wait_for_session(&mut browser, "a1:dev").await?;
+    send_json(
+        &mut browser,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "idle-healthy-first",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    let attached = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        attached["payload"]["session_name"] == "dev",
+        "healthy Agent never completed authenticated Relay attach"
+    );
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(51);
+    while tokio::time::Instant::now() < deadline {
+        // Continue polling the browser WebSocket to answer its own 10s
+        // keepalives; otherwise the *browser* could appear half-open too.
+        match tokio::time::timeout(std::time::Duration::from_secs(4), browser.next()).await {
+            Err(_) | Ok(Some(Ok(Message::Text(_))))
+            | Ok(Some(Ok(Message::Ping(_))))
+            | Ok(Some(Ok(Message::Pong(_))))
+            | Ok(Some(Ok(Message::Binary(_)))) => {}
+            Ok(Some(Ok(Message::Close(frame)))) => {
+                anyhow::bail!("healthy idle Relay closed: {frame:?}")
+            }
+            Ok(Some(Ok(other))) => {
+                anyhow::bail!("healthy idle Relay terminated: {other:?}")
+            }
+            Ok(Some(Err(error))) => return Err(error.into()),
+            Ok(None) => anyhow::bail!("healthy idle Relay vanished"),
+        }
+    }
+
+    send_json(
+        &mut browser,
+        serde_json::json!({
+            "msg_type": "agent.terminal.input",
+            "id": "healthy-after-watchdog",
+            "timestamp": current_timestamp(),
+            "payload": {"session_name": "dev", "data": "Qg=="},
+        }),
+    )
+    .await?;
+    let forwarded = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.terminal.input",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        forwarded["id"] == "healthy-after-watchdog" &&
+            forwarded["payload"]["data"] == "Qg==",
+        "healthy but idle Agent could not resume terminal input"
+    );
+    Ok(())
+}
