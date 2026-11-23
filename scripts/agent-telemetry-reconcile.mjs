@@ -199,7 +199,10 @@ export async function scanHistoricalScope({source,runNumber,summaryCounts,listin
     const key=source.id+'/'+run.id+'/'+run.run_attempt;
     const recorded=summaryCounts.get(key)??0;
     let classification;
-    if(!trustedSource(run,source)){
+    if(!trustedSource(run,source) ||
+       !Number.isFinite(Date.parse(run.created_at??'')) ||
+       run.created_at.slice(0,10)<HISTORY_START ||
+       run.created_at.slice(0,10)>end){
       classification={status:'invalid_source',published:0,recorded};
     }else{
       let result;
@@ -221,15 +224,20 @@ export async function scanHistoricalScope({source,runNumber,summaryCounts,listin
     page:plan.page,total_pages:plan.page_count,page_offset:plan.offset,
     total_runs_in_date_window:first.total_count,
     truncated:plan.truncated,probe_limit:HISTORY_PROBE_LIMIT,
-    observations,selected,selected_persisted:false};
+    observations,
+    counts:Object.fromEntries(['invalid_source','invalid_artifact','already_stored',
+      'missing_recoverable','expired_unrecoverable','no_agent_artifact']
+      .map(status=>[status,observations.filter(item=>item.status===status).length])),
+    selected,selected_persisted:false,recovered_count:0};
 }
 export function finalizeHistoricalReport(report,summaryCounts){
   if(report?.kind!=='agent_metrics_historical_recovery_scope'||
      !(summaryCounts instanceof Map))fail('invalid historical finalization');
   const picked=report.selected;
-  if(!picked)return {...report,selected_persisted:false};
+  if(!picked)return {...report,selected_persisted:false,recovered_count:0};
   const key=report.telemetry_group_id+'/'+picked.run_id+'/'+picked.run_attempt;
-  return {...report,selected_persisted:(summaryCounts.get(key)??0)>=picked.published};
+  const persisted=(summaryCounts.get(key)??0)>=picked.published;
+  return {...report,selected_persisted:persisted,recovered_count:persisted?1:0};
 }
 
 export function validateReconciliationContext(env){
@@ -509,6 +517,15 @@ function selfTest(){
     const alternate={...run,id:400,path:'.github/workflows/'+nextSource.file,
       name:nextSource.name,event:nextSource.events[0]};
     const rotationRuns=new Map([[source.file,[run]],[nextSource.file,[alternate]]]);
+    const historical=await scanHistoricalScope({
+      source,runNumber:1,summaryCounts:new Map(),
+      listing:async query=>({total_count:1,workflow_runs:[{...run,
+        created_at:'2026-11-10T00:00:00Z'}]}),
+      artifacts:async()=>({total_count:1,artifacts:[{...attempt1}]}),
+    });
+    assert.equal(historical.selected.run_id,321);
+    assert.equal(historical.counts.missing_recoverable,1);
+    assert.equal(historical.counts.expired_unrecoverable,0);
     assert.equal((await chooseMissing(rotationRuns,new Map(),async()=>1,1)).run_id,400,
       'round-robin recovery must not permanently prioritize Provider');
     await assert.rejects(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
