@@ -398,7 +398,7 @@ function selfTest(){
   assert.equal(probe.pages.length,HISTORY_PAGES_PER_TICK);
   assert.equal(new Set(probe.pages).size,HISTORY_PAGES_PER_TICK);
   assert.ok(probe.queries.every(q=>q.includes('status=completed&created=')&&
-    q.includes('2026-11-09T00')===false&&q.includes('per_page=100&page=')));
+    q.includes('2026-11-09T00%3A00%3A00Z')&&q.includes('per_page=100&page=')));
   assert.deepEqual(historicalRecoveryProbe(28,new Date('2026-11-23T12:00:00Z')).pages,
     probe.pages.map(p=>1+p%MAX_HISTORY_PAGES));
   assert.throws(()=>historicalRecoveryProbe(0),/invalid main-owned/);
