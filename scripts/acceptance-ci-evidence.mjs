@@ -285,7 +285,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     authenticated_run_store_external_checkpoint: verifiedRunStoreExternalCheckpoint,
     authenticated_run_store_five_mode_readback: authenticatedRunStoreFiveModeReadback,
     verified_staging_acr_readback: stagingAcrReadback,
-    authenticated_convergence_writer_4059: authenticatedConvergenceWriter4059,
+    ...(authenticatedConvergenceWriter4059 ? {
+      authenticated_convergence_writer_4059:authenticatedConvergenceWriter4059} : {}),
     verified_knowledge_publisher_publication: verifiedKnowledgePublisherPublication,
     verified_toolchain_4160_readback: verifiedToolchain4160,
     verified_toolchain_4241_readback: verifiedToolchain4241,
