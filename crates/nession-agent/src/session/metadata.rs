@@ -423,8 +423,9 @@ pub fn error_kind_and_detail(error: &anyhow::Error) -> (&'static str, String) {
 ///
 /// A missing Session is `not_found`; every other tmux failure is
 /// `unavailable`, so a disconnected server is not reported as a deleted
-/// Session.
-fn classify_tmux_error(message: &str) -> anyhow::Error {
+/// Session. Shared with the guarded Session kill (#4302), whose identity read
+/// fails the same way and must classify identically at every transport.
+pub(crate) fn classify_tmux_error(message: &str) -> anyhow::Error {
     let lower = message.to_lowercase();
     if lower.contains("can't find session")
         || lower.contains("no such session")
@@ -436,11 +437,14 @@ fn classify_tmux_error(message: &str) -> anyhow::Error {
     }
 }
 
-/// Refuse a write aimed at a different durable instance than the caller read.
+/// Refuse a mutation aimed at a different durable instance than the caller
+/// read.
 ///
 /// Classified as `conflict`: the caller's read is stale because the public
-/// name now names a successor. The successor's metadata is never touched.
-fn require_instance(current: &str, expected: &str) -> Result<()> {
+/// name now names a successor. The successor's state is never touched. Shared
+/// by the metadata writes (#4007) and the guarded Session kill (#4302), so one
+/// sentence and one classification own the incarnation precondition.
+pub(crate) fn require_instance(current: &str, expected: &str) -> Result<()> {
     if current != expected {
         anyhow::bail!("conflict: expected instance {expected}, current instance {current}");
     }

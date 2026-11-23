@@ -105,7 +105,7 @@ async fn the_agent_connection_lists_creates_and_kills_over_the_agent_token() {
     let patched = connection
         .patch_session_metadata(SessionMetadataPatchPayload {
             name: name.clone(),
-            expected_instance_id: instance,
+            expected_instance_id: instance.clone(),
             expected_revision: 0,
             patch: SessionMetadataPatch {
                 description: Some(Some("Next step".to_string())),
@@ -135,7 +135,28 @@ async fn the_agent_connection_lists_creates_and_kills_over_the_agent_token() {
     assert!(!stale.success);
     assert_eq!(stale.error_kind.as_deref(), Some("conflict"));
 
-    let killed = connection.kill_session(&name).await.expect("kill");
+    // #4302: a kill carrying a stale incarnation is a delivered `conflict`
+    // refusal, and the current Session keeps running.
+    let stale = connection
+        .kill_session(&name, Some("00000000-0000-4000-8000-000000000000"))
+        .await
+        .expect_err("a stale-incarnation kill must be refused");
+    match stale {
+        nession_client::ClientError::AgentRefused { code, .. } => {
+            assert_eq!(code, "conflict");
+        }
+        other => panic!("expected a delivered conflict refusal, got {other:?}"),
+    }
+    let listed = connection.list_sessions().await.expect("list");
+    assert!(
+        listed.sessions.iter().any(|session| session.name == name),
+        "the refused kill must not terminate the current Session"
+    );
+
+    let killed = connection
+        .kill_session(&name, Some(&instance))
+        .await
+        .expect("kill");
     assert_eq!(killed.name, name);
     let listed = connection.list_sessions().await.expect("list");
     assert!(
