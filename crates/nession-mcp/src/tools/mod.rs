@@ -139,7 +139,7 @@ pub(crate) mod test_support {
             Option<String>,
             Option<SessionInitialMetadata>,
         ),
-        KillSession(String, String),
+        KillSession(String, String, String),
         GetSessionMetadata(String, String),
         UpdateSessionMetadata(String, SessionMetadataPatchPayload),
     }
@@ -492,6 +492,7 @@ pub(crate) mod test_support {
             &self,
             agent_id: &str,
             name: &str,
+            expected_instance_id: &str,
         ) -> Result<SessionKillResponse, ToolError> {
             self.calls
                 .lock()
@@ -499,6 +500,7 @@ pub(crate) mod test_support {
                 .push(Recorded::KillSession(
                     agent_id.to_string(),
                     name.to_string(),
+                    expected_instance_id.to_string(),
                 ));
             serde_json::from_value(json!({ "name": name }))
                 .map_err(|error| ToolError::backend(error.to_string()))
@@ -719,7 +721,11 @@ mod tests {
             ),
             (
                 "nession_agent_kill_session",
-                serde_json::json!({ "agent_id": "agent-a", "name": "dev" }),
+                serde_json::json!({
+                    "agent_id": "agent-a",
+                    "name": "dev",
+                    "expected_instance_id": "instance-a"
+                }),
             ),
             (
                 "nession_agent_get_session_metadata",

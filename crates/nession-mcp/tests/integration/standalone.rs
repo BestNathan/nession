@@ -525,11 +525,18 @@ fn text_of(result: &Value) -> Value {
 struct BrokerLog {
     commands: Mutex<Vec<String>>,
     sessions: Mutex<Vec<String>>,
+    /// The `expected_instance_id` each routed kill carried (#4302), so a test
+    /// can prove the precondition survives the Server route, not just the Tool.
+    kill_preconditions: Mutex<Vec<Option<String>>>,
 }
 
 impl BrokerLog {
     fn commands(&self) -> Vec<String> {
         self.commands.lock().expect("broker log").clone()
+    }
+
+    fn kill_preconditions(&self) -> Vec<Option<String>> {
+        self.kill_preconditions.lock().expect("broker log").clone()
     }
 }
 
@@ -588,7 +595,18 @@ async fn register_and_answer(addr: SocketAddr) -> (tokio::task::JoinHandle<()>, 
                 let mut sessions = task_log.sessions.lock().expect("broker sessions");
                 match command.as_str() {
                     "agent.session.create" => sessions.push(session_name.to_string()),
-                    "agent.session.kill" => sessions.retain(|name| name != session_name),
+                    "agent.session.kill" => {
+                        sessions.retain(|name| name != session_name);
+                        task_log
+                            .kill_preconditions
+                            .lock()
+                            .expect("broker log")
+                            .push(
+                                parsed["payload"]["expected_instance_id"]
+                                    .as_str()
+                                    .map(str::to_owned),
+                            );
+                    }
                     _ => {}
                 }
                 sessions
@@ -927,10 +945,19 @@ async fn standalone_routes_agent_session_tools_through_the_server() {
         MCP_TOKEN,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": CLUSTER_AGENT, "name": name }),
+        json!({
+            "agent_id": CLUSTER_AGENT,
+            "name": name,
+            "expected_instance_id": "instance-a"
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
+    assert_eq!(
+        broker.kill_preconditions(),
+        vec![Some("instance-a".to_string())],
+        "the Server route must forward the caller-observed incarnation (#4302)"
+    );
 
     let commands = broker.commands();
     assert!(
@@ -1308,15 +1335,38 @@ async fn project_context_sessions_use_server_association_and_real_agent_runtime(
         "{managed}"
     );
 
+    // Cleanup kills are guarded too (#4302): bind each one to the incarnation
+    // the Agent currently reports for that name.
+    let live = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": PROJECT_AGENT }),
+    )
+    .await;
+    let live = text_of(&live);
     for session_name in [&name, &plain] {
-        let _ = call_tool(
-            mcp_addr,
-            MCP_TOKEN,
-            &session,
-            "nession_agent_kill_session",
-            json!({ "agent_id": PROJECT_AGENT, "name": session_name }),
-        )
-        .await;
+        let instance = live["sessions"]
+            .as_array()
+            .expect("agent sessions")
+            .iter()
+            .find(|entry| entry["name"] == session_name.as_str())
+            .and_then(|entry| entry["instance_id"].as_str());
+        if let Some(instance) = instance {
+            let _ = call_tool(
+                mcp_addr,
+                MCP_TOKEN,
+                &session,
+                "nession_agent_kill_session",
+                json!({
+                    "agent_id": PROJECT_AGENT,
+                    "name": session_name,
+                    "expected_instance_id": instance
+                }),
+            )
+            .await;
+        }
     }
     let _ = agent_handle.shutdown().await;
     terminate_and_wait(&mut child.0).await;
@@ -1957,12 +2007,53 @@ async fn standalone_direct_agent_mode_uses_the_real_agent_tmux() {
     assert_eq!(projects["isError"], false, "{projects}");
     assert_eq!(text_of(&projects)["projects"], json!([]));
 
+    // #4302: the direct-Agent route surfaces the owner's classified conflict
+    // for a stale incarnation, and the current Session keeps running.
+    let stale = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_kill_session",
+        json!({
+            "agent_id": AGENT_ID,
+            "name": name,
+            "expected_instance_id": "00000000-0000-4000-8000-000000000000"
+        }),
+    )
+    .await;
+    assert_eq!(stale["isError"], true, "{stale}");
+    assert_eq!(text_of(&stale)["error"]["kind"], "conflict", "{stale}");
+    let listed = call_tool(
+        mcp_addr,
+        MCP_TOKEN,
+        &session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": AGENT_ID }),
+    )
+    .await;
+    assert!(
+        text_of(&listed)["sessions"]
+            .as_array()
+            .expect("sessions")
+            .iter()
+            .any(|entry| entry["name"] == name),
+        "the refused kill must not terminate the current Session"
+    );
+
+    let instance = text_of(&created)["instance_id"]
+        .as_str()
+        .expect("the create reports its durable instance")
+        .to_string();
     let killed = call_tool(
         mcp_addr,
         MCP_TOKEN,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": AGENT_ID, "name": name }),
+        json!({
+            "agent_id": AGENT_ID,
+            "name": name,
+            "expected_instance_id": instance
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
@@ -2269,13 +2360,64 @@ async fn session_metadata_tools_share_owner_truth_across_hosts() {
     assert_eq!(missing["isError"], true, "{missing}");
     assert_eq!(text_of(&missing)["error"]["kind"], "not_found");
 
+    // #4302 SC-02: every hosting route surfaces the same classified conflict
+    // for a stale-incarnation kill, and none terminates the current Session.
+    for (addr, token, session, label) in [
+        (server_addr, SERVER_TOKEN, &server_session, "server"),
+        (agent_addr, AGENT_TOKEN, &agent_session, "agent"),
+        (routed_addr, MCP_TOKEN, &routed_session, "routed"),
+        (direct_addr, MCP_TOKEN, &direct_session, "direct"),
+    ] {
+        let stale = call_tool(
+            addr,
+            token,
+            session,
+            "nession_agent_kill_session",
+            json!({
+                "agent_id": AGENT_ID,
+                "name": name,
+                "expected_instance_id": "00000000-0000-4000-8000-000000000000"
+            }),
+        )
+        .await;
+        assert_eq!(stale["isError"], true, "{label}: {stale}");
+        assert_eq!(
+            text_of(&stale)["error"]["kind"],
+            "conflict",
+            "{label}: {stale}"
+        );
+    }
+    let still = shared_tmux.list_sessions().await.expect("real Agent list");
+    assert!(
+        still.iter().any(|session| session.name == name),
+        "a refused stale kill must not terminate the current Session"
+    );
+
     for kill_name in [&name, &legacy_name] {
+        // #4302: read the current incarnation, then bind the kill to it.
+        let read = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_agent_get_session_metadata",
+            json!({ "agent_id": AGENT_ID, "name": kill_name }),
+        )
+        .await;
+        assert_eq!(read["isError"], false, "{read}");
+        let instance = text_of(&read)["instance_id"]
+            .as_str()
+            .expect("the read reports the durable instance")
+            .to_string();
         let killed = call_tool(
             server_addr,
             SERVER_TOKEN,
             &server_session,
             "nession_agent_kill_session",
-            json!({ "agent_id": AGENT_ID, "name": kill_name }),
+            json!({
+                "agent_id": AGENT_ID,
+                "name": kill_name,
+                "expected_instance_id": instance
+            }),
         )
         .await;
         assert_eq!(killed["isError"], false, "{killed}");
@@ -2487,12 +2629,30 @@ async fn session_metadata_creation_is_equivalent_across_hosts() {
     );
 
     for (name, _) in &created_names {
+        // #4302: bind each cleanup kill to the incarnation the Agent reports.
+        let read = call_tool(
+            server_addr,
+            SERVER_TOKEN,
+            &server_session,
+            "nession_agent_get_session_metadata",
+            json!({ "agent_id": AGENT_ID, "name": name }),
+        )
+        .await;
+        assert_eq!(read["isError"], false, "{read}");
+        let instance = text_of(&read)["instance_id"]
+            .as_str()
+            .expect("the read reports the durable instance")
+            .to_string();
         let killed = call_tool(
             server_addr,
             SERVER_TOKEN,
             &server_session,
             "nession_agent_kill_session",
-            json!({ "agent_id": AGENT_ID, "name": name }),
+            json!({
+                "agent_id": AGENT_ID,
+                "name": name,
+                "expected_instance_id": instance
+            }),
         )
         .await;
         assert_eq!(killed["isError"], false, "{killed}");

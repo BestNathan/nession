@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use nession_mcp::backend::{ClusterBackend, NodeBackend, UnavailableClusterBackend};
-use nession_mcp::error::ToolError;
+use nession_mcp::error::{ToolError, ToolErrorKind};
 use nession_mcp::pending_mutation::PendingMutation;
 use nession_mcp::provider::McpToolProvider;
 use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
@@ -287,17 +287,27 @@ impl NodeBackend for AgentNodeBackend {
         &self,
         agent_id: &str,
         name: &str,
+        expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
         self.ensure_target(agent_id)?;
         let tmux = Arc::clone(&self.tmux);
         let sessions = Arc::clone(&self.sessions);
         let session_name = name.to_string();
         let queued_name = session_name.clone();
+        let expected = expected_instance_id.to_string();
         let response = self
             .run_keyed(&session_name, async move {
-                tmux.kill_session(&queued_name)
+                // #4302: the identity check and the termination run in this
+                // one keyed-lane work item — the same lane a same-name create
+                // is serialized on — so a replacement cannot interleave
+                // between them. A stale caller is a classified refusal and
+                // the successor's Session, binding and attachment are untouched.
+                tmux.kill_session_guarded(&queued_name, Some(&expected))
                     .await
-                    .map_err(|error| ToolError::backend(format!("{error:#}")))?;
+                    .map_err(|error| {
+                        let (kind, detail) = error_kind_and_detail(&error);
+                        ToolError::new(ToolErrorKind::from_wire(kind), detail)
+                    })?;
                 // The tmux Session is gone; an attachment left behind would
                 // answer the next attach with a dead backend. Same retirement
                 // the P2P route runs.

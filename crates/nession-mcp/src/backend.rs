@@ -160,10 +160,17 @@ pub trait NodeBackend: Send + Sync {
     ) -> Result<SessionCreatedOutput, ToolError>;
 
     /// `nession_agent_kill_session`.
+    ///
+    /// `expected_instance_id` is the caller-observed durable tmux incarnation
+    /// (#4302), required on this AI-facing seam: every adapter forwards it to
+    /// the Agent that owns the termination, which refuses a stale caller as a
+    /// `conflict` without touching a same-name replacement. There is no
+    /// name-only AI kill.
     async fn kill_session(
         &self,
         agent_id: &str,
         name: &str,
+        expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError>;
 
     /// `nession_agent_get_session_metadata` (#4007).
@@ -341,6 +348,7 @@ impl NodeBackend for UnavailableNodeBackend {
         &self,
         _agent_id: &str,
         _name: &str,
+        _expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
         Err(ToolError::unavailable(self.reason.clone()))
     }

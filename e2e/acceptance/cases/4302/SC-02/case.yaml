@@ -1,0 +1,24 @@
+schema_version: 1
+issue: 4302
+criterion: SC-02
+stage: staging
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: warmup-protocol-lib.cjs
+  - type: runtime
+    entry: protocol-wire.cjs
+  - type: runtime
+    entry: warmup-mcp-lib.cjs
+  - type: runtime
+    entry: tool-contract.cjs
+  - type: runtime
+    entry: warmup-mcp-integration.cjs
+  - type: runtime
+    entry: four-hosts.cjs
+  - type: runtime
+    entry: warmup-agent-integration.cjs
+  - type: runtime
+    entry: agent-embedded.cjs
+result_policy: all-pass

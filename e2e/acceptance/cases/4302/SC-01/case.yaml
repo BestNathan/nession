@@ -1,0 +1,16 @@
+schema_version: 1
+issue: 4302
+criterion: SC-01
+stage: staging
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: warmup-lib.cjs
+  - type: runtime
+    entry: warmup-integration.cjs
+  - type: runtime
+    entry: owner-stale.cjs
+  - type: runtime
+    entry: queued-interleaving.cjs
+result_policy: all-pass
