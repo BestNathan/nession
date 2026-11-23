@@ -3,9 +3,12 @@
 // deployed source with matching UI/Agent/Server immutable digests, source
 // Run/Job/SHA evidence and trusted readback. GHCR is the sole GitOps deployment
 // registry since #4032; the legacy ACR witness belongs to #3953/#3964 only.
-// No credentials, registry writes or kubectl actions: this is an independent
-// public read-only cross-check. The trusted deployed Acceptance runner remains
-// the only authoritative writer of the deployment-linked Acceptance record.
+// No registry writes or kubectl actions: this is an independent read-only
+// cross-check. GitHub reads use the trusted runner's own read-only workflow
+// token when present (hosted-runner egress IPs exhaust the unauthenticated
+// quota, #4354 SC-03 first deployed run); without a token the public read path
+// is unchanged. The trusted deployed Acceptance runner remains the only
+// authoritative writer of the deployment-linked Acceptance record.
 const assert = require('node:assert/strict');
 const { targetSha } = require('../../../shared/mcp-cases.cjs');
 
@@ -27,12 +30,22 @@ const FIX_INVARIANTS = [
 class Unobservable extends Error {}
 const safe = x => String(x ?? '').replace(/[^A-Za-z0-9 .,_:/@()-]/g, ' ').slice(0, 170);
 
+// Canonical read-only receipt pattern (e.g. 3082/SC-07): the harness passes
+// the workflow environment through, so use its read-only token for API
+// reads instead of the shared hosted-runner unauthenticated quota.
+function apiHeaders(token) {
+  const headers = { Accept: 'application/vnd.github+json',
+    'User-Agent': 'nession-4354-deployed-identity-case' };
+  if (token) headers.Authorization = 'Bearer ' + token;
+  return headers;
+}
+const allowedRev = rev => SHA.test(rev) || rev === 'acceptance-results';
 async function get(route) {
+  const headers = apiHeaders(process.env.GITHUB_TOKEN || process.env.GH_TOKEN);
   let response;
   try {
     response = await fetch(API + route, {
-      headers: { Accept: 'application/vnd.github+json',
-        'User-Agent': 'nession-4354-deployed-identity-case' },
+      headers,
       signal: AbortSignal.timeout(20000),
     });
   } catch {
@@ -166,6 +179,18 @@ function fixtures() {
   rejects(x => { x.source_sha = 'f'.repeat(40); });
   rejects(x => { x.provenance.verified_source.run_id = 102; });
   rejects(x => { x.remote_observation.evaluation = 'Pass'; });
+  // Live-readback regressions (first deployed run, #4354 SC-03): the store
+  // ref must be readable and the runner's read-only token must authenticate
+  // API reads; hosted-runner unauthenticated quota alone returns Pending.
+  assert.equal(allowedRev(sha), true);
+  assert.equal(allowedRev('acceptance-results'), true);
+  assert.equal(allowedRev('main'), false);
+  assert.equal(allowedRev(''), false);
+  assert.equal(allowedRev(sha.slice(0, 39)), false);
+  assert.equal(apiHeaders('').Authorization, undefined);
+  assert.equal(apiHeaders(undefined).Authorization, undefined);
+  assert.equal(apiHeaders('read-only-token').Authorization,
+    'Bearer read-only-token');
   // The fix-invariant source binding rejects a pre-fix collector source.
   const preFix = 'function deploymentFor() { return availableReplicas >= 1; }';
   for (const invariant of FIX_INVARIANTS) {
@@ -178,7 +203,8 @@ function fixtures() {
 }
 
 async function fileAt(path, rev) {
-  assert.ok(SHA.test(rev), 'only an exact immutable source SHA is allowed');
+  assert.ok(allowedRev(rev),
+    'only an immutable source SHA or canonical deployment-store ref is allowed');
   const file = await get('/contents/' + path + '?ref=' + rev);
   assert.equal(file.type, 'file');
   assert.equal(file.encoding, 'base64');
