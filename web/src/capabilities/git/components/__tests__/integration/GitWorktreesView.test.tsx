@@ -2,6 +2,7 @@ import { render, screen } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitWorktreesView } from '../../GitWorktreesView';
 import { gitApi } from '../../../GitPlugin';
+import { WORKSPACE_BOUNDED_SCROLL_MARKER } from '@/shared/lib/workspaceScrollClearance';
 import type { GitWorktree, GitWorktreesResponse } from '../../../types';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import type { Agent, Session } from '@/types';
@@ -68,6 +69,20 @@ describe('GitWorktreesView', () => {
 
     expect(await screen.findByTestId('git-worktree-list')).toBeInTheDocument();
     expect(mockedWorktrees).toHaveBeenCalledWith({ agent_id: 'a1', session: 'a1:work' });
+  });
+
+  it('is the section’s internal scroll owner on the declared bounded App surface (#4188)', async () => {
+    // Same contract as Branches: the bounded Git surface supplies the height,
+    // so this listing must scroll and spend the host's measured inset.
+    mockedWorktrees.mockResolvedValue(
+      ok(Array.from({ length: 40 }, (_, index) => worktree({ path: `/repo.wt/${index}` }))),
+    );
+
+    render(<GitWorktreesView ctx={ctx()} />);
+
+    const list = await screen.findByTestId('git-worktree-list');
+    expect(list.className).toContain('overflow-y-auto');
+    expect(list.className).toContain(WORKSPACE_BOUNDED_SCROLL_MARKER);
   });
 
   it('leads with the name a person calls the checkout, and keeps the address', async () => {

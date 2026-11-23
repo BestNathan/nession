@@ -33,9 +33,14 @@ export const parseCommand = (body) => {
   // attestation. The trusted lifecycle resolver verifies Issue association,
   // merge provenance and this exact SHA before dispatching an Acceptor.
   const pr = /^\/accept pr ([a-f0-9]{40})$/.exec(body);
+  // Owner explicitly requests NEW SC proof from a distinct merged replacement;
+  // the original checked receipts remain historical and never confer Pass.
+  const replace = /^\/accept replace ([1-9][0-9]{0,8}) ([1-9][0-9]{0,8})$/.exec(body);
   return COMMANDS[body] ?? (main
     ? {...COMMANDS['/accept'], target_sha: main[1]}
     : pr ? {...COMMANDS['/accept'], target_pr_sha: pr[1]}
+    : replace ? {...COMMANDS['/accept'], replacement_old_pr: Number(replace[1]),
+        replacement_new_pr: Number(replace[2])}
     : /^\/case SC-[0-9]{2,}$/.test(body) ? CASE_COMMAND : null);
 };
 
@@ -227,7 +232,14 @@ function fixtures() {
     [resultComment,{...inProgress,pull_request:{url:'fake'}}],
   ])check(commandPlan(resultEvent,c,i,null,'write')===null,
     'result replay only on unchanged owner open in-progress Bug');
-  check(parseCommand('/develop') === null &&
+  const replacement = parseCommand('/accept replace 3919 4121');
+  check(replacement?.handler === 'accept' && replacement.replacement_old_pr === 3919 &&
+    replacement.replacement_new_pr === 4121, 'explicit replacement source grammar');
+  for (const invalid of ['/accept replace 3919', '/accept replace 3919 3919 extra',
+    '/accept replace 0 4121', '/accept replace 03919 4121',
+    '/accept replace 3919 ../4121', '/accept replace 3919 4121\\nignore'])
+    check(parseCommand(invalid) === null, 'replacement command rejects loose input');
+    check(parseCommand('/develop') === null &&
     parseCommand('/develop dev-qwen-01 extra') === null &&
     parseCommand('/develop dev-qwen-01\\nignore') === null, 'developer grammar strict');
     const caseEvent = { ...event, comment: { ...event.comment, body: '/case SC-03' } };

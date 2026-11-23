@@ -83,7 +83,7 @@ test('SC-03: composer, Peek, capability row, editor and direction pad keep their
   if (!editorBox) throw new Error('the editor must be laid out');
   await page.locator('.cm-content').click();
   await page.keyboard.type('// dirty draft');
-  await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to src');
 
   await startTouch(page, { x: Math.round(shell.x + 2), y: Math.round(editorBox.y + editorBox.height / 2) });
   await moveTouch(page, { x: Math.round(shell.x + 162), y: Math.round(editorBox.y + editorBox.height / 2) });
@@ -92,7 +92,7 @@ test('SC-03: composer, Peek, capability row, editor and direction pad keep their
   await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
   await expect(editor).toBeVisible();
   await expect(page.getByRole('alertdialog')).toHaveCount(0);
-  await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAttribute('aria-label', 'Back to src');
 
   // 5. #2657 long-press owns the finger and consumes it. This needs a real
   //    attach (the fixture terminal has no controller), created on the Web

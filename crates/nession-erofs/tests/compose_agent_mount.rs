@@ -23,7 +23,7 @@ use nession_erofs::oci::annotation::MEDIA_TYPE_EROFS;
 use nession_erofs::oci::config::{ImageConfig, RootFs, RuntimeConfig};
 use nession_erofs::oci::descriptor::{Descriptor, Platform};
 use nession_erofs::{
-    host_platform, image_documents_with_runtime, BlobStore, MkfsRunner, NoopObserver, Packaging,
+    host_platform, image_documents_with_runtime, FsBlobStore, MkfsRunner, NoopObserver, Packaging,
     ProcessControl, ProcessMkfsRunner, ResumePoint,
 };
 use serde_json::Map;
@@ -125,7 +125,7 @@ async fn a_compose_result_transfers_to_the_agent_cache_and_mounts_without_source
         .iter()
         .map(|source| source.path.clone())
         .collect::<Vec<_>>();
-    let store = BlobStore::new(root.path().join("server-blobs")).unwrap();
+    let store = FsBlobStore::new(root.path().join("server-blobs")).unwrap();
     let composer = ErofsComposer::new(
         Arc::new(ProcessErofsExtractor::default()),
         mkfs,

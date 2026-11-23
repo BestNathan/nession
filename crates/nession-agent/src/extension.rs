@@ -24,8 +24,10 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::sync::Arc;
 
 use nession_common::extension::{AgentExtension, ExtensionUnitPolicy};
+use nession_common::session_activity::SessionActivityProvider;
 use nession_protocol::{
     ContractVersion, DescriptorError, IdentityError, ProtocolDescriptor, ProtocolId,
     ProtocolManifest,
@@ -330,6 +332,19 @@ impl ExtensionRegistry {
         self.policies.get(wire).copied()
     }
 
+    /// The Session Activity providers this composition contributes (#3800).
+    ///
+    /// Sourced from the composed extensions rather than a caller-supplied
+    /// list: contributing activity is a property of the extension that owns
+    /// the workload, so it cannot be added beside the registry without also
+    /// being served by it.
+    pub fn activity_providers(&self) -> Vec<Arc<dyn SessionActivityProvider>> {
+        self.extensions
+            .iter()
+            .filter_map(|extension| extension.session_activity_provider())
+            .collect()
+    }
+
     /// Try to dispatch a message. Returns `Some(response)` if handled, `None` to
     /// fall through to built-in handlers.
     pub async fn dispatch(&self, msg_type: &str, payload: Value) -> Option<anyhow::Result<Value>> {
@@ -480,6 +495,74 @@ mod tests {
             vec![ContractDescriptor::new(ContractVersion::V1, &[wire])],
         )
         .unwrap()
+    }
+
+    /// An extension that contributes one Session Activity provider (#3800).
+    struct ActivityExtension;
+
+    #[async_trait]
+    impl AgentExtension for ActivityExtension {
+        fn name(&self) -> &'static str {
+            "activity"
+        }
+
+        fn descriptors(&self) -> Result<Vec<ProtocolDescriptor>, IdentityError> {
+            Ok(vec![ProtocolDescriptor::new(
+                "fake.activity",
+                "test",
+                vec![ContractDescriptor::new(
+                    ContractVersion::V1,
+                    &["fake.activity"],
+                )],
+            )?])
+        }
+
+        async fn handle_command(&self, _command: &str, _payload: Value) -> anyhow::Result<Value> {
+            Ok(Value::Null)
+        }
+
+        fn session_activity_provider(
+            &self,
+        ) -> Option<Arc<dyn nession_common::session_activity::SessionActivityProvider>> {
+            Some(Arc::new(FixedProvider))
+        }
+    }
+
+    struct FixedProvider;
+
+    #[async_trait]
+    impl nession_common::session_activity::SessionActivityProvider for FixedProvider {
+        fn id(&self) -> &'static str {
+            "fake"
+        }
+
+        fn class(&self) -> nession_common::session_activity::WorkloadClass {
+            nession_common::session_activity::WorkloadClass::GenericShell
+        }
+
+        async fn probe(
+            &self,
+            _context: &nession_common::session_activity::SessionActivityContext,
+        ) -> anyhow::Result<Option<nession_common::session_activity::ActivityLevel>> {
+            Ok(None)
+        }
+    }
+
+    #[test]
+    fn activity_providers_come_from_the_composed_extensions() {
+        let registry = compose(vec![
+            Box::new(Fake::new("git", "git.status", "git.status")),
+            Box::new(ActivityExtension),
+        ])
+        .unwrap();
+
+        let providers = registry.activity_providers();
+        assert_eq!(
+            providers.len(),
+            1,
+            "only the contributing extension appears"
+        );
+        assert_eq!(providers[0].id(), "fake");
     }
 
     #[test]
@@ -1012,21 +1095,23 @@ mod tests {
         let registry = compose_with_core(Vec::new(), served).unwrap();
         let manifest = registry.manifest();
 
-        // The core and peer-to-peer lists share six ids (`session.create`,
+        // The core and peer-to-peer lists share eight ids (`session.create`,
         // `session.kill`, `session.capture-preview`, `session.metadata.get` /
-        // `session.metadata.update` since #2789, and `session.list` since #565,
+        // `session.metadata.update` since #2789, `session.metadata.patch` since
+        // #4007, `session.list` since #565,
         // where the Server-hosted MCP node tools ask the Agent over the control
-        // channel for the same answer a direct client gets over P2P), so the
-        // union is one entry per id — the derived assertion below states that
-        // relation.
+        // channel for the same answer a direct client gets over P2P, and
+        // `mcp.tool.call` since #3778: a contributed Tool is invoked on both
+        // the Server-relayed and direct management surfaces), so the union is
+        // one entry per id — the derived assertion below states that relation.
         //
         // Spelled as a number on purpose: adding a unit should make someone read
         // this line, and the failure of a relaxed assertion is indistinguishable
         // from a unit that was never wired up.
         assert_eq!(
             manifest.protocols.len(),
-            core.len() + p2p.len() - 6,
-            "the union is by id, so the six shared units are counted once"
+            core.len() + p2p.len() - 8,
+            "the union is by id, so the eight shared units are counted once"
         );
         // The literal count is unchanged by #565: `session.list` was already in
         // the peer-to-peer list, so adding its control-channel arm grows both
@@ -1078,9 +1163,19 @@ mod tests {
         // credential model, and `server.image.access` left with it — image
         // blobs are read with the Server Token as a bearer credential rather
         // than through an access-grant wire.
+        // Up by one for #3778: `mcp.tool.call` is served on both sockets,
+        // because the owning Agent executes a contributed Tool whether the
+        // Server relayed the call or a direct management client made it.
+        // Up by one for #3796: `agent.session.sandbox.image-prepare` is the
+        // explicit, user-authorized cache action the Server forwards for one
+        // current Session. It prepares one already-cataloged identity and
+        // never starts a download from an observation read.
+        // Up by one for #4007: `session.metadata.patch` is the partial-update
+        // sibling of the two metadata units, served on both sockets because
+        // the Agent resolves the patch at the one owner either way.
         assert_eq!(
             manifest.protocols.len(),
-            40,
+            43,
             "the surface is {:?}",
             manifest.protocols.keys().collect::<Vec<_>>()
         );

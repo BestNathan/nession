@@ -99,10 +99,14 @@ Layout validation starts with ownership, not screenshots.
 `design/scripts/layout-ownership.mjs` (in `design-system-fast`) rejects
 capability/product page geometry, capability-local App headers, Workspace host
 chrome, duplicated shared-recipe classes and raw numeric spacing in the recipe
-owner — while accepting local `flex`/`grid` composition. Browser checks then
-assert the computed result: one intended scroll owner, no page-level horizontal
-overflow, the approved control band, one App page header/Back, and visible
-actions. The canonical model is
+owner — while accepting local `flex`/`grid` composition. From #4222 it also
+requires the reusable `WorkspaceBoundedScrollport` (a capability cannot restate
+the measured clearance on a content-spacing element), rejects an undeclared
+fixed capability footer, and proves the App scroll-coverage inventory is
+complete against the route/depth/tab/section unions. Browser checks then
+assert the computed result: every designated scroll owner, no page-level
+horizontal overflow, the approved control band, one App page header/Back, and
+visible actions. The canonical model is
 [composition.md §14](../composition.md#14-layout-ownership-and-shared-recipes-3194).
 
 ## Spatial relationship and content-rhythm evidence (#4045)

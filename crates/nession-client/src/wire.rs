@@ -47,6 +47,12 @@ pub const SERVER_AGENT_LIST: &str = "server.agent.list";
 /// `server.session.list` — sessions, optionally scoped to one agent.
 pub const SERVER_SESSION_LIST: &str = "server.session.list";
 
+/// `server.project.list` — every Project declaration the Server owns.
+pub const SERVER_PROJECT_LIST: &str = "server.project.list";
+
+/// `server.project.get` — one Project declaration by identity.
+pub const SERVER_PROJECT_GET: &str = "server.project.get";
+
 /// `server.session.attach` — ask the Server how to reach a session.
 pub const SERVER_SESSION_ATTACH: &str = "server.session.attach";
 
@@ -63,8 +69,26 @@ pub const SERVER_SESSION_CREATE: &str = "server.session.create";
 /// `server.session.kill` — kill one session.
 pub const SERVER_SESSION_KILL: &str = "server.session.kill";
 
+/// `server.session.metadata.get` — one Session's Agent-owned work context.
+pub const SERVER_SESSION_METADATA_GET: &str = "server.session.metadata.get";
+
+/// `server.session.metadata.patch` — partial update with the required
+/// incarnation and revision preconditions.
+pub const SERVER_SESSION_METADATA_PATCH: &str = "server.session.metadata.patch";
+
 /// `server.info` — Server version, uptime and protocol manifest.
 pub const SERVER_INFO: &str = "server.info";
+
+/// `server.mcp.tools.list` — the Server's validated contribution manifest
+/// (`#3778`).
+pub const SERVER_MCP_TOOLS_LIST: &str = "server.mcp.tools.list";
+
+/// `server.mcp.tool.call` — one authorized Extension-contributed Tool call,
+/// routed by the Server to the explicitly named Agent (`#3778`).
+pub const SERVER_MCP_TOOL_CALL: &str = "server.mcp.tool.call";
+
+/// `agent.mcp.tool.call` — the same call on a direct Agent connection.
+pub const AGENT_MCP_TOOL_CALL: &str = "agent.mcp.tool.call";
 
 /// `server.session.capture-preview` — read-only scrollback capture.
 pub const SERVER_SESSION_CAPTURE_PREVIEW: &str = "server.session.capture-preview";
@@ -132,3 +156,10 @@ pub const AGENT_SESSION_CREATE: &str = "agent.session.create";
 
 /// `agent.session.kill` — kill a tmux Session on the Agent.
 pub const AGENT_SESSION_KILL: &str = "agent.session.kill";
+
+/// `agent.session.metadata.get` — one Agent Session's work context.
+pub const AGENT_SESSION_METADATA_GET: &str = "agent.session.metadata.get";
+
+/// `agent.session.metadata.patch` — partial update with the Agent's required
+/// incarnation and revision preconditions.
+pub const AGENT_SESSION_METADATA_PATCH: &str = "agent.session.metadata.patch";

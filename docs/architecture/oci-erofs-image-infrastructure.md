@@ -372,6 +372,16 @@ Three reusable contracts in `nession-erofs`, consumed by both hosts:
 | `RepositoryStore` | Determines accessible Manifests/Tags and the **complete reachable blob closure** of a repository. The Server implements it over the SQLite catalog; the Agent implements it as a projection of its verified local references (grants and cached Manifest closures). |
 | `RegistryAuthorizer` | Gates pull/push/list actions per principal, repository and scope. Injected by the host; never a bypassing global token. |
 
+Delivery status: `BlobStore`/`RepositoryStore` and the shared repository/tag
+grammars are delivered by #4087 in `nession-erofs::contracts`, with the Server
+adapters `FsBlobStore`/`CatalogRepositoryStore` and the Agent adapters
+`CacheBlobStore`/`CacheRepositoryStore`. `RegistryAuthorizer` is delivered with
+the Registry service (#4088). Contract reads are raw streaming access gated by
+explicit verification before consumption; the Agent adapter is stricter and
+verifies on read. Removal/eviction is deliberately absent from `BlobStore`:
+retention belongs to the owning host's policy, so a shared Registry reader can
+never reclaim another owner's pinned or transferring bytes.
+
 Rules:
 
 - A local Store is either **authoritative/persistent** (Server CAS + catalog)
@@ -411,6 +421,18 @@ host's `BlobStore`, `RepositoryStore` and `RegistryAuthorizer`.
 - Agent mode is **read-only by explicit opt-in**: all mutation verbs are
   denied even with a read credential, and access is scoped to verified
   complete artifacts and authenticated peers.
+
+Delivery status: the service is delivered by #4088 in
+`nession-erofs::registry::service` (feature `registry-service`), generic over
+the supplied `BlobStore`/`RepositoryStore`/`RegistryAuthorizer` plus a
+`RepositoryPublisher` for write mode (`RegistryMode::ReadOnly`/`ReadWrite`).
+The Server publication adapter `CatalogRepositoryPublisher` (feature `catalog`)
+records objects, descriptor edges and the Tag in one catalog transaction.
+Exposure follows the #4087 tag-rooted reachability fence: a Manifest pushed by
+Tag is readable by Tag and digest; moving a Tag moves the exposed root
+atomically. The service compiles and mounts without the external client or the
+catalog (the Agent boundary); wiring it into the Server/Agent ingresses and the
+proprietary-endpoint migration belong to #4090.
 
 ### Registry Client SDK (#4089)
 
@@ -646,13 +668,14 @@ Target module ownership inside `nession-erofs`:
 | Module | Owns |
 |---|---|
 | `oci/` | Descriptor, Manifest, Config, Index, annotations, validation, OCI layout |
-| `blob/` | digest and general CAS store |
-| `catalog/` | repository, tag, reference graph, SQLite schema/migration, GC |
+| `contracts` | Reusable `BlobStore`/`RepositoryStore` contracts and the shared repository/tag name grammars (#4087); no host identity, database or authorization state |
+| `blob/` | digest and general CAS store; `FsBlobStore` is the Server CAS adapter of the `BlobStore` contract |
+| `catalog/` | repository, tag, reference graph, SQLite schema/migration, GC; `CatalogRepositoryStore` is the Server adapter of the `RepositoryStore` contract |
 | `image/` | publish, resolve, inspect |
 | `build/` | EROFS, Git, local, archive and OCI-source publication |
 | `registry/` | OCI Distribution Client SDK (auth, pull, push, verified multi-source ingest) and the mountable `/v2/` Registry service (#4088/#4089); both host-independent, authorization and credentials injected by the host |
 | `distribution/` | Server→Agent HTTP transfer engine |
-| `cache/` | Agent fetch/resume/verify and eviction |
+| `cache/` | Agent fetch/resume/verify and eviction; `CacheBlobStore`/`CacheRepositoryStore` are the Agent adapters of the shared contracts over the verified per-identity namespace |
 | `mount/` | FUSE primitive and physical mount lease manager |
 
 The direction of dependency is one-way: `oci` and `blob` are foundational;

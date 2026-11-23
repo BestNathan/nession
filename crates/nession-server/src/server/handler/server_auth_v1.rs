@@ -25,9 +25,11 @@ impl ConnectionHandler {
                 client_id: None,
             });
 
-        // Empty server auth_token means no-auth mode: accept any client
-        let auth_ok = self.config.server_auth_token.is_empty()
-            || payload.auth_token.as_str() == self.config.server_auth_token;
+        // A disabled verifier means no-auth mode: accept any client. A
+        // configured token is compared by the canonical constant-time
+        // verifier, never by string equality (#4066 SC-03).
+        let auth_ok = !self.config.server_auth.is_enabled()
+            || self.config.server_auth.verify(payload.auth_token.as_str());
 
         if auth_ok {
             self.authenticated_client = true;

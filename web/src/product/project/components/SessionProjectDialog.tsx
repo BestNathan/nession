@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Dialog,
   DialogBody,
@@ -34,6 +34,7 @@ export function SessionProjectDialog({
   projects,
   busy,
   error,
+  conflict,
   onSave,
   onClose,
 }: {
@@ -41,14 +42,26 @@ export function SessionProjectDialog({
   projects: Project[];
   busy: boolean;
   error: string | null;
+  /** The last save lost a race; the selection below is deliberately kept. */
+  conflict: boolean;
   onSave: (projectId: string | null) => void;
   onClose: () => void;
 }) {
   const [selection, setSelection] = useState(NONE);
+  // The dialog is keyed on the Session it was opened for, not on every
+  // membership refresh: a live push or a conflict-driven token update must not
+  // replace the selection the user is about to retry (#4234).
+  const selectionSession = useRef<string | null>(null);
 
   useEffect(() => {
-    setSelection(session?.project_id ?? NONE);
-  }, [session?.session_id, session?.project_id]);
+    const sessionId = session?.session_id ?? null;
+    if (sessionId !== selectionSession.current) {
+      selectionSession.current = sessionId;
+      if (session) {
+        setSelection(session.project_id ?? NONE);
+      }
+    }
+  }, [session]);
 
   const projectId = selection === NONE ? null : selection;
   const current = projects.find((project) => project.project_id === session?.project_id);
@@ -63,12 +76,12 @@ export function SessionProjectDialog({
         <DialogHeader>
           <DialogTitle>Project membership</DialogTitle>
         </DialogHeader>
-        <DialogBody className="flex flex-col gap-3">
+        <DialogBody className="flex flex-col gap-[var(--nession-shell-space-3)]">
           <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
             Session {session?.session_name ?? ''} ·{' '}
             {current ? `currently ${current.name}` : 'currently unassociated'}
           </p>
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-[var(--nession-shell-space-2)]">
             <Label htmlFor="session-project-select">Project</Label>
             <Select
               value={selection}
@@ -105,7 +118,12 @@ export function SessionProjectDialog({
             process.
           </p>
           {error ? (
-            <p data-testid="session-project-error" className={cn('text-destructive', chromeSansRole('body'))}>
+            <p
+              data-testid="session-project-error"
+              data-conflict={conflict ? 'true' : undefined}
+              role="alert"
+              className={cn('text-destructive', chromeSansRole('body'))}
+            >
               {error}
             </p>
           ) : null}

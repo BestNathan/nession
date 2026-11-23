@@ -1,4 +1,5 @@
 import { ProtocolDirectory } from '@/platform/protocol';
+import { InvalidSocketEnvelopeError, parseSocketEnvelope } from './envelope';
 import { MessageRouterImpl, RequestTimeoutError } from './MessageRouter';
 import type {
   TransportDiagnostic,
@@ -28,6 +29,44 @@ const PERSISTENT_RECONNECT_DELAY_MS = 15_000;
 
 function reconnectDelayMs(attempt: number, baseDelay: number): number {
   return Math.min(baseDelay * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
+}
+
+/**
+ * Default finite budget for the browser socket's native outbound buffer
+ * (#4069), in UTF-8 bytes.
+ *
+ * `ws.send()` returns as soon as the frame is handed to the browser, so the
+ * only truthful pressure signal is `ws.bufferedAmount` — bytes queued but not
+ * yet written to the network. Without a bound, a slow link lets control and
+ * capability frames accumulate until the browser closes the socket. 16 MiB
+ * stays above the largest legitimate single frame the Web client sends (a
+ * 10 MiB file save, base64-expanded, plus its envelope) while remaining a
+ * finite, documented limit.
+ */
+export const DEFAULT_MAX_BUFFERED_SEND_BYTES = 16 * 1024 * 1024;
+
+const textEncoder = new TextEncoder();
+
+/**
+ * The outbound socket buffer could not admit a frame (#4069).
+ *
+ * Thrown synchronously by `send`/`sendTracked`/`request` before `ws.send`, so
+ * a caller never mistakes a refused frame for one the browser accepted.
+ * Capability plugins own their protocol-specific retry/idempotency; the
+ * transport only states the bounded-pressure fact.
+ */
+export class SocketSendBufferFullError extends Error {
+  constructor(
+    readonly bufferedBytes: number,
+    readonly messageBytes: number,
+    readonly limitBytes: number,
+  ) {
+    super(
+      `Socket send buffer full: ${bufferedBytes} buffered + ${messageBytes} message bytes `
+      + `exceeds ${limitBytes}`,
+    );
+    this.name = 'SocketSendBufferFullError';
+  }
 }
 
 // Moved to `shared/lib/agentWsUrl.ts` so `shared/lib/addressSelection.ts` can
@@ -371,11 +410,30 @@ export class WebSocketService implements PluginSurface {
     return () => this.stateListeners.delete(handler);
   }
 
+  /**
+   * Serialize and admit one frame onto the browser socket.
+   *
+   * Admission is checked before `ws.send`, and the transport queues nothing on
+   * its own: a frame is either handed to the browser now or refused with
+   * {@link SocketSendBufferFullError}. That is what makes close/reconnect
+   * release stale pressure automatically — there is no JavaScript backlog to
+   * replay against a new generation (#4069 SC-03).
+   */
   private sendRaw(message: SocketMessage): void {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+    const ws = this.ws;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
       throw new Error('WebSocket not connected');
     }
-    this.ws.send(JSON.stringify(message));
+    const serialized = JSON.stringify(message);
+    // UTF-8 bytes, not string length: the native buffer counts wire bytes, and
+    // a frame of CJK text is up to three bytes per JavaScript code unit.
+    const messageBytes = textEncoder.encode(serialized).byteLength;
+    const bufferedBytes = ws.bufferedAmount ?? 0;
+    const limitBytes = this.options.maxBufferedSendBytes ?? DEFAULT_MAX_BUFFERED_SEND_BYTES;
+    if (bufferedBytes + messageBytes > limitBytes) {
+      throw new SocketSendBufferFullError(bufferedBytes, messageBytes, limitBytes);
+    }
+    ws.send(serialized);
   }
 
   private openSocket(resolve: () => void, reject: (error: Error) => void): void {
@@ -401,15 +459,36 @@ export class WebSocketService implements PluginSurface {
       if (this.generation !== myGeneration) {
         return;
       }
-      try {
-        if (typeof event.data === 'string') {
-          const message = JSON.parse(event.data) as SocketMessage;
-          this.router.handleIncoming(message);
-        } else if (event.data instanceof ArrayBuffer) {
-          this.router.handleBinary(event.data);
+      if (typeof event.data === 'string') {
+        let message: SocketMessage;
+        try {
+          // The wire boundary is the one place every server frame crosses.
+          // TypeScript's `as` cannot validate server data; an invalid envelope
+          // is rejected here, before correlation or subscriber state (#4070).
+          message = parseSocketEnvelope(event.data);
+        } catch (error) {
+          const failure = error instanceof Error ? error : new Error(String(error));
+          this.diagnose({
+            event: 'invalid-envelope',
+            generation: myGeneration,
+            frameClass: failure instanceof InvalidSocketEnvelopeError
+              ? failure.reason
+              : undefined,
+          });
+          this.options.onError?.(failure);
+          return;
         }
-      } catch (error) {
-        this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+        try {
+          this.router.handleIncoming(message);
+        } catch (error) {
+          this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+        }
+      } else if (event.data instanceof ArrayBuffer) {
+        try {
+          this.router.handleBinary(event.data);
+        } catch (error) {
+          this.options.onError?.(error instanceof Error ? error : new Error(String(error)));
+        }
       }
     };
 
@@ -558,8 +637,11 @@ export class WebSocketService implements PluginSurface {
         // socket opened, but the answer may never have arrived (timeout,
         // unresponsive peer). Only the handshake owner can tell those apart
         // (#3358 SC-02); the historical default treats every rejection as a
-        // refusal (#692).
-        const refused = this.options.isHandshakeRefusal?.(failure) ?? true;
+        // refusal (#692). Outbound admission pressure is likewise the transport
+        // failing to write, never the peer answering, so it stays recoverable
+        // even though the owner would classify the error as a refusal (#4069).
+        const refused = !(failure instanceof SocketSendBufferFullError)
+          && (this.options.isHandshakeRefusal?.(failure) ?? true);
         this.diagnose({
           event: 'handshake-failure',
           generation: myGeneration,

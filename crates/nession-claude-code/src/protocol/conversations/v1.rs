@@ -45,7 +45,7 @@ pub const DEFAULT_ITEM_LIMIT: u32 = 50;
 /// claim the provider cannot support.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationActivityV1 {
     /// The Session is bound to this conversation and Claude is running now.
@@ -66,9 +66,9 @@ pub enum ConversationActivityV1 {
 /// of this (a `Candidate` with metadata and an `Identity` without), and the Web
 /// had to join them back by id to render a header; that join is why this is
 /// one shape now.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct ConversationItemV1 {
     /// The conversation's identity — Claude's own session id.
     ///
@@ -104,9 +104,9 @@ pub struct ConversationItemV1 {
 /// conversation is another Session's unbound list row. Absent when the host
 /// reported no binding, and absent when the binding's transcript is not among
 /// this Session's current cwd (a stale binding is not the current one).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct ConversationBindingV1 {
     /// The conversation the Session is bound to — one of `items[]`'s ids.
     pub conversation_id: String,
@@ -120,7 +120,7 @@ pub struct ConversationBindingV1 {
 /// a failure — `state: ready, items: []` says it structurally.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ConversationsStateV1 {
     /// The provider answered; `items` is the whole answer, empty or not.
@@ -134,9 +134,9 @@ pub enum ConversationsStateV1 {
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct ConversationsRequestV1 {
     /// The Nession session whose conversations are wanted. Required, because
     /// conversation visibility is scoped to a Session's cwd — there is no
@@ -155,9 +155,9 @@ pub struct ConversationsRequestV1 {
 }
 
 /// The answer.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct ConversationsResponseV1 {
     pub state: ConversationsStateV1,
 

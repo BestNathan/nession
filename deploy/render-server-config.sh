@@ -20,12 +20,34 @@ out="${1:?usage: render-server-config.sh <config.toml path>}"
 
 SERVER_LISTEN="${SERVER_LISTEN:-0.0.0.0:18080}"
 SERVER_AUTH_TOKEN="${SERVER_AUTH_TOKEN:-}"
+SERVER_ALLOWED_ORIGINS="${SERVER_ALLOWED_ORIGINS:-}"
+SERVER_ALLOW_INSECURE_REMOTE="${SERVER_ALLOW_INSECURE_REMOTE:-false}"
 TLS_CERT_PATH="${TLS_CERT_PATH:-}"
 TLS_KEY_PATH="${TLS_KEY_PATH:-}"
 SERVER_HEARTBEAT_INTERVAL="${SERVER_HEARTBEAT_INTERVAL:-10}"
 SERVER_HEARTBEAT_TIMEOUT="${SERVER_HEARTBEAT_TIMEOUT:-30}"
 NESSION_TERMINAL_COLS="${NESSION_TERMINAL_COLS:-96}"
 NESSION_TERMINAL_WEB_FONT_SIZE="${NESSION_TERMINAL_WEB_FONT_SIZE:-14}"
+
+case "$SERVER_ALLOW_INSECURE_REMOTE" in
+  true|false) ;;
+  *) echo "SERVER_ALLOW_INSECURE_REMOTE must be true or false" >&2; exit 1 ;;
+esac
+
+# Project the comma-separated browser-origin allowance into a TOML array.
+# Entries are written unvalidated, like every value in this projection: the
+# canonical `ServerConfig::validate` rejects an entry that is not `http(s)://`
+# or `"null"` before the listener binds (#4066).
+allowed_origins=""
+set -f
+old_ifs=$IFS
+IFS=,
+for origin in $SERVER_ALLOWED_ORIGINS; do
+  [ -n "$origin" ] || continue
+  allowed_origins="${allowed_origins}${allowed_origins:+, }\"${origin}\""
+done
+IFS=$old_ifs
+set +f
 
 mkdir -p "$(dirname "$out")"
 
@@ -34,6 +56,8 @@ mkdir -p "$(dirname "$out")"
 cat > "$out" <<TOML
 listen_address = "${SERVER_LISTEN}"
 auth_token = "${SERVER_AUTH_TOKEN}"
+allowed_origins = [${allowed_origins}]
+allow_insecure_remote = ${SERVER_ALLOW_INSECURE_REMOTE}
 tls_cert_path = "${TLS_CERT_PATH}"
 tls_key_path = "${TLS_KEY_PATH}"
 heartbeat_interval_secs = ${SERVER_HEARTBEAT_INTERVAL}

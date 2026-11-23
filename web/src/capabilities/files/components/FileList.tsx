@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import {
   FileListEntryRows,
   FileListErrorPanel,
@@ -98,9 +98,9 @@ export function FileList({
   const atRoot = path === '';
 
   return (
-    <div
+    <WorkspaceBoundedScrollport
       ref={listRef}
-      className={cn('h-full min-h-0 overflow-y-auto', workspaceScrollClearanceClass)}
+      viewportClassName="h-full"
       data-testid="files-app-list"
       onScroll={() => {
         const node = listRef.current;
@@ -135,6 +135,6 @@ export function FileList({
           onToggleSelect={onToggleSelect}
         />
       )}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }

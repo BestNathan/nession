@@ -125,8 +125,8 @@ pub fn read_page(
 
     let mut stats = ParseStats::default();
     let mut facts: Vec<Fact> = Vec::new();
-    for (offset, line) in &selected.records {
-        let adapted = adapt(line, *offset);
+    for record in &selected.records {
+        let adapted = adapt(&record.line, record.offset);
         stats.record(adapted.outcome);
         facts.extend(adapted.facts);
     }

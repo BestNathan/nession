@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Plus, Search } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Skeleton } from '@/components/ui/skeleton';
@@ -220,9 +220,8 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
         </DropdownMenu>
       </div>
 
-      <div
+      <WorkspaceBoundedScrollport
         ref={listRef}
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
         data-testid="env-navigator-list"
         onScroll={() => {
           const node = listRef.current;
@@ -232,7 +231,7 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
         }}
       >
         <NavigatorBody {...props} query={query} />
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

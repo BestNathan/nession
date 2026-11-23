@@ -24,6 +24,7 @@ import { installWorkspaceSurface } from './fixtureWorkspaces';
 import { fixtureFileOps } from './fixtureFileOps';
 import { fixtureGitSurface } from './fixtureGit';
 import { fixtureGithubSurface } from './fixtureGithub';
+import { MCP_KIT_FIXTURE_VIEW, MCP_KIT_FIXTURE_VIEW_ID } from './fixtureMcpUiKitView';
 import {
   FIXTURE_AGENT_PROCESS_SESSIONS,
   fixtureAgentProcessSessionId,
@@ -56,6 +57,9 @@ function isGitSessionScenario(scenario: string | null): boolean {
     scenario === 'history-overlap'
   );
 }
+
+/** The fixture-only MCP kit view; stable so the shell's binding map does not churn. */
+const MCP_KIT_FIXTURE_BINDINGS = [MCP_KIT_FIXTURE_VIEW] as const;
 
 export function FixtureWorkspace() {
   // Route parameters express session observations; without them the fixture is
@@ -168,6 +172,7 @@ export function FixtureWorkspace() {
       <WorkspaceShell
         ctx={ctx}
         activeCapabilityId={capability}
+        extraViewBindings={MCP_KIT_FIXTURE_BINDINGS}
         /* The same surface-leave action `WorkspacePanel` composes on Web
            (#1204) — inert here, but the canonical Workspace screen is not the
            shipped one without it. */
@@ -207,6 +212,9 @@ function openedCapability(search: string): CapabilityId {
   }
   if (requested === 'images') {
     return 'images';
+  }
+  if (requested === 'mcp-kit') {
+    return MCP_KIT_FIXTURE_VIEW_ID;
   }
   return requested === 'session' ? 'session' : 'files';
 }

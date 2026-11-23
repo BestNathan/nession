@@ -12,7 +12,8 @@ Git capability
   │    GitPlugin → git.* units → nession-git → GitCmd → git
   └─ GitHub hosting context
        githubApi → github.* units → nession-github → typed read-only client
-                                  → Agent-owned GitHub credential
+                                  → effective Session credential
+                                    (Session binding → Agent baseline)
 ```
 
 ## Ownership
@@ -20,13 +21,19 @@ Git capability
 - **`nession-git`** stays GitHub-agnostic. `GitCmd` is the only place a `git`
   process is spawned; it also exposes the repository context the hosting
   resolver consumes (work-tree root, current branch, upstream, configured
-  remotes). There is no second Git subprocess path.
+  remotes). There is no second Git subprocess path. Every Session-addressed
+  child receives the Session's explicit Environment Binding values on top of
+  the inherited Agent environment (#4080); the fixed repository-variable
+  scrubs and prompt/locale policy still win over any binding.
 - **`nession-github`** owns GitHub host identity, remote URL parsing, the typed
   read client, authentication availability, API normalization, budgets and
   failure codes. It does not spawn git, touch tmux, or import Web/Workspace
-  concepts.
-- **`nession-agent`** owns the Session's live working directory. It injects a
-  `WorkdirResolver` into both providers; the client never names a path.
+  concepts. Its credential is selected per Session-addressed request, not
+  frozen when the Agent composes the provider (#4080).
+- **`nession-agent`** owns the Session's live working directory and its
+  Environment Binding. It injects a `WorkdirResolver` into both providers and
+  supplies the shared session environment boundary they consume; the client
+  never names a path or a credential.
 - **`nession-server`** only relays typed calls and enforces caller/Session
   routing. It holds no GitHub credential and does not interpret GitHub APIs.
 - **Web** presents both providers under `web/src/capabilities/git/`. The
@@ -80,11 +87,29 @@ depth candidates, not part of this v1.
 
 ## Authentication and packaging
 
-The Agent constructs the client from its own environment. A token is read from
-`GITHUB_TOKEN`, falling back to `GH_TOKEN`. An absent/empty token is **not a
-startup failure**: `github.repository` reports `authenticated: false` and API
-reads answer `not_authenticated`. No anonymous fallback is attempted for a
-private repository, and SSH authority is never treated as REST authority.
+The credential is resolved **per Session-addressed request** (#4080), with
+scope precedence before alias precedence:
+
+```text
+Session.GITHUB_TOKEN → Session.GH_TOKEN → Agent.GITHUB_TOKEN → Agent.GH_TOKEN
+→ not authenticated
+```
+
+The Session half is the explicit values its Environment Binding manages; the
+Agent process environment is only the inherited fallback. Reading the Session's
+effective tmux environment directly would invert this order — a Session that
+overrides only `GH_TOKEN` also inherits an Agent `GITHUB_TOKEN`. The client an
+operation uses is derived per request; the cache key includes the resulting
+credential fingerprint (never the token). An explicitly bound empty credential
+means "no credential" and does not fall through to the Agent. An unverifiable
+binding is a typed `client_unavailable` answer, not a silent fallback.
+
+See [session-env-binding.md](session-env-binding.md) for the canonical
+Session-override/Agent-fallback model and failure semantics. An absent/empty
+effective token is **not a startup failure**: `github.repository` reports
+`authenticated: false` and API reads answer `not_authenticated`. No anonymous
+fallback is attempted for a private repository, and SSH authority is never
+treated as REST authority.
 
 v1 uses a typed Rust HTTP client (`reqwest`, rustls) rather than the `gh`
 executable. Therefore the **`gh` binary is not a runtime requirement** and the

@@ -59,6 +59,10 @@ fn make_session_info(id: &str, agent: &str, name: &str) -> SessionInfo {
         foreground_command: None,
         working_dir: None,
         instance_id: None,
+        metadata: None,
+        activity: None,
+        activity_epoch: None,
+        activity_generation: 0,
         created_at: Utc::now(),
         last_activity: Utc::now(),
     }

@@ -188,16 +188,16 @@ explanation is the same dead end one step earlier.
 ## Gestures and visible alternatives
 
 - Swipe right to reveal/open Sessions; swipe left to reveal/open Workspace.
-- **The shell does not claim the gesture on a layer whose depth offers its own
-  leave** (#1081). `Sessions ← Terminal → Workspace` describes the model *around*
-  work; inside the Workspace it is the pushed depth's business, and
-  [one navigation bar per depth](#one-navigation-bar-per-depth) gives that depth
-  exactly one leave — the page header's Back. Two routes out of one depth is the
-  defect #1051 names, and here it is worse than untidy: the Back is **allowed to
-  refuse** (Files' asks before discarding an unsaved editor) and the shell's
-  leave is not, so a shell page from there threw the work away. The gesture
-  returns at the Workspace root, where Back and the shell both mean the
-  Terminal and there is nothing to compete over.
+- **The shell does not offer a second leave on a pushed Workspace depth; the
+  same coordinator operates the capability's inner stack** (#1081, #3971).
+  `Sessions ← Terminal → Workspace` describes the model *around* work; inside a
+  pushed depth, a claimed contact routes to the capability's own Pop/Forward
+  instead of the outer pager. Two routes out of one depth would be the defect
+  #1051 names — and here it is worse than untidy: the Back is **allowed to
+  refuse** (Files asks before discarding an unsaved editor) and a shell leave is
+  not. So the inner gesture runs the capability's guarded action, never a
+  parallel discard. At the Workspace root there is no Pop; the same contact
+  returns to the Terminal, where Back and the shell mean one thing.
 - The gesture spans the shell chrome. **A work surface owns every touch that
   begins in it, except in the shell's edge region** (#1081, #2724). The outer
   `EDGE_PLATFORM_GUARD_PX` (24px) of the shell belongs to the platform's own
@@ -268,6 +268,17 @@ contact after that, and the answer is: much less until release.
   names the frozen destination with its direction. There is no resting swipe
   tutorial, edge rail or navigation overlay; release removes the label. The
   no-Session root names its index-1 destination **Home**, never a fake Terminal.
+- **The preview keeps following a moving finger.** Up to the preferred reveal
+  (80% of the shell) the layer tracks the finger one-to-one. Past it the
+  preview continues with continuous resistance toward an absolute 92% bound
+  instead of going flat, so a still-moving contact never reads as a frozen UI;
+  the bound keeps the current layer from fully leaving, and release still
+  decides the navigation (#4185). Dragged-through and rejected previews return
+  to rest in the same owned animation.
+- **Settle is interruptible, never a dead window.** A contact that arrives while
+  a return or commit animation is still on screen catches the animation up
+  (applying its pending route or in-stack decision) and becomes the live
+  candidate; it is not silently dropped for the animation's remainder (#4185).
 - **Interactive owners outrank the band.** A button, input, open alert dialog,
   an expanded Capsule Peek, a nested horizontal scroller (including the
   capability row) or an active text selection keeps its touch even at the
@@ -281,11 +292,46 @@ contact after that, and the answer is: much less until release.
   approved mobile prototype
   ([shared `prototype` branch](https://github.com/BestNathan/nession/tree/prototype/mobile-swipe-2724)),
   plus the 2026-11-05 iPhone Safari finding that the outer edge belongs to the
-  OS. The guard, band, thresholds and velocity are initial exploration values;
-  a physical Safari/PWA lane must confirm the platform's own edge ownership and
-  settle the final numbers before they are treated as measured.
+  OS. The guard, band, thresholds, resistance curve and velocity are initial
+  exploration values; a physical Safari/PWA lane must confirm the platform's
+  own edge ownership and settle the final numbers before they are treated as
+  measured. `docs/design/interaction/app.md` is the current contract; the
+  linked prototype's pre-#4185 flat-cap motion is historical.
 
 The exact header/button implementation may evolve. The invariant is the spatial relationship and the existence of a visible alternative to gestures.
+
+### Workspace inner stack swipe (#3971)
+
+The outer spatial pager and the Workspace stack are **one** coordinator, not two
+listeners competing for a contact. A touch that begins in the active Workspace
+depth is resolved in this order:
+
+```text
+platform guard → interactive/work-surface owner → Workspace inner stack → outer spatial pager
+```
+
+- **Right swipe = Pop one valid depth.** **Left swipe = Forward only when the
+  capability recorded a destination by actually leaving it**; otherwise the
+  contact yields to a nested horizontal scroller or resists and snaps back. A
+  gesture never enters an unknown resource.
+- The capability supplies the destination and its guarded action
+  (`WorkspaceDepthControl.setForward` / `WorkspacePush.onLeave`), so a dirty
+  Files editor asks before a swipe discards it. Back, the optional Stack Sheet
+  and the gesture all run the same leave guard.
+- The header and content frame follow the finger up to a short preferred reveal
+  (125px), then continue under the same bounded continuous resistance to an
+  180px limit (#4185); the Capability Capsule keeps its station and the
+  Workspace layer stays opaque, so an internal-depth gesture never exposes the
+  mounted Terminal underneath. A rejected Pop/Forward still belongs to the
+  Workspace frame: its return animates in place, never through the outer
+  page-snapback path, and a new contact during that return catches it up.
+- Interactive owners (a button, input, open dialog, xterm, CodeMirror, nested
+  horizontal scroller or active selection) keep their contact. The outer
+  platform guard and shell edge bands keep the ownership they have outside
+  Workspace.
+- Stack, forward history, pending dialogs and actions invalidate when the
+  selected Session/Agent changes; a capability that has been switched away
+  cannot retake header or gesture ownership.
 
 ### Soft keyboard and visible viewport (#3523)
 
@@ -354,6 +400,67 @@ terminal `path:line` deep-link (#1175), and long-press selection mode (#1174).
 Richer viewer/sheet actions may still extend this model without reintroducing an
 expandable tree on App.
 
+### App Claude Code workspace (#3829)
+
+Claude Code's App surface follows the same rule from the other side: the
+**current conversation is the work**, not one tab among five. The capability
+root is the exact bound conversation, read-only; new CLI input stays in the
+Terminal. One contextual **Browse** action in the App page header opens the
+capability's resource sheet — Conversations and Transcripts under *Work*;
+Memory, MCP and Configuration under *Resources & setup*. Choosing an entry
+replaces the pushed stack with that resource's root, so Back always returns to
+the conversation.
+
+Resource depth is a single push stack under the same host header: collection →
+resource → detail (a transcript record, Raw, a memory file, a configuration
+file, an MCP tool). Each depth has exactly one Back; covered layers stay mounted
+under the one above, so returning restores the list's scroll position and the
+reader's place. This is not Web's master/detail scaled down: Configuration is a
+single-column list → file, and Memory is a list → file.
+
+The conversation reader is read-only and never renders a composer. Activity is
+only the provider's own word (`Running now` / `Finished`); a foreground `claude`
+process is not evidence that a turn is working (#2663, #3801). An unbound
+Session says so and offers strict-cwd candidates without promoting one to
+"current"; an offline Agent says that instead of showing stale history.
+
+### App content surfaces and region hierarchy (#3971)
+
+Workspace has one canvas owned by the host. Inside it, a capability content
+region consumes semantic roles instead of laying rows directly on the canvas:
+
+- **Primary surface** — the resource's own region (a Reader, a Collection, a
+  Configuration page). One per visible screen unless a genuinely peer region
+  exists.
+- **Secondary surface** — supporting grouped content inside it (a configuration
+  row group, a quiet fact block), only where the relationship warrants it.
+- **Section / Group / Row** — a named section; a continuous run of sibling rows
+  sharing one separator language; one row with a leading slot, a title/subtitle
+  stack and a trailing local action.
+
+Rules:
+
+- whitespace and typography carry separation first, background contrast next,
+  borders/radius only when they earn it. **A row is not a card**: rows in one
+  group are contiguous and share the group's separator.
+- Collection (Git changes, transcripts, files) = grouped rows with section
+  labels; Detail (Agent/Image/MCP) = identity + state + grouped facts;
+  Configuration (Sandbox/Env) = named editable sections; Reader
+  (Conversation/Diff/Raw) = one predominant continuous surface, with no
+  card-per-message or card-per-code-block.
+- the host owns page scroll and shell geometry; reusable recipes own the
+  internal relationships. A capability chooses the role, not the pixels.
+
+### App icon-first actions (#3971)
+
+App chrome and repeated row/toolbar actions use one semantic icon vocabulary:
+Back, Browse, Search, More, Create, Edit, Refresh, Filter, Copy, Open, Confirm,
+Save and Delete. A capability names the meaning; Nession resolves the glyph and
+the 44px App touch target. Icon-only actions always carry an accessible name and
+a visible focus state; context menus and destructive confirmations keep **icon +
+text**. A narrow Web viewport without the App Experience keeps its Web action
+labels.
+
 ### One navigation bar per depth
 
 Workspace is a stack of depths, and **at any moment exactly one navigation bar owns the
@@ -390,11 +497,97 @@ itself. It is the *level*, not the component, that owns navigation.
   opened from, and it is what the user returns to — not chrome to restate on every
   Workspace screen.
 
-See `#1051` and [workspace.md](../workspace.md). The App presentation of this rule —
+#### Stack header anatomy (#3971)
+
+The one bar carries the depth hierarchy instead of adding a second breadcrumb or
+toolbar row:
+
+```text
+[Back] | primary title
+         secondary path / context | priority icon(s) | More
+```
+
+- **Primary title** is the current capability/resource. **Secondary** is the
+  immediate ancestry the capability reports, or the active Session/Agent context
+  at a capability root. It projects the *actual* stack — never a fabricated
+  breadcrumb — and truncates technical identities safely.
+- The secondary line is the optional **Stack Sheet** trigger when the capability
+  can jump. The sheet lists the real path root-first; choosing an ancestor runs
+  the same leave guard as Back, then jumps. A capability supplies the jump and
+  the guard; the host owns the sheet.
+- Right-side actions are capability-contributed **semantics**. Nession renders
+  at most two priority icons and moves every remaining action, and every
+  destructive action, into **More** with readable text. Missing actions leave no
+  inert placeholder.
+- The bar is a compact two-line layout at 375/390/430 and in landscape. The
+  Capability Capsule remains present at every depth (the 2026-10-03 owner
+  decision in
+  [workspace-navigation.md](../design-system/patterns/workspace-navigation.md)).
+
+**Prototype history.** The unified [#3971 prototype record](../design-system/patterns/app-workspace-3971-prototype.md)
+supersedes the deep-detail presentation of the #3829 Claude prototype and the
+inner-gesture presentation of the #2724 mobile-swipe prototype. Those older
+prototype pages carry in-place historical/superseded notices on the orphan
+`prototype` branch and remain IA/outer-gesture references only; their
+production owners are unchanged. The #4185 motion revision (2026-11-20) updates
+both swipe prototypes to the bounded continuous resistance and interruptible
+settle above; its pinned source is
+`2cb721ccedc54a544749980d32a0167904eb5dbb` on the shared `prototype` branch.
+
+See `#1051`, `#3971` and [workspace.md](../workspace.md). The App presentation of this rule —
 including where the capability switcher may appear — is in
 [workspace-navigation.md](../design-system/patterns/workspace-navigation.md).
 
 See [workspace.md](../workspace.md).
+
+### Host-owned scrolling and bottom actions (#4115)
+
+The App Workspace host owns the page's vertical scroll and the space at its
+end. A capability contributes content; it does not make itself a page scroller,
+calculate the Capsule's height, or add trailing padding so its last row can be
+seen.
+
+- **One default scroll owner per depth.** The host renders a bounded scrollport
+  around an ordinary capability view. The view's content is in natural flow,
+  and the scrollport's trailing extent is measured from the scrollport's own
+  bottom to the floating bar's top. At rest content may pass behind the
+  translucent Capsule Zone; at the end of scrolling the last row or control is
+  fully visible and tappable above it.
+- **Declared bounded surfaces are the exception.** A collection, reader, diff
+  or editor that genuinely scrolls internally declares itself `bounded` on its
+  view binding and keeps its internal scroll owners. The host gives it the full
+  region; each owner rendered through `WorkspaceBoundedScrollport` carries the
+  measured trailing inset on its viewport, while its content spacing stays on
+  an inner wrapper (`p-2` cannot override the inset). Split surfaces may have
+  several owners at different bottoms — the host measures each from that
+  element's own visible rect, not from one shared number.
+- **Every route variant is in the coverage contract.** A nested depth, tab or
+  section inherits no scrolling guarantee from its parent's `bounded`
+  declaration. `scrollCoverage.ts` names the mode and the observable owners for
+  every reachable variant, and the design Gate fails closed when a union member
+  has no entry.
+- **Bottom actions are hosted.** A capability's bottom actions (Files'
+  Copy/Delete while selecting) are contributed as content and mounted by the
+  host below the scrollport and above the Capsule. The host owns the band's
+  safe-area/Capsule inset, so actions stay reachable at every overlay height
+  and no capability computes a capability-specific footer offset.
+- **No permanently reserved footer.** An actions slot with nothing in it is
+  hidden; the scroll end reserves nothing for space that is already outside
+  the scrolling viewport. Ordinary notes, errors and status rows live inside
+  the scroll area; a genuinely persistent context declares
+  `data-workspace-fixed-role="context"` and must stay above the Capsule.
+- **The overlay is dynamic.** Opening/collapsing the Capsule, switching
+  capabilities or depths, wrapping items, orientation/safe-area changes and a
+  keyboard/focus change recompute the same measurement. The App viewport
+  environment remains the single keyboard/safe-area reader (#3523); this
+  contract consumes its snapshot rather than adding another viewport owner.
+
+Browser proof is Chromium + Playwright against the production fixture. The
+Case reads the actual viewport, the designated scroll owner, the last
+actionable element and the Capsule rect at `scrollTop = scrollHeight -
+clientHeight`, and asserts the element's bottom is no lower than the Capsule's
+top (1px rounding tolerance). Source-level ownership is enforced by the
+existing layout-ownership Gate, not by a second Gate.
 
 ## Current capability-state mapping
 

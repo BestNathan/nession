@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { formatBytes } from '../state';
 import type { GitDiffResponse } from '../types';
@@ -132,18 +132,18 @@ export function GitDiffView({
           </ToggleGroup>
         ) : null}
       </div>
-      <div
+      <WorkspaceBoundedScrollport
         ref={setViewport}
         data-testid="git-diff-body"
         data-renderer={inspection.kind}
-        className={cn('min-h-0 flex-1 overflow-auto', workspaceScrollClearanceClass)}
+        viewportClassName="overflow-auto"
       >
         <GitPatchDiff
           diff={diff}
           inspection={inspection}
           layout={splitAvailable ? layout : 'unified'}
         />
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

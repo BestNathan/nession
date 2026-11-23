@@ -403,3 +403,131 @@ describe('SessionItem row actions overflow', () => {
     expect(onKill).toHaveBeenCalledWith(session);
   });
 });
+
+describe('Session Activity (#3804)', () => {
+  function renderActivity(
+    activity: Session['activity'],
+    agent: DomainState['agent'] = domain.agent,
+  ) {
+    return render(
+      <SessionItem
+        session={{ ...session, activity }}
+        domain={{ ...domain, agent }}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+  }
+
+  const level = (
+    state: 'working' | 'idle' | 'unknown',
+    attention: 'input_required' | null = null,
+  ) => ({ state, attention, capability_id: 'shell', observed_at_ms: 1_700_000_000_000 });
+
+  it('renders working, idle and unknown through one fixed-size slot', () => {
+    const { rerender } = renderActivity(level('working'));
+    expect(screen.getByTestId('session-item-row')).toHaveAttribute(
+      'data-activity',
+      'working',
+    );
+    expect(screen.getByTestId('session-item-activity')).toHaveAttribute(
+      'data-activity',
+      'working',
+    );
+    expect(screen.getByTestId('session-item-a1:fix')).toHaveAccessibleName(
+      /Activity: Working/,
+    );
+
+    rerender(
+      <SessionItem
+        session={{ ...session, activity: level('idle') }}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('session-item-row')).toHaveAttribute('data-activity', 'idle');
+    expect(screen.getByTestId('session-item-a1:fix')).toHaveAccessibleName(
+      /Activity: Idle/,
+    );
+
+    rerender(
+      <SessionItem
+        session={{ ...session, activity: undefined }}
+        domain={domain}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('session-item-row')).toHaveAttribute(
+      'data-activity',
+      'unknown',
+    );
+    expect(screen.getByTestId('session-item-a1:fix')).toHaveAccessibleName(
+      /Activity: Unknown/,
+    );
+  });
+
+  it('adds needs-input beside a working level rather than replacing it', () => {
+    renderActivity(level('working', 'input_required'));
+
+    const row = screen.getByTestId('session-item-row');
+    expect(row).toHaveAttribute('data-activity', 'working');
+    expect(row).toHaveAttribute('data-attention', 'input_required');
+    expect(screen.getByTestId('session-item-attention')).toHaveTextContent('Needs input');
+    expect(screen.getByTestId('session-item-a1:fix')).toHaveAccessibleName(
+      /Activity: Working — needs user input/,
+    );
+  });
+
+  it('states unknown for an offline or stale Agent instead of the last level', () => {
+    const { rerender } = renderActivity(level('working'), {
+      channel: 'offline',
+      copy: 'Agent offline',
+    });
+    expect(screen.getByTestId('session-item-row')).toHaveAttribute(
+      'data-activity',
+      'unknown',
+    );
+    expect(screen.getByTestId('session-item-a1:fix')).toHaveAccessibleName(
+      /Activity: Unknown — Agent unreachable/,
+    );
+    expect(screen.getByText('Agent offline')).toBeInTheDocument();
+
+    rerender(
+      <SessionItem
+        session={{ ...session, activity: level('working') }}
+        domain={{ ...domain, agent: { channel: 'error', copy: 'Agent did not respond' } }}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId('session-item-row')).toHaveAttribute(
+      'data-activity',
+      'unknown',
+    );
+    expect(screen.getByText('Agent did not respond')).toBeInTheDocument();
+  });
+
+  it('does not use Activity as recency and does not surface attention when stale', () => {
+    const { rerender } = renderActivity(level('idle'));
+    const meta = screen.getByTestId('session-item-meta').textContent;
+
+    rerender(
+      <SessionItem
+        session={{ ...session, activity: level('working', 'input_required') }}
+        domain={{ ...domain, agent: { channel: 'offline', copy: 'Agent offline' } }}
+        agentLabel="devbox-01"
+        selected={false}
+        onSelect={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('session-item-meta').textContent).toBe(meta);
+    expect(screen.queryByTestId('session-item-attention')).not.toBeInTheDocument();
+  });
+});

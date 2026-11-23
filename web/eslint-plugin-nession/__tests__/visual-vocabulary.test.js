@@ -29,6 +29,9 @@ const TERMINAL_VIEWPORT = '/proj/web/src/product/terminal/components/TerminalVie
 
 test('generated metadata makes the --nession-* namespace machine-readable', () => {
   assert.ok(lintMetadata.cssVariables.includes('--nession-background'));
+  // Keep the Staging-only rhythm token's generated-vocabulary coverage (#4050).
+  assert.ok(lintMetadata.cssVariables.includes('--nession-rhythm-inline'));
+  assert.ok(lintMetadata.cssVariables.includes('--nession-panel-padding'));
   assert.ok(lintMetadata.cssVariables.includes('--nession-radius-control'));
   assert.ok(lintMetadata.legacyCssVariables.includes('--background'));
   assert.equal(

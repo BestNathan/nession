@@ -135,6 +135,20 @@ jobs:
          github.event.comment.body == '/nession recover-review-preflight issue=3784 run=44500591865') ||
         (github.event_name == 'issue_comment' &&
          github.event.action == 'created' &&
+         github.event.issue.number == 4065 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession recover-review-preflight issue=4065 run=44744956936') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 4065 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession recover-review-tools issue=4065 run=44776788638') ||
+        (github.event_name == 'issue_comment' &&
+         github.event.action == 'created' &&
          github.event.issue.state == 'open' &&
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
@@ -194,6 +208,8 @@ jobs:
         run: |
           set -euo pipefail
           node scripts/lib/agent/orchestration/controller-dispatch-selftest.mjs
+          node scripts/lib/agent/orchestration/reviewer-premodel-failure-selftest.mjs
+          node scripts/lib/agent/orchestration/reviewer-tool-failure-4065-selftest.mjs
           # This includes original post-model failure, Store CAS and replay negatives.
           node scripts/lib/agent/orchestration/qwen-cli-failure-selftest.mjs
           node scripts/lib/agent/orchestration/qwen-tool-policy-failure-selftest.mjs

@@ -52,7 +52,16 @@ digest?: string | null, size_bytes: number, alias?: string | null,
 /**
  * Whether this build reused bytes that were already published.
  */
-deduplicated: boolean, created_at: number, updated_at: number, };
+deduplicated: boolean, 
+/**
+ * Bounded terminal attempt history, oldest first (#3798).
+ */
+attempts?: Array<ImageBuildAttempt>, created_at: number, updated_at: number, };
+export type ImageBuildAttempt = { attempt: number, status: string, stage?: string | null, 
+/**
+ * The last bounded diagnostic observed for this attempt.
+ */
+diagnostic?: string | null, error?: string | null, started_at: number, finished_at: number, };
 export type ImageBuildProgress = { files?: number | null, bytes?: number | null, 
 /**
  * Time since this attempt started, in milliseconds.

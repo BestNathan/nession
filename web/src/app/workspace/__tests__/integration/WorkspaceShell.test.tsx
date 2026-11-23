@@ -193,6 +193,38 @@ describe('WorkspaceShell surface navigation (#1204)', () => {
     expect(screen.getByTestId('surface-action-open-terminal')).toBeInTheDocument();
   });
 
+  it('renders the App host page scrollport for document content (#4115)', () => {
+    const ctx = workspaceContext({ experience: 'app' });
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="session" />);
+
+    const scrollport = screen.getByTestId('app-workspace-scrollport');
+    expect(scrollport).toHaveAttribute('data-workspace-scroll-owner', 'true');
+    expect(scrollport).toHaveAttribute('data-workspace-app-surface', 'document');
+    expect(screen.queryByTestId('app-workspace-bounded')).not.toBeInTheDocument();
+  });
+
+  it('renders the fill adapter for a declared bounded App surface (#4115)', () => {
+    const ctx = workspaceContext({ experience: 'app' });
+    render(<WorkspaceShell ctx={ctx} activeCapabilityId="files" />);
+
+    expect(screen.getByTestId('mock-files-app')).toBeInTheDocument();
+    const bounded = screen.getByTestId('app-workspace-bounded');
+    expect(bounded).toHaveAttribute('data-workspace-app-surface', 'bounded');
+    expect(screen.queryByTestId('app-workspace-scrollport')).not.toBeInTheDocument();
+  });
+
+  it('renders the Host-owned Bottom Actions slot on App and not on Web (#4115)', () => {
+    const app = workspaceContext({ experience: 'app' });
+    const { unmount } = render(<WorkspaceShell ctx={app} activeCapabilityId="files" />);
+    const slot = screen.getByTestId('workspace-bottom-actions');
+    expect(slot).toBeInTheDocument();
+    expect(slot.className).toContain('empty:hidden');
+    unmount();
+
+    render(<WorkspaceShell ctx={workspaceContext()} activeCapabilityId="files" />);
+    expect(screen.queryByTestId('workspace-bottom-actions')).not.toBeInTheDocument();
+  });
+
   it('renders no surface navigation for the App experience', () => {
     const ctx = workspaceContext({ experience: 'app' });
     render(

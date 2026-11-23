@@ -154,6 +154,23 @@ impl WorkspaceGuard {
     pub fn disarm(&mut self) {
         self.armed = false;
     }
+
+    /// A guard for a preparation that created no scratch workspace.
+    pub fn none() -> Self {
+        Self {
+            path: PathBuf::new(),
+            root: PathBuf::new(),
+            armed: false,
+        }
+    }
+
+    /// Disarm and remove the owned scratch workspace, if one exists.
+    pub fn discard(&mut self) {
+        self.armed = false;
+        if !self.path.as_os_str().is_empty() {
+            remove_owned_workspace(&self.root, &self.path);
+        }
+    }
 }
 
 impl Drop for WorkspaceGuard {
@@ -182,13 +199,16 @@ pub fn remove_owned_workspace(root: &Path, path: &Path) {
 
 /// Fetch every grant and build the canonical composition.
 pub async fn prepare(
-    cache: &ErofsCache,
+    cache: Option<&ErofsCache>,
     grants: &[ManagedImageGrant],
     server_url: &str,
     server_auth_token: &str,
     state_dir: &Path,
     workspace_override: Option<SandboxWorkspaceOverride>,
 ) -> Result<PreparedSandboxImages> {
+    if !grants.is_empty() && cache.is_none() {
+        anyhow::bail!("a Sandbox image composition requires the Agent's EROFS cache");
+    }
     let origin = blob_origin(server_url)?;
     let mut base: Option<&ManagedImageGrant> = None;
     let mut workspaces: Vec<&ManagedImageGrant> = Vec::new();
@@ -208,37 +228,90 @@ pub async fn prepare(
     if workspaces.len() > 16 {
         anyhow::bail!("a Sandbox composition has more than 16 ordered workspace lowers");
     }
-    let base =
-        base.ok_or_else(|| anyhow::anyhow!("a composition requires a Base Runtime image"))?;
+    let needs_scratch = workspace_override.is_none() && (base.is_some() || !workspaces.is_empty());
+
+    // Resolve every authorized grant and reject unsupported Composite closures
+    // before creating any execution-owned workspace or mount resources (#3784).
+    // Cache fetches are permitted; scratch workspace allocation is not.
+    let base_resolved = match base {
+        Some(grant) => {
+            let resolved = resolve_grant_image(
+                cache.context("a Base grant requires the Agent EROFS cache")?,
+                grant,
+                &origin,
+                server_auth_token,
+            )
+            .await?;
+            reject_referenced_composite(&resolved)?;
+            Some(resolved)
+        }
+        None => None,
+    };
+    let mut workspace_resolved = Vec::with_capacity(workspaces.len());
+    for grant in workspaces {
+        let resolved = resolve_grant_image(
+            cache.context("a grant set requires the Agent EROFS cache")?,
+            grant,
+            &origin,
+            server_auth_token,
+        )
+        .await?;
+        reject_referenced_composite(&resolved)?;
+        workspace_resolved.push(resolved);
+    }
+    let mut toolchain_resolved = Vec::with_capacity(toolchains.len());
+    for grant in toolchains {
+        let resolved = resolve_grant_image(
+            cache.context("a grant set requires the Agent EROFS cache")?,
+            grant,
+            &origin,
+            server_auth_token,
+        )
+        .await?;
+        reject_referenced_composite(&resolved)?;
+        let target = toolchain_target(grant.target.as_deref(), &resolved)?;
+        toolchain_resolved.push((resolved, target));
+    }
 
     let workspace_root = state_dir.join("sandbox-workspaces");
-    std::fs::create_dir_all(&workspace_root).with_context(|| {
-        format!(
-            "cannot create the Sandbox workspace root {}",
-            workspace_root.display()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&workspace_root, std::fs::Permissions::from_mode(0o700));
-    }
-    let workspace_dir = workspace_root.join(format!("workspace-{}", Uuid::new_v4()));
-    std::fs::create_dir(&workspace_dir).with_context(|| {
-        format!(
-            "cannot create the Sandbox workspace {}",
-            workspace_dir.display()
-        )
-    })?;
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let _ = std::fs::set_permissions(&workspace_dir, std::fs::Permissions::from_mode(0o700));
-    }
-    let mut guard = WorkspaceGuard {
-        path: workspace_dir.clone(),
-        root: workspace_root,
-        armed: true,
+    let workspace_dir = if needs_scratch {
+        std::fs::create_dir_all(&workspace_root).with_context(|| {
+            format!(
+                "cannot create the Sandbox workspace root {}",
+                workspace_root.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ =
+                std::fs::set_permissions(&workspace_root, std::fs::Permissions::from_mode(0o700));
+        }
+        let workspace_dir = workspace_root.join(format!("workspace-{}", Uuid::new_v4()));
+        std::fs::create_dir(&workspace_dir).with_context(|| {
+            format!(
+                "cannot create the Sandbox workspace {}",
+                workspace_dir.display()
+            )
+        })?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let _ =
+                std::fs::set_permissions(&workspace_dir, std::fs::Permissions::from_mode(0o700));
+        }
+        workspace_dir
+    } else {
+        PathBuf::new()
+    };
+    let mut guard = if needs_scratch {
+        WorkspaceGuard {
+            path: workspace_dir.clone(),
+            root: workspace_root,
+            armed: true,
+        }
+    } else {
+        WorkspaceGuard::none()
     };
 
     let mut images = Vec::with_capacity(grants.len());
@@ -254,47 +327,24 @@ pub async fn prepare(
         }
         ((role, resolved.layer_digest, resolved.layer_path), binding)
     };
-    let (base_ref, base_env) =
-        match resolve_grant_image(cache, base, &origin, server_auth_token).await {
-            Ok(resolved) => {
-                if let Err(error) = reject_referenced_composite(&resolved) {
-                    guard.disarm();
-                    remove_owned_workspace(&guard.root, &guard.path);
-                    return Err(error);
-                }
-                let base_env = image_env_defaults(&resolved);
-                let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
-                manifests.extend(binding);
-                images.push((role, digest.clone(), path.clone()));
-                (
-                    SandboxImageRef {
-                        digest,
-                        source: path.display().to_string(),
-                    },
-                    base_env,
-                )
-            }
-            Err(error) => {
-                guard.disarm();
-                remove_owned_workspace(&guard.root, &guard.path);
-                return Err(error);
-            }
-        };
-    let mut workspace_refs = Vec::with_capacity(workspaces.len());
-    for grant in workspaces {
-        let resolved = match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
-            Ok(resolved) => resolved,
-            Err(error) => {
-                guard.disarm();
-                remove_owned_workspace(&guard.root, &guard.path);
-                return Err(error);
-            }
-        };
-        if let Err(error) = reject_referenced_composite(&resolved) {
-            guard.disarm();
-            remove_owned_workspace(&guard.root, &guard.path);
-            return Err(error);
+    let (base_ref, base_env) = match base_resolved {
+        Some(resolved) => {
+            let base_env = image_env_defaults(&resolved);
+            let ((role, digest, path), binding) = record(ManagedImageRole::Base, resolved);
+            manifests.extend(binding);
+            images.push((role, digest.clone(), path.clone()));
+            (
+                Some(SandboxImageRef {
+                    digest,
+                    source: path.display().to_string(),
+                }),
+                base_env,
+            )
         }
+        None => (None, Vec::new()),
+    };
+    let mut workspace_refs = Vec::with_capacity(workspace_resolved.len());
+    for resolved in workspace_resolved {
         let ((role, digest, path), binding) = record(ManagedImageRole::Workspace, resolved);
         manifests.extend(binding);
         images.push((role, digest.clone(), path.clone()));
@@ -303,29 +353,8 @@ pub async fn prepare(
             source: path.display().to_string(),
         });
     }
-    let mut toolchain_refs = Vec::with_capacity(toolchains.len());
-    for grant in toolchains {
-        let resolved = match resolve_grant_image(cache, grant, &origin, server_auth_token).await {
-            Ok(value) => value,
-            Err(error) => {
-                guard.disarm();
-                remove_owned_workspace(&guard.root, &guard.path);
-                return Err(error);
-            }
-        };
-        if let Err(error) = reject_referenced_composite(&resolved) {
-            guard.disarm();
-            remove_owned_workspace(&guard.root, &guard.path);
-            return Err(error);
-        }
-        let target = match toolchain_target(grant.target.as_deref(), &resolved) {
-            Ok(target) => target,
-            Err(error) => {
-                guard.disarm();
-                remove_owned_workspace(&guard.root, &guard.path);
-                return Err(error);
-            }
-        };
+    let mut toolchain_refs = Vec::with_capacity(toolchain_resolved.len());
+    for (resolved, target) in toolchain_resolved {
         let env = image_env_defaults(&resolved);
         let path_prepend = image_path_prepend(&resolved);
         let ((role, digest, path), binding) = record(ManagedImageRole::Toolchain, resolved);
@@ -340,10 +369,12 @@ pub async fn prepare(
         });
     }
 
+    let has_workspace_override = workspace_override.is_some();
+    let has_workspace_view = needs_scratch || has_workspace_override;
     let mut composition = SandboxFilesystemComposition {
         base: base_ref,
         base_writable: false,
-        workspace: Some(SandboxWorkspace {
+        workspace: has_workspace_view.then_some(SandboxWorkspace {
             image: None,
             lowers: workspace_refs,
             write: workspace_dir.display().to_string(),
@@ -362,8 +393,7 @@ pub async fn prepare(
         {
             owns_scratch_workspace = false;
         }
-        guard.disarm();
-        remove_owned_workspace(&guard.root, &guard.path);
+        guard.discard();
         let (write, ownership) = match workspace_override {
             SandboxWorkspaceOverride::Managed { path, lease } => {
                 workspace_lease = Some(lease);
@@ -436,15 +466,17 @@ pub async fn prepare(
 /// host, so the path is carried as the declared external workspace without
 /// creating anything.
 pub fn preflight_composition(
-    cache: &ErofsCache,
+    cache: Option<&ErofsCache>,
     selections: &[SandboxImageSelection],
     project_location: Option<&str>,
+    workspace_requested: bool,
 ) -> Result<SandboxFilesystemComposition> {
     let mut base = None;
     let mut lowers = Vec::new();
     let mut toolchains = Vec::new();
     for selection in selections {
         let source = cache
+            .context("an image selection requires the Agent EROFS cache")?
             .blob_path(&selection.digest)
             .with_context(|| format!("invalid image digest {}", selection.digest))?;
         let image = SandboxImageRef {
@@ -483,8 +515,6 @@ pub fn preflight_composition(
             }
         }
     }
-    let base =
-        base.ok_or_else(|| anyhow::anyhow!("a composition requires a Base Runtime image"))?;
     if project_location.is_some() && !lowers.is_empty() {
         anyhow::bail!("a Project Location cannot be combined with a Project EROFS lower");
     }
@@ -492,18 +522,24 @@ pub fn preflight_composition(
         Some(path) => (path.to_string(), SandboxWorkspaceOwnership::ProjectLocation),
         None => (
             cache
-                .root()
-                .join("sandbox-workspaces")
-                .join("preflight")
-                .display()
-                .to_string(),
+                .map(|cache| {
+                    cache
+                        .root()
+                        .join("sandbox-workspaces")
+                        .join("preflight")
+                        .display()
+                        .to_string()
+                })
+                .unwrap_or_else(|| "/tmp/nession-preflight-workspace".to_string()),
             SandboxWorkspaceOwnership::Agent,
         ),
     };
+    let has_workspace_view =
+        base.is_some() || !lowers.is_empty() || project_location.is_some() || workspace_requested;
     Ok(SandboxFilesystemComposition {
         base,
         base_writable: false,
-        workspace: Some(SandboxWorkspace {
+        workspace: has_workspace_view.then_some(SandboxWorkspace {
             image: None,
             lowers,
             write,
@@ -588,7 +624,7 @@ mod tests {
         }
 
         let prepared = prepare(
-            &cache,
+            Some(&cache),
             &[
                 grant(ManagedImageRole::Base, &base, None),
                 grant(ManagedImageRole::Workspace, &workspace, None),
@@ -602,7 +638,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert_eq!(prepared.composition.base.digest, base);
+        assert_eq!(prepared.composition.base.as_ref().unwrap().digest, base);
         assert_eq!(
             prepared
                 .composition
@@ -649,7 +685,7 @@ mod tests {
         let workspace = format!("sha256:{}", "b".repeat(64));
         let toolchain = format!("sha256:{}", "c".repeat(64));
         let composition = preflight_composition(
-            &cache,
+            Some(&cache),
             &[
                 SandboxImageSelection {
                     role: SandboxImageRole::Base,
@@ -671,11 +707,12 @@ mod tests {
                 },
             ],
             None,
+            false,
         )
         .unwrap();
-        assert_eq!(composition.base.digest, base);
+        assert_eq!(composition.base.as_ref().unwrap().digest, base);
         assert_eq!(
-            composition.base.source,
+            composition.base.as_ref().unwrap().source,
             cache.blob_path(&base).unwrap().display().to_string()
         );
         assert_eq!(composition.toolchains[0].target, "/opt/node");
@@ -781,7 +818,7 @@ mod workspace_override_tests {
             .workspace_directory(&workspace.workspace_id)
             .unwrap();
         let prepared = prepare(
-            &cache,
+            Some(&cache),
             &[grant(ManagedImageRole::Base, &base, None)],
             &server.url("/").to_string().replacen("http://", "ws://", 1),
             SERVER_AUTH_TOKEN,
@@ -854,7 +891,7 @@ mod workspace_override_tests {
         #[cfg(target_os = "linux")]
         nession_sandbox::mount::overlay::storage::initialize(&path).unwrap();
         let prepared = prepare(
-            &cache,
+            Some(&cache),
             &[
                 grant(ManagedImageRole::Base, &base, None),
                 grant(ManagedImageRole::Workspace, &workspace_digest, None),
@@ -899,7 +936,7 @@ mod workspace_override_tests {
         let location = tempfile::tempdir().unwrap();
         let path = std::fs::canonicalize(location.path()).unwrap();
         let prepared = prepare(
-            &cache,
+            Some(&cache),
             &[grant(ManagedImageRole::Base, &base, None)],
             &server.url("/").to_string().replacen("http://", "ws://", 1),
             SERVER_AUTH_TOKEN,
@@ -922,7 +959,7 @@ mod workspace_override_tests {
         );
 
         let refused = prepare(
-            &cache,
+            Some(&cache),
             &[
                 grant(ManagedImageRole::Base, &base, None),
                 grant(ManagedImageRole::Workspace, &workspace_digest, None),
@@ -939,7 +976,6 @@ mod workspace_override_tests {
         };
         assert!(format!("{error:#}").contains("Project EROFS lower"));
     }
-
     /// Verify that reject_referenced_composite produces the expected error
     /// for a ResolvedGrantImage with composite metadata (#3784).
     #[test]
@@ -1130,12 +1166,9 @@ mod workspace_override_tests {
 
     fn assert_no_execution_workspace(state_dir: &Path) {
         let workspace_root = state_dir.join("sandbox-workspaces");
-        let remaining = std::fs::read_dir(&workspace_root)
-            .map(std::iter::Iterator::count)
-            .unwrap_or(0);
-        assert_eq!(
-            remaining, 0,
-            "a rejected preparation must not leave an execution-owned workspace"
+        assert!(
+            !workspace_root.exists(),
+            "a rejected preparation must not create the execution-owned workspace root"
         );
     }
 
@@ -1151,7 +1184,7 @@ mod workspace_override_tests {
         let composite = composite_image(&server, ManagedImageRole::Base, None);
 
         let result = prepare(
-            &cache,
+            Some(&cache),
             &[composite],
             &ws_url(&server),
             SERVER_AUTH_TOKEN,
@@ -1185,7 +1218,7 @@ mod workspace_override_tests {
         let composite = composite_image(&server, ManagedImageRole::Workspace, None);
 
         let result = prepare(
-            &cache,
+            Some(&cache),
             &[grant(ManagedImageRole::Base, &base, None), composite],
             &ws_url(&server),
             SERVER_AUTH_TOKEN,
@@ -1219,7 +1252,7 @@ mod workspace_override_tests {
         let composite = composite_image(&server, ManagedImageRole::Toolchain, Some("/opt/rust"));
 
         let result = prepare(
-            &cache,
+            Some(&cache),
             &[grant(ManagedImageRole::Base, &base, None), composite],
             &ws_url(&server),
             SERVER_AUTH_TOKEN,
@@ -1262,7 +1295,7 @@ mod workspace_override_tests {
         device.path = format!("/images/blobs/{unrelated}");
 
         let result = prepare(
-            &cache,
+            Some(&cache),
             &[grant(ManagedImageRole::Base, &base, None), composite],
             &ws_url(&server),
             SERVER_AUTH_TOKEN,

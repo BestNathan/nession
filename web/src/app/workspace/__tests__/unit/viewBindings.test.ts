@@ -33,9 +33,24 @@ describe('workspace view bindings', () => {
     // whether it is available. Name and state come from the provider, placement
     // from Nession's presence policy — so a view cannot grant itself a slot by
     // being added to this list. Widening the key set here means re-arguing that.
+    //
+    // `appScroll` (#4115) is the one allowed addition: it declares how the view
+    // itself scrolls, not whether it is present or where it sits. The App host
+    // needs that fact to render either the page scrollport or the bounded fill
+    // adapter; the capability still owns no page policy.
     for (const view of WORKSPACE_VIEW_BINDINGS) {
-      expect(Object.keys(view).sort()).toEqual(['icon', 'id', 'layout']);
+      expect(Object.keys(view).sort()).toEqual(
+        ['icon', 'id', 'layout'].concat(view.appScroll === undefined ? [] : ['appScroll']).sort(),
+      );
     }
+  });
+
+  it('declares only genuinely bounded App surfaces (#4115)', () => {
+    const bounded = WORKSPACE_VIEW_BINDINGS
+      .filter((view) => view.appScroll === 'bounded')
+      .map((view) => view.id)
+      .sort();
+    expect(bounded).toEqual(['claude-code', 'env', 'files', 'git']);
   });
 
   it('binds only capabilities the workspace actually provides', () => {

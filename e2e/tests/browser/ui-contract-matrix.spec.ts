@@ -520,7 +520,7 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       await page.getByTestId('file-row-web/src').click();
       await page.getByTestId('file-row-web/src/App.tsx').click();
       const back = page.getByTestId('app-page-back');
-      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+      await expect(back).toHaveAttribute('aria-label', 'Back to src');
 
       const shell = await layerRoot.boundingBox();
       const editor = await page.locator('.cm-editor').boundingBox();
@@ -532,17 +532,17 @@ for (const row of viewports.filter((v) => v.experience === 'app')) {
       // From inside the editor's own left edge — CodeMirror's line-number
       // gutter sits at x = 0, so this is the touch the edge band re-admitted,
       // and before this rule it left the whole depth and discarded whatever
-      // `Back to Files` was guarding.
+      // `Back to src` was guarding.
       await swipeHorizontally(page, { y, fromX: shell.x + 10, toX: shell.x + 170 });
       await page.waitForTimeout(300);
       await expect(layerRoot).toHaveAttribute('data-layer', 'workspace');
-      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+      await expect(back).toHaveAttribute('aria-label', 'Back to src');
 
       // …and the depth's own leave walks the directory stack (#1140) before the
       // capability root, where Back and the shell both mean the Terminal.
       await back.click();
       await expect(page.getByTestId('app-page-header')).toContainText('src');
-      await expect(back).toHaveAttribute('aria-label', 'Back to Files');
+      await expect(back).toHaveAttribute('aria-label', 'Back to web');
       await back.click();
       await expect(page.getByTestId('app-page-header')).toContainText('web');
       await back.click();

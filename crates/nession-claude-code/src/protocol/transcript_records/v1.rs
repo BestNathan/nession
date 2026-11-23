@@ -23,10 +23,13 @@
 //! ## What an opaque reference binds
 //!
 //! `record_ref` and `next_cursor` are opaque strings. Both encode the
-//! transcript identity, a byte offset and a generation fingerprint of the
-//! file. A reference from one transcript can never be used against another,
-//! and a cursor from before the file was replaced is refused rather than
-//! applied to different bytes. No filesystem path crosses the wire.
+//! transcript identity and a byte offset, and both carry a fingerprint of the
+//! bytes they name: a record reference covers its own line, while a cursor
+//! covers the byte range of the page it was issued with. Rewriting a record a
+//! caller already saw makes the identity stale even when the file's first line
+//! is unchanged; appending records leaves both identities valid. A reference
+//! from one transcript can never be used against another, and no filesystem
+//! path crosses the wire.
 //!
 //! ## Partial writes are withheld
 //!
@@ -65,15 +68,15 @@ pub const RECORD_INLINE_CEILING: usize = 64 * 1024;
 pub const PAGE_INLINE_BUDGET: usize = 256 * 1024;
 
 /// One raw record: identity, size and, when it fits, the original text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordV1 {
     /// Opaque, resource-scoped identity of this line.
     ///
-    /// Encodes the transcript identity, the line's byte offset and the file's
-    /// generation fingerprint. It is the identity a renderer keys its row on,
-    /// and the only way to ask for the full record.
+    /// Encodes the transcript identity, the line's byte offset and a
+    /// fingerprint of the line's own bytes. It is the identity a renderer keys
+    /// its row on, and the only way to ask for the full record.
     pub record_ref: String,
 
     /// The line's byte offset within the transcript.
@@ -101,7 +104,7 @@ pub struct TranscriptRecordV1 {
 /// Where a read of the requested transcript stands.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum TranscriptRecordsStateV1 {
     /// The requested transcript was found and the page is the answer.
@@ -112,18 +115,19 @@ pub enum TranscriptRecordsStateV1 {
     /// The provider cannot establish the Session's cwd, so it cannot scope the
     /// read. Distinct from `NotFound`.
     Unavailable,
-    /// The cursor was not issued for this transcript or this file generation.
-    /// The caller must restart from the newest page; the response carries no
-    /// page, so stale bytes are never applied to a newer file.
+    /// The cursor was not issued for this transcript, or the page it vouches
+    /// for was rewritten. The caller must restart from the newest page; the
+    /// response carries no page, so stale bytes are never applied to a newer
+    /// file.
     StaleCursor,
     /// The read was attempted and failed. `error` carries the reason.
     Error,
 }
 
 /// What the caller asks for.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordsRequestV1 {
     /// The Nession session the read is scoped to. Required: visibility is
     /// per-Session-cwd, so a request without one would be a machine-wide
@@ -146,9 +150,9 @@ pub struct TranscriptRecordsRequestV1 {
 }
 
 /// The answer.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
-#[cfg_attr(feature = "codegen", derive(schemars::JsonSchema))]
+#[derive(schemars::JsonSchema)]
 pub struct TranscriptRecordsResponseV1 {
     pub state: TranscriptRecordsStateV1,
 

@@ -488,9 +488,11 @@ test.describe('App 390×844', () => {
     await gotoFixtureApp(page);
     await page.getByTestId('app-header-workspace').first().click();
     await expect(page.getByTestId('files-app-list')).toBeVisible();
-    // The directory counts arrive one `listDir` at a time, so the screenshot
-    // waits for the last row's meta rather than racing it.
-    await expect(page.getByTestId('file-row-web')).toContainText('1 item', { timeout: 10_000 });
+    // #3451 removed per-child directory counts from ordinary navigation, so a
+    // row's meta is no longer a load signal. The row itself is rendered after
+    // the fixture's `listDir` resolves; assert the completed no-count text so
+    // the screenshot cannot race the list.
+    await expect(page.getByTestId('file-row-web')).toHaveText('web', { timeout: 10_000 });
 
     await expect(page).toHaveScreenshot('app-files-list.png', {
       fullPage: true,
@@ -575,9 +577,29 @@ test.describe('App 390×844', () => {
       ...FIXTURE_SCREENSHOT,
     });
 
-    // The App draws this view with its own layout, so its strip gets its own
-    // region rather than borrowing Web's (#1332).
-    await expectChromeRegion(page, 'claude-code-view-tabs', 'app-claude-code-view-tabs.png');
+    // #3829: the App's Claude surface is conversation-first. There is no
+    // permanent five-tab strip competing with the work; the one contextual
+    // resource entry is the header's Browse action, and it opens the App-owned
+    // resource sheet. The host keeps exactly one header at every depth.
+    await expect(page.getByTestId('claude-code-view-tabs')).toHaveCount(0);
+    await expect(page.getByTestId('app-page-header')).toHaveCount(1);
+    await expect(page.getByTestId('app-page-action-browse')).toHaveAccessibleName('Browse Claude');
+
+    await page.getByTestId('app-page-action-browse').click();
+    const browseSheet = page.getByTestId('claude-browse-sheet');
+    await expect(browseSheet).toBeVisible();
+    for (const id of [
+      'claude-browse-conversations',
+      'claude-browse-transcripts',
+      'claude-browse-memory',
+      'claude-browse-mcp',
+      'claude-browse-configuration',
+    ]) {
+      await expect(page.getByTestId(id)).toBeVisible();
+    }
+    // The resource index gets its own chrome region rather than borrowing a
+    // capability strip's (#1332).
+    await expectChromeRegion(page, 'claude-browse-sheet', 'app-claude-code-browse.png');
   });
 
   // #1184 SC-16 names the Peek overlay — the conversation read from the

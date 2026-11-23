@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ChevronLeft,
+  ChevronRight,
   Pencil,
   PlugZap,
   Plus,
@@ -49,7 +50,8 @@ import {
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
+import { formatSchema } from '../format';
 import { serverApi } from '@/platform/server';
 import type {
   ClaudeCodeMcpConnectState,
@@ -61,6 +63,7 @@ import type {
   ClaudeCodeMcpProbe,
   ClaudeCodeMcpProbeStatus,
   ClaudeCodeMcpScope,
+  ClaudeCodeMcpTool,
   ClaudeCodeMcpTransport,
   ClaudeCodeMcpWriteScope,
 } from '../types';
@@ -191,7 +194,18 @@ function probeLabel(status: ClaudeCodeMcpProbeStatus): string {
   }
 }
 
-function ProbeSection({ probe }: { probe: ClaudeCodeMcpProbe }) {
+function ProbeSection({
+  probe,
+  onOpenTool,
+}: {
+  probe: ClaudeCodeMcpProbe;
+  /**
+   * App: a tool's schema is its own pushed depth, so the row reports the
+   * choice instead of unfolding a desktop disclosure inside the server page.
+   * Web omits it and keeps the inline `<details>`.
+   */
+  onOpenTool?: (tool: ClaudeCodeMcpTool) => void;
+}) {
   return (
     <DetailSection title="Tools and capabilities" testId="claude-code-mcp-probe">
       <DetailFacts>
@@ -218,31 +232,56 @@ function ProbeSection({ probe }: { probe: ClaudeCodeMcpProbe }) {
       ) : null}
       {probe.tools.length > 0 ? (
         <div className="flex flex-col gap-2" data-testid="claude-code-mcp-tools">
-          {probe.tools.map((tool) => (
-            <div key={tool.name} className="flex min-w-0 flex-col gap-1">
-              <p className={cn('min-w-0', chromeSansRole('secondary'))}>{tool.name}</p>
-              {tool.description ? (
-                <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
-                  {tool.description}
-                </p>
-              ) : null}
-              {tool.input_schema ? (
-                <details>
-                  <summary className={cn('cursor-pointer text-muted-foreground', chromeSansRole('caption'))}>
-                    Input schema
-                  </summary>
-                  <pre
-                    className={cn(
-                      'mt-1 max-h-48 overflow-auto rounded-[var(--nession-radius-control)] bg-muted p-2',
-                      chromeMonoRole('code'),
-                    )}
-                  >
-                    {formatSchema(tool.input_schema)}
-                  </pre>
-                </details>
-              ) : null}
-            </div>
-          ))}
+          {probe.tools.map((tool) =>
+            onOpenTool ? (
+              <button
+                key={tool.name}
+                type="button"
+                className={cn(
+                  'flex min-h-11 w-full min-w-0 items-center justify-between gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+                  'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
+                )}
+                onClick={() => onOpenTool(tool)}
+                data-testid="claude-code-mcp-tool-open"
+              >
+                <span className="flex min-w-0 flex-col gap-1">
+                  <span className={cn('min-w-0 truncate', chromeSansRole('secondary'))}>
+                    {tool.name}
+                  </span>
+                  {tool.description ? (
+                    <span className={cn('min-w-0 truncate text-muted-foreground', chromeSansRole('caption'))}>
+                      {tool.description}
+                    </span>
+                  ) : null}
+                </span>
+                <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+              </button>
+            ) : (
+              <div key={tool.name} className="flex min-w-0 flex-col gap-1">
+                <p className={cn('min-w-0', chromeSansRole('secondary'))}>{tool.name}</p>
+                {tool.description ? (
+                  <p className={cn('text-muted-foreground', chromeSansRole('caption'))}>
+                    {tool.description}
+                  </p>
+                ) : null}
+                {tool.input_schema ? (
+                  <details>
+                    <summary className={cn('cursor-pointer text-muted-foreground', chromeSansRole('caption'))}>
+                      Input schema
+                    </summary>
+                    <pre
+                      className={cn(
+                        'mt-1 max-h-48 overflow-auto rounded-[var(--nession-radius-control)] bg-muted p-2',
+                        chromeMonoRole('code'),
+                      )}
+                    >
+                      {formatSchema(tool.input_schema)}
+                    </pre>
+                  </details>
+                ) : null}
+              </div>
+            ),
+          )}
         </div>
       ) : null}
       {probe.status === 'ok' || probe.status === 'truncated' ? (
@@ -280,22 +319,16 @@ function ProbeSection({ probe }: { probe: ClaudeCodeMcpProbe }) {
   );
 }
 
-function formatSchema(schema: string): string {
-  try {
-    return JSON.stringify(JSON.parse(schema) as unknown, null, 2);
-  } catch {
-    return schema;
-  }
-}
-
 function ServerRow({
   entry,
   selected,
   onSelect,
+  touch,
 }: {
   entry: ClaudeCodeMcpEntry;
   selected: boolean;
   onSelect: () => void;
+  touch: boolean;
 }) {
   return (
     <button
@@ -305,6 +338,7 @@ function ServerRow({
       onClick={onSelect}
       className={cn(
         'flex w-full min-w-0 flex-col gap-1 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+        touch && 'min-h-11',
         'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
         selected && 'bg-accent text-accent-foreground',
       )}
@@ -338,7 +372,17 @@ function SourceList({ mcp }: { mcp: McpState }) {
   );
 }
 
-function ServerList({ mcp, onAdd }: { mcp: McpState; onAdd: () => void }) {
+function ServerList({
+  mcp,
+  onAdd,
+  onSelect,
+  touch,
+}: {
+  mcp: McpState;
+  onAdd: () => void;
+  onSelect: (entry: ClaudeCodeMcpEntry) => void;
+  touch: boolean;
+}) {
   const servers = mcp.inventory?.servers ?? [];
   const effective = servers.filter((entry) => entry.effective).length;
   return (
@@ -359,7 +403,7 @@ function ServerList({ mcp, onAdd }: { mcp: McpState; onAdd: () => void }) {
           </Button>
         </div>
       </div>
-      <div className={cn('min-h-0 flex-1 overflow-y-auto p-1', workspaceScrollClearanceClass)}>
+      <WorkspaceBoundedScrollport className="p-1" data-testid="claude-code-mcp-list">
         {servers.length === 0 ? (
           <div className="p-3">
             <DetailEmpty>
@@ -375,13 +419,14 @@ function ServerList({ mcp, onAdd }: { mcp: McpState; onAdd: () => void }) {
                 selected={
                   mcp.selection?.name === entry.name && mcp.selection.scope === entry.scope
                 }
-                onSelect={() => void mcp.select(entry)}
+                onSelect={() => onSelect(entry)}
+                touch={touch}
               />
             ))}
           </div>
         )}
         <SourceList mcp={mcp} />
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }
@@ -488,6 +533,8 @@ function ServerDetail({
   mcp,
   entry,
   isApp,
+  showBack,
+  onOpenTool,
   onEdit,
   onRemove,
   onInspect,
@@ -496,6 +543,9 @@ function ServerDetail({
   mcp: McpState;
   entry: ClaudeCodeMcpEntry;
   isApp: boolean;
+  /** Whether the inline App Back is this surface's leave. */
+  showBack: boolean;
+  onOpenTool?: (tool: ClaudeCodeMcpTool) => void;
   onEdit: () => void;
   onRemove: () => void;
   onInspect: () => void;
@@ -503,11 +553,11 @@ function ServerDetail({
 }) {
   const canEdit = !entry.read_only && (entry.scope === 'local' || entry.scope === 'project');
   return (
-    <div
+    <WorkspaceBoundedScrollport
       data-testid="claude-code-mcp-detail"
-      className={cn('min-h-0 flex-1 overflow-y-auto p-4', workspaceScrollClearanceClass)}
+      className="p-4"
     >
-      {isApp ? (
+      {isApp && showBack ? (
         <Button
           type="button"
           variant="ghost"
@@ -554,9 +604,9 @@ function ServerDetail({
             </DetailNote>
           ) : null}
         </DetailSection>
-        {mcp.probe ? <ProbeSection probe={mcp.probe} /> : null}
+        {mcp.probe ? <ProbeSection probe={mcp.probe} onOpenTool={onOpenTool} /> : null}
       </DetailSurface>
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 
@@ -1347,7 +1397,7 @@ function ConnectDialog({
               setScope={setScope}
               name={name}
               setName={setName}
-              credentialEnv={preflight?.credential_env ?? 'NESSON_MCP_TOKEN'}
+              credentialEnv={preflight?.credential_env ?? 'NESSION_MCP_TOKEN'}
               projectConfirmed={projectConfirmed}
               setProjectConfirmed={setProjectConfirmed}
               replaceExisting={replaceExisting}
@@ -1399,17 +1449,24 @@ function McpHeader({
   mcp,
   isApp,
   hasSelection,
+  showSelectionBack,
   onConnect,
 }: {
   mcp: McpState;
   isApp: boolean;
   hasSelection: boolean;
+  /**
+   * Whether this surface owns its own Back out of a server detail. The App
+   * composition pushes a server as a shell depth, so the shell header's Back is
+   * the one leave; the inline control would be a second one (#1051).
+   */
+  showSelectionBack: boolean;
   onConnect: () => void;
 }) {
   return (
     <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
       <div className="flex min-w-0 items-center gap-2">
-        {isApp && hasSelection ? (
+        {isApp && hasSelection && showSelectionBack ? (
           <Button type="button" variant="ghost" size="sm" onClick={mcp.clearSelection}>
             <ChevronLeft className="size-4" /> Back
           </Button>
@@ -1446,6 +1503,9 @@ function McpBody({
   mcp,
   isApp,
   selectedEntry,
+  showSelectionBack,
+  onSelectEntry,
+  onOpenTool,
   onAdd,
   onEdit,
   onRemove,
@@ -1454,6 +1514,9 @@ function McpBody({
   mcp: McpState;
   isApp: boolean;
   selectedEntry: ClaudeCodeMcpEntry | null;
+  showSelectionBack: boolean;
+  onSelectEntry: (entry: ClaudeCodeMcpEntry) => void;
+  onOpenTool?: (tool: ClaudeCodeMcpTool) => void;
   onAdd: () => void;
   onEdit: (entry: ClaudeCodeMcpEntry) => void;
   onRemove: (entry: ClaudeCodeMcpEntry) => void;
@@ -1486,7 +1549,7 @@ function McpBody({
           isApp && selectedEntry && 'hidden',
         )}
       >
-        <ServerList mcp={mcp} onAdd={onAdd} />
+        <ServerList mcp={mcp} onAdd={onAdd} onSelect={onSelectEntry} touch={isApp} />
       </aside>
       <main className={cn('flex min-h-0 flex-col', isApp && !selectedEntry && 'hidden')}>
         {selectedEntry ? (
@@ -1494,6 +1557,8 @@ function McpBody({
             mcp={mcp}
             entry={selectedEntry}
             isApp={isApp}
+            showBack={showSelectionBack}
+            onOpenTool={onOpenTool}
             onBack={mcp.clearSelection}
             onEdit={() => onEdit(selectedEntry)}
             onRemove={() => onRemove(selectedEntry)}
@@ -1518,14 +1583,28 @@ export function McpView({
   onAdd,
   onEdit,
   onRemove,
+  onSelectEntry,
+  onOpenTool,
+  showSelectionBack = true,
 }: {
   mcp: McpState;
   experience: 'web' | 'app';
   onAdd: () => void;
   onEdit: (entry: ClaudeCodeMcpEntry) => void;
   onRemove: (entry: ClaudeCodeMcpEntry) => void;
+  /**
+   * App composition hook: report a chosen server so the caller can push its
+   * detail as a shell depth. The default keeps the view's own selection, which
+   * is what the Web master/detail and the legacy App pane use.
+   */
+  onSelectEntry?: (entry: ClaudeCodeMcpEntry) => void;
+  /** App composition hook: a tool's schema is its own pushed depth. */
+  onOpenTool?: (tool: ClaudeCodeMcpTool) => void;
+  /** Whether this surface owns its own Back out of a server detail. */
+  showSelectionBack?: boolean;
 }) {
   const isApp = experience === 'app';
+  const selectEntry = onSelectEntry ?? ((entry: ClaudeCodeMcpEntry) => void mcp.select(entry));
   const [consent, setConsent] = useState(false);
   const [connectOpen, setConnectOpen] = useState(false);
   const selectedEntry = useMemo(() => {
@@ -1565,12 +1644,16 @@ export function McpView({
         mcp={mcp}
         isApp={isApp}
         hasSelection={selectedEntry !== null}
+        showSelectionBack={showSelectionBack}
         onConnect={() => setConnectOpen(true)}
       />
       <McpBody
         mcp={mcp}
         isApp={isApp}
         selectedEntry={selectedEntry}
+        showSelectionBack={showSelectionBack}
+        onSelectEntry={selectEntry}
+        onOpenTool={onOpenTool}
         onAdd={onAdd}
         onEdit={onEdit}
         onRemove={onRemove}

@@ -21,7 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ImageBuildCancelPayload = { build_id: string, };
+export type ImageBuildCancelPayload = { build_id: string, 
+/**
+ * The attempt the caller observed. A mismatch is a conflict and the
+ * Server returns the current record rather than canceling a different
+ * attempt.
+ */
+attempt?: number | null, };
 export type ImageBuildCancelResponsePayload = { success: boolean, build?: ImageBuildDescriptor | null, error?: string | null, error_kind?: string | null, };
 export type ImageBuildDescriptor = { build_id: string, 
 /**
@@ -47,7 +53,16 @@ digest?: string | null, size_bytes: number, alias?: string | null,
 /**
  * Whether this build reused bytes that were already published.
  */
-deduplicated: boolean, created_at: number, updated_at: number, };
+deduplicated: boolean, 
+/**
+ * Bounded terminal attempt history, oldest first (#3798).
+ */
+attempts?: Array<ImageBuildAttempt>, created_at: number, updated_at: number, };
+export type ImageBuildAttempt = { attempt: number, status: string, stage?: string | null, 
+/**
+ * The last bounded diagnostic observed for this attempt.
+ */
+diagnostic?: string | null, error?: string | null, started_at: number, finished_at: number, };
 export type ImageBuildProgress = { files?: number | null, bytes?: number | null, 
 /**
  * Time since this attempt started, in milliseconds.
@@ -80,7 +95,13 @@ export type ImagePackaging = { compression: string, block_size: number, fixed_ti
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type ImageBuildCancelCall = { build_id: string, };
+export type ImageBuildCancelCall = { build_id: string, 
+/**
+ * The attempt the caller observed. A mismatch is a conflict and the
+ * Server returns the current record rather than canceling a different
+ * attempt.
+ */
+attempt?: number | null, };
 
 /** The payload the provider answers with. */
 export type ImageBuildCancelReply = { success: boolean, build?: ImageBuildDescriptor | null, error?: string | null, error_kind?: string | null, };

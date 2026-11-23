@@ -9,8 +9,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
 import { formatClockTime } from '@/shared/lib/format';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { parseTranscriptRecord, type ParsedTranscriptRecord } from '../model/transcriptRecord';
 import { formatSize } from '../format';
 import { TranscriptRecordDetail } from './TranscriptRecordDetail';
@@ -67,6 +68,7 @@ function RecordRow({
   onToggle,
   onOpenRecord,
   onOpenRaw,
+  touch = false,
 }: {
   record: ClaudeCodeTranscriptRecord;
   layout: 'master-detail' | 'push';
@@ -74,6 +76,7 @@ function RecordRow({
   onToggle: () => void;
   onOpenRecord: () => void;
   onOpenRaw: () => void;
+  touch?: boolean;
 }) {
   const parsed = useMemo(
     () => (typeof record.raw === 'string' ? parseTranscriptRecord(record.raw) : null),
@@ -97,7 +100,10 @@ function RecordRow({
       <div className="flex min-w-0 items-start gap-1">
         <button
           type="button"
-          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-muted/50"
+          className={cn(
+            'flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left hover:bg-muted/50',
+            touch && 'min-h-11',
+          )}
           aria-expanded={layout === 'master-detail' ? expanded : undefined}
           onClick={() => (layout === 'push' ? onOpenRecord() : onToggle())}
           data-testid="transcript-record-open"
@@ -130,6 +136,7 @@ function RecordRow({
           type="button"
           className={cn(
             'my-1 shrink-0 rounded-[var(--nession-radius-control)] px-2 py-1 text-muted-foreground hover:bg-muted hover:text-foreground',
+            touch && 'min-h-11 min-w-11',
             chromeSansRole('metadata'),
           )}
           onClick={() => onOpenRaw()}
@@ -159,6 +166,7 @@ export function TranscriptTimeline({
   loadingOlder = false,
   partialTail = false,
   emptyLine = 'This transcript recorded nothing.',
+  touch = false,
 }: {
   records: ClaudeCodeTranscriptRecord[];
   layout: 'master-detail' | 'push';
@@ -170,13 +178,12 @@ export function TranscriptTimeline({
   loadingOlder?: boolean;
   partialTail?: boolean;
   emptyLine?: string;
+  /** The App's 44px touch floor for the row and its Raw action. */
+  touch?: boolean;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-timeline">
-      <div
-        className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
-        data-testid="transcript-timeline-scroll"
-      >
+      <WorkspaceBoundedScrollport data-testid="transcript-timeline-scroll">
         {records.length === 0 ? (
           <p
             className={cn('px-3 py-6 text-muted-foreground', chromeSansRole('secondary'))}
@@ -195,6 +202,7 @@ export function TranscriptTimeline({
                 onToggle={() => onToggleRecord(record.record_ref)}
                 onOpenRecord={() => onOpenRecord(record)}
                 onOpenRaw={() => onOpenRaw(record)}
+                touch={touch}
               />
             ))}
           </ul>
@@ -204,6 +212,7 @@ export function TranscriptTimeline({
             type="button"
             className={cn(
               'w-full px-3 py-2 text-muted-foreground',
+              touch && 'min-h-11',
               chromeSansRole('metadata'),
             )}
             onClick={() => onLoadOlder()}
@@ -212,10 +221,11 @@ export function TranscriptTimeline({
             {loadingOlder ? 'Loading…' : 'Load earlier'}
           </button>
         ) : null}
-      </div>
+      </WorkspaceBoundedScrollport>
       {partialTail ? (
         <p
-          className={cn('px-3 py-1 text-muted-foreground', chromeSansRole('metadata'))}
+          data-workspace-fixed-role="context"
+          className={cn('px-3 py-1 text-muted-foreground', chromeSansRole('metadata'), workspaceFixedContextClearanceClass)}
           data-testid="transcript-partial"
         >
           The transcript is still being written.

@@ -65,6 +65,57 @@ describe('fixture GitHub surface', () => {
     expect(ambiguous.choices.length).toBeGreaterThan(1);
   });
 
+  it('serves an overflowing inventory for the nested #4188 Cases', async () => {
+    const surface = fixtureGithubSurface('?github=long');
+    const issues = await surface.request<{
+      issues: { number: number }[];
+      has_more: boolean;
+    }>('github.issues', { state: 'all', limit: 40 });
+    expect(issues.issues).toHaveLength(36);
+    expect(issues.issues[0]?.number).toBe(4001);
+    expect(issues.has_more).toBe(false);
+
+    const firstPage = await surface.request<{ issues: unknown[]; has_more: boolean }>(
+      'github.issues',
+      { state: 'all', limit: 20 },
+    );
+    expect(firstPage.issues).toHaveLength(20);
+    expect(firstPage.has_more).toBe(true);
+
+    const detail = await surface.request<{ issue: { body: string } }>('github.issue-detail', {
+      number: 4001,
+    });
+    expect(detail.issue.body).toContain('Section 40');
+
+    const pulls = await surface.request<{ pull_requests: unknown[]; current_branch_pr: number }>(
+      'github.pull-requests',
+      { state: 'open', limit: 40 },
+    );
+    expect(pulls.pull_requests).toHaveLength(36);
+    expect(pulls.current_branch_pr).toBe(5001);
+
+    const pullPage = await surface.request<{ pull_requests: unknown[]; has_more: boolean }>(
+      'github.pull-requests',
+      { state: 'open', limit: 20 },
+    );
+    expect(pullPage.pull_requests).toHaveLength(20);
+    expect(pullPage.has_more).toBe(true);
+
+    const actions = await surface.request<{ workflows: unknown[]; has_more: boolean }>(
+      'github.workflows',
+      { scope: 'repository', limit: 40 },
+    );
+    expect(actions.workflows).toHaveLength(36);
+    expect(actions.has_more).toBe(false);
+
+    const actionPage = await surface.request<{ workflows: unknown[]; has_more: boolean }>(
+      'github.workflows',
+      { scope: 'repository', limit: 30 },
+    );
+    expect(actionPage.workflows).toHaveLength(30);
+    expect(actionPage.has_more).toBe(true);
+  });
+
   it('scopes Actions runs and preserves queued/in-progress/disabled states', async () => {
     const surface = fixtureGithubSurface('');
     const repo = await surface.request<{ workflows: { state: string; latest_run?: { status: string } }[] }>(

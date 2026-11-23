@@ -3,7 +3,7 @@ import { ZoomIn, ZoomOut, Maximize, Minimize } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 
 export interface ImageViewerProps {
   blobUrl: string;
@@ -26,7 +26,10 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
         </span>
         <span className={cn('text-muted-foreground', chromeSansRole('metadata'))}>{Math.round(scale * 100)}%</span>
       </div>
-      <div className={cn('flex-1 min-h-0 overflow-auto flex items-center justify-center bg-inverse/20', workspaceScrollClearanceClass)}>
+      <WorkspaceBoundedScrollport
+        viewportClassName="overflow-auto flex items-center justify-center bg-inverse/20"
+        className="flex items-center justify-center"
+      >
         <img
           src={blobUrl}
           alt={filename}
@@ -37,7 +40,7 @@ export function ImageViewer({ blobUrl, filename }: ImageViewerProps) {
           )}
           style={fitToScreen ? undefined : { transform: `scale(${scale})` }}
         />
-      </div>
+      </WorkspaceBoundedScrollport>
       <div className="flex items-center justify-center gap-1 px-2 py-1 border-t flex-shrink-0">
         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={zoomOut} aria-label="Zoom out">
           <ZoomOut className="h-3.5 w-3.5" />

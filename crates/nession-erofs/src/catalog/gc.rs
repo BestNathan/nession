@@ -8,7 +8,7 @@ use super::pin;
 use super::reference;
 use super::sqlite;
 use super::tag;
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 
 /// One sweep's bounds and grace window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +115,7 @@ async fn unmark(conn: &impl ConnectionTrait, digest: &str) -> Result<()> {
 /// are gone.
 pub async fn sweep(
     conn: &DatabaseConnection,
-    store: &BlobStore,
+    store: &FsBlobStore,
     now: i64,
     policy: &GcPolicy,
     external_roots: &[String],
@@ -205,7 +205,7 @@ pub async fn sweep(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::blob::store::BlobStore;
+    use crate::blob::store::FsBlobStore;
     use crate::catalog::reference::{record_object, ObjectKind, StoredObject};
     use crate::catalog::sqlite::tests::memory_connection;
     use crate::catalog::tag::{set_tag, TagExpectation};
@@ -214,7 +214,7 @@ mod tests {
 
     async fn published_manifest(
         conn: &DatabaseConnection,
-        store: &BlobStore,
+        store: &FsBlobStore,
         tag_name: Option<&str>,
         hex: char,
         now: i64,
@@ -266,7 +266,7 @@ mod tests {
     #[tokio::test]
     async fn gc_marks_then_deletes_only_unreachable_objects_after_grace() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         sqlite::migrate(&conn).await.unwrap();
         let (kept, kept_layer) = published_manifest(&conn, &store, Some("v1"), 'a', 100).await;
@@ -299,7 +299,7 @@ mod tests {
     #[tokio::test]
     async fn a_pin_or_new_tag_reprieves_a_marked_object() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let conn = memory_connection().await;
         sqlite::migrate(&conn).await.unwrap();
         let (digest, _) = published_manifest(&conn, &store, None, 'c', 1).await;
@@ -323,7 +323,7 @@ mod tests {
     #[tokio::test]
     async fn durable_marks_bounded_sweeps_and_restarts_still_reclaim() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let database_path = dir.path().join("gc.db");
         let conn = sqlite::tests::file_connection(&database_path).await;
         sqlite::migrate(&conn).await.unwrap();

@@ -183,8 +183,68 @@ function calculatePlan() {
   return { schema_version: 1, main_sha: mainSha, branches: states };
 }
 
+// #4186: synchronous `gh api` run-inventory fetches must not overflow the
+// default 1 MiB child stdout buffer. Historical convergence-review/audit run
+// lists embed full repository/head_commit/actor objects (~13 KiB per run);
+// 80+ runs exceed the default and crash the controller with ENOBUFS before
+// any pagination guard runs. The bound is the server-side `--jq` projection
+// to ONLY the fields the dedupe consumers read; RUN_INVENTORY_MAX_BUFFER is a
+// documented defensive cap, not the policy — raising it alone must never mask
+// unbounded payload growth. Truncated/oversized/incomplete inventories fail
+// closed with a named denial; no dispatch or branch mutation may follow.
+export const RUN_INVENTORY_MAX_BUFFER = 8 * 1024 * 1024;
+export const RUN_INVENTORY_JQ =
+  '{total_count: .total_count, workflow_runs: [.workflow_runs[] | ' +
+  '{id: .id, display_title: .display_title, event: .event, ' +
+  'head_branch: .head_branch, created_at: .created_at, ' +
+  'repository: {full_name: .repository.full_name}, ' +
+  'head_repository: {full_name: .head_repository.full_name}}]}';
+
+export function parseRunInventory(raw) {
+  let inventory;
+  try { inventory = JSON.parse(raw); }
+  catch { reject('truncated or malformed run inventory JSON'); }
+  if (!inventory || typeof inventory !== 'object' ||
+      !Array.isArray(inventory.workflow_runs))
+    reject('untrusted run inventory: workflow_runs must be an array');
+  if (!Number.isSafeInteger(inventory.total_count) ||
+      inventory.total_count < inventory.workflow_runs.length)
+    reject('untrusted run inventory: inconsistent total_count');
+  return inventory;
+}
+
+export function fetchRunInventory(repo, workflow, execute) {
+  let raw;
+  try {
+    raw = execute(['api', '--jq', RUN_INVENTORY_JQ,
+      'repos/' + repo + '/actions/workflows/' + workflow +
+      '/runs?event=workflow_dispatch&per_page=100'],
+    { maxBuffer: RUN_INVENTORY_MAX_BUFFER });
+  } catch (error) {
+    // ENOBUFS (even past the defensive cap) or a failed gh call is an
+    // explicit bounded-policy denial, never an uncontrolled crash or a
+    // license to dispatch/mutate.
+    reject('bounded run-inventory fetch denied (' +
+      (error?.code ?? 'error') + '); no dispatch performed');
+  }
+  return parseRunInventory(raw);
+}
+
+// One canonical run-identity rule for both dedupe consumers: an exact display
+// title, workflow_dispatch event, main head branch and same-repo head/base.
+// The audit consumer additionally rejects runs older than its Issue.
+export function matchRunIdentity(inventory, { title, repo, createdAfter }) {
+  return inventory.workflow_runs.find(run =>
+    run.display_title === title && run.event === 'workflow_dispatch' &&
+    run.head_branch === 'main' && run.repository?.full_name === repo &&
+    run.head_repository?.full_name === repo &&
+    (createdAfter === undefined ||
+      Date.parse(run.created_at) >= Date.parse(createdAfter)));
+}
+
 function gh(args) {
-  return JSON.parse(shell('gh', ['api', ...args]));
+  return JSON.parse(shell('gh', ['api', ...args],
+    { maxBuffer: RUN_INVENTORY_MAX_BUFFER }));
 }
 
 // The existing Publisher App identity only has Contents/PR write, not Issue
@@ -194,7 +254,8 @@ function ghIssueWrite(args) {
   const token=process.env.ISSUE_GITHUB_TOKEN;
   if(!token)reject('trusted Issue cleanup token unavailable');
   return JSON.parse(shell('gh',['api',...args],{
-    env:{...process.env,GH_TOKEN:token}
+    env:{...process.env,GH_TOKEN:token},
+    maxBuffer:RUN_INVENTORY_MAX_BUFFER
   }));
 }
 export function legacyIssueArchiveRequests(repo,number,prNumber,headSha) {
@@ -470,22 +531,19 @@ function ensurePr(repo, owner, head, base, plan, batchIssueNumber=null, batch=nu
 // Exact-head scoped CI and immutable source qualification are the merge
 // admission boundary. Full regression is a periodic Main diagnostic, not an
 // implicit merge-dispatch or approval dependency (#3465).
-function dispatchBatchAudit(repo,issue){
+function dispatchBatchAudit(repo,issue,inventoryExecute){
   const token=process.env.DISPATCH_GITHUB_TOKEN;
   if(!token)reject('trusted Issue Audit dispatcher token missing');
   const env={...process.env,GH_TOKEN:token};
   // A dispatch can succeed remotely while the Controller loses its reply.
   // Reconcile the immutable Issue identity against actual GitHub runs before
   // spending another model invocation; do not rely on the created flag.
-  const raw=shell('gh',['api','repos/'+repo+
-    '/actions/workflows/agent-issue-audit.yml/runs?event=workflow_dispatch&per_page=100'],{env});
-  const inventory=JSON.parse(raw);
-  if(!Array.isArray(inventory.workflow_runs))reject('untrusted Issue Audit run inventory');
+  // #4186: bounded, projected inventory fetch (never the unbounded default).
+  const inventory=fetchRunInventory(repo,'agent-issue-audit.yml',
+    inventoryExecute ?? ((args,options)=>shell('gh',args,{env,...options})));
   const expected='Issue Audit #'+issue.number;
-  const found=inventory.workflow_runs.find(run=>run.display_title===expected&&
-    run.event==='workflow_dispatch'&&run.head_branch==='main'&&
-    run.repository?.full_name===repo&&run.head_repository?.full_name===repo&&
-    Date.parse(run.created_at)>=Date.parse(issue.created_at));
+  const found=matchRunIdentity(inventory,
+    {title:expected,repo,createdAfter:issue.created_at});
   if(found)return {status:'EXISTING_AUDIT',run_id:found.id};
   if(inventory.workflow_runs.length===100 &&
     Date.parse(inventory.workflow_runs[99].created_at)>Date.parse(issue.created_at))
@@ -627,18 +685,20 @@ function ensureConflictRepairIssue(repo,plan,lane){
   return {number:created.number,action:'created'};
 }
 
-function dispatchConflictReview(repo, receipt, action, plan, lane) {
+function dispatchConflictReview(repo, receipt, action, plan, lane, inventoryExecute) {
   const token = process.env.DISPATCH_GITHUB_TOKEN;
   if (!token) reject('the trusted Controller Actions dispatcher token is missing');
+  const env = { ...process.env, GH_TOKEN: token };
   function api(args) {
-    return shell('gh', ['api', ...args], { env: { ...process.env, GH_TOKEN: token } });
+    return shell('gh', ['api', ...args], { env, maxBuffer: RUN_INVENTORY_MAX_BUFFER });
   }
   const workflow = 'agent-staging-convergence-review.yml';
   // Exact SHA pair is embedded in the trusted Agent Run display title. This
   // keeps a repeatedly discovered conflict from spending tokens every tick.
-  const previous = JSON.parse(api(['repos/' + repo + '/actions/workflows/' + workflow +
-    '/runs?event=workflow_dispatch&per_page=100']));
-  if (!Array.isArray(previous.workflow_runs) || previous.total_count > 100) {
+  // #4186: bounded, projected inventory fetch (never the unbounded default).
+  const previous = fetchRunInventory(repo, workflow,
+    inventoryExecute ?? ((args, options) => shell('gh', args, { env, ...options })));
+  if (previous.total_count > 100) {
     return { status: 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY' };
   }
   const productionRequested=action==='sync-main-to-lane'&&
@@ -678,11 +738,7 @@ function dispatchConflictReview(repo, receipt, action, plan, lane) {
   const production=Boolean(repairPaths&&repairIssue?.number);
   const identity=(production?'Convergence repair ':'Convergence conflict ')+
     lane.branch+' '+plan.main_sha+' '+lane.sha;
-  const recorded=previous.workflow_runs.find(run=>
-    run.display_title===identity&&run.event==='workflow_dispatch'&&
-    run.head_branch==='main'&&
-    run.repository?.full_name===repo&&
-    run.head_repository?.full_name===repo);
+  const recorded=matchRunIdentity(previous,{title:identity,repo});
   if(recorded)return {status:production?'EXISTING_REPAIR':'EXISTING_ANALYSIS',
     run_id:recorded.id,
     ...(repairSkip?{repair_skipped:repairSkip}:{})};
@@ -1139,6 +1195,139 @@ function selfTest() {
   assert.throws(()=>legacyIssueArchiveRequests('attacker/repo',0,3168,
     'a'.repeat(40)),/invalid legacy Issue archive provenance/);
     assert.throws(() => deriveActions(-1, 0), /invalid/);
+  // #4186: bounded run-inventory fetch. The historical controller crashed
+  // with `spawnSync gh ENOBUFS` because unprojected run lists (~13 KiB/run)
+  // exceed the default 1 MiB child buffer before any pagination guard runs.
+  const bulkyRun = (i, over = {}) => ({
+    id: 1000 + i,
+    display_title: 'Convergence conflict staging ' + 'a'.repeat(40) + ' ' + 'b'.repeat(40),
+    event: 'workflow_dispatch', head_branch: 'main',
+    created_at: '2026-11-20T00:00:00Z',
+    repository: { full_name: 'BestNathan/nession' },
+    head_repository: { full_name: 'BestNathan/nession' },
+    head_commit: { message: 'x'.repeat(6144) },
+    actor: { login: 'bot', padding: 'y'.repeat(6144) },
+    padding: 'z'.repeat(6144), ...over,
+  });
+  const fullRuns = Array.from({ length: 80 }, (_, i) => bulkyRun(i));
+  const fullPayload = JSON.stringify({ total_count: 80, workflow_runs: fullRuns });
+  assert.ok(fullPayload.length > 1024 * 1024,
+    'oversized fixture must exceed the default 1 MiB buffer');
+  // SC-01: reproduce the OLD overflow with a real child whose stdout exceeds
+  // the default 1 MiB buffer (the run-inventory mechanism), not a mocked error.
+  const emitOversized = ['-e', "process.stdout.write('x'.repeat(2*1024*1024))"];
+  assert.throws(() => execFileSync(process.execPath, emitOversized,
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }),
+    (error) => error.code === 'ENOBUFS',
+    'default 1 MiB buffer must overflow on oversized run-inventory output');
+  // The documented finite defensive cap absorbs the same oversized output.
+  assert.equal(execFileSync(process.execPath, emitOversized,
+    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+      maxBuffer: RUN_INVENTORY_MAX_BUFFER }).length, 2 * 1024 * 1024,
+    'finite defensive cap processes oversized output without ENOBUFS');
+  // The repair bounds the payload by projecting ONLY consumed fields.
+  const projectRuns = (payload) => JSON.stringify({
+    total_count: payload.total_count,
+    workflow_runs: payload.workflow_runs.map((run) => ({
+      id: run.id, display_title: run.display_title, event: run.event,
+      head_branch: run.head_branch, created_at: run.created_at,
+      repository: { full_name: run.repository.full_name },
+      head_repository: { full_name: run.head_repository.full_name },
+    })),
+  });
+  const projected = projectRuns(JSON.parse(fullPayload));
+  assert.ok(projected.length < 64 * 1024, 'projection must bound the payload');
+  const fetchCalls = [];
+  const boundedExecute = (args, options) => {
+    fetchCalls.push({ args, options });
+    assert.equal(options.maxBuffer, RUN_INVENTORY_MAX_BUFFER,
+      'a finite defensive maxBuffer is required');
+    assert.ok(args.includes('--jq') && args.includes(RUN_INVENTORY_JQ),
+      'the fetch must request the consumed-field projection');
+    return projected;
+  };
+  const inventory = fetchRunInventory('BestNathan/nession',
+    'agent-staging-convergence-review.yml', boundedExecute);
+  assert.equal(inventory.total_count, 80);
+  assert.equal(inventory.workflow_runs.length, 80);
+  assert.equal(inventory.workflow_runs[0].display_title, fullRuns[0].display_title);
+  assert.equal(fetchCalls.length, 1, 'exactly one bounded inventory fetch');
+  // SC-02: truncated / malformed / missing / inconsistent inventories fail
+  // closed at the parse boundary (no execute, no dispatch, no mutation).
+  assert.throws(() => parseRunInventory(projected.slice(0, projected.length - 5)),
+    /truncated or malformed run inventory/);
+  assert.throws(() => parseRunInventory(''), /truncated or malformed run inventory/);
+  assert.throws(() => parseRunInventory(JSON.stringify({ total_count: 1 })),
+    /workflow_runs must be an array/);
+  assert.throws(() => parseRunInventory(JSON.stringify({ workflow_runs: [] })),
+    /inconsistent total_count/);
+  assert.throws(() => parseRunInventory(JSON.stringify(
+    { total_count: 0, workflow_runs: [bulkyRun(0)] })), /inconsistent total_count/);
+  // SC-02: a child overflow even past the defensive cap is an explicit
+  // bounded-policy denial, never an uncontrolled crash or a dispatch.
+  const denialCalls = [];
+  assert.throws(() => fetchRunInventory('BestNathan/nession',
+    'agent-staging-convergence-review.yml', (args, options) => {
+      denialCalls.push({ args, options });
+      throw Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
+    }), /bounded run-inventory fetch denied/);
+  assert.equal(denialCalls.length, 1, 'denial performs no follow-up call');
+  // SC-01/02: the projected fields retain exactly the authenticated identity
+  // the dedupe needs; wrong repo/base/branch/event/title or stale time never
+  // match (one canonical matcher shared by both consumers).
+  const identity = 'Convergence conflict staging ' + 'a'.repeat(40) + ' ' + 'b'.repeat(40);
+  const matchInventory = parseRunInventory(projected);
+  assert.equal(matchRunIdentity(matchInventory,
+    { title: identity, repo: 'BestNathan/nession' })?.id, 1000);
+  assert.equal(matchRunIdentity(matchInventory,
+    { title: identity, repo: 'attacker/repo' }), undefined, 'wrong repo never matches');
+  assert.equal(matchRunIdentity(matchInventory,
+    { title: 'Convergence conflict staging ' + 'c'.repeat(40) + ' ' + 'b'.repeat(40),
+      repo: 'BestNathan/nession' }), undefined, 'stale SHA pair never matches');
+  const wrongIdentity = parseRunInventory(projectRuns({ total_count: 4, workflow_runs: [
+    bulkyRun(0, { head_repository: { full_name: 'attacker/repo' } }),
+    bulkyRun(1, { head_branch: 'staging' }),
+    bulkyRun(2, { event: 'push' }),
+    bulkyRun(3, { repository: { full_name: 'attacker/repo' } }),
+  ] }));
+  assert.equal(matchRunIdentity(wrongIdentity,
+    { title: identity, repo: 'BestNathan/nession' }), undefined,
+    'wrong head repo/base/branch/event never matches');
+  const auditMatch = parseRunInventory(projectRuns({ total_count: 2, workflow_runs: [
+    bulkyRun(0, { display_title: 'Issue Audit #5', created_at: '2026-11-19T00:00:00Z' }),
+    bulkyRun(1, { display_title: 'Issue Audit #5', created_at: '2026-11-20T01:00:00Z' }),
+  ] }));
+  assert.equal(matchRunIdentity(auditMatch, { title: 'Issue Audit #5',
+    repo: 'BestNathan/nession', createdAfter: '2026-11-20T00:00:00Z' })?.id, 1001,
+    'audit matcher rejects runs older than the Issue');
+  // SC-02: consumer-level fail-closed. An unbounded review inventory blocks
+  // without dispatching; a matching run is reused without a new dispatch.
+  const prevToken = process.env.DISPATCH_GITHUB_TOKEN;
+  process.env.DISPATCH_GITHUB_TOKEN = 'self-test-token';
+  try {
+    const reviewArgs = ['BestNathan/nession', { number: 4077 }, 'analyze',
+      { main_sha: 'a'.repeat(40) }, { branch: 'staging', sha: 'b'.repeat(40) }];
+    const unbounded = dispatchConflictReview(...reviewArgs, () => projectRuns(
+      { total_count: 101, workflow_runs: fullRuns }));
+    assert.equal(unbounded.status, 'BLOCKED_UNBOUNDED_REVIEW_INVENTORY');
+    const reused = dispatchConflictReview(...reviewArgs, () => projectRuns(
+      { total_count: 1, workflow_runs: [bulkyRun(0)] }));
+    assert.equal(reused.status, 'EXISTING_ANALYSIS');
+    assert.equal(reused.run_id, 1000);
+    const auditArgs = ['BestNathan/nession',
+      { number: 5, created_at: '2026-11-20T00:00:00Z' }];
+    const existingAudit = dispatchBatchAudit(...auditArgs, () => projectRuns(
+      { total_count: 1, workflow_runs: [
+        bulkyRun(0, { display_title: 'Issue Audit #5', created_at: '2026-11-20T01:00:00Z' })] }));
+    assert.equal(existingAudit.status, 'EXISTING_AUDIT');
+    const truncatedAudit = dispatchBatchAudit(...auditArgs, () => projectRuns(
+      { total_count: 100, workflow_runs: Array.from({ length: 100 }, (_, i) =>
+        bulkyRun(i, { display_title: 'Issue Audit #999', created_at: '2026-11-21T00:00:00Z' })) }));
+    assert.equal(truncatedAudit.status, 'BLOCKED_AUDIT_RUN_INVENTORY_TRUNCATED');
+  } finally {
+    if (prevToken === undefined) delete process.env.DISPATCH_GITHUB_TOKEN;
+    else process.env.DISPATCH_GITHUB_TOKEN = prevToken;
+  }
   process.stdout.write('staging convergence self-test: PASS\n');
 }
 

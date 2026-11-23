@@ -24,7 +24,7 @@ use anyhow::Result;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::gc::{sweep, GcPolicy, GcReport};
 use crate::catalog::legacy::{migrate_legacy_images, LegacyMigrationReport, LegacyPlatform};
 use crate::catalog::tag::TagExpectation;
@@ -38,19 +38,19 @@ use crate::catalog::tag::TagExpectation;
 /// accepted #3334 build root uses), not a multi-Pod claim.
 #[derive(Debug)]
 pub struct ImageCatalog {
-    store: BlobStore,
+    store: FsBlobStore,
     writer: Mutex<()>,
 }
 
 impl ImageCatalog {
-    pub fn new(store: BlobStore) -> Self {
+    pub fn new(store: FsBlobStore) -> Self {
         Self {
             store,
             writer: Mutex::new(()),
         }
     }
 
-    pub fn store(&self) -> &BlobStore {
+    pub fn store(&self) -> &FsBlobStore {
         &self.store
     }
 
@@ -127,7 +127,7 @@ mod tests {
     #[tokio::test]
     async fn the_catalog_lock_serializes_publication_and_gc() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let catalog = ImageCatalog::new(store);
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
@@ -157,7 +157,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_tag_moves_with_one_expected_old_digest_have_one_winner() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let catalog = ImageCatalog::new(store);
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();
@@ -215,7 +215,7 @@ mod tests {
     #[tokio::test]
     async fn a_pinned_manifest_survives_a_tag_move() {
         let dir = tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let catalog = ImageCatalog::new(store);
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn).await.unwrap();

@@ -482,6 +482,17 @@ impl Outbox {
         self.publish(Class::SessionState, session, msg)
     }
 
+    /// Publish one session's Activity level (#3804), superseding any still
+    /// pending for it.
+    ///
+    /// Shares the session-state class but not its key: inventory and Activity
+    /// are two levels about one Session, and a shared key would let one
+    /// supersede the other. The namespaced key keeps them independently
+    /// coalesced, and both are re-derived by the same full re-sync.
+    pub fn send_session_activity(&self, session: &str, msg: WsMessage) -> Result<()> {
+        self.publish(Class::SessionState, &format!("activity:{session}"), msg)
+    }
+
     /// Publish one session's terminal size, superseding any resize still pending
     /// for it.
     ///
