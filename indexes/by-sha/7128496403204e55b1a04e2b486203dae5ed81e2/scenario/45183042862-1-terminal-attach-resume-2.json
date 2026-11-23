@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45183042862,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4249-native-bridge-path",
+    "target_sha": "7128496403204e55b1a04e2b486203dae5ed81e2",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45183042862",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "01d60fe00c2309f9c0a28b41a142434be345a4895cfc04ac44e4cf2a460ac5fb"
+  },
+  "record": "runs/2026-11-23/45183042862-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "8d39406f8d62822cd2f1f9de4a1baef095b3da37da817fdfbebcd6796bf56f65"
+}
