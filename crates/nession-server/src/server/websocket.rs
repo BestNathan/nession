@@ -4088,10 +4088,7 @@ mod tests {
     async fn browser_pong_does_not_starve_independent_agent_probe() {
         let source = futures_util::stream::unfold((), |_| async {
             tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-            Some((
-                Ok::<WsFrame, std::io::Error>(WsFrame::Pong(Vec::new())),
-                (),
-            ))
+            Some((Ok::<WsFrame, std::io::Error>(WsFrame::Pong(Vec::new())), ()))
         });
         let mut client_read = Box::pin(source);
         let mut agent_write = RecordingSink::default();
