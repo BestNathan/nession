@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45111025444,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4065-relay-halfopen-staging-integration-20261123",
+    "target_sha": "c60ecf6d8223cf5138dba8ffe490963ed650af8d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45111025444",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "1dcb04cab27148d815ec34b4cf32d889c365b025bedd01e801863723759a645c"
+  },
+  "record": "runs/2026-11-23/45111025444-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "f5fc57986078b3b4094c17c36a0b357021a3602ca4fbd59c60dff02f3baa1f0a"
+}
