@@ -6,6 +6,8 @@ runtime: full-stack-local
 isolation: isolated
 verifiers:
   - type: runtime
+    entry: warmup.cjs
+  - type: runtime
     entry: half-open.cjs
   - type: runtime
     entry: idle-healthy.cjs
