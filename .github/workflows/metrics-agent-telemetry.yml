@@ -6,6 +6,8 @@ on:
   # historical Workflow Run scans.
   schedule:
     - cron: '*/5 * * * *'
+    # Main-only hourly read-only historical gap inventory (#4342).
+    - cron: '47 * * * *'
   workflow_run:
     workflows:
       - Agent / SC Acceptance
@@ -457,3 +459,67 @@ jobs:
             -F "client_payload[source_run_attempt]=$SOURCE_RUN_ATTEMPT" \
             -f "client_payload[source_sha]=$source_sha"
           echo "Notified trusted Reviewer result ingest after durable Metrics CAS: $SOURCE_RUN_ID/$SOURCE_RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
+
+  # The historical inventory is a separate, read-only observer. It has no
+  # metrics-writer concurrency, App token, Store push, or source-selected code.
+  # Reports distinguish observed model Artifacts from unknown/expired coverage.
+  history-inventory:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'schedule' &&
+      github.event.schedule == '47 * * * *'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Checkout trusted main-only inventory tooling
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          path: trusted
+          persist-credentials: false
+
+      - name: Checkout immutable Metrics history read-only
+        uses: actions/checkout@v4
+        with:
+          ref: metrics
+          path: metrics-store
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Verify catalog, source trust and historical inventory fixtures
+        working-directory: trusted
+        run: ./gates/run agent-workflow-telemetry
+
+      - name: Inventory 2026-11-09 onward source Runs and Artifact expiry
+        working-directory: trusted
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          node scripts/agent-telemetry-history-inventory.mjs audit \
+            "${GITHUB_WORKSPACE}/metrics-store" \
+            "${RUNNER_TEMP}/agent-telemetry-historical-inventory.json" \
+            > "${RUNNER_TEMP}/historical-inventory-summary.json"
+          {
+            echo '## Historical Agent Metrics inventory (read-only)'
+            echo
+            jq -r '"- Coverage: " + .status, "- Window: " + .window.start + " to " + .window.end, "- Counts: " + (.totals | tostring), "- Truncation: " + (.truncation | tostring)' \
+              "${RUNNER_TEMP}/historical-inventory-summary.json"
+            echo
+            echo 'Missing, expired and unknown are NOT zero Agent calls. This job cannot mutate the Metrics Store.'
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Preserve independent read-only recovery/expiry report
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-telemetry-history-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-telemetry-historical-inventory.json
+          if-no-files-found: error
+          retention-days: 30
