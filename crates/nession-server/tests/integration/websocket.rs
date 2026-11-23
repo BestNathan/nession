@@ -4124,7 +4124,6 @@ async fn an_agent_registration_with_a_wrong_token_is_rejected() {
     assert_eq!(reply["payload"]["status"], "rejected");
 }
 
-
 /// #4065: the first Relay→Agent TCP/WebSocket stays open after a successful
 /// authenticated attach but deliberately stops reading frames. Unlike a socket
 /// close this never sends FIN/RST or pong, so it exercises the *ongoing* 45s
@@ -4157,9 +4156,13 @@ async fn start_half_open_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                         == Some("agent.attach");
                     if is_relay_request(&request) {
                         let response = mock_agent_relay_reply(&request);
-                        if sink.send(tokio_tungstenite::tungstenite::Message::Text(
-                            response.to_string(),
-                        )).await.is_err() {
+                        if sink
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                response.to_string(),
+                            ))
+                            .await
+                            .is_err()
+                        {
                             return;
                         }
                     }
@@ -4170,9 +4173,10 @@ async fn start_half_open_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
                         // Hold both live TCP halves while *never* polling
                         // read again. Ping receives no automatic tungstenite
                         // pong; this is a silent partition, not graceful EOF.
-                        let held_open = (sink, read);
+                        // Both halves stay owned by this async task across
+                        // the pending read. The loop cannot advance or drop
+                        // either socket half until the test runtime ends.
                         std::future::pending::<()>().await;
-                        drop(held_open);
                     }
                 }
             });
@@ -4198,81 +4202,127 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
 
     let mut browser = connect_client(server).await?;
     wait_for_session(&mut browser, "a1:dev").await?;
-    send_json(&mut browser, serde_json::json!({
-        "msg_type": "server.session.relay.begin",
-        "id": "half-open-first",
-        "timestamp": current_timestamp(),
-        "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
-    })).await?;
-    let first = expect_frame_of_type(&mut endpoint.frames, "agent.attach",
-        std::time::Duration::from_secs(5)).await?;
-    anyhow::ensure!(first["payload"]["session_name"] == "dev",
-        "the first Relay must attach before the partition");
+    send_json(
+        &mut browser,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "half-open-first",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    let first = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        first["payload"]["session_name"] == "dev",
+        "the first Relay must attach before the partition"
+    );
 
     let started = tokio::time::Instant::now();
-    let reason = tokio::time::timeout(
-        std::time::Duration::from_secs(70),
-        async {
-            loop {
-                match browser.next().await {
-                    Some(Ok(Message::Close(Some(frame)))) => {
-                        return Ok::<String, anyhow::Error>(frame.reason.to_string())
-                    }
-                    Some(Ok(Message::Close(None))) => {
-                        anyhow::bail!("half-open has no client-visible reason")
-                    }
-                    Some(Ok(_)) => {}
-                    Some(Err(error)) => return Err(error.into()),
-                    None => anyhow::bail!("half-open closed without reason"),
+    let reason = tokio::time::timeout(std::time::Duration::from_secs(70), async {
+        loop {
+            match browser.next().await {
+                Some(Ok(Message::Close(Some(frame)))) => {
+                    return Ok::<String, anyhow::Error>(frame.reason.to_string())
                 }
+                Some(Ok(Message::Close(None))) => {
+                    anyhow::bail!("half-open has no client-visible reason")
+                }
+                Some(Ok(_)) => {}
+                Some(Err(error)) => return Err(error.into()),
+                None => anyhow::bail!("half-open closed without reason"),
             }
-        },
-    ).await.map_err(|_| anyhow::anyhow!(
-        "Agent-leg half-open timeout did not retire the live Relay within 70s"
-    ))??;
-    anyhow::ensure!(reason == "relay-agent-half-open",
-        "wrong explicit Agent-leg close reason: {reason}");
-    anyhow::ensure!(started.elapsed() >= std::time::Duration::from_secs(35),
-        "Relay disconnected before its documented idle watchdog");
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!("Agent-leg half-open timeout did not retire the live Relay within 70s")
+    })??;
+    anyhow::ensure!(
+        reason == "relay-agent-half-open",
+        "wrong explicit Agent-leg close reason: {reason}"
+    );
+    anyhow::ensure!(
+        started.elapsed() >= std::time::Duration::from_secs(35),
+        "Relay disconnected before its documented idle watchdog"
+    );
 
     // The original Agent control socket and registered Session were never
     // retired by that relay-local failure.
     let mut reconnect = connect_client(server).await?;
-    anyhow::ensure!(listed_session_ids(&mut reconnect).await?
-        .contains(&"a1:dev".to_string()),
-        "half-open Relay cleanup lost the persisted Session");
+    anyhow::ensure!(
+        listed_session_ids(&mut reconnect)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "half-open Relay cleanup lost the persisted Session"
+    );
 
-    send_json(&mut reconnect,
-        session_attach_request("half-open-reattach", "a1:dev", "relay")).await?;
-    let attached = next_reply(&mut reconnect, &["half-open-reattach"],
-        std::time::Duration::from_secs(5)).await?;
+    send_json(
+        &mut reconnect,
+        session_attach_request("half-open-reattach", "a1:dev", "relay"),
+    )
+    .await?;
+    let attached = next_reply(
+        &mut reconnect,
+        &["half-open-reattach"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
     anyhow::ensure!(
         payload_of(&attached, "server.session.attach")?["status"] == "success",
         "the replacement browser cannot reattach to the Session"
     );
-    send_json(&mut reconnect, serde_json::json!({
-        "msg_type": "server.session.relay.begin",
-        "id": "half-open-second",
-        "timestamp": current_timestamp(),
-        "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
-    })).await?;
-    let second = expect_frame_of_type(&mut endpoint.frames, "agent.attach",
-        std::time::Duration::from_secs(5)).await?;
-    anyhow::ensure!(second["payload"]["session_name"] == "dev",
-        "a new Agent-side Relay never attached");
+    send_json(
+        &mut reconnect,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "half-open-second",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    let second = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        second["payload"]["session_name"] == "dev",
+        "a new Agent-side Relay never attached"
+    );
 
-    send_json(&mut reconnect, serde_json::json!({
-        "msg_type": "agent.terminal.input",
-        "id": "half-open-input-once",
-        "timestamp": current_timestamp(),
-        "payload": {"session_name": "dev", "data": "QQ=="},
-    })).await?;
-    let forwarded = expect_frame_of_type(&mut endpoint.frames, "agent.terminal.input",
-        std::time::Duration::from_secs(5)).await?;
-    anyhow::ensure!(forwarded["id"] == "half-open-input-once" &&
-        forwarded["payload"]["data"] == "QQ==",
-        "the new Relay lost or rewrote input");
-    no_frame_of_type_within(&mut endpoint.frames, "agent.terminal.input",
-        std::time::Duration::from_millis(200)).await?;
+    send_json(
+        &mut reconnect,
+        serde_json::json!({
+            "msg_type": "agent.terminal.input",
+            "id": "half-open-input-once",
+            "timestamp": current_timestamp(),
+            "payload": {"session_name": "dev", "data": "QQ=="},
+        }),
+    )
+    .await?;
+    let forwarded = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.terminal.input",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        forwarded["id"] == "half-open-input-once" && forwarded["payload"]["data"] == "QQ==",
+        "the new Relay lost or rewrote input"
+    );
+    no_frame_of_type_within(
+        &mut endpoint.frames,
+        "agent.terminal.input",
+        std::time::Duration::from_millis(200),
+    )
+    .await?;
     Ok(())
 }
