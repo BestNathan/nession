@@ -13,6 +13,8 @@ const MAIN_ANCHOR='ff00fbd6b504ca2953293dce9ea4097fce9a3452';
 const SC01_HEAD='729699a7bcbf1af074f1948f8d7491ca7c446324';
 const SC01_PR=4266;
 const SOURCE_ACCEPT_RUN=45105031223;
+const SOURCE_REQUEST_RUN=45104919638;
+const SOURCE_OWNER_COMMENT=7090587994;
 const SOURCE_ACCEPT_HEAD='ff7c0818ea31142896b42ea5b8058375a8327702';
 const CATALOG_FIRST='82881f5333d4bff1091beee8ce4e6d270aeead60';
 const SOURCE_PRS=Object.freeze({
@@ -114,7 +116,7 @@ export function shouldCollectToolchain4241(stage,issue) {
 // must all agree. This attests history; only the canonical Agent may judge
 // the child's SC and only the deterministic updater may mutate its rows.
 export function attest4297ParentClosure(parent,events,run,jobs,artifact,result,
-  sourceReachable,releaseEvidence) {
+  sourceReachable,releaseEvidence,sourceRequest) {
   denied(sourceReachable===true&&parent?.number===4241&&
     parent.state==='closed'&&parent.state_reason==='completed'&&
     typeof parent.closed_at==='string','parent not formally completed');
@@ -176,12 +178,46 @@ export function attest4297ParentClosure(parent,events,run,jobs,artifact,result,
     Array.isArray(result.criteria)&&required.every(id=>
       result.criteria.filter(x=>x?.criterion===id&&x.result==='Pass').length===1),
     'original immutable Agent result incomplete or not Pass');
+  // The original Owner's /accept is a separate authorization boundary.
+  // A successful model Run or a bot-closing Issue is NOT itself owner consent.
+  const owner=sourceRequest?.comment,manual=sourceRequest?.run;
+  denied(owner?.id===SOURCE_OWNER_COMMENT&&
+    owner.user?.login==='BestNathan'&&
+    owner.issue_url==='https://api.github.com/repos/'+REPO+'/issues/4241'&&
+    owner.body==='/accept post-merge '+MAIN_ANCHOR&&
+    typeof owner.created_at==='string'&&
+    Date.parse(owner.created_at)<Date.parse(parent.closed_at),
+    'missing original Owner-authorized manual Acceptance');
+  denied(manual?.id===SOURCE_REQUEST_RUN&&manual.run_attempt===1&&
+    manual.name==='Comment Accept #4241 comment:'+SOURCE_OWNER_COMMENT&&
+    manual.path==='.github/workflows/acceptance-manual-request.yml'&&
+    manual.event==='workflow_dispatch'&&manual.head_branch==='main'&&
+    manual.head_sha===SOURCE_ACCEPT_HEAD&&
+    manual.actor?.login==='github-actions[bot]'&&
+    manual.repository?.full_name===REPO&&
+    manual.head_repository?.full_name===REPO&&
+    manual.status==='completed'&&manual.conclusion==='success'&&
+    typeof manual.created_at==='string'&&
+    Date.parse(manual.created_at)>=Date.parse(owner.created_at)&&
+    Date.parse(manual.created_at)<Date.parse(parent.closed_at),
+    'unverified canonical Manual Request Run');
+  const requestJob=exactJob(sourceRequest?.jobs,manual,'request');
+  denied(requestJob.run_attempt===1&&requestJob.head_sha===SOURCE_ACCEPT_HEAD&&
+    ['Verify comment source and canonical Acceptance policy',
+      'Reconcile or dispatch existing stage-qualified Agent Acceptance']
+      .every(name=>requestJob.steps?.filter(x=>x.name===name&&
+        x.status==='completed'&&x.conclusion==='success').length===1),
+    'unverified Owner command admission/dispatch');
   denied(releaseEvidence?.published?.length===14&&
     new Set(releaseEvidence.published.map(x=>x.tool)).size===13,
     'independent GHCR/EROFS evidence incomplete');
   return {kind:'toolchain_4297_verified_parent_closure',
     parent_issue:4241,parent_closed_at:parent.closed_at,
-    closure_actor:'github-actions[bot]',acceptance_run:SOURCE_ACCEPT_RUN,
+    closure_actor:'github-actions[bot]',owner_comment:SOURCE_OWNER_COMMENT,
+    manual_request_run:SOURCE_REQUEST_RUN,manual_request_job:requestJob.id,
+    manual_request_target:MAIN_ANCHOR,
+    original_acceptance_main_sha:SOURCE_ACCEPT_HEAD,
+    source_ancestry_verified:sourceReachable,acceptance_run:SOURCE_ACCEPT_RUN,
     acceptance_attempt:1,acceptance_target:MAIN_ANCHOR,
     acceptance_executor_job:executor.id,acceptance_updater_job:updater.id,
     acceptance_artifact_id:artifact.id,
@@ -274,13 +310,17 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
     'incomplete user-selected distribution matrix');
   let linkedClosure=null;
   if(String(issue)==='4297'){
-    const [parent,events,run,jobs,artifacts,comparison]=await Promise.all([
+    const [parent,events,run,jobs,artifacts,comparison,
+      ownerComment,manualRun,manualJobs]=await Promise.all([
       read(PREFIX+'/issues/4241'),
       read(PREFIX+'/issues/4241/events?per_page=100'),
       read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/attempts/1'),
       read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/attempts/1/jobs?per_page=100'),
       read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/artifacts?per_page=100'),
       read(PREFIX+'/compare/'+SOURCE_ACCEPT_HEAD+'...'+targetSha),
+      read(PREFIX+'/issues/comments/'+SOURCE_OWNER_COMMENT),
+      read(PREFIX+'/actions/runs/'+SOURCE_REQUEST_RUN+'/attempts/1'),
+      read(PREFIX+'/actions/runs/'+SOURCE_REQUEST_RUN+'/attempts/1/jobs?per_page=100'),
     ]);
     denied(Array.isArray(artifacts?.artifacts)&&artifacts.artifacts.length<100,
       'incomplete parent Acceptance artifact listing');
@@ -290,7 +330,8 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
     const result=await downloadedResult(REPO,matches[0],
       process.env.GH_TOKEN??process.env.GITHUB_TOKEN);
     linkedClosure=attest4297ParentClosure(parent,events,run,jobs,matches[0],
-      result,ancestor(comparison,SOURCE_ACCEPT_HEAD),{published:accepted});
+      result,ancestor(comparison,SOURCE_ACCEPT_HEAD),{published:accepted},
+      {comment:ownerComment,run:manualRun,jobs:manualJobs});
   }
   return {kind:'verified_toolchain_4241_readonly',issue:4241,target_sha:targetSha,
     ...(linkedClosure ? {verified_4297_parent_closure:linkedClosure} : {}),
@@ -399,7 +440,29 @@ export function selfTestToolchain4241() {
     contract_sha256:'b'.repeat(64),selected_criteria:sc.slice(1),
     criteria:sc.slice(1).map(criterion=>({criterion,result:'Pass'}))};
   const release={published:RELEASES.map(([tool,version])=>({tool,version}))};
-  const verify=(...args)=>attest4297ParentClosure(...args);
+  const sourceRequest={
+    comment:{id:SOURCE_OWNER_COMMENT,user:{login:'BestNathan'},
+      issue_url:'https://api.github.com/repos/'+REPO+'/issues/4241',
+      body:'/accept post-merge '+MAIN_ANCHOR,
+      created_at:'2026-11-23T03:15:02Z'},
+    run:{id:SOURCE_REQUEST_RUN,run_attempt:1,
+      name:'Comment Accept #4241 comment:'+SOURCE_OWNER_COMMENT,
+      path:'.github/workflows/acceptance-manual-request.yml',
+      event:'workflow_dispatch',head_branch:'main',
+      head_sha:SOURCE_ACCEPT_HEAD,actor:{login:'github-actions[bot]'},
+      repository:{full_name:REPO},head_repository:{full_name:REPO},
+      status:'completed',conclusion:'success',
+      created_at:'2026-11-23T03:15:05Z'},
+    jobs:{jobs:[]},
+  };
+  sourceRequest.jobs.jobs.push({
+    id:24,name:'request',run_id:SOURCE_REQUEST_RUN,run_attempt:1,
+    head_sha:SOURCE_ACCEPT_HEAD,status:'completed',conclusion:'success',
+    steps:['Verify comment source and canonical Acceptance policy',
+      'Reconcile or dispatch existing stage-qualified Agent Acceptance']
+      .map(name=>({name,status:'completed',conclusion:'success'})),
+  });
+  const verify=(...args)=>attest4297ParentClosure(...args,sourceRequest);
   assert.equal(verify(parent,events,run,jobs,artifact,result,true,release).published,14);
   for(const args of [
     [{...parent,state:'open'},events,run,jobs,artifact,result,true,release],
@@ -414,6 +477,15 @@ export function selfTestToolchain4241() {
     [parent,events,run,jobs,artifact,result,true,
       {published:release.published.slice(1)}],
   ])assert.throws(()=>verify(...args),/toolchain #4241 readback/);
+  for(const forgery of [
+    {...sourceRequest,comment:{...sourceRequest.comment,user:{login:'attacker'}}},
+    {...sourceRequest,comment:{...sourceRequest.comment,
+      body:'/accept post-merge '+'a'.repeat(40)}},
+    {...sourceRequest,run:{...sourceRequest.run,head_sha:'a'.repeat(40)}},
+    {...sourceRequest,run:{...sourceRequest.run,run_attempt:2}},
+    {...sourceRequest,jobs:{jobs:[]}},
+  ])assert.throws(()=>attest4297ParentClosure(parent,events,run,jobs,artifact,
+    result,true,release,forgery),/toolchain #4241 readback/);
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
