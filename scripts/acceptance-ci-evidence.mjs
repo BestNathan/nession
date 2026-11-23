@@ -65,7 +65,7 @@ import {collectOriginalQwenReview,selfTestOriginalQwenReview} from './acceptance
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectKnowledgePublication,shouldCollectKnowledgePublication,selfTestKnowledgePublication} from './acceptance-knowledge-publisher-evidence.mjs';
 import {collectToolchain4160,shouldCollectToolchain4160,selfTestToolchain4160} from './acceptance-toolchain-4160-evidence.mjs';
-import {collectToolchain4241,shouldCollectToolchain4241,selfTestToolchain4241} from './acceptance-toolchain-4241-evidence.mjs';
+import {collectToolchain4241,shouldCollectToolchain4241,selfTestToolchain4241,related4297ToolchainClosure} from './acceptance-toolchain-4241-evidence.mjs';
 import {collectKnowledgeProposalCleanup,shouldCollectProposalCleanup,selfTestKnowledgeProposalCleanup} from './acceptance-knowledge-proposal-cleanup-evidence.mjs';
 import {collectKnowledgeWriter2358,shouldCollectKnowledgeWriter2358,selfTestKnowledgeWriter2358} from './acceptance-knowledge-writer-2358.mjs';
 import {collectSandbox3145,shouldCollectSandbox3145,selfTestSandbox3145} from './acceptance-knowledge-sandbox-3145.mjs';
@@ -2156,6 +2156,12 @@ async function collectCommand(workspace, outFile) {
     if (['staging','post-merge'].includes(process.env.ACCEPTANCE_STAGE)) {
       relatedAcceptance=await collectCrossIssueAcceptance(repo,currentIssue.body,
         sha,Number(issueNumber),githubGet,attestExactHeadE2eSteps);
+      // #4297: the original #4241 formal Acceptance ran at an authenticated
+      // ancestor SHA, with releases independently re-attested at target SHA.
+      // A historical cross-Issue receipt never claims parent re-execution.
+      if(issueNumber==='4297' && process.env.ACCEPTANCE_STAGE==='post-merge') {
+        relatedAcceptance.push(related4297ToolchainClosure(verifiedToolchain4241,sha));
+      }
     }
     if(process.env.ACCEPTANCE_STAGE==='post-merge') {
       implementationPulls=await collectImplementationGateEvidence(
