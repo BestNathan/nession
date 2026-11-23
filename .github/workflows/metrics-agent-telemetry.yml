@@ -56,46 +56,46 @@ jobs:
         (github.event_name == 'workflow_run' &&
           (github.event.workflow_run.conclusion == 'success' || github.event.workflow_run.conclusion == 'failure') &&
           (
-            (github.event.workflow_run.name == 'Agent / Development' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-develop.yml' &&
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / Staging Developer Canary' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-staging-developer-canary.yml' &&
              github.event.workflow_run.event == 'workflow_run' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / Review' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-review.yml' &&
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / E2E Failure Analysis' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-e2e-failure-analysis.yml' &&
              github.event.workflow_run.event == 'workflow_dispatch' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / Staging Convergence Review' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-staging-convergence-review.yml' &&
              (github.event.workflow_run.event == 'workflow_dispatch' ||
               github.event.workflow_run.event == 'push') &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / Provider Smoke' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-provider-smoke.yml' &&
              (github.event.workflow_run.event == 'push' || github.event.workflow_run.event == 'workflow_dispatch')) ||
-            (github.event.workflow_run.name == 'Agent / Cursor Resume Seed' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-cursor-resume-seed.yml' &&
              github.event.workflow_run.head_branch == 'main' &&
              (github.event.workflow_run.event == 'push' ||
               github.event.workflow_run.event == 'workflow_dispatch')) ||
-            (github.event.workflow_run.name == 'Agent / Cursor Resume Verify' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-cursor-resume-verify.yml' &&
              github.event.workflow_run.event == 'workflow_run' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / Claude Resume Seed' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-claude-resume-seed.yml' &&
              github.event.workflow_run.head_branch == 'main' &&
              (github.event.workflow_run.event == 'push' ||
               github.event.workflow_run.event == 'workflow_dispatch')) ||
-            (github.event.workflow_run.name == 'Agent / Claude Resume Verify' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-claude-resume-verify.yml' &&
              github.event.workflow_run.event == 'workflow_run' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Agent / SC Acceptance' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-sc-acceptance.yml' &&
              github.event.workflow_run.event == 'workflow_dispatch') ||
-            (github.event.workflow_run.name == 'Agent / Issue Audit' &&
+            (github.event.workflow_run.path == '.github/workflows/agent-issue-audit.yml' &&
              (github.event.workflow_run.event == 'issues' || github.event.workflow_run.event == 'workflow_dispatch')) ||
-            (github.event.workflow_run.name == 'Acceptance / Verified Issue Stage' &&
+            (github.event.workflow_run.path == '.github/workflows/acceptance-verified-stage.yml' &&
              github.event.workflow_run.event == 'issue_comment' &&
              github.event.workflow_run.head_branch == 'main') ||
-            (github.event.workflow_run.name == 'Acceptance / Orchestrator' &&
+            (github.event.workflow_run.path == '.github/workflows/acceptance-orchestrator.yml' &&
              (github.event.workflow_run.event == 'pull_request_target' ||
               github.event.workflow_run.event == 'issues' ||
               github.event.workflow_run.event == 'push'))
@@ -205,7 +205,7 @@ jobs:
             jq -e --arg repo "$GITHUB_REPOSITORY"               --arg sha "$EVENT_SOURCE_SHA"               --argjson id "$run_id" --argjson attempt "$EVENT_RUN_ATTEMPT" '
               .id == $id and .run_attempt == $attempt and .head_sha == $sha and
               .path == ".github/workflows/agent-review.yml" and
-              .name == "Agent / Review" and .event == "workflow_dispatch" and
+               .event == "workflow_dispatch" and
               .head_branch == "main" and .status == "completed" and
               .conclusion == "success" and .repository.full_name == $repo and
               .head_repository.full_name == $repo and
@@ -409,7 +409,7 @@ jobs:
             .repository.full_name == $repo and
             .head_repository.full_name == $repo and
             .path == ".github/workflows/agent-provider-smoke.yml" and
-            .name == "Agent / Provider Smoke" and
+            
             .event == "push" and .head_branch == "main" and
             .status == "completed" and .conclusion == "success" and
             (.head_sha | test("^[a-f0-9]{40}$"))' \
@@ -444,7 +444,7 @@ jobs:
             .repository.full_name == $repo and
             .head_repository.full_name == $repo and
             .path == ".github/workflows/agent-review.yml" and
-            .name == "Agent / Review" and
+            
             .event == "workflow_dispatch" and .head_branch == "main" and
             .status == "completed" and .conclusion == "success" and
             (.actor.login == "BestNathan" or .actor.login == "github-actions[bot]") and
