@@ -1222,6 +1222,10 @@ function selfTestClosedIssueGuard() {
     ({ ...open, body: 'newer SC evidence' }), write),
   /refusing stale body overwrite/, 'concurrent report updates must not be overwritten');
   assert.equal(writes, 0);
+  assert.throws(() => commitOpenAcceptanceIssue(open, () =>
+    ({ ...open, number: 4241 }), write),
+  /refusing stale body overwrite/, 'an unrelated Issue snapshot must never authorize an edit');
+  assert.equal(writes, 0);
   assert.equal(commitOpenAcceptanceIssue(open, readOpen, write), true,
     'an unchanged open Issue must still use the native updater');
   assert.equal(writes, 1);
