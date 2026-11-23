@@ -111,7 +111,7 @@ export function attest4342AuditMetrics({source,writer,sourceArtifacts,writerArti
     reject('missing independently published aggregate');
   return Object.freeze({
     kind:'verified_4342_audit_metrics_readback',status:'authenticated',
-    target_sha:PROOF.target_sha,source_run_id:source.id,source_attempt:source.run_attempt,
+    source_sha:PROOF.target_sha,source_run_id:source.id,source_attempt:source.run_attempt,
     source_workflow_key:'agent-issue-audit',telemetry_group_id:PROOF.group,
     source_artifact_id:sourceArtifactId,writer_run_id:writer.id,
     writer_attempt:writer.run_attempt,writer_job_id:matching[0].id,
@@ -132,7 +132,7 @@ export function verified4342AuditCriterion(context,normalized) {
   const proof=context.ci_evidence?.verified_4342_audit_metrics;
   const verified=proof?.kind==='verified_4342_audit_metrics_readback'&&
     proof.status==='authenticated'&&proof.target_sha===context.target_ref&&
-    proof.target_sha===PROOF.target_sha&&
+    proof.source_sha===PROOF.target_sha&&
     proof.source_run_id===PROOF.source_run_id&&proof.source_attempt===1&&
     proof.writer_run_id===PROOF.writer_run_id&&
     proof.telemetry_group_id===PROOF.group&&
@@ -175,8 +175,23 @@ function collect(file,targetSha) {
   if(process.env.GITHUB_REPOSITORY!==REPO||
      process.env.ACCEPTANCE_STAGE!=='post-merge'||
      String(process.env.ISSUE_NUMBER)!==String(PROOF.issue)||
-     targetSha!==PROOF.target_sha)
-    reject('not the approved #4342 post-merge exact target');
+     !SHA.test(targetSha))
+    reject('not the approved #4342 post-merge target');
+  // Source Audit ran on the original merged fix. Later main commits may
+  // independently judge those immutable bytes only if the exact source fix
+  // is an ancestor of the authenticated target checkout.
+  const workspace=path.join(process.env.GITHUB_WORKSPACE??'', 'workspace');
+  if(!path.isAbsolute(workspace)||!fs.existsSync(workspace))
+    reject('trusted target checkout unavailable');
+  try {
+    const actual=execFileSync('git',['-C',workspace,'rev-parse','HEAD'],
+      {encoding:'utf8',timeout:20000}).trim();
+    if(actual!==targetSha)reject('target checkout differs from accepted SHA');
+    execFileSync('git',['-C',workspace,'merge-base','--is-ancestor',PROOF.target_sha,targetSha],
+      {stdio:'ignore',timeout:20000});
+  }catch {
+    reject('Audit fix is not a verified ancestor of accepted main target');
+  }
   const evidence=JSON.parse(fs.readFileSync(file,'utf8'));
   if(evidence?.kind!=='acceptance_ci_evidence'||evidence.target_sha!==targetSha)
     reject('untrusted Acceptance evidence file/target');
@@ -193,10 +208,13 @@ function collect(file,targetSha) {
   const aggregate=githubContents('agent-metrics.json',
     String(gh('git/ref/heads/metrics')?.object?.sha??''));
   const proof=attest4342AuditMetrics({
-    source,writer,sourceArtifacts,writerArtifacts,writerJobs,writerLog,rawRecord,aggregate,
+    source,writer,sourceArtifacts,writerJobs,writerLog,writerArtifacts,rawRecord,aggregate,
   });
+  // Source SHA is separately pinned; bind this readback to the exact selected
+  // descendant main SHA without modifying the historical Source identity.
+  const targetBoundProof={...proof,target_sha:targetSha};
   fs.writeFileSync(file,JSON.stringify({
-    ...evidence,verified_4342_audit_metrics:proof,
+    ...evidence,verified_4342_audit_metrics:targetBoundProof,
   },null,2)+'\n');
   console.log('verified #4342 real Audit telemetry: source '+proof.source_run_id+
     ', writer '+proof.writer_run_id+', metrics '+proof.metrics_commit_sha);
@@ -245,9 +263,15 @@ function selfTest(){
   const proof=attest4342AuditMetrics(args);
   assert.equal(proof.status,'authenticated');
   const context={issue:{number:4342},stage:'post-merge',target_ref:PROOF.target_sha,
-    ci_evidence:{verified_4342_audit_metrics:proof}};
+    ci_evidence:{verified_4342_audit_metrics:{...proof,target_sha:PROOF.target_sha}}};
   const result={criteria:[{criterion:'SC-04',result:'Pending',evidence:[]}]};
   assert.equal(verified4342AuditCriterion(context,result).criteria[0].result,'Pass');
+  const descendant='d'.repeat(40);
+  assert.equal(verified4342AuditCriterion({...context,target_ref:descendant,
+    ci_evidence:{verified_4342_audit_metrics:{...proof,target_sha:descendant}}},result)
+    .criteria[0].result,'Pass');
+  assert.equal(verified4342AuditCriterion({...context,target_ref:descendant},result)
+    .criteria[0].result,'Pending','stale exact-target proof cannot authorize later SHA');
   assert.throws(()=>attest4342AuditMetrics({...args,source:{...source,
     repository:{full_name:'attacker/nession'}}}),/untrusted/);
   assert.throws(()=>attest4342AuditMetrics({...args,source:{...source,
