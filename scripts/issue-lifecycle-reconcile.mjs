@@ -735,6 +735,9 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   // every source and the historical PR-stage Quality, then let this SAME
   // deterministic Issue writer perform the only closure mutation.
   if(number===4241) {
+    const labels=(issue.labels||[]).map(x=>typeof x==='string'?x:x.name);
+    if(labels.includes('status:blocked')||labels.includes('status:on-hold'))
+      return {action:'pending',reason:'explicit blocking status'};
     const manualReopened=await humanReopened(repository,number,token,request);
     if(manualReopened)return {action:'pending',reason:'human reopened Issue'};
     const target=accepted4241Target(issue);
