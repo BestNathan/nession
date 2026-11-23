@@ -2,8 +2,10 @@ import { describe, it, expect } from 'vitest';
 import {
   PendingInputQueue,
   utf8ByteLength,
+  type InputDrop,
   type InputQueueBounds,
 } from '@/platform/terminal-runtime/inputQueue';
+import { INPUT_QUEUE_BOUNDS } from '@/platform/terminal-runtime/ConnectionManager';
 
 const BOUNDS: InputQueueBounds = {
   maxChunks: 4,
@@ -196,14 +198,16 @@ describe('PendingInputQueue', () => {
 
     /**
      * A paste is one chunk, and the bound exists to permit it rather than to
-     * refuse it. The requirement says bounds must not assume one keystroke per
-     * event; a queue that refused a large paste because it was larger than the
-     * byte bound would refuse exactly the case it is for.
+     * refuse it — up to the byte budget itself. The requirement says bounds
+     * must not assume one keystroke per event; a queue that split a paste into
+     * per-keystroke chunks would refuse exactly the case it is for. What the
+     * bound does refuse, whole and with a stated loss, is a single event whose
+     * own bytes exceed the budget (#4299) — pinned in the #4299 block below.
      */
-    it('accepts one oversized chunk into an empty queue', () => {
+    it('accepts one exact-bound paste as a single chunk into an empty queue', () => {
       const { queue } = queueWithClock();
       queue.reconcile(identity());
-      const paste = 'x'.repeat(1000);
+      const paste = 'x'.repeat(BOUNDS.maxBytes);
       expect(queue.accept(paste)).toBe(true);
       expect(queue.outbound()).toEqual([{ seq: 1, data: paste }]);
       // And the next thing is refused, because the queue is full.
@@ -231,6 +235,149 @@ describe('PendingInputQueue', () => {
       queue.reconcile(identity());
       expect(queue.accept('')).toBe(true);
       expect(queue.size).toBe(0);
+    });
+  });
+
+  /**
+   * #4299: the byte bound governs the FIRST chunk too. The mutation this block
+   * pins is guarding the bounds behind `chunks.length > 0`, which admitted one
+   * event of any size into an empty queue — a single paste larger than the
+   * whole per-Session budget was buffered while detached and offered on
+   * reconnect, with no loss stated. The refusal is whole (no truncation, no
+   * split) and recorded as exactly one `bound` drop for the refused chunk.
+   */
+  describe('the first chunk obeys the byte bound (#4299)', () => {
+    /** SC-01 negative: 1 MiB + 1 byte on an empty queue over the real policy. */
+    it('refuses a single oversized first chunk and states exactly one bound drop', () => {
+      const { queue } = queueWithClock(INPUT_QUEUE_BOUNDS);
+      const drops: InputDrop[] = [];
+      queue.onDrop = (drop) => drops.push(drop);
+      queue.reconcile(identity());
+
+      const oversized = 'x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes + 1);
+      expect(queue.accept(oversized)).toBe(false);
+      expect(queue.byteLength).toBe(0);
+      expect(queue.size).toBe(0);
+      expect(queue.outbound()).toEqual([]);
+      expect(queue.outboundFrame()).toBeNull();
+      expect(drops).toHaveLength(1);
+      expect(drops[0]).toMatchObject({ reason: 'bound', chunks: 1 });
+      expect(queue.lastDrop).toMatchObject({ reason: 'bound', chunks: 1 });
+      expect(queue.droppedChunks).toBe(1);
+
+      // The refusal does not poison the queue: ordinary input still lands,
+      // numbered from the cursor as if the refused event never existed.
+      expect(queue.accept('ok\r')).toBe(true);
+      expect(queue.outbound()).toEqual([{ seq: 1, data: 'ok\r' }]);
+      expect(drops).toHaveLength(1);
+    });
+
+    /** SC-01 positive: exactly maxBytes is inside the budget, not past it. */
+    it('accepts a first chunk of exactly maxBytes', () => {
+      const { queue } = queueWithClock(INPUT_QUEUE_BOUNDS);
+      const drops: InputDrop[] = [];
+      queue.onDrop = (drop) => drops.push(drop);
+      queue.reconcile(identity());
+
+      const paste = 'x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes);
+      expect(queue.accept(paste)).toBe(true);
+      expect(queue.byteLength).toBe(INPUT_QUEUE_BOUNDS.maxBytes);
+      expect(queue.outbound()).toEqual([{ seq: 1, data: paste }]);
+      expect(drops).toHaveLength(0);
+    });
+
+    /**
+     * The first chunk is measured in UTF-8 bytes, not string units: a CJK
+     * paste whose `.length` is far under the budget can still exceed it on
+     * the wire, and one that lands exactly on the budget must be admitted.
+     */
+    it('measures the first chunk in UTF-8 bytes at the 1 MiB boundary', () => {
+      // 3-byte CJK chars padded with ASCII to land exactly on the budget.
+      const cjk = '中'.repeat(Math.floor(INPUT_QUEUE_BOUNDS.maxBytes / 3));
+      const exact = cjk + 'x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes - utf8ByteLength(cjk));
+      const over = `${exact}a`;
+      expect(utf8ByteLength(exact)).toBe(INPUT_QUEUE_BOUNDS.maxBytes);
+      expect(utf8ByteLength(over)).toBe(INPUT_QUEUE_BOUNDS.maxBytes + 1);
+      expect(over.length).toBeLessThan(INPUT_QUEUE_BOUNDS.maxBytes);
+
+      const accepting = queueWithClock(INPUT_QUEUE_BOUNDS);
+      accepting.queue.reconcile(identity());
+      expect(accepting.queue.accept(exact)).toBe(true);
+      expect(accepting.queue.byteLength).toBe(INPUT_QUEUE_BOUNDS.maxBytes);
+
+      const refusing = queueWithClock(INPUT_QUEUE_BOUNDS);
+      const drops: InputDrop[] = [];
+      refusing.queue.onDrop = (drop) => drops.push(drop);
+      refusing.queue.reconcile(identity());
+      expect(refusing.queue.accept(over)).toBe(false);
+      expect(refusing.queue.byteLength).toBe(0);
+      expect(drops).toHaveLength(1);
+      expect(drops[0]).toMatchObject({ reason: 'bound', chunks: 1 });
+    });
+
+    /** The bound applies before the queue has an epoch, not only after. */
+    it('refuses an oversized first chunk on an unbound empty queue', () => {
+      const { queue } = queueWithClock(INPUT_QUEUE_BOUNDS);
+      expect(queue.accept('x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes + 1))).toBe(false);
+      expect(queue.byteLength).toBe(0);
+      expect(queue.lastDrop).toMatchObject({ reason: 'bound', chunks: 1 });
+      queue.reconcile(identity());
+      expect(queue.accept('a')).toBe(true);
+      expect(queue.outbound()).toEqual([{ seq: 1, data: 'a' }]);
+    });
+
+    /** The same contract at the small fixture scale, exact-bound included. */
+    it('refuses the first chunk past a small bound but admits the exact bound', () => {
+      const { queue } = queueWithClock();
+      queue.reconcile(identity());
+      expect(queue.accept('x'.repeat(BOUNDS.maxBytes + 1))).toBe(false);
+      expect(queue.byteLength).toBe(0);
+      expect(queue.lastDrop).toMatchObject({ reason: 'bound', chunks: 1 });
+      expect(queue.accept('x'.repeat(BOUNDS.maxBytes))).toBe(true);
+      expect(queue.byteLength).toBe(BOUNDS.maxBytes);
+    });
+
+    /**
+     * SC-02: a cumulative refusal leaves the accepted run byte-for-byte and
+     * position-for-position intact — the bound refuses the newest event, it
+     * never edits what the queue already holds.
+     */
+    it('refuses a cumulative byte overflow without mutating the accepted run', () => {
+      const { queue } = queueWithClock();
+      const drops: InputDrop[] = [];
+      queue.onDrop = (drop) => drops.push(drop);
+      queue.reconcile(identity());
+      expect(queue.accept('0123456789')).toBe(true);
+
+      expect(queue.accept('1234567')).toBe(false); // 10 + 7 > 16
+      expect(queue.byteLength).toBe(10);
+      expect(queue.outbound()).toEqual([{ seq: 1, data: '0123456789' }]);
+      expect(drops).toHaveLength(1);
+      expect(drops[0]).toMatchObject({ reason: 'bound', chunks: 1 });
+
+      // The kept run still acknowledges and still admits ordinary UTF-8 input.
+      queue.acknowledge(7, 1);
+      expect(queue.byteLength).toBe(0);
+      expect(queue.accept('中')).toBe(true);
+      expect(queue.outbound()).toEqual([{ seq: 2, data: '中' }]);
+    });
+
+    /** SC-02: the chunk bound likewise refuses without touching held bytes. */
+    it('refuses at the chunk bound without mutating accepted bytes', () => {
+      const { queue } = queueWithClock();
+      queue.reconcile(identity());
+      for (const data of ['a', 'b', 'c', 'd']) {
+        expect(queue.accept(data)).toBe(true);
+      }
+      expect(queue.accept('e')).toBe(false);
+      expect(queue.byteLength).toBe(4);
+      expect(queue.outbound()).toEqual([
+        { seq: 1, data: 'a' },
+        { seq: 2, data: 'b' },
+        { seq: 3, data: 'c' },
+        { seq: 4, data: 'd' },
+      ]);
+      expect(queue.lastDrop).toMatchObject({ reason: 'bound', chunks: 1 });
     });
   });
 
