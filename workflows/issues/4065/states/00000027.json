@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "issue": 4065,
+  "version": 27,
+  "phase": "review",
+  "target_sha": "79608bbfabfceb7d6cd98add8412a4b3c704e610",
+  "repair_attempts": 2,
+  "transitions": [
+    {
+      "key": "cddaa9c1fc8ca0d85221c2bd3e3449b5dd8dc28ee9991daf541cee627fad3464",
+      "kind": "publisher",
+      "run_id": 44744656206,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "published"
+    },
+    {
+      "key": "ce7807f81dbab94a769c7267b1d8d54dad22933ba51f55a1ecd6a805864c168e",
+      "kind": "reviewer",
+      "run_id": 44773349621,
+      "attempt": 1,
+      "target_sha": "f79547b0def78418e109aba82673d7f20edbc341",
+      "outcome": "changes_requested"
+    },
+    {
+      "key": "48a2ecac5ca5af7cadc4d47d654d49843ec30d6caf8b26303fd39e9fa07760fa",
+      "kind": "publisher",
+      "run_id": 44776472241,
+      "attempt": 1,
+      "target_sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+      "outcome": "published"
+    },
+    {
+      "key": "00e7a9f2239476ce5acc44fd29be102318bc59eb75eb264711539285712ed0d9",
+      "kind": "reviewer",
+      "run_id": 44927222686,
+      "attempt": 1,
+      "target_sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+      "outcome": "changes_requested"
+    },
+    {
+      "key": "474a80da87509c35b1661332eacef60a2c143ec4d25727e3f43129c58bd05ab1",
+      "kind": "publisher",
+      "run_id": 45104012705,
+      "attempt": 1,
+      "target_sha": "79608bbfabfceb7d6cd98add8412a4b3c704e610",
+      "outcome": "published",
+      "write_ahead_publisher_run_id": 44928833605
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+      "task": {
+        "type": "dispatch",
+        "role": "developer",
+        "task": "implement",
+        "sha": "8b7777f48a577d01961fd7d9e75311f75d6d57a1",
+        "agent_id": "dev-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44",
+        "source_run_id": 44733719096,
+        "source_attempt": 1,
+        "failure_code": "qwen_tracked_source_gate_rejected"
+      }
+    },
+    {
+      "id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "f79547b0def78418e109aba82673d7f20edbc341",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127",
+        "source_run_id": 44744956936,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_large_base_premodel_failure"
+      }
+    },
+    {
+      "id": "320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "8d512ec934770944a208c9e1a797bc155a7a46d2",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "failed",
+      "attempts": 1,
+      "receipt": {
+        "status": "failed",
+        "dispatch_id": "320b1a854c198d7f10e2e348b595337ff3cd611e48a73ddbdf5592a8aa57ddde",
+        "source_run_id": 44776788638,
+        "source_attempt": 1,
+        "failure_code": "qwen_reviewer_forbidden_tool_postmodel_failure"
+      }
+    },
+    {
+      "id": "c4de87e1dae1c5d89368c1efca058915897c59a8f9bd643815a15b0c04bd979b",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "79608bbfabfceb7d6cd98add8412a4b3c704e610",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "receipt": null
+    }
+  ]
+}
