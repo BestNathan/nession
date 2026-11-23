@@ -319,6 +319,18 @@ function selfTest(){
     /immutable Metrics Store/);
   assert.throws(()=>attest4342History({...args,writer:{...writer,
     actor:{login:'attacker'}}}),/untrusted main-owned/);
+  assert.throws(()=>attest4342History({...args,artifact:{
+    ...artifact,expired:true}}),/unexpired historical report Artifact/);
+  assert.throws(()=>attest4342History({...args,report:{
+    ...report,source_workflow_key:'attacker-workflow'}}),/canonical Catalog/);
+  assert.throws(()=>attest4342History({...args,report:{
+    ...report,truncated:'unknown'}}),/bounded history scope/);
+  assert.throws(()=>attest4342History({...args,report:{
+    ...report,selected:{...report.selected,target_sha:'b'.repeat(40)}}}),
+    /selected run not identified/);
+  assert.throws(()=>attest4342History({...args,ancestry:{
+    writer:true,original:false}}),/accepted target/);
+
   console.log('4342 bounded historical Agent Artifact, immutable Store, and fail-closed SC-05 fixtures passed');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
