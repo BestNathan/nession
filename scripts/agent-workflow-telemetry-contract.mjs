@@ -2,7 +2,9 @@
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { telemetryWorkflowSources } from './workflow-conventions.mjs';
 
 const AGENT_SIGNALS = [
   /NSESSION_AGENT_WORKFLOW_ID:/,
@@ -13,83 +15,19 @@ const AGENT_SIGNALS = [
 ];
 
 
-const TRUSTED_TELEMETRY_SOURCES = new Map([
-  ['.github/workflows/agent-develop.yml', {
-    workflow_id: 'agent-develop',
-    events: new Set(['workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-staging-developer-canary.yml', {
-    workflow_id: 'agent-staging-developer-canary',
-    events: new Set(['workflow_run']),
-    workflow_dispatch_main_only: false,
-    allowed_workflow_run_branches: new Set(['main']),
-  }],
-  ['.github/workflows/agent-review.yml', {
-    workflow_id: 'agent-review',
-    events: new Set(['workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/acceptance-verified-stage.yml', {
-    workflow_id: 'requirement-acceptance',
-    events: new Set(['issue_comment']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-sc-acceptance.yml', {
-    workflow_id: 'requirement-acceptance',
-    events: new Set(['workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/acceptance-orchestrator.yml', {
-    workflow_id: 'requirement-acceptance',
-    events: new Set(['pull_request_target', 'issues', 'push']),
-    allowed_push_branches: new Set(['staging', 'main']),
-    workflow_dispatch_main_only: false,
-  }],
-  ['.github/workflows/agent-issue-audit.yml', {
-    workflow_id: 'issue-audit',
-    events: new Set(['issues', 'workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-e2e-failure-analysis.yml', {
-    workflow_id: 'agent-e2e-failure-analysis',
-    events: new Set(['workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-staging-convergence-review.yml', {
-    workflow_id: 'agent-staging-convergence-review',
-    events: new Set(['workflow_dispatch', 'push']),
-    allowed_push_branches: new Set(['main']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-provider-smoke.yml', {
-    workflow_id: 'agent-provider-smoke',
-    events: new Set(['push', 'workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-cursor-resume-seed.yml', {
-    workflow_id: 'agent-cursor-resume-seed',
-    events: new Set(['push', 'workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-cursor-resume-verify.yml', {
-    workflow_id: 'agent-cursor-resume-verify',
-    events: new Set(['workflow_run']),
-    workflow_dispatch_main_only: false,
-    allowed_workflow_run_branches: new Set(['main']),
-  }],
-  ['.github/workflows/agent-claude-resume-seed.yml', {
-    workflow_id: 'agent-claude-resume-seed',
-    events: new Set(['push', 'workflow_dispatch']),
-    workflow_dispatch_main_only: true,
-  }],
-  ['.github/workflows/agent-claude-resume-verify.yml', {
-    workflow_id: 'agent-claude-resume-verify',
-    events: new Set(['workflow_run']),
-    workflow_dispatch_main_only: false,
-    allowed_workflow_run_branches: new Set(['main']),
-  }],
-]);
+// Derived from the canonical Workflow Catalog. Source path and group
+// identity are distinct: requirement-acceptance is intentionally shared.
+const TRUSTED_TELEMETRY_SOURCES = new Map(telemetryWorkflowSources().map(source => [
+  source.path, {
+    source_workflow_key: source.key,
+    workflow_id: source.group_id,
+    events: new Set(source.events),
+    workflow_dispatch_main_only: source.main_only,
+    allowed_push_branches: source.push_branches.length ? new Set(source.push_branches) : null,
+    allowed_workflow_run_branches: source.workflow_run_branches.length ?
+      new Set(source.workflow_run_branches) : null,
+  },
+]));
 
 export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_REPOSITORY) {
   const path = String(run?.path ?? '');
@@ -117,6 +55,7 @@ export function validateTelemetrySourceRun(run, repository = process.env.GITHUB_
   }
 
   return {
+    source_workflow_key: source.source_workflow_key,
     workflow_id: source.workflow_id,
     path,
     event,
@@ -283,6 +222,18 @@ function selfTest() {
     repository: { full_name: 'attacker/nession' },
   }, 'BestNathan/nession'), /repository mismatch/);
 
+  assert.equal(TRUSTED_TELEMETRY_SOURCES.size,14);
+  const auditSource = TRUSTED_TELEMETRY_SOURCES.get('.github/workflows/agent-issue-audit.yml');
+  assert.equal(auditSource.source_workflow_key,'agent-issue-audit');
+  assert.equal(auditSource.workflow_id,'issue-audit');
+  for(const name of ['Issue Audit #4297','Comment Audit #4230 comment:7090927541']){
+    const source=validateTelemetrySourceRun({id:11,run_attempt:1,
+      path:'.github/workflows/agent-issue-audit.yml',event:'issues',
+      head_branch:'main',name,repository:{full_name:'BestNathan/nession'}
+    },'BestNathan/nession');
+    assert.equal(source.source_workflow_key,'agent-issue-audit');
+  }
+
   assert.equal(validateTelemetrySourceRun({
     id: 11,
     run_attempt: 1,
@@ -341,14 +292,18 @@ function selfTest() {
   console.log('agent-workflow-telemetry-contract self-test: 11 cases passed');
 }
 
-const command = process.argv[2] ?? 'check';
-if (command === 'self-test' || command === '--self-test') selfTest();
-else if (command === 'check') checkRepository();
-else if (command === 'provenance') {
-  const file = process.argv[3];
-  if (!file) throw new Error('usage: agent-workflow-telemetry-contract.mjs provenance RUN_JSON');
-  const result = validateTelemetrySourceRun(JSON.parse(readFileSync(file, 'utf8')));
-  process.stdout.write(JSON.stringify(result) + '\n');
-} else {
-  throw new Error('usage: agent-workflow-telemetry-contract.mjs <check|self-test|provenance RUN_JSON>');
+// Reconcile imports the same authoritative validator as a library. Do not
+// run this script's CLI while another source owns process.argv.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const command = process.argv[2] ?? 'check';
+  if (command === 'self-test' || command === '--self-test') selfTest();
+  else if (command === 'check') checkRepository();
+  else if (command === 'provenance') {
+    const file = process.argv[3];
+    if (!file) throw new Error('usage: agent-workflow-telemetry-contract.mjs provenance RUN_JSON');
+    const result = validateTelemetrySourceRun(JSON.parse(readFileSync(file, 'utf8')));
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } else {
+    throw new Error('usage: agent-workflow-telemetry-contract.mjs <check|self-test|provenance RUN_JSON>');
+  }
 }

@@ -98,7 +98,62 @@ export const CATALOG = [
   ['store-app-writer-smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store-app-writer-smoke.yml', 'Store / App Writer Smoke', 'store'],
   ['store-agent-bootstrap', 'store-agent-bootstrap.yml', 'Store / Agent Bootstrap', 'store-agent-bootstrap.yml', 'Store / Agent Bootstrap', 'store'],
   ['store-receipt-readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store-receipt-readback.yml', 'Store / Receipt Readback', 'store'],
-];
+ ];
+
+// #4342: the Workflow Catalog owns source workflow identity and telemetry
+// admission policy. These keys refer to CATALOG rows; they are not a second
+// hand-edited path/name registry. Metrics group IDs are deliberately separate
+// and may be shared by different sources (Acceptance).
+export const TELEMETRY_SOURCE_POLICY = Object.freeze({
+  'agent-develop': {group_id:'agent-develop',events:['workflow_dispatch'],main_only:true},
+  'agent-staging-developer-canary': {group_id:'agent-staging-developer-canary',events:['workflow_run'],workflow_run_branches:['main']},
+  'agent-review': {group_id:'agent-review',events:['workflow_dispatch'],main_only:true},
+  'acceptance-verified-stage': {group_id:'requirement-acceptance',events:['issue_comment']},
+  'agent-sc-acceptance': {group_id:'requirement-acceptance',events:['workflow_dispatch'],main_only:true},
+  'acceptance-orchestrator': {group_id:'requirement-acceptance',events:['pull_request_target','issues','push'],push_branches:['staging','main'],branches:['main','staging']},
+  'agent-issue-audit': {group_id:'issue-audit',events:['issues','workflow_dispatch'],main_only:true},
+  'agent-e2e-failure-analysis': {group_id:'agent-e2e-failure-analysis',events:['workflow_dispatch'],main_only:true},
+  'agent-staging-convergence-review': {group_id:'agent-staging-convergence-review',events:['workflow_dispatch','push'],push_branches:['main'],main_only:true},
+  'agent-provider-smoke': {group_id:'agent-provider-smoke',events:['push','workflow_dispatch'],main_only:true},
+  'agent-cursor-resume-seed': {group_id:'agent-cursor-resume-seed',events:['push','workflow_dispatch'],main_only:true},
+  'agent-cursor-resume-verify': {group_id:'agent-cursor-resume-verify',events:['workflow_run'],workflow_run_branches:['main']},
+  'agent-claude-resume-seed': {group_id:'agent-claude-resume-seed',events:['push','workflow_dispatch'],main_only:true},
+  'agent-claude-resume-verify': {group_id:'agent-claude-resume-verify',events:['workflow_run'],workflow_run_branches:['main']},
+});
+
+// A verified, read-only projection: no inferred aliases, no display-name
+// authentication, no implicit fallback if a Catalog owner is ambiguous.
+export function telemetryWorkflowSources(catalog=CATALOG, policy=TELEMETRY_SOURCE_POLICY) {
+  const seenPaths=new Set();
+  return Object.entries(policy).map(([key, config]) => {
+    const matches=catalog.filter(row => row[0]===key);
+    if(matches.length!==1)throw Error('telemetry source has missing/ambiguous Catalog key: '+key);
+    const [, , , filename, displayName] = matches[0];
+    const path='.github/workflows/'+filename;
+    if(seenPaths.has(path))throw Error('duplicate telemetry source path: '+path);
+    seenPaths.add(path);
+    if(!/^[a-z0-9][a-z0-9._-]*$/.test(config.group_id ?? ''))
+      throw Error('invalid telemetry group for '+key);
+    if(!Array.isArray(config.events)||!config.events.length||
+      config.events.some(event=>!['push','issues','issue_comment','pull_request_target','workflow_dispatch','workflow_run'].includes(event))||
+      new Set(config.events).size!==config.events.length)
+      throw Error('invalid telemetry source events: '+key);
+    for(const [field,values] of Object.entries(config)){
+      if(!['branches','push_branches','workflow_run_branches'].includes(field))continue;
+      if(!Array.isArray(values)||!values.length||
+         values.some(v=>!['main','staging'].includes(v))||new Set(values).size!==values.length)
+        throw Error('invalid telemetry source branch policy: '+key);
+    }
+    return Object.freeze({
+      key,path,file:filename,name:displayName,group_id:config.group_id,
+      events:Object.freeze([...config.events]),
+      branches:Object.freeze([...(config.branches??['main'])]),
+      main_only:config.main_only===true,
+      push_branches:Object.freeze([...(config.push_branches??[])]),
+      workflow_run_branches:Object.freeze([...(config.workflow_run_branches??[])]),
+    });
+  });
+}
 
 // Resolve the actual checked-in path from the single canonical catalog.
 // Reject missing and ambiguous dual legacy/target copies, rather than choosing
@@ -263,7 +318,7 @@ export function auditWorkflowDocumentation(documents, catalog = CATALOG) {
   return errors;
 }
 
-export function auditWorkflows(files, catalog = CATALOG, { complete = true, trustedSources = '', ownerDocs = '', requireTargetNames = false, documents = null } = {}) {
+export function auditWorkflows(files, catalog = CATALOG, { complete = true, telemetryPolicy = null, ownerDocs = '', requireTargetNames = false, documents = null } = {}) {
   const errors = [];
   const byPath = new Map();
   const names = new Map();
@@ -323,16 +378,15 @@ export function auditWorkflows(files, catalog = CATALOG, { complete = true, trus
       errors.push(file + ': references trusted/ without a path: trusted checkout');
     }
   }
-  // The trusted provenance source allowlist is an independent stable owner.
-  // Check that registered source paths still exist; don't reimplement its
-  // event, workflow_id and authorization policy.
-  if (trustedSources) {
-    const section = trustedSources.split('const TRUSTED_TELEMETRY_SOURCES = new Map(')[1]?.split(']);')[0];
-    if (!section) errors.push('unable to locate canonical telemetry source allowlist');
-    else {
-      for (const match of section.matchAll(/\['\.github\/workflows\/([a-zA-Z0-9._-]+\.ya?ml)'/g)) {
-        if (!files.has(match[1])) errors.push('telemetry allowlist references absent workflow: ' + match[1]);
-      }
+  // The same Catalog projection drives source trust and scheduled recovery.
+  if (telemetryPolicy) {
+    let projected = [];
+    try { projected = telemetryWorkflowSources(catalog,telemetryPolicy); }
+    catch(error) { errors.push(String(error.message)); }
+    for (const source of projected) {
+      if (!files.has(source.file)) errors.push('telemetry allowlist references absent workflow: '+source.file);
+      else if (workflowName(files.get(source.file))!==source.name)
+        errors.push('telemetry source Catalog display-name drift: '+source.file);
     }
   }
   // CI/CD Skill must advertise paths that actually exist. This is a doc-path
@@ -400,7 +454,13 @@ function selfTest() {
     '\n      - uses: actions/checkout@v4\n        with:\n          path: trusted\n' +
     '      - run: node trusted/scripts/run-store-integrity.mjs staged agent-store "$store"');
   assert.deepEqual(auditWorkflows(trustedPath, catalog).errors, []);
-  assert.match(auditWorkflows(old, catalog, { trustedSources: 'const TRUSTED_TELEMETRY_SOURCES = new Map([\n  [\'.github/workflows/missing.yml\', {}],\n]);' }).errors.join('\n'), /telemetry allowlist references absent/);
+  assert.match(auditWorkflows(old,catalog,{
+    telemetryPolicy:{'missing-agent':{group_id:'any',events:['push']}}
+  }).errors.join('\n'),/missing\/ambiguous Catalog key/);
+  assert.throws(()=>telemetryWorkflowSources(catalog,{
+    'agent-job':{group_id:'bad group',events:['workflow_dispatch']}
+  }),/invalid telemetry group/);
+
   assert.deepEqual(upstreamWorkflowNames('on:\n  workflow_run:\n    workflows:\n      - Model\n      - Task\n').names, ['Model', 'Task']);
   assert.match(auditWorkflows(old, catalog, { ownerDocs: '## 3. Current workflow owners\n- \x60.github/workflows/missing.yml\x60\n## 4. Other' }).errors.join('\n'), /CI\/CD Skill references absent workflow/);
   // The two unprivileged orphan producers cannot create a generic bypass.
@@ -525,13 +585,12 @@ function check() {
   const files = new Map(fs.readdirSync(WORKFLOW_DIR)
     .filter((f) => /\.ya?ml$/.test(f))
     .map((f) => [f, fs.readFileSync(path.join(WORKFLOW_DIR, f), 'utf8')]));
-  const sources = fs.readFileSync(path.join(ROOT, 'scripts/agent-workflow-telemetry-contract.mjs'), 'utf8');
   const ownerDocs = fs.readFileSync(path.join(ROOT, '.claude/skills/nession-cicd/SKILL.md'), 'utf8');
   const documents = new Map([...DOCUMENTED_WORKFLOW_IDS.keys()].map(docPath => [
     docPath, fs.readFileSync(path.join(ROOT, docPath), 'utf8'),
   ]));
   const audit = auditWorkflows(files, CATALOG, {
-    trustedSources: sources, ownerDocs, requireTargetNames: true, documents,
+    telemetryPolicy: TELEMETRY_SOURCE_POLICY, ownerDocs, requireTargetNames: true, documents,
   });
   const errors = [...audit.errors, ...auditCanonicalPrWorkflowTiming(files)];
   if (errors.length) {
