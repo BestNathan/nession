@@ -63,6 +63,7 @@ import {collectOriginalQwenReview,selfTestOriginalQwenReview} from './acceptance
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectKnowledgePublication,shouldCollectKnowledgePublication,selfTestKnowledgePublication} from './acceptance-knowledge-publisher-evidence.mjs';
 import {collectToolchain4160,shouldCollectToolchain4160,selfTestToolchain4160} from './acceptance-toolchain-4160-evidence.mjs';
+import {collectToolchain4241,shouldCollectToolchain4241,selfTestToolchain4241} from './acceptance-toolchain-4241-evidence.mjs';
 import {collectKnowledgeProposalCleanup,shouldCollectProposalCleanup,selfTestKnowledgeProposalCleanup} from './acceptance-knowledge-proposal-cleanup-evidence.mjs';
 import {collectKnowledgeWriter2358,shouldCollectKnowledgeWriter2358,selfTestKnowledgeWriter2358} from './acceptance-knowledge-writer-2358.mjs';
 import {collectSandbox3145,shouldCollectSandbox3145,selfTestSandbox3145} from './acceptance-knowledge-sandbox-3145.mjs';
@@ -221,7 +222,7 @@ function compactRuns(runs, expectedSha) {
 }
 
 export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null,
-  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, verifiedConflictProbe4124 = null }) {
+  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedToolchain4241 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, verifiedConflictProbe4124 = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -276,6 +277,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_staging_acr_readback: stagingAcrReadback,
     verified_knowledge_publisher_publication: verifiedKnowledgePublisherPublication,
     verified_toolchain_4160_readback: verifiedToolchain4160,
+    verified_toolchain_4241_readback: verifiedToolchain4241,
     verified_knowledge_proposal_cleanup: verifiedKnowledgeProposalCleanup,
     verified_knowledge_writer_policy_2358: verifiedKnowledgeWriter2358,
     verified_knowledge_sandbox_pages_3145: verifiedSandbox3145,
@@ -1874,6 +1876,14 @@ async function collectCommand(workspace, outFile) {
         stage:process.env.ACCEPTANCE_STAGE,issue:process.env.ISSUE_NUMBER,
         get:githubGet,getLog:githubJobLog})
     : null;
+  // #4297: independently authenticated orphan catalog + main trusted GHCR
+  // receipts. This is evidence only; the model and Issue cannot assert a Pass.
+  const verifiedToolchain4241=shouldCollectToolchain4241(
+    process.env.ACCEPTANCE_STAGE,process.env.ISSUE_NUMBER)
+    ? await collectToolchain4241({repo,targetSha:sha,
+        stage:process.env.ACCEPTANCE_STAGE,issue:process.env.ISSUE_NUMBER,
+        get:githubGet,getLog:githubJobLog})
+    : null;
   // #3773: evidence of the already executed, main-only Knowledge proposal GC
   // must bind exact Run/Attempt/job steps, source log, live refs and ledger.
   const verifiedKnowledgeProposalCleanup =
@@ -2192,7 +2202,7 @@ async function collectCommand(workspace, outFile) {
     authenticatedQwenChainFixture,authenticatedQwen3433Recovery,verifiedConflictProbe4124,
     authenticatedRunStoreCasMatrix,
     authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
-    authenticatedRunStoreFiveModeReadback, verifiedKnowledgePublisherPublication, verifiedToolchain4160, verifiedKnowledgeProposalCleanup, verifiedKnowledgeWriter2358, verifiedSandbox3145,
+    authenticatedRunStoreFiveModeReadback, verifiedKnowledgePublisherPublication, verifiedToolchain4160, verifiedToolchain4241, verifiedKnowledgeProposalCleanup, verifiedKnowledgeWriter2358, verifiedSandbox3145,
     deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
     stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts,
     historicalStagingBatchProof });
@@ -2282,6 +2292,7 @@ async function selfTest() {
   selfTestConflictProbe4124();
   selfTestKnowledgePublication();
   selfTestToolchain4160();
+  selfTestToolchain4241();
   selfTestKnowledgeProposalCleanup();
   selfTestKnowledgeWriter2358();
   selfTestSandbox3145();

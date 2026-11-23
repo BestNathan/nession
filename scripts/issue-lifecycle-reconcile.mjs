@@ -16,6 +16,7 @@ import { planStage, validateAcceptancePlan, canonicalAcceptanceStage } from './a
 import {collectPrRequiredQualityAsync, validPrRequiredQualityReceipt}
   from './acceptance-pr-web-quality-receipt.mjs';
 import { parseCommand } from './github-comment-command.mjs';
+import {collectToolchain4241} from './acceptance-toolchain-4241-evidence.mjs';
 
 const SHA = /^[0-9a-f]{40}$/i;
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -403,6 +404,45 @@ async function githubRequest(path, { token, method = 'GET', body } = {}) {
   return response.json();
 }
 
+// Read-only source proof is independently collected from official GitHub
+// source/Actions/OCI readback receipts. The Issue or model supplies no pins.
+async function sourceProof4241(repository, targetSha, token,
+  request = githubRequest, getLog = null) {
+  if(repository!=='BestNathan/nession'||!SHA.test(String(targetSha||''))||!token)
+    throw Error('untrusted toolchains orphan acceptance source');
+  const readLog=getLog??(async path=>{
+    const response=await fetch('https://api.github.com'+path,{
+      headers:{Accept:'application/vnd.github+json',
+        Authorization:'Bearer '+token,
+        'X-GitHub-Api-Version':'2022-11-28',
+        'User-Agent':'nession-issue-lifecycle'},
+    });
+    if(!response.ok)throw Error('toolchains read-only job log unavailable: '+response.status);
+    return response.text();
+  });
+  return collectToolchain4241({repo:repository,targetSha,stage:'post-merge',
+    issue:4241,get:path=>request(path,{token}),getLog:readLog});
+}
+function accepted4241Target(issue) {
+  if(issue?.number!==4241)return null;
+  const criteria=parseSuccessCriteria(extractSection(issue.body,'Success Criteria'));
+  const report=parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+  const plan=validateAcceptancePlan(issue.body,criteria.criteria.keys(),report.rows);
+  if(criteria.errors.length||report.errors.length||plan.errors.length||!plan.plan)
+    return null;
+  const refs=[];
+  for(const id of ['SC-02','SC-03','SC-04','SC-05']) {
+    const row=report.rows.get(id),criterion=criteria.criteria.get(id),
+      entry=plan.plan.get(id);
+    if(!row||!criterion?.checked||row.result!=='Pass'||
+       entry?.method!=='agent'||planStage(entry)!=='post-merge')return null;
+    const match=/^run [1-9][0-9]*; ref ([a-f0-9]{40}); source agent(?:-[a-z0-9-]+)?;/i
+      .exec(String(row.evidence??''));
+    if(!match)return null;
+    refs.push(match[1].toLowerCase());
+  }
+  return new Set(refs).size===1?refs[0]:null;
+}
 function repoParts(repository) {
   const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(repository || '');
   if (!match) throw Error('invalid GITHUB_REPOSITORY');
@@ -654,6 +694,21 @@ export async function assessNativeCompletedIssueSource(repository, number, token
   if (issue.state !== 'closed' || issue.state_reason === 'not_planned' ||
       !isAcceptanceIssue(issue) || issue.pull_request)
     return {qualified:true, reason:'not a completed native Acceptance Issue'};
+  // A native premature close cannot evade the orphan source and SC-01 Quality
+  // contract. Reject it and let the existing closed-Issue guard restore state.
+  if(number===4241) {
+    const target=accepted4241Target(issue);
+    if(!target||completedIssueAcceptanceDecision({...issue,state:'open'}).kind!=='accepted')
+      return {qualified:false,reason:'toolchains SCs not formally accepted'};
+    const proof=await sourceProof4241(repository,target,token,request);
+    const original=await request(prefix+'/pulls/'+proof.historical_sc01.pr,{token});
+    const quality=await qualifyIssuePrSourceForClosure(issue,[original],
+      qualityReader??(sha=>collectPrRequiredQualityAsync(sha,
+        path=>request(path,{token}))));
+    return quality.qualified
+      ? {qualified:true,reason:'authenticated orphan GHCR source + historical PR Quality'}
+      : {qualified:false,reason:'toolchains SC-01 Quality: '+quality.reason};
+  }
   const prs = await relatedPulls(repository, number, token, null, request);
   const decision = decideIssueClosure({...issue,state:'open'},prs);
   if (decision.action !== 'close')
@@ -674,6 +729,33 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   if (!issue || issue.number !== number) throw Error('Issue number mismatch');
   if (issue.state !== 'open' || !isAcceptanceIssue(issue) || issue.pull_request) {
     return { action: 'skip', reason: 'not an open native acceptance Issue' };
+  }
+  // #4297: an explicitly allowlisted orphan catalog has no fabricated Main
+  // implementing PR. Complete the ordinary SC Gate first, re-authenticate
+  // every source and the historical PR-stage Quality, then let this SAME
+  // deterministic Issue writer perform the only closure mutation.
+  if(number===4241) {
+    const labels=(issue.labels||[]).map(x=>typeof x==='string'?x:x.name);
+    if(labels.includes('status:blocked')||labels.includes('status:on-hold'))
+      return {action:'pending',reason:'explicit blocking status'};
+    const manualReopened=await humanReopened(repository,number,token,request);
+    if(manualReopened)return {action:'pending',reason:'human reopened Issue'};
+    const target=accepted4241Target(issue);
+    if(!target||completedIssueAcceptanceDecision(issue).kind!=='accepted')
+      return {action:'pending',reason:'toolchains formal Acceptance SC-02..05 pending'};
+    const proof=await sourceProof4241(repository,target,token,request);
+    const sc01=await request(prefix+'/pulls/'+proof.historical_sc01.pr,{token});
+    const qualified=await qualifyIssuePrSourceForClosure(issue,[sc01],
+      qualityReader??(sha=>collectPrRequiredQualityAsync(sha,
+        path=>request(path,{token}))));
+    if(!qualified.qualified)return {action:'pending',reason:'historical SC-01 Quality: '+qualified.reason};
+    const fresh=await request(prefix+'/issues/'+number,{token});
+    if(fresh?.state!=='open'||fresh?.updated_at!==issue.updated_at)
+      return {action:'pending',reason:'Issue changed during source reconciliation'};
+    await request(prefix+'/issues/'+number,{token,method:'PATCH',
+      body:{state:'closed',state_reason:'completed'}});
+    return {action:'closed',reason:'authenticated toolchains source, 14 GHCR receipts, SC Gate and historical PR Quality',
+      prs:proof.orphan_prs.map(x=>x.number)};
   }
   const prs = await relatedPulls(repository, number, token, includePr, request);
   const manualReopened = await humanReopened(repository, number, token, request);
@@ -753,6 +835,37 @@ async function handleManual(event, repository, actor, token, request = githubReq
   const labels = (issue.labels || []).map(x => typeof x === 'string' ? x : x.name);
   if (labels.includes('status:blocked') || labels.includes('status:on-hold')) {
     return { action: 'pending', reason: 'explicit blocker prevents manual re-dispatch' };
+  }
+  if(command.issueNumber===4241) {
+    // Owner input is intent only. No arbitrary source ref, Issue claim, or
+    // historical failed Publisher Run can authorize a new acceptance Agent.
+    if(!command.targetMainSha||command.targetPrSha||
+        command.replacementOldPr!=null||command.replacementNewPr!=null)
+      return {action:'pending',reason:'toolchains requires explicit post-merge main SHA'};
+    const proof=await sourceProof4241(repository,command.targetMainSha,token,request);
+    const criteria=parseSuccessCriteria(extractSection(issue.body,'Success Criteria'));
+    const report=parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+    const plan=validateAcceptancePlan(issue.body,criteria.criteria.keys(),report.rows);
+    if(criteria.errors.length||report.errors.length||plan.errors.length||!plan.plan)
+      throw Error('toolchains Acceptance Plan contract invalid');
+    const pending=['SC-02','SC-03','SC-04','SC-05'].filter(id=>{
+      const row=report.rows.get(id),criterion=criteria.criteria.get(id);
+      return row&&!(['Pass','N/A'].includes(row.result)&&criterion?.checked);
+    });
+    if(!pending.length)
+      return {action:'pending',reason:'toolchains has no pending post-merge SCs'};
+    for(const id of pending){
+      const entry=plan.plan.get(id);
+      if(!entry||entry.method!=='agent'||planStage(entry)!=='post-merge')
+        throw Error('unexpected toolchains Acceptance method/stage '+id);
+    }
+    await request(prefix+'/actions/workflows/agent-sc-acceptance.yml/dispatches',{
+      token,method:'POST',body:{ref:'main',inputs:{
+        issue_number:'4241',stage:'post-merge',target_ref:proof.target_sha,
+        provider:'',deployment:''}}});
+    return {action:'dispatched',reason:'authenticated orphan catalog and publisher evidence',
+      agent_runs:[{stage:'post-merge',target_ref:proof.target_sha}],
+      diagnostics:[],note:'only deterministic projector may update SCs'};
   }
   const prs = await relatedPulls(repository, command.issueNumber, token, null, request);
   const sourcePrs = await verifiedManualSourcePulls(repository, command.issueNumber,
