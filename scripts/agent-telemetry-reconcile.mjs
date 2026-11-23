@@ -264,6 +264,37 @@ export function validateReconciliationContext(env,event=null){
     return 'trusted-bot-recovery';
   fail('reconciliation denied: schedule or trusted post-Store bot wake required');
 }
+// Repository-dispatch's bot identity is necessary, not sufficient: another
+// workflow with GITHUB_TOKEN could manufacture the same actor. The immutable
+// writer run is independently re-read with the exact attempt and completed
+// post-Store steps before a bot wake can enter privileged recovery.
+export function attestHistoryWriterWake(run,jobs,event,now=Date.now()){
+  const id=Number(event?.client_payload?.writer_run_id);
+  if(!positive(id)||run?.id!==id||run.run_attempt!==1||
+     run.path!=='.github/workflows/metrics-agent-telemetry.yml'||
+     run.name!=='Metrics / Agent Telemetry Ingest'||
+     run.event!=='workflow_run'||run.status!=='completed'||run.conclusion!=='success'||
+     run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
+     run.head_branch!=='main'||!SHA.test(run.head_sha??'')||
+     !Number.isFinite(Date.parse(run.updated_at??''))||
+     now-Date.parse(run.updated_at)>6*60*60*1000||
+     Date.parse(run.updated_at)>now+5*60*1000)
+    fail('untrusted historical wake writer provenance');
+  if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+    fail('unbounded historical wake writer jobs');
+  const ingests=jobs.jobs.filter(j=>j.name==='ingest');
+  if(ingests.length!==1||ingests[0].run_id!==id||
+     ingests[0].run_attempt!==1||ingests[0].conclusion!=='success'||
+     ingests[0].status!=='completed')
+    fail('untrusted historical wake writer job');
+  for(const stepName of ['Validate and append immutable telemetry',
+    'Commit metrics history','Verify immutable Git bytes before uploading Run Store receipts']){
+    const matching=(ingests[0].steps??[]).filter(step=>
+      step.name===stepName&&step.conclusion==='success');
+    if(matching.length!==1)fail('historical wake requires real immutable Store write: '+stepName);
+  }
+  return true;
+}
 function reconcileEventContext(){
   if(process.env.GITHUB_EVENT_NAME!=='repository_dispatch')return null;
   const file=process.env.GITHUB_EVENT_PATH;
@@ -271,7 +302,14 @@ function reconcileEventContext(){
   return JSON.parse(fs.readFileSync(file,'utf8'));
 }
 async function select(store){
-  validateReconciliationContext(process.env,reconcileEventContext());
+  const event=reconcileEventContext();
+  const context=validateReconciliationContext(process.env,event);
+  if(context==='trusted-bot-recovery'){
+    const id=Number(event.client_payload.writer_run_id);
+    const run=ghJson('actions/runs/'+id);
+    const jobs=ghJson('actions/runs/'+id+'/attempts/1/jobs?per_page=100');
+    attestHistoryWriterWake(run,jobs,event);
+  }
   if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
   const summaryCounts=indexedSourceSummaries(store);
   const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
@@ -363,7 +401,15 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
+  const reviewerGuard=[
+    "(github.event_name == 'repository_dispatch' &&",
+    "          github.ref == 'refs/heads/main' &&",
+    "          github.event.action == 'nession-agent-review-completed' &&",
+    "          github.actor == 'github-actions[bot]' &&",
+    "          github.event.sender.login == 'github-actions[bot]')",
+  ].join('\n');
   if(!trigger.includes('    types: [nession-agent-review-completed, nession-agent-metrics-history-recover]') ||
+     !job.includes(reviewerGuard) ||
      !job.includes("github.event.action == 'nession-agent-review-completed'") ||
      !job.includes("github.actor == 'github-actions[bot]'") ||
      !job.includes("github.event.sender.login == 'github-actions[bot]'") ||
@@ -445,12 +491,36 @@ function selfTest(){
   ),/failed Provider evidence/);
     const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
+  const writerRun={id:45168056749,run_attempt:1,
+    path:'.github/workflows/metrics-agent-telemetry.yml',
+    name:'Metrics / Agent Telemetry Ingest',event:'workflow_run',
+    status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    head_branch:'main',head_sha:'a'.repeat(40),
+    updated_at:'2026-11-23T12:00:00Z'};
+  const writerJobs={jobs:[{name:'ingest',run_id:writerRun.id,run_attempt:1,
+    status:'completed',conclusion:'success',steps:[
+      'Validate and append immutable telemetry','Commit metrics history',
+      'Verify immutable Git bytes before uploading Run Store receipts',
+    ].map(name=>({name,conclusion:'success'}))}]};
   const botEvent={action:'nession-agent-metrics-history-recover',
     sender:{login:'github-actions[bot]'},repository:{full_name:REPO},
     client_payload:{writer_run_id:45168056749}};
   assert.equal(validateReconciliationContext({...mainEnv,
     GITHUB_EVENT_NAME:'repository_dispatch',GITHUB_ACTOR:'github-actions[bot]'},botEvent),
     'trusted-bot-recovery');
+  assert.equal(attestHistoryWriterWake(writerRun,writerJobs,botEvent,
+    Date.parse('2026-11-23T12:05:00Z')),true);
+  for(const [badRun,badJobs] of [
+    [{...writerRun,path:'.github/workflows/evil.yml'},writerJobs],
+    [{...writerRun,event:'workflow_dispatch'},writerJobs],
+    [{...writerRun,conclusion:'failure'},writerJobs],
+    [writerRun,{jobs:[{...writerJobs.jobs[0],steps:writerJobs.jobs[0].steps
+      .filter(step=>step.name!=='Commit metrics history')}]}],
+  ])assert.throws(()=>attestHistoryWriterWake(badRun,badJobs,botEvent,
+      Date.parse('2026-11-23T12:05:00Z')),/untrusted historical wake|real immutable Store write/);
+  assert.throws(()=>attestHistoryWriterWake(writerRun,writerJobs,botEvent,
+    Date.parse('2026-11-24T12:05:00Z')),/untrusted historical wake/);
   for(const [badEnv,badEvent] of [
     [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
       GITHUB_ACTOR:'attacker'},botEvent],
