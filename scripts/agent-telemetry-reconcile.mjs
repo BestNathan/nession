@@ -316,7 +316,7 @@ export function validateRecoveryRouting(workflow){
   const job=workflow.split(/^jobs:/m)[1]??'';
   if(!/^  schedule:\s*\n    - cron: '[^'\n]+'\s*$/m.test(trigger) ||
      /^  workflow_dispatch:/m.test(trigger))
-    fail('Metrics replay must be scheduled-only, never arbitrary-ref dispatch');
+    fail('Metrics replay must remain main-owned; no arbitrary-ref dispatch');
   if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
      !job.includes("github.repository == 'BestNathan/nession'"))
     fail('missing trusted main schedule guard');
@@ -340,8 +340,8 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
      !workflow.includes('run-store-integrity.mjs"'))
     fail('trusted reconciliation or immutable Store Gate omitted');
-  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule'")||
-     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'")||
+  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover')")||
+     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'")||
      !job.includes("if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
      job.includes("steps.event_artifacts.outputs.count == '0'")||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
@@ -363,7 +363,7 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
-  if(!trigger.includes('    types: [nession-agent-review-completed]') ||
+  if(!trigger.includes('    types: [nession-agent-review-completed, nession-agent-metrics-history-recover]') ||
      !job.includes("github.event.action == 'nession-agent-review-completed'") ||
      !job.includes("github.actor == 'github-actions[bot]'") ||
      !job.includes("github.event.sender.login == 'github-actions[bot]'") ||
@@ -378,6 +378,21 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
+  // The emergency history wake is a *main-owned* bot signal, not public
+  // workflow_dispatch. The same writer re-authenticates the selected source.
+  const botGuard=[
+    "(github.event_name == 'repository_dispatch' &&",
+    "          github.ref == 'refs/heads/main' &&",
+    "          github.event.action == 'nession-agent-metrics-history-recover' &&",
+    "          github.actor == 'github-actions[bot]' &&",
+    "          github.event.sender.login == 'github-actions[bot]')",
+  ].join('\n');
+  if(!trigger.includes('nession-agent-metrics-history-recover')||
+     !job.includes(botGuard)||
+     !job.includes("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''")||
+     !job.includes('client_payload[writer_run_id]=${GITHUB_RUN_ID}')||
+     !job.includes('if: github.event_name == \'workflow_run\' || (github.event_name == \'repository_dispatch\' && github.event.action == \'nession-agent-review-completed\')'))
+    fail('untrusted or recursive Metrics history bot wake');
   // Never report successful metrics ingestion as failed merely because the
   // *authentic source Provider job* failed. Only a successful source may wake
   // Acceptance; all source identity checks still apply to success cases.
@@ -397,6 +412,15 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '      - Agent / Issue Audit\n',''
   )),/subscriptions drifted from Catalog/);
+  for(const weaker of [
+    workflow.replace("github.event.action == 'nession-agent-metrics-history-recover'",
+      "github.event.action == 'attacker-recover'"),
+    workflow.replace('client_payload[writer_run_id]=${GITHUB_RUN_ID}',
+      'client_payload[writer_run_id]=attacker'),
+    workflow.replace("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''",
+      "github.event_name == 'repository_dispatch' &&\n          steps.persist.outputs.changed != ''"),
+  ])assert.throws(()=>validateRecoveryRouting(weaker),
+    /untrusted or recursive Metrics history bot wake|empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
   ),/scheduled-only/);
