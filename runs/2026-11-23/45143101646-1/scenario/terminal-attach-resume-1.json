@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "d1a44579eb0e328acf9821bbbab6d2509331964d",
+  "scenario_revision": "d1a44579eb0e328acf9821bbbab6d2509331964d",
+  "run_id": 45143101646,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-23T09:02:34.467Z",
+  "finished_at": "2026-11-23T09:02:43.617Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-23T09:02:42.844Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b252ed6fe4a1fb2c4376ca71633058592efb54e8ae3c2310008002003af9d95e",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-23T09:02:43.096Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b252ed6fe4a1fb2c4376ca71633058592efb54e8ae3c2310008002003af9d95e",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-23T09:02:43.574Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "b252ed6fe4a1fb2c4376ca71633058592efb54e8ae3c2310008002003af9d95e",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45143101646,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4065-relay-halfopen-staging-integration-20261123",
+    "target_sha": "d1a44579eb0e328acf9821bbbab6d2509331964d",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45143101646",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "dea1394008c59356406309264ec14d0eea9efd3a2ef447b76fad7e96df1737a6"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-45143101646-1",
+    "sha256": "dea1394008c59356406309264ec14d0eea9efd3a2ef447b76fad7e96df1737a6",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45143101646",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "b929a8c968a885dd4f4dad31fd28f123e884b0096079822c53755dac9e84bbe7"
+}
