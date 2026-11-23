@@ -445,16 +445,6 @@ impl SessionWatcher {
             }
         };
 
-        if let Some(activity) = self.reconcile_activity(&current_sessions).await {
-            if let Err(e) = self.publish_activity(&activity, false) {
-                // Not recorded as sent, so the next poll retries this level.
-                warn!(
-                    "Session Activity publication failed; retrying next poll: {:#}",
-                    e
-                );
-            }
-        }
-
         // Build a map of current sessions for easy lookup.
         let mut current_map: HashMap<String, SessionInfo> = HashMap::new();
         for session in &current_sessions {
@@ -486,6 +476,24 @@ impl SessionWatcher {
                 // Send a "removed" update with status "gone".
                 self.handle
                     .send_session_update(name, "gone", 0, 0, None, None)?;
+            }
+        }
+
+        // Activity is published **after** the inventory (#4291): the Server
+        // applies a level only to an admitted Session row, and a level is
+        // remembered as published once enqueued. Enqueuing a new Session's
+        // inventory first means its admission frame precedes its level even
+        // when the writer drains between the two publishes; the outbox keeps
+        // the same order while both frames are pending. A failed inventory
+        // enqueue returned above, so this level is not remembered and the next
+        // poll retries both.
+        if let Some(activity) = self.reconcile_activity(&current_sessions).await {
+            if let Err(e) = self.publish_activity(&activity, false) {
+                // Not recorded as sent, so the next poll retries this level.
+                warn!(
+                    "Session Activity publication failed; retrying next poll: {:#}",
+                    e
+                );
             }
         }
 
@@ -1030,6 +1038,298 @@ esac\n";
         assert_eq!(published.len(), 1, "the resync restates every level");
         assert_eq!(published[0]["state"], "idle");
         assert_eq!(published[0]["generation"], 3);
+    }
+
+    // -----------------------------------------------------------------------
+    // Initial inventory/Activity admission ordering (#4291).
+    //
+    // These are the isolated Server+Agent protocol Cases: the real watcher and
+    // the real bounded outbox produce the frames, and the real Server
+    // `SessionRegistry` (a dev-dependency, as in `peer_registry`'s tests)
+    // consumes them in a controlled delivery order. No socket, no tmux server,
+    // no timing — the adverse Activity-before-inventory order is forced, not
+    // sampled from HashMap iteration.
+    // -----------------------------------------------------------------------
+
+    use nession_protocol::contracts::session::v1::SessionActivityView;
+    use nession_server::registry::{
+        SessionInfo as ServerSessionInfo, SessionRegistry, SessionStatus,
+    };
+
+    /// A fresh Server registry over its own in-memory database.
+    async fn server_registry() -> SessionRegistry {
+        let db = Arc::new(
+            nession_server::db::Database::new(":memory:")
+                .await
+                .expect("in-memory Server database"),
+        );
+        SessionRegistry::new(db)
+    }
+
+    /// Consume one drained frame exactly as the Server's handlers do: an
+    /// inventory update admits/replaces the row (or removes it on `gone`), and
+    /// an Activity level goes through the fenced `update_activity` admission.
+    async fn apply_frame(reg: &SessionRegistry, kind: &str, payload: &serde_json::Value) {
+        let agent_id = payload["agent_id"].as_str().expect("frame names its agent");
+        let session_name = payload["session_name"]
+            .as_str()
+            .expect("frame names its session");
+        let session_id = format!("{agent_id}:{session_name}");
+        match kind {
+            "server.agent.session-update" => {
+                let status = payload["status"]
+                    .as_str()
+                    .expect("update states its status");
+                if status == "gone" {
+                    reg.remove(&session_id).await;
+                    return;
+                }
+                let status = match status {
+                    "active" => SessionStatus::Active,
+                    "detached" => SessionStatus::Detached,
+                    other => panic!("unexpected inventory status {other}"),
+                };
+                reg.update_session(ServerSessionInfo {
+                    session_id,
+                    agent_id: agent_id.to_string(),
+                    session_name: session_name.to_string(),
+                    status,
+                    window_count: u32::try_from(payload["window_count"].as_u64().unwrap_or(0))
+                        .unwrap_or(0),
+                    attached_clients: u32::try_from(
+                        payload["attached_clients"].as_u64().unwrap_or(0),
+                    )
+                    .unwrap_or(0),
+                    foreground_command: payload["foreground_command"].as_str().map(str::to_string),
+                    working_dir: None,
+                    instance_id: payload["instance_id"].as_str().map(str::to_string),
+                    metadata: None,
+                    activity: None,
+                    activity_epoch: None,
+                    activity_generation: 0,
+                    created_at: chrono::Utc::now(),
+                    last_activity: chrono::Utc::now(),
+                })
+                .await;
+            }
+            "server.agent.session-activity" => {
+                let view = SessionActivityView {
+                    state: payload["state"]
+                        .as_str()
+                        .expect("level states its state")
+                        .to_string(),
+                    attention: payload["attention"].as_str().map(str::to_string),
+                    capability_id: payload["capability_id"].as_str().map(str::to_string),
+                    observed_at_ms: payload["observed_at_ms"].as_i64().unwrap_or(0),
+                };
+                reg.update_activity(
+                    agent_id,
+                    session_name,
+                    payload["instance_id"]
+                        .as_str()
+                        .expect("level names its incarnation"),
+                    payload["epoch"].as_str().expect("level names its epoch"),
+                    payload["generation"]
+                        .as_u64()
+                        .expect("level names its generation"),
+                    view,
+                )
+                .await;
+            }
+            other => panic!("unexpected frame kind {other}"),
+        }
+    }
+
+    /// Force the adverse delivery order deterministically: every Activity
+    /// frame reaches the Server before any inventory frame — the ordering the
+    /// unordered outbox selection permitted (#4291 reproduction step 3). The
+    /// partition is stable, so frames of one kind keep their drain order.
+    fn activity_first(
+        drained: Vec<(String, serde_json::Value)>,
+    ) -> Vec<(String, serde_json::Value)> {
+        let (mut levels, mut inventory): (Vec<_>, Vec<_>) = drained
+            .into_iter()
+            .partition(|(kind, _)| kind == "server.agent.session-activity");
+        levels.append(&mut inventory);
+        levels
+    }
+
+    /// A watcher over the one-Session activity listing, with a stable
+    /// `working` provider level.
+    fn working_watcher(dir: &Path) -> (SessionWatcher, ServerClientHandle, OutboxFrames) {
+        FakeTmux::new(dir, ACTIVITY_LISTING);
+        let (handle, frames) = ServerClientHandle::test_handle(true);
+        let activity = SessionActivityCoordinator::new(
+            "agent-a",
+            vec![Arc::new(SwitchableProvider {
+                state: Arc::new(AtomicU8::new(1)),
+                sequence: AtomicU64::new(0),
+            })],
+        )
+        .expect("one provider composes");
+        let watcher = SessionWatcher::new(handle.clone(), Arc::new(manager_at(dir)), 5)
+            .with_activity(activity);
+        (watcher, handle, frames)
+    }
+
+    /// The producer half of the ordering invariant: a newly discovered
+    /// Session's inventory frame is enqueued — and therefore drains — before
+    /// its Activity level, even though the level is observed in the same poll.
+    #[tokio::test]
+    async fn a_new_sessions_inventory_is_enqueued_before_its_activity_level() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut watcher, _handle, mut frames) = working_watcher(dir.path());
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        let drained = drain_frames(&mut frames);
+        let inventory = drained
+            .iter()
+            .position(|(kind, _)| kind == "server.agent.session-update")
+            .expect("the inventory is published");
+        let level = drained
+            .iter()
+            .position(|(kind, _)| kind == "server.agent.session-activity")
+            .expect("the level is published");
+        assert!(
+            inventory < level,
+            "the admission frame must precede the level in delivery order: {drained:?}"
+        );
+    }
+
+    /// #4291 SC-01: force Activity-before-inventory delivery for a newly
+    /// discovered Session and prove the final Server Activity equals the
+    /// Agent's stable level — no further poll, no workload change, no
+    /// reconnect. Stale incarnation and generation updates remain rejected.
+    ///
+    /// Fails on the original defect: the Server refused the early level, the
+    /// inventory admitted the row without it, and the watcher remembered the
+    /// level as published, so the Session stayed `unknown` indefinitely.
+    #[tokio::test]
+    async fn sc01_activity_forced_before_inventory_converges_to_the_agents_stable_level() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut watcher, _handle, mut frames) = working_watcher(dir.path());
+
+        // The first successful poll discovers the Session; the Server does not
+        // have its inventory row yet.
+        watcher.poll_and_sync().await.expect("initial poll");
+        let drained = drain_frames(&mut frames);
+        assert_eq!(of_kind(&drained, "server.agent.session-update").len(), 1);
+        let levels = of_kind(&drained, "server.agent.session-activity");
+        assert_eq!(levels.len(), 1);
+        assert_eq!(levels[0]["state"], "working");
+        let published_level = levels[0].clone();
+
+        // Force the adverse delivery order: Activity reaches the real Server
+        // registry before the inventory frame.
+        let reg = server_registry().await;
+        for (kind, payload) in activity_first(drained) {
+            apply_frame(&reg, &kind, &payload).await;
+        }
+
+        // The final projection equals the Agent's stable level, converged at
+        // the inventory admission itself.
+        let stored = reg
+            .get("test-agent:dev")
+            .await
+            .expect("the row is admitted");
+        let level = stored.activity.expect("the level converged at admission");
+        assert_eq!(level.state, "working");
+        assert_eq!(level.capability_id.as_deref(), Some("fixture-shell"));
+        assert_eq!(stored.activity_generation, 1);
+        assert_eq!(stored.instance_id.as_deref(), Some("inc-1"));
+        let recency = stored.last_activity;
+
+        // A stale incarnation is still refused, however new its generation.
+        let mut stale_incarnation = published_level.clone();
+        stale_incarnation["instance_id"] = serde_json::json!("inc-2");
+        stale_incarnation["generation"] = serde_json::json!(9);
+        apply_frame(&reg, "server.agent.session-activity", &stale_incarnation).await;
+        // A duplicate/older generation in the same epoch is still refused.
+        let mut stale_generation = published_level.clone();
+        stale_generation["state"] = serde_json::json!("idle");
+        apply_frame(&reg, "server.agent.session-activity", &stale_generation).await;
+
+        let stored = reg.get("test-agent:dev").await.unwrap();
+        assert_eq!(stored.activity.unwrap().state, "working");
+        assert_eq!(stored.activity_generation, 1);
+        assert_eq!(
+            stored.last_activity, recency,
+            "activity is not Session interaction recency"
+        );
+    }
+
+    /// #4291 SC-02: unchanged Activity is not repeatedly broadcast during
+    /// normal polling, and a full reconnect re-sync restores both inventory
+    /// and Activity under reordered/coalesced pending frames — even when the
+    /// delivery order is again forced Activity-first.
+    #[tokio::test]
+    async fn sc02_unchanged_activity_is_silent_and_a_reconnect_resync_restores_both_projections() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (mut watcher, handle, mut frames) = working_watcher(dir.path());
+
+        watcher.poll_and_sync().await.expect("initial poll");
+        let reg = server_registry().await;
+        for (kind, payload) in activity_first(drain_frames(&mut frames)) {
+            apply_frame(&reg, &kind, &payload).await;
+        }
+        assert_eq!(
+            reg.get("test-agent:dev")
+                .await
+                .unwrap()
+                .activity
+                .unwrap()
+                .state,
+            "working"
+        );
+
+        // Unchanged polls broadcast neither inventory nor Activity.
+        for _ in 0..3 {
+            watcher.poll_and_sync().await.expect("unchanged poll");
+            assert!(
+                drain_frames(&mut frames).is_empty(),
+                "an unchanged Session is silent on both keys"
+            );
+        }
+
+        // Reconnect: the Server wipes the Agent's rows (offline grace /
+        // re-registration) and the supervisor marks the full re-sync intent.
+        reg.remove_by_agent("test-agent").await;
+        assert!(reg.get("test-agent:dev").await.is_none());
+        handle.mark_sync_needed();
+
+        // Two re-sync passes coalesce into one pending frame per key before
+        // the writer drains — the reordered/coalesced pending frames the
+        // criterion names.
+        watcher.poll_and_sync().await.expect("first resync poll");
+        handle.mark_sync_needed();
+        watcher.poll_and_sync().await.expect("second resync poll");
+        assert!(!handle.is_sync_needed());
+        let drained = drain_frames(&mut frames);
+        assert_eq!(
+            of_kind(&drained, "server.agent.session-update").len(),
+            1,
+            "the inventory coalesced to one frame"
+        );
+        let levels = of_kind(&drained, "server.agent.session-activity");
+        assert_eq!(levels.len(), 1, "the Activity coalesced to one frame");
+        assert_eq!(levels[0]["state"], "working");
+        assert_eq!(
+            levels[0]["generation"], 3,
+            "the newest restatement survived the supersession"
+        );
+
+        // Deliver in the adverse order again: both projections are restored.
+        for (kind, payload) in activity_first(drained) {
+            apply_frame(&reg, &kind, &payload).await;
+        }
+        let stored = reg.get("test-agent:dev").await.expect("inventory restored");
+        assert_eq!(stored.instance_id.as_deref(), Some("inc-1"));
+        assert_eq!(stored.activity.expect("Activity restored").state, "working");
+        assert_eq!(stored.activity_generation, 3);
+
+        // Settled: the next incremental poll is silent again.
+        watcher.poll_and_sync().await.expect("settled poll");
+        assert!(drain_frames(&mut frames).is_empty());
     }
 
     #[tokio::test]
