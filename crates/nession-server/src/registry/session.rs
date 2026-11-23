@@ -65,8 +65,41 @@ pub struct SessionProjectMembership {
     pub revision: u64,
 }
 
+/// The bound on Activity levels held for Sessions whose inventory row has not
+/// been admitted yet (#4291).
+///
+/// One slot per `(Session, incarnation)`, and a hard total: a level held for an
+/// unknown row is a reconciliation fallback, not a second registry. At the
+/// bound a *new* key is refused (the Agent's full re-sync restates every level
+/// after its inventory, so a refused hold is recoverable); a key already held
+/// keeps its slot and is superseded by a newer fenced level, exactly the
+/// coalescing rule the Agent's outbox states for its own lanes.
+const PENDING_ACTIVITY_LIMIT: usize = 256;
+
+/// One Activity level that arrived before its Session's authoritative inventory
+/// row (#4291).
+///
+/// The Agent enqueues a new Session's inventory before its Activity level, but
+/// a level can still reach the Server first (a frame already in flight, or an
+/// older Agent). Rather than losing it until the next workload change or
+/// reconnect, the registry holds it here and applies it — under the same
+/// incarnation/epoch/generation fences — when the authoritative inventory
+/// admits the row. Keyed by `(session_id, instance_id)` so a level observed for
+/// one incarnation can never be applied to another.
+struct PendingActivity {
+    agent_id: String,
+    epoch: String,
+    generation: u64,
+    activity: SessionActivityView,
+}
+
 pub struct SessionRegistry {
     sessions: Arc<RwLock<HashMap<String, SessionInfo>>>,
+    /// Activity levels awaiting their Session's first inventory admission
+    /// (#4291). Decided under the same Agent/lifecycle guards and the sessions
+    /// write lock as the admission itself, so a hold and its replay cannot
+    /// interleave with a newer report.
+    pending_activity: Mutex<HashMap<(String, String), PendingActivity>>,
     /// One lifecycle lock per Session id (#2848).
     ///
     /// A Session's live report, creation claim, removal and stale-row
@@ -103,6 +136,7 @@ impl SessionRegistry {
     pub fn new(db: Arc<Database>) -> Self {
         Self {
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            pending_activity: Mutex::new(HashMap::new()),
             lifecycle_locks: Mutex::new(HashMap::new()),
             agent_locks: Mutex::new(HashMap::new()),
             agent_generations: Mutex::new(HashMap::new()),
@@ -290,6 +324,11 @@ impl SessionRegistry {
                 // same incarnation.
                 preserve_metadata(previous, &mut session);
             }
+            // This is the authoritative admission of the row: apply an Activity
+            // level that arrived before it (#4291), under the same fences, so
+            // the first projection the Server serves already carries the
+            // Agent's level.
+            self.apply_pending_activity(&mut session);
             sessions.insert(session.session_id.clone(), session.clone());
         }
         self.bump_agent_generation(&session.agent_id);
@@ -324,6 +363,12 @@ impl SessionRegistry {
     /// one that is not newer than the stored `(epoch, generation)`, is silently
     /// ignored so a stale socket or a retried frame cannot resurrect Activity.
     ///
+    /// A level whose Session row does not exist yet is **held**, not lost
+    /// (#4291): the authoritative inventory admission replays it under the same
+    /// fences, so an Activity frame delivered before its inventory converges
+    /// without waiting for a workload change or a reconnect. A held level is
+    /// not the current projection, so this still returns `false` for it.
+    ///
     /// Activity is **not** Session interaction recency: `last_activity` and the
     /// Agent's session-state generation are deliberately untouched.
     pub async fn update_activity(
@@ -343,7 +388,14 @@ impl SessionRegistry {
 
         let mut sessions = self.sessions.write().await;
         let Some(session) = sessions.get_mut(&session_id) else {
-            return false;
+            return self.hold_pending_activity(
+                agent_id,
+                &session_id,
+                instance_id,
+                epoch,
+                generation,
+                activity,
+            );
         };
         if session.instance_id.as_deref() != Some(instance_id) {
             return false;
@@ -359,6 +411,94 @@ impl SessionRegistry {
         true
     }
 
+    /// Hold one level whose Session row has not been admitted yet (#4291).
+    ///
+    /// The hold is fenced exactly like a live commit: within one
+    /// `(Session, incarnation, epoch)` a generation that is not newer is
+    /// refused, and a new epoch may restart the counter. The slot is a level,
+    /// so a newer fenced observation supersedes the held one. At
+    /// [`PENDING_ACTIVITY_LIMIT`] a new key is refused rather than evicting a
+    /// held level; the Agent's full re-sync restates levels after inventory, so
+    /// a refusal is recoverable. Always returns `false`: a held level is not
+    /// yet the Web-visible projection.
+    fn hold_pending_activity(
+        &self,
+        agent_id: &str,
+        session_id: &str,
+        instance_id: &str,
+        epoch: &str,
+        generation: u64,
+        activity: SessionActivityView,
+    ) -> bool {
+        let mut pending = self
+            .pending_activity
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let key = (session_id.to_string(), instance_id.to_string());
+        if let Some(held) = pending.get(&key) {
+            if held.epoch == epoch && generation <= held.generation {
+                return false;
+            }
+        } else if pending.len() >= PENDING_ACTIVITY_LIMIT {
+            return false;
+        }
+        pending.insert(
+            key,
+            PendingActivity {
+                agent_id: agent_id.to_string(),
+                epoch: epoch.to_string(),
+                generation,
+                activity,
+            },
+        );
+        false
+    }
+
+    /// Decide the held levels for a Session the authoritative inventory is
+    /// admitting (#4291). Called under the sessions write lock.
+    ///
+    /// Only a level held for the **exact admitted incarnation** can apply, and
+    /// it still passes the live `(epoch, generation)` fence — a level already
+    /// committed for the same incarnation (preserved onto this row) wins over
+    /// an older hold. Every other hold for this Session is decided too: the
+    /// authoritative row now states the current incarnation, so a level
+    /// observed for another one is stale and is dropped, never inherited. A
+    /// legacy row with no instance identity cannot prove any hold and drops
+    /// them all.
+    fn apply_pending_activity(&self, session: &mut SessionInfo) {
+        let mut pending = self
+            .pending_activity
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let matching = session
+            .instance_id
+            .as_ref()
+            .and_then(|instance| pending.remove(&(session.session_id.clone(), instance.clone())));
+        pending.retain(|(sid, _), _| sid != &session.session_id);
+        let Some(held) = matching else {
+            return;
+        };
+        if session.activity_epoch.as_deref() == Some(held.epoch.as_str())
+            && held.generation <= session.activity_generation
+        {
+            return;
+        }
+        session.activity = Some(held.activity);
+        session.activity_epoch = Some(held.epoch);
+        session.activity_generation = held.generation;
+    }
+
+    /// Drop every held level for a Session that is leaving the registry.
+    /// A removed Session has no projection; a later same-name report is a new
+    /// observation and must not inherit a level held for the old row.
+    fn discard_pending_activity(&self, session_id: &str) {
+        let mut pending = self
+            .pending_activity
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        pending.retain(|(sid, _), _| sid != session_id);
+    }
+
     /// Register only the create-time placeholder, without overwriting an
     /// authoritative Agent report that may have raced ahead of the command
     /// acknowledgement (#2021). The presence check and insert MUST share
@@ -367,6 +507,10 @@ impl SessionRegistry {
     ///
     /// Return false when the row already exists; creation still succeeded,
     /// and the caller may broadcast the existing authoritative row.
+    ///
+    /// A placeholder does not decide held Activity levels (#4291): it carries
+    /// no verified incarnation, so a hold waits for the authoritative Agent
+    /// report that admits the row.
     pub async fn insert_session_if_absent(&self, session: SessionInfo) -> bool {
         let _agent = self.agent_guard(&session.agent_id).await;
         let _lifecycle = self.lifecycle_guard(&session.session_id).await;
@@ -441,6 +585,7 @@ impl SessionRegistry {
         }
         let mut sessions = self.sessions.write().await;
         sessions.remove(session_id);
+        self.discard_pending_activity(session_id);
         if let Some(agent_id) = agent_id {
             self.bump_agent_generation(&agent_id);
         }
@@ -498,6 +643,7 @@ impl SessionRegistry {
             .await
         {
             Ok(true) => {
+                self.discard_pending_activity(session_id);
                 self.bump_agent_generation(agent_id);
                 true
             }
@@ -565,6 +711,12 @@ impl SessionRegistry {
             .map(|s| s.session_id.clone())
             .collect();
         sessions.retain(|_, s| s.agent_id != agent_id);
+        // A disconnected or deleted Agent's held levels leave with its rows:
+        // the reconnect re-sync restates inventory and Activity together.
+        self.pending_activity
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(|_, held| held.agent_id != agent_id);
         drop(sessions);
         self.bump_agent_generation(agent_id);
         removed
@@ -619,10 +771,14 @@ impl SessionRegistry {
                 if let Some(previous) = sessions.get(&session.session_id) {
                     preserve_activity(previous, session);
                 }
+                // The refresh is an authoritative admission too: a level held
+                // for an incoming Session applies under the same fences, and
+                // holds for other incarnations of it are decided (#4291).
+                self.apply_pending_activity(session);
             }
             let incoming_ids: std::collections::HashSet<&str> =
                 incoming.iter().map(|s| s.session_id.as_str()).collect();
-            let removed = sessions
+            let removed: Vec<String> = sessions
                 .values()
                 .filter(|s| s.agent_id == agent_id && !incoming_ids.contains(s.session_id.as_str()))
                 .map(|s| s.session_id.clone())
@@ -631,6 +787,14 @@ impl SessionRegistry {
             for session in &incoming {
                 sessions.insert(session.session_id.clone(), session.clone());
             }
+            // The snapshot is authoritative for the Agent's whole Session set:
+            // every incoming Session's holds were decided above, and a hold for
+            // any other Session of this Agent names a Session the report says
+            // does not exist — it is stale, whether or not a row was removed.
+            self.pending_activity
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .retain(|_, held| held.agent_id != agent_id);
             removed
         };
         self.bump_agent_generation(agent_id);
@@ -880,6 +1044,269 @@ mod tests {
         let generation = reg.agent_generation(agent_id);
         reg.replace_agent_sessions(agent_id, incoming, generation)
             .await
+    }
+
+    /// #4291: a level delivered before its inventory row is applied at the
+    /// authoritative admission — the same fences, no workload change and no
+    /// reconnect. Before the fix the level was refused and the row admitted
+    /// without it, leaving the Session `unknown` indefinitely.
+    #[tokio::test]
+    async fn a_level_arriving_before_its_row_is_applied_at_inventory_admission() {
+        let reg = new_registry().await;
+        // Activity first: the row does not exist. The level is held, not yet
+        // the projection, so no broadcast-worthy change is reported.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+        assert!(reg.get("a1:dev").await.is_none());
+
+        let mut row = make_session("a1", "dev");
+        row.instance_id = Some("inc-1".to_string());
+        let admitted_recency = row.last_activity;
+        reg.update_session(row).await;
+
+        let stored = reg.get("a1:dev").await.unwrap();
+        assert_eq!(
+            stored.activity.unwrap().state,
+            "working",
+            "the admission replays the held level"
+        );
+        assert_eq!(stored.activity_epoch.as_deref(), Some("epoch-1"));
+        assert_eq!(stored.activity_generation, 1);
+        assert_eq!(
+            stored.last_activity, admitted_recency,
+            "the replay is not Session interaction recency"
+        );
+
+        // The hold was consumed: a same-incarnation inventory update preserves
+        // the applied level, and the live fence still refuses older frames.
+        let mut again = make_session("a1", "dev");
+        again.instance_id = Some("inc-1".to_string());
+        reg.update_session(again).await;
+        assert_eq!(
+            reg.get("a1:dev").await.unwrap().activity.unwrap().state,
+            "working"
+        );
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("idle"))
+                .await
+        );
+    }
+
+    /// A held level is fenced exactly like a live one: generation and epoch
+    /// order the hold, and a level held for another incarnation can never be
+    /// applied to the admitted row.
+    #[tokio::test]
+    async fn a_held_level_is_fenced_by_incarnation_epoch_and_generation() {
+        let reg = new_registry().await;
+        // Same epoch: only a newer generation supersedes the hold; duplicates
+        // and older generations are refused.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 2, activity("idle"))
+                .await
+        );
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 2, activity("working"))
+                .await
+        );
+        // A new Agent epoch may restart the counter at 1.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-2", 1, activity("working"))
+                .await
+        );
+        // Another incarnation holds its own slot; it cannot supersede inc-1's.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-2", "epoch-2", 9, activity("idle"))
+                .await
+        );
+
+        let mut row = make_session("a1", "dev");
+        row.instance_id = Some("inc-1".to_string());
+        reg.update_session(row).await;
+        let stored = reg.get("a1:dev").await.unwrap();
+        assert_eq!(stored.activity.unwrap().state, "working");
+        assert_eq!(stored.activity_epoch.as_deref(), Some("epoch-2"));
+        assert_eq!(stored.activity_generation, 1);
+
+        // The stale-incarnation hold was decided at admission and dropped: a
+        // later inc-2 frame is refused by the live fence, and an authoritative
+        // inc-2 replacement inherits nothing.
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-2", "epoch-2", 10, activity("idle"))
+                .await
+        );
+        let mut replacement = make_session("a1", "dev");
+        replacement.instance_id = Some("inc-2".to_string());
+        reg.update_session(replacement).await;
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
+    }
+
+    /// The hold is bounded: at the limit a new key is refused rather than
+    /// evicting a held level, a held key keeps its slot and is still superseded
+    /// by a newer fenced level, and a refused hold is never stored.
+    #[tokio::test]
+    async fn held_levels_are_bounded_and_a_refused_hold_is_not_stored() {
+        let reg = new_registry().await;
+        for n in 0..PENDING_ACTIVITY_LIMIT {
+            assert!(
+                !reg.update_activity(
+                    "a1",
+                    &format!("s{n}"),
+                    "inc-1",
+                    "epoch-1",
+                    1,
+                    activity("working")
+                )
+                .await
+            );
+        }
+        // A new key at the bound is refused...
+        assert!(
+            !reg.update_activity(
+                "a1",
+                "one-too-many",
+                "inc-1",
+                "epoch-1",
+                1,
+                activity("working")
+            )
+            .await
+        );
+        let mut refused = make_session("a1", "one-too-many");
+        refused.instance_id = Some("inc-1".to_string());
+        reg.update_session(refused).await;
+        assert!(
+            reg.get("a1:one-too-many").await.unwrap().activity.is_none(),
+            "a refused hold must not be stored"
+        );
+        // ...while a held key keeps its slot and is still a level: a newer
+        // generation supersedes it even at the bound.
+        assert!(
+            !reg.update_activity("a1", "s0", "inc-1", "epoch-1", 2, activity("idle"))
+                .await
+        );
+        let mut first = make_session("a1", "s0");
+        first.instance_id = Some("inc-1".to_string());
+        reg.update_session(first).await;
+        let stored = reg.get("a1:s0").await.unwrap();
+        assert_eq!(stored.activity.unwrap().state, "idle");
+        assert_eq!(stored.activity_generation, 2);
+    }
+
+    /// A removed Session has no projection to hold for: a gone report and an
+    /// Agent wipe both decide the holds, and a later same-name report is a new
+    /// observation that inherits nothing.
+    #[tokio::test]
+    async fn removal_and_agent_wipe_clear_held_levels() {
+        let reg = new_registry().await;
+        for (agent, name) in [("a1", "dev"), ("a1", "api"), ("a2", "other")] {
+            assert!(
+                !reg.update_activity(agent, name, "inc-1", "epoch-1", 1, activity("working"))
+                    .await
+            );
+        }
+
+        // A gone report for a row that was never admitted decides the hold.
+        reg.remove("a1:dev").await;
+        let mut dev = make_session("a1", "dev");
+        dev.instance_id = Some("inc-1".to_string());
+        reg.update_session(dev).await;
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
+
+        // An Agent wipe takes its holds with it, leaving other Agents untouched.
+        reg.remove_by_agent("a1").await;
+        let mut api = make_session("a1", "api");
+        api.instance_id = Some("inc-1".to_string());
+        reg.update_session(api).await;
+        assert!(reg.get("a1:api").await.unwrap().activity.is_none());
+        let mut other = make_session("a2", "other");
+        other.instance_id = Some("inc-1".to_string());
+        reg.update_session(other).await;
+        assert_eq!(
+            reg.get("a2:other").await.unwrap().activity.unwrap().state,
+            "working"
+        );
+    }
+
+    /// A force-refresh is an authoritative admission too: holds for incoming
+    /// Sessions apply under the same fences, and a hold for a Session the
+    /// snapshot says does not exist is stale and dropped.
+    #[tokio::test]
+    async fn a_force_refresh_applies_holds_for_incoming_sessions_and_drops_absent_ones() {
+        let reg = new_registry().await;
+        assert!(
+            !reg.update_activity("a1", "keep", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+        assert!(
+            !reg.update_activity("a1", "absent", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+
+        let mut keep = make_session("a1", "keep");
+        keep.instance_id = Some("inc-1".to_string());
+        let removed = replace(&reg, "a1", vec![keep]).await;
+        assert!(removed.is_empty());
+        assert_eq!(
+            reg.get("a1:keep").await.unwrap().activity.unwrap().state,
+            "working"
+        );
+
+        let mut absent = make_session("a1", "absent");
+        absent.instance_id = Some("inc-1".to_string());
+        reg.update_session(absent).await;
+        assert!(
+            reg.get("a1:absent").await.unwrap().activity.is_none(),
+            "a hold for a Session absent from the authoritative snapshot must not survive"
+        );
+    }
+
+    /// A create-time placeholder carries no verified incarnation, so it does
+    /// not decide a hold; the authoritative Agent report does.
+    #[tokio::test]
+    async fn a_create_placeholder_does_not_decide_a_held_level() {
+        let reg = new_registry().await;
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+        assert!(
+            reg.insert_session_if_absent(make_session("a1", "dev"))
+                .await
+        );
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
+
+        let mut row = make_session("a1", "dev");
+        row.instance_id = Some("inc-1".to_string());
+        reg.update_session(row).await;
+        assert_eq!(
+            reg.get("a1:dev").await.unwrap().activity.unwrap().state,
+            "working"
+        );
+    }
+
+    /// A legacy row with no instance identity cannot prove any held level's
+    /// incarnation: the holds are dropped, never guessed onto the row, and a
+    /// later authoritative report does not resurrect them.
+    #[tokio::test]
+    async fn a_legacy_admission_cannot_prove_a_held_level_and_drops_it() {
+        let reg = new_registry().await;
+        assert!(
+            !reg.update_activity("a1", "dev", "inc-1", "epoch-1", 1, activity("working"))
+                .await
+        );
+        reg.update_session(make_session("a1", "dev")).await;
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
+
+        let mut row = make_session("a1", "dev");
+        row.instance_id = Some("inc-1".to_string());
+        reg.update_session(row).await;
+        assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
     }
 
     /// The Agent's report can race the command's success reply. The reply
