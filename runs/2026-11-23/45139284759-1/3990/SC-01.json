@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "68f004ac2694a047fa6becc793c2f4578c6bda391359c73bb8653b88fa016ce6",
+  "run_id": 45139284759,
+  "run_attempt": 1,
+  "issue": 3990,
+  "criterion": "SC-01",
+  "criterion_text": "Given M1 on G1, after physical socket loss and before G2's authoritative Agent list, a lookup for A is `unknown` (not M1); after G2 publishes M2 or no Agent A, resolution reflects only that snapshot. Verify the negative case of a stale delayed G1 response.",
+  "stage": "staging",
+  "target_sha": "87533c0560f0d742b0279ddbf4e421f031bb45ea",
+  "contract_sha256": "975d0916d64f03b066015f8d125d60ec6748f5536c5a3c2900fab536ec7bc128",
+  "case_revision": "87533c0560f0d742b0279ddbf4e421f031bb45ea",
+  "case_tree_sha": "df80703b3737463dc178559f3328150c6ecf7b28",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T08:33:54.256Z",
+  "finished_at": "2026-11-23T08:34:01.838Z",
+  "duration_ms": 7581,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the protocol directory forgets a lost socket and only a current-generation authoritative list can refill it",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "exact SHA 87533c0560f0d742b0279ddbf4e421f031bb45ea: after socket loss the directory answered `unknown` for the agent it had served as `present`; a replacement socket opened empty; a snapshot published in the reconnect window and a list response that settled on the later generation were both dropped, while a request queued behind the readiness gate published its current answer"
+        }
+      ],
+      "duration_ms": 1681,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45139284759,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "09499daebf1a503e597dc87f59326568ae13452f",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "87533c0560f0d742b0279ddbf4e421f031bb45ea",
+        "stage": "staging",
+        "issue": 3990,
+        "criterion": "SC-01",
+        "job_id": 137572998238,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45139284759",
+    "record_path": "runs/2026-11-23/45139284759-1/3990/SC-01.json",
+    "source_result_sha256": "4ab5a145547dfb7a5d121e905177a95b3773a1aaa20e9a5a6f90187b101dd0bc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45139284759-1",
+    "sha256": "4ab5a145547dfb7a5d121e905177a95b3773a1aaa20e9a5a6f90187b101dd0bc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45139284759",
+    "durability": "time-limited; object archival not configured"
+  }
+}
