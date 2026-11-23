@@ -176,6 +176,13 @@ The Server keeps the level **in memory**, like `foreground_command`:
 - the level never writes `last_activity`, `created_at` or `status`;
 - an inventory update and an `agent.session.report`/force refresh preserve the
   level for the same incarnation, so a resync cannot clear a newer observation;
+- admission is ordered (#4291): the Agent enqueues a new Session's inventory
+  before its Activity level, and the outbox drains an inventory key before a
+  pending Activity key. A level that still arrives before its row is held in a
+  bounded per-incarnation slot and replayed — under the same fences — when the
+  authoritative inventory admits the row, so an early level converges without
+  waiting for a workload change or a reconnect; a removed Session's hold is
+  dropped, never inherited;
 - the projection is ephemeral: a restart, a removed Session or a legacy Agent
   has no level, which consumers render as `unknown`.
 
