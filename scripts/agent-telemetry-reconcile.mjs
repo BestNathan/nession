@@ -400,6 +400,13 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
+  // Dispatch contains two distinct capabilities: Reviewer explicitly sends
+  // a source Run/SHA/Attempt, whereas historical recovery selects the source
+  // inside trusted main code. The Reviewer-only sender validation must never
+  // inspect or block a history event lacking Reviewer payload fields.
+  if(!job.includes('EVENT_DISPATCH_ACTION: ${{ github.event.action }}')||
+     !job.includes('if [[ "$GITHUB_EVENT_NAME" == repository_dispatch &&\n                "$EVENT_DISPATCH_ACTION" == nession-agent-review-completed ]]; then'))
+    fail('Reviewer-specific dispatch guard must exclude historical recovery');
   const reviewerGuard=[
     "(github.event_name == 'repository_dispatch' &&",
     "          github.ref == 'refs/heads/main' &&",
@@ -450,6 +457,10 @@ export function validateRecoveryRouting(workflow){
 function selfTest(){
   const workflow=fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8');
   assert.equal(validateRecoveryRouting(workflow),true);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '"$EVENT_DISPATCH_ACTION" == nession-agent-review-completed ]]; then',
+    '"$EVENT_DISPATCH_ACTION" == nession-agent-metrics-history-recover ]]; then'
+  )),/Reviewer-specific dispatch guard/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '      - Agent / Issue Audit',
     '      - Attacker / Source'
