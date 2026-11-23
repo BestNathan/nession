@@ -246,15 +246,69 @@ export function finalizeHistoricalReport(report,summaryCounts){
   return {...report,selected_persisted:persisted,recovered_count:persisted?1:0};
 }
 
-export function validateReconciliationContext(env){
+export function validateReconciliationContext(env,event=null){
   if(env.GITHUB_REPOSITORY!==REPO||
      env.GITHUB_REF!=='refs/heads/main')
     fail('reconciler must execute only on trusted main');
   if(env.GITHUB_EVENT_NAME==='schedule')return 'schedule';
-  fail('reconciliation denied: only main schedule may scan history');
+  // GitHub may drop scheduled events under heavy load. A *writer* which
+  // successfully persisted a real source can request exactly one bot wake;
+  // never accept a public, user-ref-selected workflow_dispatch fallback.
+  if(env.GITHUB_EVENT_NAME==='repository_dispatch' &&
+     env.GITHUB_ACTOR==='github-actions[bot]'&&
+     event?.action==='nession-agent-metrics-history-recover'&&
+     event?.sender?.login==='github-actions[bot]'&&
+     event?.repository?.full_name===REPO&&
+     Number.isSafeInteger(Number(event?.client_payload?.writer_run_id))&&
+     Number(event.client_payload.writer_run_id)>0)
+    return 'trusted-bot-recovery';
+  fail('reconciliation denied: schedule or trusted post-Store bot wake required');
+}
+// Repository-dispatch's bot identity is necessary, not sufficient: another
+// workflow with GITHUB_TOKEN could manufacture the same actor. The immutable
+// writer run is independently re-read with the exact attempt and completed
+// post-Store steps before a bot wake can enter privileged recovery.
+export function attestHistoryWriterWake(run,jobs,event,now=Date.now()){
+  const id=Number(event?.client_payload?.writer_run_id);
+  if(!positive(id)||run?.id!==id||run.run_attempt!==1||
+     run.path!=='.github/workflows/metrics-agent-telemetry.yml'||
+     run.event!=='workflow_run'||run.status!=='completed'||run.conclusion!=='success'||
+     run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
+     run.head_branch!=='main'||!SHA.test(run.head_sha??'')||
+     !Number.isFinite(Date.parse(run.updated_at??''))||
+     now-Date.parse(run.updated_at)>6*60*60*1000||
+     Date.parse(run.updated_at)>now+5*60*1000)
+    fail('untrusted historical wake writer provenance');
+  if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+    fail('unbounded historical wake writer jobs');
+  const ingests=jobs.jobs.filter(j=>j.name==='ingest');
+  if(ingests.length!==1||ingests[0].run_id!==id||
+     ingests[0].run_attempt!==1||ingests[0].conclusion!=='success'||
+     ingests[0].status!=='completed')
+    fail('untrusted historical wake writer job');
+  for(const stepName of ['Validate and append immutable telemetry',
+    'Commit metrics history','Verify immutable Git bytes before uploading Run Store receipts']){
+    const matching=(ingests[0].steps??[]).filter(step=>
+      step.name===stepName&&step.conclusion==='success');
+    if(matching.length!==1)fail('historical wake requires real immutable Store write: '+stepName);
+  }
+  return true;
+}
+function reconcileEventContext(){
+  if(process.env.GITHUB_EVENT_NAME!=='repository_dispatch')return null;
+  const file=process.env.GITHUB_EVENT_PATH;
+  if(!file||!path.isAbsolute(file))fail('GitHub event payload file required');
+  return JSON.parse(fs.readFileSync(file,'utf8'));
 }
 async function select(store){
-  validateReconciliationContext(process.env);
+  const event=reconcileEventContext();
+  const context=validateReconciliationContext(process.env,event);
+  if(context==='trusted-bot-recovery'){
+    const id=Number(event.client_payload.writer_run_id);
+    const run=ghJson('actions/runs/'+id);
+    const jobs=ghJson('actions/runs/'+id+'/attempts/1/jobs?per_page=100');
+    attestHistoryWriterWake(run,jobs,event);
+  }
   if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
   const summaryCounts=indexedSourceSummaries(store);
   const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
@@ -286,7 +340,7 @@ async function select(store){
   console.log(JSON.stringify(result??{run_id:null}));
 }
 function finalize(store,reportPath){
-  validateReconciliationContext(process.env);
+  validateReconciliationContext(process.env,reconcileEventContext());
   if(!path.isAbsolute(store)||!path.isAbsolute(reportPath))fail('absolute finalization paths required');
   const report=JSON.parse(fs.readFileSync(reportPath,'utf8'));
   fs.writeFileSync(reportPath,JSON.stringify(
@@ -299,7 +353,7 @@ export function validateRecoveryRouting(workflow){
   const job=workflow.split(/^jobs:/m)[1]??'';
   if(!/^  schedule:\s*\n    - cron: '[^'\n]+'\s*$/m.test(trigger) ||
      /^  workflow_dispatch:/m.test(trigger))
-    fail('Metrics replay must be scheduled-only, never arbitrary-ref dispatch');
+    fail('Metrics replay must remain main-owned; no arbitrary-ref dispatch');
   if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
      !job.includes("github.repository == 'BestNathan/nession'"))
     fail('missing trusted main schedule guard');
@@ -323,8 +377,8 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
      !workflow.includes('run-store-integrity.mjs"'))
     fail('trusted reconciliation or immutable Store Gate omitted');
-  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule'")||
-     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'")||
+  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover')")||
+     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'")||
      !job.includes("if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
      job.includes("steps.event_artifacts.outputs.count == '0'")||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
@@ -346,7 +400,15 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
-  if(!trigger.includes('    types: [nession-agent-review-completed]') ||
+  const reviewerGuard=[
+    "(github.event_name == 'repository_dispatch' &&",
+    "          github.ref == 'refs/heads/main' &&",
+    "          github.event.action == 'nession-agent-review-completed' &&",
+    "          github.actor == 'github-actions[bot]' &&",
+    "          github.event.sender.login == 'github-actions[bot]')",
+  ].join('\n');
+  if(!trigger.includes('    types: [nession-agent-review-completed, nession-agent-metrics-history-recover]') ||
+     !job.includes(reviewerGuard) ||
      !job.includes("github.event.action == 'nession-agent-review-completed'") ||
      !job.includes("github.actor == 'github-actions[bot]'") ||
      !job.includes("github.event.sender.login == 'github-actions[bot]'") ||
@@ -361,6 +423,21 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
+  // The emergency history wake is a *main-owned* bot signal, not public
+  // workflow_dispatch. The same writer re-authenticates the selected source.
+  const botGuard=[
+    "(github.event_name == 'repository_dispatch' &&",
+    "          github.ref == 'refs/heads/main' &&",
+    "          github.event.action == 'nession-agent-metrics-history-recover' &&",
+    "          github.actor == 'github-actions[bot]' &&",
+    "          github.event.sender.login == 'github-actions[bot]')",
+  ].join('\n');
+  if(!trigger.includes('nession-agent-metrics-history-recover')||
+     !job.includes(botGuard)||
+     !job.includes("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''")||
+     !job.includes('client_payload[writer_run_id]=${GITHUB_RUN_ID}')||
+     !job.includes('if: github.event_name == \'workflow_run\' || (github.event_name == \'repository_dispatch\' && github.event.action == \'nession-agent-review-completed\')'))
+    fail('untrusted or recursive Metrics history bot wake');
   // Never report successful metrics ingestion as failed merely because the
   // *authentic source Provider job* failed. Only a successful source may wake
   // Acceptance; all source identity checks still apply to success cases.
@@ -380,9 +457,18 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '      - Agent / Issue Audit\n',''
   )),/subscriptions drifted from Catalog/);
+  for(const weaker of [
+    workflow.replace("github.event.action == 'nession-agent-metrics-history-recover'",
+      "github.event.action == 'attacker-recover'"),
+    workflow.replace('client_payload[writer_run_id]=${GITHUB_RUN_ID}',
+      'client_payload[writer_run_id]=attacker'),
+    workflow.replace("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''",
+      "github.event_name == 'repository_dispatch' &&\n          steps.persist.outputs.changed != ''"),
+  ])assert.throws(()=>validateRecoveryRouting(weaker),
+    /untrusted or recursive Metrics history bot wake|empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
-  ),/scheduled-only/);
+  ),/main-owned/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("github.event_name == 'schedule' && github.ref == 'refs/heads/main'",
       "github.event_name == 'schedule'")
@@ -404,6 +490,53 @@ function selfTest(){
   ),/failed Provider evidence/);
     const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
+  const writerRun={id:45168056749,run_attempt:1,
+    path:'.github/workflows/metrics-agent-telemetry.yml',
+    name:'Metrics / Agent Telemetry Ingest',event:'workflow_run',
+    status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    head_branch:'main',head_sha:'a'.repeat(40),
+    updated_at:'2026-11-23T12:00:00Z'};
+  const writerJobs={jobs:[{name:'ingest',run_id:writerRun.id,run_attempt:1,
+    status:'completed',conclusion:'success',steps:[
+      'Validate and append immutable telemetry','Commit metrics history',
+      'Verify immutable Git bytes before uploading Run Store receipts',
+    ].map(name=>({name,conclusion:'success'}))}]};
+  const botEvent={action:'nession-agent-metrics-history-recover',
+    sender:{login:'github-actions[bot]'},repository:{full_name:REPO},
+    client_payload:{writer_run_id:45168056749}};
+  assert.equal(validateReconciliationContext({...mainEnv,
+    GITHUB_EVENT_NAME:'repository_dispatch',GITHUB_ACTOR:'github-actions[bot]'},botEvent),
+    'trusted-bot-recovery');
+  assert.equal(attestHistoryWriterWake(writerRun,writerJobs,botEvent,
+    Date.parse('2026-11-23T12:05:00Z')),true);
+  assert.equal(attestHistoryWriterWake({...writerRun,name:'Dynamic display #4342'},
+    writerJobs,botEvent,Date.parse('2026-11-23T12:05:00Z')),true,
+    'display name must never become writer authorization identity');
+  for(const [badRun,badJobs] of [
+    [{...writerRun,path:'.github/workflows/evil.yml'},writerJobs],
+    [{...writerRun,event:'workflow_dispatch'},writerJobs],
+    [{...writerRun,conclusion:'failure'},writerJobs],
+    [writerRun,{jobs:[{...writerJobs.jobs[0],steps:writerJobs.jobs[0].steps
+      .filter(step=>step.name!=='Commit metrics history')}]}],
+  ])assert.throws(()=>attestHistoryWriterWake(badRun,badJobs,botEvent,
+      Date.parse('2026-11-23T12:05:00Z')),/untrusted historical wake|real immutable Store write/);
+  assert.throws(()=>attestHistoryWriterWake(writerRun,writerJobs,botEvent,
+    Date.parse('2026-11-24T12:05:00Z')),/untrusted historical wake/);
+  for(const [badEnv,badEvent] of [
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'attacker'},botEvent],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,sender:{login:'attacker'}}],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,action:'nession-agent-review-completed'}],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,client_payload:{writer_run_id:0}}],
+  ])assert.throws(()=>validateReconciliationContext(badEnv,badEvent),
+    /reconciliation denied/);
   for(const invalid of [
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_dispatch'},
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'1'},
@@ -418,8 +551,8 @@ function selfTest(){
     "- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'workflow_run'"
   )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'",
-    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count == '0'"
+    "github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'",
+    "github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count == '0'"
   )),/empty telemetry events/);
   // Empty telemetry must not proceed through source resolution after preflight.
   assert.throws(()=>validateRecoveryRouting(workflow.replace(

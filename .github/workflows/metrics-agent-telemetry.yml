@@ -26,7 +26,7 @@ on:
   # A bot-dispatched Reviewer Run cannot rely on workflow_run chaining.
   # This wake is NOT a trusted result: the main-owned writer rechecks REST.
   repository_dispatch:
-    types: [nession-agent-review-completed]
+    types: [nession-agent-review-completed, nession-agent-metrics-history-recover]
 permissions:
   actions: read
   contents: write
@@ -51,6 +51,11 @@ jobs:
         (github.event_name == 'repository_dispatch' &&
           github.ref == 'refs/heads/main' &&
           github.event.action == 'nession-agent-review-completed' &&
+          github.actor == 'github-actions[bot]' &&
+          github.event.sender.login == 'github-actions[bot]') ||
+        (github.event_name == 'repository_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.event.action == 'nession-agent-metrics-history-recover' &&
           github.actor == 'github-actions[bot]' &&
           github.event.sender.login == 'github-actions[bot]') ||
         (github.event_name == 'workflow_run' &&
@@ -126,7 +131,7 @@ jobs:
       # One attempt-scoped artifact query. A source without Agent telemetry
       # is a no-op; the five-minute scheduled scan owns missed-run replay.
       - name: Detect source Agent telemetry
-        if: github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch'
+        if: github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')
         id: event_artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -146,7 +151,7 @@ jobs:
           fi
 
       - name: Checkout metrics history
-        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'
+        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'
         uses: actions/checkout@v4
         with:
           ref: metrics
@@ -155,7 +160,7 @@ jobs:
           persist-credentials: false
 
       - name: Select missed trusted Agent telemetry source
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover')
         id: reconcile
         working-directory: trusted
         env:
@@ -391,7 +396,7 @@ jobs:
       # checked in this main-owned schedule run. It is a read-only observation;
       # source records are persisted by the existing immutable Metrics writer.
       - name: Finalize bounded historical recovery report
-        if: success() && github.event_name == 'schedule'
+        if: success() && (github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover'))
         working-directory: trusted
         run: |
           node scripts/agent-telemetry-reconcile.mjs history-finalize \
@@ -400,7 +405,7 @@ jobs:
             "${RUNNER_TEMP}/agent-metrics-history.json" >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload scoped historical recovery and expiry inventory
-        if: always() && github.event_name == 'schedule'
+        if: always() && (github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover'))
         uses: actions/upload-artifact@v4
         with:
           name: agent-metrics-history-${{ github.run_id }}-${{ github.run_attempt }}
@@ -479,3 +484,21 @@ jobs:
             -F "client_payload[source_run_attempt]=$SOURCE_RUN_ATTEMPT" \
             -f "client_payload[source_sha]=$source_sha"
           echo "Notified trusted Reviewer result ingest after durable Metrics CAS: $SOURCE_RUN_ID/$SOURCE_RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
+
+      # A successful authentic source write supplies one bounded follow-up
+      # when GitHub drops or delays high-frequency schedule events. The wake
+      # carries NO source/ref/writer authority and cannot recursively dispatch.
+      - name: Wake bounded history scan after new real Agent telemetry
+        if: >-
+          success() &&
+          github.event_name == 'workflow_run' &&
+          steps.persist.outputs.changed != '' &&
+          steps.persist.outputs.changed != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
+            -f event_type=nession-agent-metrics-history-recover \
+            -F "client_payload[writer_run_id]=${GITHUB_RUN_ID}"
+          echo "Requested one main-owned bounded historical scan; no trust or SC result delegated" >> "${GITHUB_STEP_SUMMARY}"
