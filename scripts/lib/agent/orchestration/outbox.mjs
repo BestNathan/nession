@@ -722,6 +722,7 @@ export function hasOnlyRetiredReviewerForQwenRepair(state){
   // active, duplicate, or cross-Issue Reviewer is allowed.
   const allowed=[
     ...REVIEWER_PREMODEL_FAILURE_SOURCES,...REVIEWER_JSON_FAILURE_SOURCES,
+    REVIEWER_TOOL_FAILURE_4065,
   ].filter(f=>f.issue===state?.issue);
   if(entries.length>allowed.length)return false;
   const seen=new Set();
