@@ -3,7 +3,7 @@
 // Case code consumes *only* this uncredentialed snapshot, never GH_TOKEN.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const { targetSha } = require('../../shared/control-mode-cases.cjs');
+const { targetSha } = require('./control-mode-cases.cjs');
 
 let cached;
 function readCaptured(route) {

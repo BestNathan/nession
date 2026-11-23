@@ -6,7 +6,7 @@ const assert = require('node:assert/strict');
 const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { targetSha } = require('../../../shared/control-mode-cases.cjs');
-const { readCaptured } = require('../github-snapshot.cjs');
+const { readCaptured } = require('../../../shared/case3072-github-snapshot.cjs');
 
 const ROOT = path.resolve(__dirname, '../../../../..');
 const REPO = 'BestNathan/nession';
