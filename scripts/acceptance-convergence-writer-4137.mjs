@@ -132,6 +132,34 @@ export function validConvergenceWriterReceipt(proof,targetSha) {
       Number.isSafeInteger(x.run_attempt)&&x.run_attempt>0));
 }
 
+// The Acceptor's prose cannot confer writer authority. A source-bound Pass
+// without the independent collector's operation receipt stays Pending.
+export function enforceConvergenceWriter4059(context,normalized) {
+  if(context?.issue?.number!==4059||context?.stage!=='post-merge')
+    return normalized;
+  const proof=context?.ci_evidence?.authenticated_convergence_writer_4059;
+  const valid=validConvergenceWriterReceipt(proof,context.target_ref);
+  const items=(normalized?.criteria??[]).map(item=>{
+    if(item.criterion!=='SC-02'||item.result!=='Pass')return item;
+    if(!valid)return {...item,result:'Pending',evidence:[],
+      summary:'Workflow writer authorization is unproven: no exact-source '+
+        'successful App writer mint, non-BLOCKED Controller outcome, '+
+        'two-parent PR, exact-HEAD CI and protected merge readback'};
+    return {...item,summary:'Independently attested workflow-bearing staging '+
+      'promotion and protected merge',
+      evidence:[{type:'authenticated-convergence-writer',value:
+        'Run '+proof.source_run_id+'/'+proof.source_run_attempt+
+        ', converge Job '+proof.source_job_id+
+        ', App writer minted, '+proof.controller_outcome+
+        ', Draft/integration PR #'+proof.integration_pr+
+        ', head '+proof.integration_head+
+        ', protected merge '+proof.protected_merge_sha+
+        ', exact-HEAD Quality/Case/E2E verified'}]};
+  });
+  return {...normalized,criteria:items,
+    ...(valid?{authenticated_convergence_writer_4059:proof}:{})};
+}
+
 // This routine makes read-only source-bound REST observations. The source Run
 // is only a lookup candidate; authorization comes from independent Run, Step,
 // structured Controller result, PR ancestry, CI and protected merge witnesses.
@@ -198,6 +226,32 @@ export function selfTestConvergenceWriter4137() {
     stagingComparison:{status:'ahead',merge_base_commit:{sha:merge}}};
   const good=attestConvergenceWriter(valid);
   assert.equal(validConvergenceWriterReceipt(good,sha),true);
+
+  const context={issue:{number:4059},stage:'post-merge',target_ref:sha,
+    ci_evidence:{authenticated_convergence_writer_4059:good}};
+  const claimed={criteria:[{criterion:'SC-02',result:'Pass',
+    evidence:[{type:'workflow',value:'unrelated green Waker'}],summary:'green job'}]};
+  const evidence=enforceConvergenceWriter4059(context,claimed);
+  assert.equal(evidence.criteria[0].result,'Pass');
+  assert.match(evidence.criteria[0].evidence[0].value,/App writer minted/);
+  assert.doesNotMatch(evidence.criteria[0].summary,/green job/);
+  for(const untrusted of [
+    null,{...good,target_sha:'f'.repeat(40)},
+    {...good,controller_outcome:'BLOCKED'},
+    {...good,writer_mint:'skipped'}, {...good,ci_checks:[]}
+  ]) {
+    const denied=enforceConvergenceWriter4059({...context,
+      ci_evidence:{authenticated_convergence_writer_4059:untrusted}},claimed);
+    assert.equal(denied.criteria[0].result,'Pending');
+    assert.deepEqual(denied.criteria[0].evidence,[]);
+    assert.equal('authenticated_convergence_writer_4059' in denied,false);
+  }
+  assert.equal(enforceConvergenceWriter4059({...context,issue:{number:4140}},
+    claimed).criteria[0].result,'Pass','other Issues unchanged');
+  assert.equal(enforceConvergenceWriter4059(context,{criteria:[{
+    criterion:'SC-02',result:'Fail',evidence:[],summary:'observed denial'
+  }]}).criteria[0].result,'Fail','real failures remain failures');
+
   for(const mutation of [
     {job:{...job,steps:job.steps.map(s=>s.name.startsWith('Mint')?
       {...s,conclusion:'skipped'}:s)}},
