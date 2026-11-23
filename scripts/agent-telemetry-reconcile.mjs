@@ -246,15 +246,32 @@ export function finalizeHistoricalReport(report,summaryCounts){
   return {...report,selected_persisted:persisted,recovered_count:persisted?1:0};
 }
 
-export function validateReconciliationContext(env){
+export function validateReconciliationContext(env,event=null){
   if(env.GITHUB_REPOSITORY!==REPO||
      env.GITHUB_REF!=='refs/heads/main')
     fail('reconciler must execute only on trusted main');
   if(env.GITHUB_EVENT_NAME==='schedule')return 'schedule';
-  fail('reconciliation denied: only main schedule may scan history');
+  // GitHub may drop scheduled events under heavy load. A *writer* which
+  // successfully persisted a real source can request exactly one bot wake;
+  // never accept a public, user-ref-selected workflow_dispatch fallback.
+  if(env.GITHUB_EVENT_NAME==='repository_dispatch' &&
+     env.GITHUB_ACTOR==='github-actions[bot]'&&
+     event?.action==='nession-agent-metrics-history-recover'&&
+     event?.sender?.login==='github-actions[bot]'&&
+     event?.repository?.full_name===REPO&&
+     Number.isSafeInteger(Number(event?.client_payload?.writer_run_id))&&
+     Number(event.client_payload.writer_run_id)>0)
+    return 'trusted-bot-recovery';
+  fail('reconciliation denied: schedule or trusted post-Store bot wake required');
+}
+function reconcileEventContext(){
+  if(process.env.GITHUB_EVENT_NAME!=='repository_dispatch')return null;
+  const file=process.env.GITHUB_EVENT_PATH;
+  if(!file||!path.isAbsolute(file))fail('GitHub event payload file required');
+  return JSON.parse(fs.readFileSync(file,'utf8'));
 }
 async function select(store){
-  validateReconciliationContext(process.env);
+  validateReconciliationContext(process.env,reconcileEventContext());
   if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
   const summaryCounts=indexedSourceSummaries(store);
   const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
@@ -286,7 +303,7 @@ async function select(store){
   console.log(JSON.stringify(result??{run_id:null}));
 }
 function finalize(store,reportPath){
-  validateReconciliationContext(process.env);
+  validateReconciliationContext(process.env,reconcileEventContext());
   if(!path.isAbsolute(store)||!path.isAbsolute(reportPath))fail('absolute finalization paths required');
   const report=JSON.parse(fs.readFileSync(reportPath,'utf8'));
   fs.writeFileSync(reportPath,JSON.stringify(
@@ -404,6 +421,26 @@ function selfTest(){
   ),/failed Provider evidence/);
     const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
+  const botEvent={action:'nession-agent-metrics-history-recover',
+    sender:{login:'github-actions[bot]'},repository:{full_name:REPO},
+    client_payload:{writer_run_id:45168056749}};
+  assert.equal(validateReconciliationContext({...mainEnv,
+    GITHUB_EVENT_NAME:'repository_dispatch',GITHUB_ACTOR:'github-actions[bot]'},botEvent),
+    'trusted-bot-recovery');
+  for(const [badEnv,badEvent] of [
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'attacker'},botEvent],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,sender:{login:'attacker'}}],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,action:'nession-agent-review-completed'}],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,client_payload:{writer_run_id:0}}],
+  ])assert.throws(()=>validateReconciliationContext(badEnv,badEvent),
+    /reconciliation denied/);
   for(const invalid of [
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_dispatch'},
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'1'},
