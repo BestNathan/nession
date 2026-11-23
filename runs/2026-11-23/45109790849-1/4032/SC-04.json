@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b476acda79cdf00dd12d5f6c9658672d8c37d54f21b71512d7025e0acdc04f3b",
+  "run_id": 45109790849,
+  "run_attempt": 1,
+  "issue": 4032,
+  "criterion": "SC-04",
+  "criterion_text": ": On a genuine post-change staging SHA, GitOps writes GHCR images and a trusted read-only Deployment Identity attests actual ready GHCR workloads (or remains Pending with explicit blocker), independently of ACR status.",
+  "stage": "post-merge",
+  "target_sha": "68a07de3fb22ef331d9549617dbce8e453856c34",
+  "contract_sha256": "f841cebca3d8fb8a597835aa27f3a8bd3357e704a6e801873e6a3c0415145c9c",
+  "case_revision": "68a07de3fb22ef331d9549617dbce8e453856c34",
+  "case_tree_sha": "c3feb576af7dacb96b0659b548c2cd8018ef1fe3",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T04:10:18.474Z",
+  "finished_at": "2026-11-23T04:10:27.684Z",
+  "duration_ms": 9210,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "GHCR-only immutable Staging GitOps and real ready workload identity attested at 68a07de3fb22ef331d9549617dbce8e453856c34",
+      "evidence": [
+        {
+          "type": "ci",
+          "value": "authenticated GHCR eight-platform release Run/Attempt 45105339340/1; no ACR dependency"
+        },
+        {
+          "type": "ci",
+          "value": "source-pinned GHCR GitOps writer Run/Attempt 45105339293/1 successful"
+        },
+        {
+          "type": "provenance",
+          "value": "immutable deployed receipt runs/2026-11-23/45108686579-1/deployment/staging.json execution 19a7ad73ed13f314ca303b52d5388365dd170311171fe394f593a5ce1d81901a GitOps 9d3efe24c019f88d074e137bd7f8bfc3de403697"
+        },
+        {
+          "type": "runtime",
+          "value": "read-only Deployment Identity verified ready GHCR Server/Agent/UI imageIDs: agent=sha256:7183270f0dca2d1ec0a641f225ac0ebd1c01282d50a4c9720ba07ed816b7c92c server=sha256:516d2a180d99867451d2f6a7c980709ecc0c9810f3c6b87acca4f3b1efd69c28 ui=sha256:5dcf811525be2a3a03a48a7a1678aac926fbebe08b2ddc521e0ddf41372838f6"
+        },
+        {
+          "type": "provenance",
+          "value": "both GitOps overlays pin GHCR Server/Agent/UI/MCP tags from the same exact Staging source SHA; MCP desired-state verified (not claimed as an independently attested Pod)"
+        }
+      ],
+      "duration_ms": 3283,
+      "exit_code": 0
+    }
+  ],
+  "deployment": {
+    "environment_id": "staging",
+    "deployed_source_sha": "68a07de3fb22ef331d9549617dbce8e453856c34",
+    "attestation_execution_id": "19a7ad73ed13f314ca303b52d5388365dd170311171fe394f593a5ce1d81901a",
+    "gitops_revision": "9d3efe24c019f88d074e137bd7f8bfc3de403697",
+    "image_digests": {
+      "agent": "sha256:7183270f0dca2d1ec0a641f225ac0ebd1c01282d50a4c9720ba07ed816b7c92c",
+      "server": "sha256:516d2a180d99867451d2f6a7c980709ecc0c9810f3c6b87acca4f3b1efd69c28",
+      "ui": "sha256:5dcf811525be2a3a03a48a7a1678aac926fbebe08b2ddc521e0ddf41372838f6"
+    }
+  },
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45109790849,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "d0302b05bacf0c587ac3e461b76bdecf50b7849e",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45109790849",
+    "record_path": "runs/2026-11-23/45109790849-1/4032/SC-04.json",
+    "source_result_sha256": "e42a80d2fb5d19c0bccbad0d69a8495bb1c92bef136f5269049675b1469f713e"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45109790849-1",
+    "sha256": "e42a80d2fb5d19c0bccbad0d69a8495bb1c92bef136f5269049675b1469f713e",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45109790849",
+    "durability": "time-limited; object archival not configured"
+  }
+}
