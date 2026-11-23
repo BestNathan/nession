@@ -8,6 +8,12 @@ use super::{
 
 impl ConnectionHandler {
     /// Handle `server.session.kill` — kill a session on its agent.
+    ///
+    /// `expected_instance_id` (#4302) is the optional caller-observed
+    /// incarnation precondition: present, the Server forwards it to the Agent
+    /// that owns the termination and propagates the Agent's classified refusal
+    /// (`conflict` for a same-name replacement); absent, the legacy Web/CLI
+    /// name-addressed kill is unchanged.
     pub(super) async fn handle_client_session_kill(
         &mut self,
         msg: ProtocolMessage<serde_json::Value>,
@@ -24,6 +30,7 @@ impl ConnectionHandler {
                 WebSessionKillResponse {
                     success: false,
                     error: Some("Not authenticated".to_string()),
+                    error_kind: None,
                 },
             ));
         }
@@ -31,8 +38,10 @@ impl ConnectionHandler {
         // A missing or non-string `session_id` parses to nothing and lands on
         // the same "Invalid session_id format" reply the empty-string path
         // already produced, so that behaviour is unchanged.
-        let Ok(ClientSessionKillPayload { session_id }) =
-            serde_json::from_value::<ClientSessionKillPayload>(msg.payload)
+        let Ok(ClientSessionKillPayload {
+            session_id,
+            expected_instance_id,
+        }) = serde_json::from_value::<ClientSessionKillPayload>(msg.payload)
         else {
             return Ok(session_kill_reply(
                 &msg.id,
@@ -41,10 +50,12 @@ impl ConnectionHandler {
                     error: Some(
                         "Invalid session_id format. Expected 'agent_id:session_name'".to_string(),
                     ),
+                    error_kind: None,
                 },
             ));
         };
         let session_id = session_id.as_str();
+        let guarded = expected_instance_id.is_some();
 
         let (agent_id, session_name) = match session_id.split_once(':') {
             Some((aid, sname)) => (aid.to_string(), sname.to_string()),
@@ -57,6 +68,7 @@ impl ConnectionHandler {
                             "Invalid session_id format. Expected 'agent_id:session_name'"
                                 .to_string(),
                         ),
+                        error_kind: None,
                     },
                 ));
             }
@@ -68,6 +80,22 @@ impl ConnectionHandler {
             let agent = self.agent_registry.get(&agent_id).await;
             match agent {
                 Some(a) if a.status != AgentStatus::Online => {
+                    // A guarded kill cannot verify the incarnation on an
+                    // offline Agent, so it refuses truthfully instead of
+                    // inheriting the legacy "consider it gone" success (#4302).
+                    if guarded {
+                        return Ok(session_kill_reply(
+                            &msg.id,
+                            WebSessionKillResponse {
+                                success: false,
+                                error: Some(format!(
+                                    "Agent '{agent_id}' is offline; the Session's instance \
+                                     identity cannot be verified"
+                                )),
+                                error_kind: Some("unavailable".to_string()),
+                            },
+                        ));
+                    }
                     self.session_registry.remove(session_id).await;
                     // The one branch of this unit whose wire changes: the type
                     // has no `skip_serializing_if` on `error`, so this reply
@@ -78,6 +106,7 @@ impl ConnectionHandler {
                         WebSessionKillResponse {
                             success: true,
                             error: None,
+                            error_kind: None,
                         },
                     ));
                 }
@@ -87,6 +116,7 @@ impl ConnectionHandler {
                         WebSessionKillResponse {
                             success: false,
                             error: Some(format!("Session '{session_id}' not found")),
+                            error_kind: guarded.then(|| "not_found".to_string()),
                         },
                     ));
                 }
@@ -96,6 +126,7 @@ impl ConnectionHandler {
                         WebSessionKillResponse {
                             success: false,
                             error: Some(format!("Agent '{agent_id}' not found")),
+                            error_kind: guarded.then(|| "not_found".to_string()),
                         },
                     ));
                 }
@@ -109,17 +140,20 @@ impl ConnectionHandler {
             session_name, agent_id
         );
 
+        let command = match expected_instance_id.as_deref() {
+            Some(expected) => json!({
+                "request_id": request_id,
+                "name": session_name,
+                "expected_instance_id": expected,
+            }),
+            None => json!({
+                "request_id": request_id,
+                "name": session_name,
+            }),
+        };
         let rx = self
             .command_broker
-            .send_command(
-                &agent_id,
-                "agent.session.kill",
-                &request_id,
-                json!({
-                    "request_id": request_id,
-                    "name": session_name,
-                }),
-            )
+            .send_command(&agent_id, "agent.session.kill", &request_id, command)
             .await;
 
         // Wait up to 30 seconds for agent response.
@@ -134,6 +168,12 @@ impl ConnectionHandler {
                     .get("error")
                     .and_then(|v| v.as_str())
                     .map(std::string::ToString::to_string);
+                // The Agent's guarded refusal carries its classification; a
+                // legacy name-only refusal has none and the reply keeps none.
+                let error_kind = response
+                    .get("error_kind")
+                    .and_then(|v| v.as_str())
+                    .map(std::string::ToString::to_string);
 
                 if success {
                     self.session_registry.remove(session_id).await;
@@ -143,7 +183,11 @@ impl ConnectionHandler {
 
                 Ok(session_kill_reply(
                     &msg.id,
-                    WebSessionKillResponse { success, error },
+                    WebSessionKillResponse {
+                        success,
+                        error,
+                        error_kind,
+                    },
                 ))
             }
             Ok(Err(_)) => Ok(session_kill_reply(
@@ -151,6 +195,9 @@ impl ConnectionHandler {
                 WebSessionKillResponse {
                     success: false,
                     error: Some("Agent disconnected".to_string()),
+                    // The kill may or may not have run; the outcome is
+                    // indeterminate, never a silent retry (#3704, #4302).
+                    error_kind: Some("unavailable".to_string()),
                 },
             )),
             Err(_) => Ok(session_kill_reply(
@@ -158,6 +205,7 @@ impl ConnectionHandler {
                 WebSessionKillResponse {
                     success: false,
                     error: Some("Timeout waiting for agent response".to_string()),
+                    error_kind: Some("timeout".to_string()),
                 },
             )),
         }

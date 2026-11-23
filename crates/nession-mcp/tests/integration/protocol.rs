@@ -279,8 +279,11 @@ impl NodeBackend for Recorder {
         &self,
         agent_id: &str,
         name: &str,
+        expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
-        self.push(format!("node.kill:{agent_id}:{name}"));
+        self.push(format!(
+            "node.kill:{agent_id}:{name}:{expected_instance_id}"
+        ));
         typed(json!({ "name": name }))
     }
 
@@ -351,6 +354,7 @@ impl NodeBackend for SlowNode {
         &self,
         _agent_id: &str,
         name: &str,
+        _expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
         Ok(SessionKillResponse {
             name: name.to_string(),
@@ -892,7 +896,11 @@ async fn every_successful_tool_call_returns_declared_structured_content() {
         ),
         (
             "nession_agent_kill_session",
-            json!({ "agent_id": "agent-1", "name": "dev" }),
+            json!({
+                "agent_id": "agent-1",
+                "name": "dev",
+                "expected_instance_id": "instance-a"
+            }),
         ),
         (
             "nession_agent_get_session_metadata",

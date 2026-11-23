@@ -21,7 +21,16 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type SessionKillPayload = { name: string, };
+export type SessionKillPayload = { name: string, 
+/**
+ * Optional incarnation precondition for a destructive kill (#4302).
+ *
+ * Present: the Agent checks it against the name's current durable tmux
+ * instance inside the same keyed mutation lane as the termination, and
+ * refuses a stale caller as a `conflict` without touching the successor.
+ * Absent: the legacy name-addressed kill is unchanged.
+ */
+expected_instance_id?: string | null, };
 export type SessionKillResponse = { 
 /**
  * The tmux Session name that was killed.
@@ -31,7 +40,16 @@ name: string, };
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionKillCall = { name: string, };
+export type SessionKillCall = { name: string, 
+/**
+ * Optional incarnation precondition for a destructive kill (#4302).
+ *
+ * Present: the Agent checks it against the name's current durable tmux
+ * instance inside the same keyed mutation lane as the termination, and
+ * refuses a stale caller as a `conflict` without touching the successor.
+ * Absent: the legacy name-addressed kill is unchanged.
+ */
+expected_instance_id?: string | null, };
 
 /** The payload the provider answers with. */
 export type SessionKillReply = { 

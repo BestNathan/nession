@@ -197,6 +197,14 @@ pub struct ServerSessionCreatePayload {
 pub struct ServerSessionKillPayload {
     pub request_id: String,
     pub name: String,
+    /// Optional incarnation precondition for a destructive kill (#4302).
+    ///
+    /// Present: the Agent terminates the Session only while the public name
+    /// still names exactly that durable tmux instance, so a caller that
+    /// observed incarnation A can never kill a same-name replacement B.
+    /// Absent: the legacy Web/CLI name-addressed kill is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_instance_id: Option<String>,
 }
 
 pub(crate) fn default_width() -> u16 {
@@ -320,6 +328,13 @@ pub struct ClientSessionCreatePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ClientSessionKillPayload {
     pub session_id: String,
+    /// Optional incarnation precondition for a destructive kill (#4302).
+    ///
+    /// Present: the Server forwards it to the Agent, which refuses a kill
+    /// aimed at a same-name replacement of the instance the caller observed.
+    /// Absent: the legacy Web/CLI name-addressed kill is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_instance_id: Option<String>,
 }
 
 // --- Server → Client session command response payloads ---
@@ -365,6 +380,11 @@ pub struct ClientSessionKillResponsePayload {
     pub success: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// The actionable classification of a refusal (#4302); see
+    /// [`WebSessionKillResponse::error_kind`], the same wire's Server-side
+    /// declaration. Absent on success and on legacy name-only refusals.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
 }
 
 // --- Client ↔ Server session attach ---
@@ -1043,6 +1063,14 @@ pub struct SessionCreatePayload {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionKillPayload {
     pub name: String,
+    /// Optional incarnation precondition for a destructive kill (#4302).
+    ///
+    /// Present: the Agent checks it against the name's current durable tmux
+    /// instance inside the same keyed mutation lane as the termination, and
+    /// refuses a stale caller as a `conflict` without touching the successor.
+    /// Absent: the legacy name-addressed kill is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_instance_id: Option<String>,
 }
 
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
@@ -1340,6 +1368,12 @@ pub struct WebSessionKillPayload {
 pub struct WebSessionKillResponse {
     pub success: bool,
     pub error: Option<String>,
+    /// The actionable classification of a refusal (#4302): `conflict` when a
+    /// supplied `expected_instance_id` no longer names the current instance,
+    /// `not_found` or `unavailable` for the other guarded failures. Absent on
+    /// success and on every legacy name-only refusal, whose wire is unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_kind: Option<String>,
 }
 
 /// What the Server says when it refuses a session request before answering it.

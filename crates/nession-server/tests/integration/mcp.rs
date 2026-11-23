@@ -573,6 +573,12 @@ async fn embedded_mcp_node_tools_route_to_the_named_agent() {
                     answer_command(&mut agent_sink, &frame, json!({ "session_name": name })).await;
                 }
                 Some("agent.session.kill") => {
+                    // #4302: the Server-embedded route must forward the
+                    // caller-observed incarnation on the canonical command.
+                    assert_eq!(
+                        parsed["payload"]["expected_instance_id"], "instance-a",
+                        "the embedded Server route dropped the kill precondition"
+                    );
                     answer_command(&mut agent_sink, &frame, json!({})).await;
                 }
                 _ => {}
@@ -620,7 +626,11 @@ async fn embedded_mcp_node_tools_route_to_the_named_agent() {
         addr,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": "agent-1", "name": "work" }),
+        json!({
+            "agent_id": "agent-1",
+            "name": "work",
+            "expected_instance_id": "instance-a"
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
