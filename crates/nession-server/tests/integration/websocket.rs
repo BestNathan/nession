@@ -2928,8 +2928,23 @@ async fn start_mock_agent_endpoint_with_subscription(
                 };
                 let (mut sink, mut stream) = ws.split();
                 while let Some(Ok(message)) = stream.next().await {
-                    let tokio_tungstenite::tungstenite::Message::Text(text) = message else {
-                        continue;
+                    // This is a healthy Agent peer, unlike the separate
+                    // intentionally half-open fixture. Send an actual Pong
+                    // for every Server probe instead of assuming a queued
+                    // tungstenite auto-Pong was flushed by read-only polling.
+                    let text = match message {
+                        tokio_tungstenite::tungstenite::Message::Ping(payload) => {
+                            if sink
+                                .send(tokio_tungstenite::tungstenite::Message::Pong(payload))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            continue;
+                        }
+                        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+                        _ => continue,
                     };
                     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
                         continue;
@@ -4372,7 +4387,6 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     Ok(())
 }
 
-
 /// #4065 SC-01: a *responsive* idle Agent leg must survive more than the
 /// production 45-second watchdog, not only a 100ms model-time Unit fixture.
 /// Real tungstenite peers process ping/pong while both connections are idle.
@@ -4416,10 +4430,15 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
         // Continue polling the browser WebSocket to answer its own 10s
         // keepalives; otherwise the *browser* could appear half-open too.
         match tokio::time::timeout(std::time::Duration::from_secs(4), browser.next()).await {
-            Err(_) | Ok(Some(Ok(Message::Text(_))))
-            | Ok(Some(Ok(Message::Ping(_))))
+            Err(_)
+            | Ok(Some(Ok(Message::Text(_))))
             | Ok(Some(Ok(Message::Pong(_))))
             | Ok(Some(Ok(Message::Binary(_)))) => {}
+            Ok(Some(Ok(Message::Ping(payload)))) => {
+                // A live browser also answers keepalive probes on its own
+                // socket. Keep this independent of the Agent-leg watchdog.
+                browser.send(Message::Pong(payload)).await?;
+            }
             Ok(Some(Ok(Message::Close(frame)))) => {
                 anyhow::bail!("healthy idle Relay closed: {frame:?}")
             }
@@ -4448,8 +4467,7 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
     )
     .await?;
     anyhow::ensure!(
-        forwarded["id"] == "healthy-after-watchdog" &&
-            forwarded["payload"]["data"] == "Qg==",
+        forwarded["id"] == "healthy-after-watchdog" && forwarded["payload"]["data"] == "Qg==",
         "healthy but idle Agent could not resume terminal input"
     );
     Ok(())
