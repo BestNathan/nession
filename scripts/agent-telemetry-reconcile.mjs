@@ -8,7 +8,7 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {validateAgentWorkflowTelemetry} from './agent-workflow-telemetry.mjs';
-import {telemetryWorkflowSources} from './workflow-conventions.mjs';
+import {telemetryWorkflowSources,upstreamWorkflowNames} from './workflow-conventions.mjs';
 import {validateTelemetrySourceRun} from './agent-workflow-telemetry-contract.mjs';
 
 const REPO='BestNathan/nession';
@@ -169,7 +169,16 @@ export function validateRecoveryRouting(workflow){
   if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
      !job.includes("github.repository == 'BestNathan/nession'"))
     fail('missing trusted main schedule guard');
-  // Display names are subscription labels only; never authenticate REST Runs.
+  // GitHub workflow_run.workflows uses static top-level display names *only*
+  // as event subscriptions; compare that list with the Catalog projection.
+  const subscribers=upstreamWorkflowNames(workflow);
+  const expectedNames=SOURCES.map(source=>source.name);
+  if(!subscribers.valid || subscribers.names.length!==expectedNames.length ||
+     new Set(subscribers.names).size!==expectedNames.length ||
+     subscribers.names.some(name=>!expectedNames.includes(name)))
+    fail('Metrics workflow_run subscriptions drifted from Catalog sources');
+  // Display names are never runtime authority; authenticated path+event/ref
+  // policy is checked again by the main-owned provenance script.
   if(job.includes('github.event.workflow_run.name =='))
     fail('runtime source display-name authorization is forbidden');
   for(const source of SOURCES){
@@ -230,6 +239,13 @@ export function validateRecoveryRouting(workflow){
 function selfTest(){
   const workflow=fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8');
   assert.equal(validateRecoveryRouting(workflow),true);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '      - Agent / Issue Audit',
+    '      - Attacker / Source'
+  )),/subscriptions drifted from Catalog/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '      - Agent / Issue Audit\n',''
+  )),/subscriptions drifted from Catalog/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
   ),/scheduled-only/);
