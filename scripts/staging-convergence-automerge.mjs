@@ -4,7 +4,7 @@
 // Do not invent extra strict-mode / constituent-CI branch policy.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {execFileSync} from 'node:child_process';
+import {execFileSync,spawnSync} from 'node:child_process';
 
 export const QUALIFICATION_CONTEXT = 'nession/convergence-qualification';
 const SHA = /^[0-9a-f]{40}$/;
@@ -153,6 +153,13 @@ export function verifyQualificationReadback(created,state,read,pause=()=>{}) {
   throw Error('GitHub status readback does not match exact HEAD and latest context');
 }
 
+// #4230: reconcile stdout is a single JSON document consumed by jq. A
+// successful GitHub status GET retry is diagnostic-only and must never pollute
+// the Controller's machine-readable stdout channel.
+export function reportQualificationStatusReadback(attempts) {
+  if(attempts>1) console.error('Qualification Status GET became visible after '+attempts+' attempts');
+}
+
 export function publishQualificationStatus(repo,headSha,state,reason) {
   if(repo!==REPO || !SHA.test(headSha) || !['pending','success','failure'].includes(state))
     throw Error('invalid source-bound convergence status publication');
@@ -169,7 +176,7 @@ export function publishQualificationStatus(repo,headSha,state,reason) {
     process.env.READ_GITHUB_TOKEN,
     ['repos/'+repo+'/commits/'+headSha+'/statuses?per_page=100']),
     ()=>execFileSync('sleep',['0.5'],{stdio:'ignore'}));
-  if(attempts>1) console.log('Qualification Status GET became visible after '+attempts+' attempts');
+  reportQualificationStatusReadback(attempts);
   return status;
 }
 
@@ -307,6 +314,25 @@ function selfTest(){
     ()=>[{...created,state:'failure'}]),/superseded or altered/);
   assert.equal(verifyQualificationReadback(created,'pending',
     ()=>[created]),1);
+  // #4230: exercise real Node stdout/stderr pipes, not a mock reporter.
+  // Reconcile output must remain one strict JSON document after a retried
+  // status GET; an old stdout diagnostic must be rejected by its JSON reader.
+  const fixtureJson=JSON.stringify([{outcome:'BLOCKED',reason:'MISSING_EXACT_HEAD_PR_CHECK'}])+'\\n';
+  const emitter=JSON.stringify(new URL('./staging-convergence-automerge.mjs',import.meta.url).href);
+  const script='import {reportQualificationStatusReadback} from '+emitter+
+    ';reportQualificationStatusReadback(2);process.stdout.write('+JSON.stringify(fixtureJson)+');';
+  const emitted=spawnSync(process.execPath,['--input-type=module','-e',script],{
+    encoding:'utf8',maxBuffer:1024*1024
+  });
+  assert.equal(emitted.status,0,emitted.stderr);
+  assert.equal(emitted.stdout,fixtureJson,'reconcile stdout must contain only JSON');
+  assert.match(emitted.stderr,/Qualification Status GET became visible after 2 attempts/);
+  assert.deepEqual(JSON.parse(emitted.stdout),
+    [{outcome:'BLOCKED',reason:'MISSING_EXACT_HEAD_PR_CHECK'}]);
+  assert.throws(()=>JSON.parse(emitted.stderr+emitted.stdout),SyntaxError,
+    'polluting a JSON stream with a retry diagnostic must stay a hard error');
+  assert.throws(()=>JSON.parse(fixtureJson+'unexpected second document'),SyntaxError,
+    'trailing/non-JSON reconcile output must never be silently stripped');
 
   const pr={state:'open',draft:false,user:{login:PUBLISHER},
     base:{ref:'main',repo:{full_name:REPO}},head:{ref:'staging',
