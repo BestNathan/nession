@@ -8,40 +8,20 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {validateAgentWorkflowTelemetry} from './agent-workflow-telemetry.mjs';
+import {telemetryWorkflowSources} from './workflow-conventions.mjs';
+import {validateTelemetrySourceRun} from './agent-workflow-telemetry-contract.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const MAX_RUNS=100, MAX_ARTIFACTS=100, MAX_BYTES=1024*1024;
-const SOURCES=Object.freeze([
-  {file:'agent-provider-smoke.yml',name:'Agent / Provider Smoke',id:'agent-provider-smoke',
-    events:['push','workflow_dispatch'],branches:['main']},
-  {file:'agent-develop.yml',name:'Agent / Development',id:'agent-develop',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-staging-developer-canary.yml',name:'Agent / Staging Developer Canary',id:'agent-staging-developer-canary',
-    events:['workflow_run'],branches:['main']},
-  {file:'agent-review.yml',name:'Agent / Review',id:'agent-review',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-e2e-failure-analysis.yml',name:'Agent / E2E Failure Analysis',id:'agent-e2e-failure-analysis',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-staging-convergence-review.yml',name:'Agent / Staging Convergence Review',id:'agent-staging-convergence-review',
-    events:['workflow_dispatch','push'],branches:['main']},
-  {file:'agent-cursor-resume-seed.yml',name:'Agent / Cursor Resume Seed',id:'agent-cursor-resume-seed',
-    events:['push','workflow_dispatch'],branches:['main']},
-  {file:'agent-cursor-resume-verify.yml',name:'Agent / Cursor Resume Verify',id:'agent-cursor-resume-verify',
-    events:['workflow_run'],branches:['main']},
-  {file:'agent-claude-resume-seed.yml',name:'Agent / Claude Resume Seed',id:'agent-claude-resume-seed',
-    events:['push','workflow_dispatch'],branches:['main']},
-  {file:'agent-claude-resume-verify.yml',name:'Agent / Claude Resume Verify',id:'agent-claude-resume-verify',
-    events:['workflow_run'],branches:['main']},
-  {file:'agent-sc-acceptance.yml',name:'Agent / SC Acceptance',id:'requirement-acceptance',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-issue-audit.yml',name:'Agent / Issue Audit',id:'issue-audit',
-    events:['issues','workflow_dispatch'],branches:['main']},
-  {file:'acceptance-orchestrator.yml',name:'Acceptance / Orchestrator',id:'requirement-acceptance',
-    events:['pull_request_target','push','issues'],branches:['main','staging']},
-  {file:'acceptance-verified-stage.yml',name:'Acceptance / Verified Issue Stage',id:'requirement-acceptance',
-    events:['issue_comment'],branches:['main']},
-]);
+// All source keys, paths, groups and events come from the canonical Catalog.
+// Provider is prioritized to avoid stranding a post-Store Acceptance wake.
+const SOURCES=Object.freeze(telemetryWorkflowSources()
+  .map(x=>Object.freeze({key:x.key,file:x.file,name:x.name,id:x.group_id,
+    events:x.events,branches:x.branches}))
+  .sort((a,b)=>Number(b.key==='agent-provider-smoke')-
+               Number(a.key==='agent-provider-smoke')));
+
 function fail(message){throw Error('Agent telemetry reconciliation: '+message);}
 function positive(n){return Number.isSafeInteger(n)&&n>0;}
 export function trustedSource(run,source){
@@ -55,7 +35,13 @@ export function trustedSource(run,source){
   // orchestrator may verify a PR head, but its source workflow is trusted main.
   if(source.file!=='acceptance-orchestrator.yml' && run.head_branch!=='main')return false;
   if(run.event==='push'&&!source.branches.includes(run.head_branch))return false;
-  return true;
+  try {
+    const verified=validateTelemetrySourceRun(run,REPO);
+    return verified.source_workflow_key===source.key &&
+      verified.workflow_id===source.id;
+  } catch {
+    return false;
+  }
 }
 export function countArtifactSummaries(value,run=null){
   if(run && (!positive(Number(run.id)) || !positive(Number(run.run_attempt))))
@@ -91,7 +77,12 @@ export function countArtifactSummaries(value,run=null){
 export function indexedSourceSummaries(root){
   const summaryCounts=new Map();
   let inspected=0;
+  // Three Acceptance sources intentionally share one Metrics group; scan its
+  // immutable directory exactly once, not once for each source.
+  const visitedGroups=new Set();
   for(const source of SOURCES){
+    if(visitedGroups.has(source.id))continue;
+    visitedGroups.add(source.id);
     const dir=path.join(root,'raw','workflows',source.id);
     if(!fs.existsSync(dir))continue;
     if(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink())
@@ -312,6 +303,9 @@ function selfTest(){
     created_at:'2026-10-14T00:00:00Z'};
   assert.equal(trustedSource(run,source),true);
   assert.equal(SOURCES.length,14);
+  assert.equal(new Set(SOURCES.map(s=>s.file)).size,14);
+  assert.equal(SOURCES.filter(s=>s.id==='requirement-acceptance').length,3);
+  assert.equal(SOURCES[0].key,'agent-provider-smoke');
   const auditSource=SOURCES.find(item=>item.file==='agent-issue-audit.yml');
   assert.ok(auditSource);
   for(const [name,event] of [
