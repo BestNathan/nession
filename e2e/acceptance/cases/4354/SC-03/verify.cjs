@@ -3,21 +3,30 @@
 // deployed source with matching UI/Agent/Server immutable digests, source
 // Run/Job/SHA evidence and trusted readback. GHCR is the sole GitOps deployment
 // registry since #4032; the legacy ACR witness belongs to #3953/#3964 only.
-// No registry writes or kubectl actions: this is an independent read-only
-// cross-check. GitHub reads use the trusted runner's own read-only workflow
-// token when present (hosted-runner egress IPs exhaust the unauthenticated
-// quota, #4354 SC-03 first deployed run); without a token the public read path
-// is unchanged. The trusted deployed Acceptance runner remains the only
-// authoritative writer of the deployment-linked Acceptance record.
+//
+// Trust model (#1974): Case/target code receives NO credentials, so this
+// verifier performs no network reads at all. The trusted "Resolve trusted
+// deployment binding" step in acceptance-cases.yml pre-stages the pinned
+// acceptance-results store at ${RUNNER_TEMP}/acceptance-store and the selected
+// binding at ${RUNNER_TEMP}/deployment-binding.json (DEPLOYMENT_BINDING env).
+// The append-only Store is the only authority for deployed proof: its records
+// were written by the trusted Deploy / Identity ingester after authenticating
+// the source Run/Attempt/SHA. This Case verifies those immutable staged bytes,
+// cross-checks them against the trusted binding, and binds the fix invariant
+// to its own target-SHA checkout (targetSha() asserts HEAD == target SHA).
+// No registry writes, no kubectl actions, no GitHub API quota dependence.
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const { targetSha } = require('../../../shared/mcp-cases.cjs');
 
 const REPO = 'BestNathan/nession';
-const API = 'https://api.github.com/repos/' + REPO;
 const REGISTRY = 'ghcr.io/bestnathan/nession';
 const SHA = /^[0-9a-f]{40}$/;
 const DIGEST = /^sha256:[a-f0-9]{64}$/;
 const DEPLOYED = ['agent', 'server', 'ui'];
+const RECORD_PATH = /^runs\/\d{4}-\d{2}-\d{2}\/\d+-\d+\/deployment\/staging\.json$/;
+const INDEX_NAME = /^\d+-\d+-staging\.json$/;
 // The canonical #4354 fix invariant: the collector binds pod imageIDs only
 // after the desired revision has fully rolled out. Asserting these exact
 // strings in the collector source at the deployed SHA binds the attested
@@ -27,43 +36,56 @@ const FIX_INVARIANTS = [
   'deployment.status?.updatedReplicas !== desiredReplicas',
 ];
 
-class Unobservable extends Error {}
 const safe = x => String(x ?? '').replace(/[^A-Za-z0-9 .,_:/@()-]/g, ' ').slice(0, 170);
-
-// Canonical read-only receipt pattern (e.g. 3082/SC-07): the harness passes
-// the workflow environment through, so use its read-only token for API
-// reads instead of the shared hosted-runner unauthenticated quota.
-function apiHeaders(token) {
-  const headers = { Accept: 'application/vnd.github+json',
-    'User-Agent': 'nession-4354-deployed-identity-case' };
-  if (token) headers.Authorization = 'Bearer ' + token;
-  return headers;
-}
-const allowedRev = rev => SHA.test(rev) || rev === 'acceptance-results';
-async function get(route) {
-  const headers = apiHeaders(process.env.GITHUB_TOKEN || process.env.GH_TOKEN);
-  let response;
-  try {
-    response = await fetch(API + route, {
-      headers,
-      signal: AbortSignal.timeout(20000),
-    });
-  } catch {
-    throw new Unobservable('read-only GitHub evidence temporarily unavailable');
-  }
-  if (!response.ok) {
-    if ([403, 404, 408, 429, 500, 502, 503, 504].includes(response.status)) {
-      throw new Unobservable('source-aligned deployment evidence not yet readable');
-    }
-    throw Error('unexpected GitHub read status ' + response.status);
-  }
-  return response.json();
-}
 
 function rolesExactly(list, expected, label) {
   assert.ok(Array.isArray(list), label + ' must be an array');
   assert.deepEqual(list.map(x => x.role).sort(), [...expected].sort(),
     label + ' must include exactly the required roles');
+}
+
+// The trusted binding is the workflow's selection receipt: it must attest the
+// exact target source in the staging lane and name one immutable store record.
+function validateBinding(binding, sha) {
+  assert.match(sha, SHA);
+  assert.equal(binding.attested, true, 'binding must be an attested selection');
+  assert.equal(binding.environment_id, 'staging');
+  assert.equal(binding.source_sha, sha,
+    'binding must select the exact deployed target source');
+  assert.ok(typeof binding.attestation_path === 'string' &&
+    RECORD_PATH.test(binding.attestation_path),
+    'binding must name a canonical staging deployment record path');
+  assert.match(binding.attestation_execution_id, /^[0-9a-f]{64}$/);
+  assert.match(binding.gitops_revision, SHA);
+  assert.ok(binding.image_digests && typeof binding.image_digests === 'object' &&
+    !Array.isArray(binding.image_digests), 'binding image_digests must be a map');
+  assert.deepEqual(Object.keys(binding.image_digests).sort(), [...DEPLOYED].sort(),
+    'binding must carry exactly the deployed role digests');
+  for (const role of DEPLOYED) {
+    assert.match(binding.image_digests[role], DIGEST,
+      'binding digest for ' + role);
+  }
+}
+
+// The binding and the staged store bytes must describe the same observation.
+function bindingCrossCheck(binding, index, digests) {
+  assert.equal(binding.attestation_execution_id, index.execution_id,
+    'binding must select the staged attestation execution');
+  assert.equal(binding.gitops_revision, index.gitops_revision,
+    'binding GitOps revision must match the staged attestation');
+  for (const role of DEPLOYED) {
+    assert.equal(binding.image_digests[role], digests.get(role),
+      'binding digest for ' + role + ' must match the staged attestation');
+  }
+}
+
+// Exactly one staged index may carry the binding's execution id; zero or many
+// is an ambiguous/unreadable store and must fail closed, never guess.
+function pickIndex(indexes, executionId) {
+  const matches = indexes.filter(x => x.execution_id === executionId);
+  assert.equal(matches.length, 1,
+    'exactly one staged deployment index must match the binding execution');
+  return matches[0];
 }
 
 // Immutable source -> digest -> ready-workload chain, GHCR-authoritative.
@@ -159,7 +181,8 @@ function fixtures() {
       status: 'Observed', evaluation: null, source_sha: sha, gitops_revision: gitops,
       samples: [{ workloads: DEPLOYED.map(role => ({
         role, ready: true, generation: 2, observed_generation: 2, digest })) }] } };
-  assert.equal(attestation(idx, record, sha).sourceRun, 101);
+  const data = attestation(idx, record, sha);
+  assert.equal(data.sourceRun, 101);
   function rejects(fn) {
     const copy = structuredClone(record);
     fn(copy);
@@ -179,18 +202,44 @@ function fixtures() {
   rejects(x => { x.source_sha = 'f'.repeat(40); });
   rejects(x => { x.provenance.verified_source.run_id = 102; });
   rejects(x => { x.remote_observation.evaluation = 'Pass'; });
-  // Live-readback regressions (first deployed run, #4354 SC-03): the store
-  // ref must be readable and the runner's read-only token must authenticate
-  // API reads; hosted-runner unauthenticated quota alone returns Pending.
-  assert.equal(allowedRev(sha), true);
-  assert.equal(allowedRev('acceptance-results'), true);
-  assert.equal(allowedRev('main'), false);
-  assert.equal(allowedRev(''), false);
-  assert.equal(allowedRev(sha.slice(0, 39)), false);
-  assert.equal(apiHeaders('').Authorization, undefined);
-  assert.equal(apiHeaders(undefined).Authorization, undefined);
-  assert.equal(apiHeaders('read-only-token').Authorization,
-    'Bearer read-only-token');
+  // Trusted-binding regressions (#4354 SC-03 deployed lane): the binding must
+  // attest the exact target source, name one canonical staging record, and
+  // agree with the staged attestation bytes. A forged, stale or mismatched
+  // selection must fail closed.
+  const binding = { attested: true, environment_id: 'staging', source_sha: sha,
+    attestation_path: 'runs/2026-11-24/101-1/deployment/staging.json',
+    attestation_execution_id: idx.execution_id, gitops_revision: gitops,
+    image_digests: Object.fromEntries(DEPLOYED.map(role => [role, digest])) };
+  validateBinding(binding, sha);
+  bindingCrossCheck(binding, idx, data.digests);
+  function rejectsBinding(fn) {
+    const copy = structuredClone(binding);
+    fn(copy);
+    assert.throws(() => validateBinding(copy, sha));
+  }
+  rejectsBinding(x => { x.attested = false; });
+  rejectsBinding(x => { x.environment_id = 'staging-01'; });
+  rejectsBinding(x => { x.source_sha = 'f'.repeat(40); });
+  rejectsBinding(x => { x.attestation_path = '../../etc/passwd'; });
+  rejectsBinding(x => { x.attestation_path =
+    'runs/2026-11-24/101-1/deployment/staging-01.json'; });
+  rejectsBinding(x => { x.attestation_execution_id = 'not-an-execution-id'; });
+  rejectsBinding(x => { x.gitops_revision = 'main'; });
+  rejectsBinding(x => { delete x.image_digests.ui; });
+  rejectsBinding(x => { x.image_digests.ui = 'sha256:short'; });
+  rejectsBinding(x => { x.image_digests.extra = digest; });
+  function rejectsCrossCheck(fn) {
+    const copy = structuredClone(binding);
+    fn(copy);
+    assert.throws(() => bindingCrossCheck(copy, idx, data.digests));
+  }
+  rejectsCrossCheck(x => { x.attestation_execution_id = 'f'.repeat(64); });
+  rejectsCrossCheck(x => { x.gitops_revision = 'f'.repeat(40); });
+  rejectsCrossCheck(x => { x.image_digests.ui = 'sha256:' + 'f'.repeat(64); });
+  // Index selection must be unambiguous: zero or duplicate executions fail.
+  assert.equal(pickIndex([idx], idx.execution_id), idx);
+  assert.throws(() => pickIndex([], idx.execution_id));
+  assert.throws(() => pickIndex([idx, structuredClone(idx)], idx.execution_id));
   // The fix-invariant source binding rejects a pre-fix collector source.
   const preFix = 'function deploymentFor() { return availableReplicas >= 1; }';
   for (const invariant of FIX_INVARIANTS) {
@@ -202,96 +251,63 @@ function fixtures() {
   }
 }
 
-async function fileAt(path, rev) {
-  assert.ok(allowedRev(rev),
-    'only an immutable source SHA or canonical deployment-store ref is allowed');
-  const file = await get('/contents/' + path + '?ref=' + rev);
-  assert.equal(file.type, 'file');
-  assert.equal(file.encoding, 'base64');
-  assert.ok(typeof file.content === 'string' && file.content.length < 120000);
-  return Buffer.from(file.content.replace(/\s/g, ''), 'base64').toString('utf8');
+function readJson(file) {
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
 }
-async function jsonAt(path, rev) {
-  return JSON.parse(await fileAt(path, rev));
-}
-function passed(jobs, name, step) {
-  const matches = jobs.filter(x => x.name === name);
-  assert.equal(matches.length, 1, 'exactly one trusted job ' + name);
-  const job = matches[0];
-  assert.equal(job.status, 'completed');
-  assert.equal(job.conclusion, 'success');
-  if (step) {
-    assert.equal((job.steps ?? []).filter(x =>
-      x.name === step && x.status === 'completed' && x.conclusion === 'success').length,
-      1, name + ' must complete ' + step);
-  }
-  return job;
-}
-async function jobsOf(run) {
-  const x = await get('/actions/runs/' + run.id + '/attempts/' + run.run_attempt +
-    '/jobs?per_page=100');
-  assert.ok(Array.isArray(x.jobs) && x.jobs.length > 0 && x.jobs.length <= 100);
-  return x.jobs;
-}
-async function deployedAttestation(sha) {
-  const list = await get('/contents/indexes/by-sha/' + sha +
-    '/deployment?ref=acceptance-results');
-  assert.ok(Array.isArray(list) && list.length <= 80);
-  const entries = list.filter(x => /^\d+-\d+-staging\.json$/.test(x.name) &&
-    x.type === 'file').slice(0, 12);
-  if (!entries.length) throw new Unobservable('identity not yet ingested');
-  const all = [];
-  for (const entry of entries) {
-    const index = await jsonAt(entry.path, 'acceptance-results');
-    assert.ok(/^runs\/\d{4}-\d{2}-\d{2}\/\d+-\d+\/deployment\/staging\.json$/
-      .test(index.record), 'unsafe attestation record path');
-    const record = await jsonAt(index.record, 'acceptance-results');
-    const data = attestation(index, record, sha);
-    all.push({ index, record, data });
-  }
-  all.sort((a, b) => Date.parse(b.data.observed) - Date.parse(a.data.observed));
-  if (all.length > 1 && all[0].data.observed === all[1].data.observed) {
-    throw Error('ambiguous latest identity observation');
-  }
-  const chosen = all[0];
-  const run = await get('/actions/runs/' + chosen.data.sourceRun);
-  assert.equal(run.name, 'Deploy / Identity');
-  assert.equal(run.path?.split('@')[0], '.github/workflows/deploy-identity.yml');
-  assert.equal(run.event, 'workflow_run');
-  assert.equal(run.head_branch, 'main');
-  assert.equal(run.repository?.full_name, REPO);
-  assert.equal(run.head_repository?.full_name, REPO);
-  assert.equal(run.status, 'completed');
-  assert.equal(run.conclusion, 'success');
-  assert.equal(run.run_attempt, chosen.data.sourceAttempt);
-  passed(await jobsOf(run), 'attest',
-    'Wait boundedly for reconciled Staging workload identity');
-  return chosen;
-}
+
 async function verify() {
   fixtures();
   const sha = targetSha();
+  // The deployed lane must hand this Case the trusted selection receipt;
+  // absence is a lane misconfiguration, not a retryable observation gap.
+  const bindingPath = process.env.DEPLOYMENT_BINDING;
+  assert.ok(bindingPath,
+    'deployed lane must provide DEPLOYMENT_BINDING from the trusted deployment step');
+  const binding = readJson(bindingPath);
+  validateBinding(binding, sha);
+  // acceptance-cases.yml stages the pinned store as the binding's sibling
+  // directory "acceptance-store" under RUNNER_TEMP; a layout change fails
+  // closed here rather than silently reading other bytes.
+  const storeRoot = path.resolve(path.dirname(bindingPath), 'acceptance-store');
+  assert.ok(fs.existsSync(storeRoot),
+    'trusted staged acceptance-store must exist beside the deployment binding');
+  const recordPath = path.resolve(storeRoot, binding.attestation_path);
+  assert.ok(recordPath.startsWith(storeRoot + path.sep),
+    'attestation record must stay inside the staged store');
+  const record = readJson(recordPath);
+  const indexDir = path.join(storeRoot, 'indexes', 'by-sha', sha, 'deployment');
+  const names = fs.readdirSync(indexDir).filter(x => INDEX_NAME.test(x));
+  assert.ok(names.length > 0 && names.length <= 80,
+    'staged deployment index directory must be bounded and non-empty');
+  const indexes = names.map(x => readJson(path.join(indexDir, x)));
+  const index = pickIndex(indexes, binding.attestation_execution_id);
+  assert.equal(index.record, binding.attestation_path,
+    'staged index must point at the binding-selected record');
+  const data = attestation(index, record, sha);
+  bindingCrossCheck(binding, index, data.digests);
   // Bind the attested deployment to the fixed collector source: the exact
-  // deployed SHA must contain the canonical converged-rollout invariant.
-  const collector = await fileAt('scripts/deployment-identity-collect.mjs', sha);
+  // deployed SHA checkout (HEAD == target SHA, asserted by targetSha()) must
+  // contain the canonical converged-rollout invariant.
+  const repoRoot = path.resolve(__dirname, '../../../../..');
+  const collector = fs.readFileSync(
+    path.join(repoRoot, 'scripts', 'deployment-identity-collect.mjs'), 'utf8');
   for (const invariant of FIX_INVARIANTS) {
     assert.ok(collector.includes(invariant),
       'deployed source must contain the #4354 converged-rollout invariant');
   }
-  const observed = await deployedAttestation(sha);
-  const digests = [...observed.data.digests].map(([role, digest]) =>
+  const digests = [...data.digests].map(([role, digest]) =>
     role + '=' + digest).join(' ');
   return { status: 'pass',
     summary: 'authorized Staging Deploy / Identity attested exact source ' + sha +
-      ' with matching GHCR UI/Agent/Server digests and trusted readback',
+      ' with matching GHCR UI/Agent/Server digests and trusted staged readback',
     evidence: [
-      { type: 'provenance', value: 'immutable deployed receipt ' +
-        observed.index.record + ' execution ' + observed.index.execution_id +
-        ' source ' + sha + ' GitOps ' + observed.data.gitops },
-      { type: 'ci', value: 'trusted successful Deploy / Identity run ' +
-        observed.data.sourceRun + '/' + observed.data.sourceAttempt +
-        ' attest completed the bounded reconciled-identity wait' },
-      { type: 'runtime', value: 'read-only remote samples verify ready ' +
+      { type: 'provenance', value: 'trusted staged store record ' +
+        binding.attestation_path + ' execution ' + index.execution_id +
+        ' source ' + sha + ' GitOps ' + data.gitops },
+      { type: 'ci', value: 'ingester-authenticated Deploy / Identity run ' +
+        data.sourceRun + '/' + data.sourceAttempt +
+        ' (workflow_run, main) recorded as Attested in the append-only store' },
+      { type: 'runtime', value: 'staged remote samples verify ready ' +
         'GHCR workloads and immutable role digests: ' + digests },
       { type: 'runtime', value: 'collector source at deployed SHA ' + sha +
         ' contains the #4354 converged-rollout invariant; the trusted runner ' +
@@ -303,10 +319,9 @@ if (process.argv.includes('--self-test')) {
   process.stdout.write('4354 deployed identity Case offline mutation fixtures passed\n');
 } else {
   verify().then(v => process.stdout.write(JSON.stringify(v) + '\n')).catch(e => {
-    const pending = e instanceof Unobservable;
-    process.stdout.write(JSON.stringify({ status: pending ? 'pending' : 'fail',
-      summary: pending ? safe(e.message) : '4354 deployed identity Case rejected: ' + safe(e.message),
+    process.stdout.write(JSON.stringify({ status: 'fail',
+      summary: '4354 deployed identity Case rejected: ' + safe(e.message),
       evidence: [] }) + '\n');
-    if (!pending) process.exitCode = 1;
+    process.exitCode = 1;
   });
 }
