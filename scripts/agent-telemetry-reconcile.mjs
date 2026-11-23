@@ -272,7 +272,6 @@ export function attestHistoryWriterWake(run,jobs,event,now=Date.now()){
   const id=Number(event?.client_payload?.writer_run_id);
   if(!positive(id)||run?.id!==id||run.run_attempt!==1||
      run.path!=='.github/workflows/metrics-agent-telemetry.yml'||
-     run.name!=='Metrics / Agent Telemetry Ingest'||
      run.event!=='workflow_run'||run.status!=='completed'||run.conclusion!=='success'||
      run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
      run.head_branch!=='main'||!SHA.test(run.head_sha??'')||
@@ -511,6 +510,9 @@ function selfTest(){
     'trusted-bot-recovery');
   assert.equal(attestHistoryWriterWake(writerRun,writerJobs,botEvent,
     Date.parse('2026-11-23T12:05:00Z')),true);
+  assert.equal(attestHistoryWriterWake({...writerRun,name:'Dynamic display #4342'},
+    writerJobs,botEvent,Date.parse('2026-11-23T12:05:00Z')),true,
+    'display name must never become writer authorization identity');
   for(const [badRun,badJobs] of [
     [{...writerRun,path:'.github/workflows/evil.yml'},writerJobs],
     [{...writerRun,event:'workflow_dispatch'},writerJobs],
