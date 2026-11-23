@@ -543,6 +543,8 @@ jobs:
           tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}-amd64
           cache-from: type=gha,scope=nession-build-amd64
           cache-to: type=gha,scope=nession-build-amd64,mode=min
+          build-args: |
+            NESSION_SOURCE_REVISION=${{ github.sha }}
           build-contexts: |
             web-dist=/tmp/web-dist
 
@@ -685,6 +687,8 @@ jobs:
           tags: ${{ env.IMG }}:ui-${{ env.WEB_VER }}-arm64
           cache-from: type=gha,scope=nession-build-arm64
           cache-to: type=gha,scope=nession-build-arm64,mode=min
+          build-args: |
+            NESSION_SOURCE_REVISION=${{ github.sha }}
           build-contexts: |
             web-dist=/tmp/web-dist
 
