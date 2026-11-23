@@ -620,8 +620,62 @@ export async function verifyHistoricalPrSourceSuccessor(repository, sourceSha, p
   return true;
 }
 
+// #4321: an accepted PR-stage SC proof source may ride a *later* merged
+// fixture/test PR that builds on the implementing PR. #4160 keeps such a
+// `Refs #N` fixture PR out of the implementation relation (it must not block
+// closure by target branch), yet the accepted-PR-pin design keeps the SC
+// receipt pinned to that fixture commit. Authenticate the descendant source
+// only when GitHub associates it with a merged same-repo fixture PR whose head
+// provably contains a verified implementing PR head. The caller then requires
+// independent exact-head required Quality on that fixture head; the intermediate
+// fixture commit is covered by its merged PR head's Quality, not a separate run.
+// This never makes a fixture PR an implementation relation and never accepts an
+// unrelated or unverified source.
+export async function verifyDescendantFixtureSource(repository, sourceSha, implementingPrs,
+  token, request = githubRequest) {
+  if (!SHA.test(String(sourceSha || '')) || !token ||
+      !Array.isArray(implementingPrs)) return null;
+  const implHeads = implementingPrs.filter(pr =>
+    Boolean(pr?.merged_at) && SHA.test(String(pr?.head?.sha || '')) &&
+    ['main','staging','gitops'].includes(pr?.base?.ref) &&
+    pr.head?.repo?.full_name === repository &&
+    pr.base?.repo?.full_name === repository).map(pr => pr.head.sha);
+  if (implHeads.length === 0) return null;
+  const {prefix} = repoParts(repository);
+  const associated = await request(prefix+'/commits/'+sourceSha+'/pulls?per_page=100', {token});
+  if (!Array.isArray(associated) || associated.length >= 100) return null;
+  const fixtures = associated.filter(pr => Boolean(pr?.merged_at) &&
+    Number.isSafeInteger(pr?.number) && SHA.test(String(pr?.head?.sha || '')) &&
+    ['main','staging','gitops'].includes(pr?.base?.ref) &&
+    pr.head?.repo?.full_name === repository &&
+    pr.base?.repo?.full_name === repository);
+  for (const fixture of fixtures) {
+    const fixtureHead = fixture.head.sha;
+    // sourceSha must sit inside this exact merged fixture PR (strict ancestry).
+    if (fixtureHead !== sourceSha) {
+      const within = await request(prefix+'/compare/'+sourceSha+'...'+fixtureHead, {token});
+      if (within?.base_commit?.sha !== sourceSha ||
+          within?.merge_base_commit?.sha !== sourceSha ||
+          within?.status !== 'ahead' || within?.behind_by !== 0 ||
+          !Number.isSafeInteger(within?.ahead_by) || within.ahead_by <= 0) continue;
+    }
+    // The fixture PR head must contain a verified implementing PR head.
+    for (const implHead of implHeads) {
+      if (implHead === fixtureHead) return fixtureHead;
+      const contains = await request(prefix+'/compare/'+implHead+'...'+fixtureHead, {token});
+      if (contains?.base_commit?.sha === implHead &&
+          contains?.merge_base_commit?.sha === implHead &&
+          contains?.status === 'ahead' && contains?.behind_by === 0 &&
+          Number.isSafeInteger(contains?.ahead_by) && contains.ahead_by > 0) {
+        return fixtureHead;
+      }
+    }
+  }
+  return null;
+}
+
 export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality,
-  verifySuccessor = async () => false) {
+  verifySuccessor = async () => false, verifyDescendant = async () => null) {
   const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
   const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
@@ -649,6 +703,7 @@ export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality,
     const candidates=Array.isArray(prs) ? prs.filter(pr=>
       Boolean(pr.merged_at) && ['main','staging','gitops'].includes(pr.base?.ref)) : [];
     let authorizedPr=candidates.some(pr=>pr.head?.sha===head);
+    let descendantOnly=false;
     if (!authorizedPr) {
       // The older SC source must belong to this exact merged PR. Merely
       // sharing a commit ancestor across unrelated PRs is not sufficient.
@@ -661,10 +716,22 @@ export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality,
       }
     }
     if (!authorizedPr) {
+      // #4321: the pinned SC source may be a descendant fixture commit riding a
+      // later merged fixture PR that contains the implementation. Authenticate
+      // that lineage, then require Quality on the merged fixture head only (the
+      // intermediate fixture commit has no separate required-Quality run).
+      const fixtureHead=await verifyDescendant(head,candidates);
+      if (fixtureHead && SHA.test(String(fixtureHead))) {
+        successorHeads.add(fixtureHead);
+        authorizedPr=true;
+        descendantOnly=true;
+      }
+    }
+    if (!authorizedPr) {
       return {qualified:false,
         reason:id+' accepted source HEAD lacks an authenticated merged-PR successor'};
     }
-    heads.add(head);
+    if (!descendantOnly) heads.add(head);
   }
   const allHeads=new Set([...heads,...successorHeads]);
   if (allHeads.size > 16) return {qualified:false, reason:'too many PR Quality sources'};
@@ -716,7 +783,8 @@ export async function assessNativeCompletedIssueSource(repository, number, token
   const qualified = await qualifyIssuePrSourceForClosure(issue,prs,
     qualityReader ?? (sha => collectPrRequiredQualityAsync(sha,
       path => request(path, {token}))),
-    (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request));
+    (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request),
+    (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request));
   return qualified.qualified
     ? {qualified:true,reason:'merged source and Quality verified'}
     : {qualified:false,reason:'PR source Quality: '+qualified.reason};
@@ -764,7 +832,8 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   const qualified = await qualifyIssuePrSourceForClosure(issue, prs,
     qualityReader ?? (head => collectPrRequiredQualityAsync(head,
       path => request(path, {token}))),
-    (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request));
+    (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request),
+    (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request));
   if (!qualified.qualified) {
     return {action:'pending', reason:'PR source Quality: '+qualified.reason,
       prs:prs.map(pr => pr.number)};
@@ -1041,6 +1110,89 @@ async function selfTest() {
       [{number:assocPr.number+1,merged_at:pr.merged_at,head:{repo:sameRepo},
         base:{ref:'main',repo:sameRepo}}]),false,
     'ancestor source associated with a different PR is not accepted');
+
+  // #4321: a pinned SC source riding a later merged fixture PR that contains the
+  // implementing head qualifies via the descendant path. Required Quality is
+  // verified on the merged fixture head; the intermediate fixture commit has no
+  // separate required-Quality run and is covered by its merged PR head.
+  const descendantFixtureHead='c'.repeat(40);
+  const verifiedFixtureDescendant=async (oldHead,implPrs)=>
+    oldHead===sha && Array.isArray(implPrs) && implPrs.some(p=>p.head?.sha===successorSha)
+      ? descendantFixtureHead : null;
+  const descendantQualified=await qualifyIssuePrSourceForClosure(issue,[advancedPr],
+    fixtureQuality,async()=>false,verifiedFixtureDescendant);
+  assert.equal(descendantQualified.qualified,true,
+    'descendant fixture source containing the implementing head qualifies');
+  assert.deepEqual(descendantQualified.verified_successors,[descendantFixtureHead]);
+  assert.deepEqual(descendantQualified.sources,[],
+    'the intermediate fixture commit is covered by its merged head Quality, not a separate run');
+  assert.equal((await qualifyIssuePrSourceForClosure(issue,[advancedPr],
+    fixtureQuality,async()=>false,async()=>null)).qualified,false,
+    'an unverified descendant fixture source never inherits an SC Pass');
+  assert.equal((await qualifyIssuePrSourceForClosure(issue,[advancedPr],
+    async head=>head===descendantFixtureHead?{status:'fail'}:await fixtureQuality(head),
+    async()=>false,verifiedFixtureDescendant)).qualified,false,
+    'failed merged fixture head Quality cannot close via the descendant path');
+  assert.equal((await qualifyIssuePrSourceForClosure(issue,[advancedPr],
+    fixtureQuality,async()=>false)).qualified,false,
+    'the default no-op descendant verifier preserves prior fail-closed behavior');
+
+  const implPr={...advancedPr,head:{sha:successorSha,repo:sameRepo},
+    base:{ref:'main',repo:sameRepo}};
+  const fixturePr={number:99,merged_at:pr.merged_at,
+    head:{sha:descendantFixtureHead,repo:sameRepo},base:{ref:'staging',repo:sameRepo}};
+  const aheadOf=baseSha=>({base_commit:{sha:baseSha},merge_base_commit:{sha:baseSha},
+    status:'ahead',behind_by:0,ahead_by:2});
+  const descendantRead=async path=>{
+    if(path.includes('/commits/'+sha+'/pulls'))return [fixturePr];
+    if(path.includes('/compare/'+sha+'...'+descendantFixtureHead))return aheadOf(sha);
+    if(path.includes('/compare/'+successorSha+'...'+descendantFixtureHead))return aheadOf(successorSha);
+    throw Error('unexpected descendant evidence path '+path);
+  };
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',descendantRead),descendantFixtureHead,
+    'merged fixture PR containing the implementing head authenticates the descendant source');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',descendantFixtureHead,
+    [implPr],'fixture-token',async path=>{
+      if(path.includes('/commits/'))return [fixturePr];
+      if(path.includes('/compare/'+successorSha+'...'+descendantFixtureHead))return aheadOf(successorSha);
+      throw Error('within-compare must be skipped when source equals the fixture head');
+    }),descendantFixtureHead,
+    'source equal to the merged fixture head is accepted without a within-compare');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,
+    [{...implPr,head:{sha:successorSha,repo:{full_name:'Unrelated/repository'}}}],
+    'fixture-token',async()=>{throw Error('should not query without a same-repo implementing head');}),
+    null,'foreign implementing repository cannot authenticate a descendant source');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',async path=>path.includes('/commits/')?[{...fixturePr,merged_at:null}]:aheadOf(sha)),
+    null,'an unmerged fixture PR cannot authenticate a descendant source');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',async path=>path.includes('/commits/')?
+      [{...fixturePr,head:{sha:descendantFixtureHead,repo:{full_name:'Unrelated/repository'}}}]:aheadOf(sha)),
+    null,'a foreign fixture head repository is rejected');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',async path=>path.includes('/commits/')?
+      [{...fixturePr,base:{ref:'feature',repo:sameRepo}}]:aheadOf(sha)),
+    null,'an invalid fixture base ref is rejected');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',async path=>{
+      if(path.includes('/commits/'))return [fixturePr];
+      if(path.includes('/compare/'+sha+'...'))return {base_commit:{sha},
+        merge_base_commit:{sha},status:'diverged',behind_by:1,ahead_by:2};
+      return aheadOf(successorSha);
+    }),null,'a source outside the fixture PR ancestry is rejected');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',async path=>{
+      if(path.includes('/commits/'))return [fixturePr];
+      if(path.includes('/compare/'+sha+'...'))return aheadOf(sha);
+      return {base_commit:{sha:successorSha},merge_base_commit:{sha:successorSha},
+        status:'diverged',behind_by:1,ahead_by:2};
+    }),null,'a fixture PR that does not contain the implementing head is rejected');
+  assert.equal(await verifyDescendantFixtureSource('BestNathan/nession',sha,[implPr],
+    'fixture-token',async path=>path.includes('/commits/')?
+      Array.from({length:100},()=>fixturePr):aheadOf(sha)),
+    null,'an incomplete associated-PR inventory fails closed');
+
   const liveNegativeHead='fa04599e1e9bb3f344d9dc43597f477c4063afc2';
   const originalIssue={...issue,body:body.replaceAll(sha,liveNegativeHead)};
   const failedPr={...pr,head:{sha:liveNegativeHead}};
