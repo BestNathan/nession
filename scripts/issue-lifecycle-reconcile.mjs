@@ -885,11 +885,48 @@ export async function qualifyManualFailedQualityRecovery(issue, targetSha,
     validPrRequiredQualityReceipt(currentQuality.receipt, targetSha);
 }
 
+// Comment Router deliberately acknowledges after dispatch/run discovery.
+// A /accept worker can start first; wait for the exact trusted acknowledgment
+// BEFORE snapshotting updated_at, without weakening the final freshness guard.
+export async function waitForAcceptRouterAck(repository, issueNumber, commentId, token, {
+  request = githubRequest,
+  pause = ms => new Promise(resolve => setTimeout(resolve, ms)),
+  attempts = 20,
+} = {}) {
+  if (!Number.isSafeInteger(issueNumber) || issueNumber <= 0 ||
+      !Number.isSafeInteger(commentId) || commentId <= 0 ||
+      !Number.isSafeInteger(attempts) || attempts < 1 || attempts > 20)
+    throw Error('invalid /accept acknowledgment boundary');
+  const { prefix } = repoParts(repository);
+  const marker = '\n\n<!-- nession-command-comment:' + commentId + ' -->';
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    const comments = await request(prefix + '/issues/' + issueNumber +
+      '/comments?per_page=100&sort=created&direction=desc', { token });
+    if (!Array.isArray(comments) || comments.length > 100)
+      throw Error('unbounded /accept router acknowledgment inventory');
+    if (comments.some(comment =>
+      comment?.user?.type === 'Bot' &&
+      comment.user.login === 'github-actions[bot]' &&
+      typeof comment.body === 'string' &&
+      comment.body.startsWith('Comment command `/accept') &&
+      comment.body.includes(' accepted for Issue #' + issueNumber + '.') &&
+      comment.body.includes(marker))) return true;
+    if (attempt + 1 < attempts) await pause(1000);
+  }
+  return false;
+}
+
 async function handleManual(event, repository, actor, token, request = githubRequest) {
   const command = resolveAcceptComment(event, repository, actor);
   if (!command) return { action: 'skip', reason: 'untrusted or non-/accept comment' };
   if (process.env.GITHUB_RUN_ATTEMPT && process.env.GITHUB_RUN_ATTEMPT !== '1') {
     return { action: 'skip', reason: 'manual dispatch is first-attempt only' };
+  }
+  // Router acknowledgment comments change Issue.updated_at. Snapshot only
+  // after this exact comment's receipt is visible, or fail closed.
+  if (!await waitForAcceptRouterAck(repository, command.issueNumber,
+    command.commentId, token, { request })) {
+    return { action: 'pending', reason: 'source-bound Comment Router acknowledgment not visible' };
   }
   const { prefix } = repoParts(repository);
   // The fresh /accept must be newer than the latest human reopen; a delayed
@@ -1690,6 +1727,29 @@ async function selfTest() {
   let writes = 0, dispatches = 0;
   let effectivePr = {...pr, head:{...pr.head,repo:{full_name:'X/y'}},
     base:{...pr.base,repo:{full_name:'X/y'}}};
+  const ackComment = {user: {login: 'github-actions[bot]', type: 'Bot'},
+    body: 'Comment command `/accept` accepted for Issue #19. [Actions run](https://example.test/22). ' +
+      'This request is not an Acceptance Pass or proof that a Developer has started.\n\n' +
+      '<!-- nession-command-comment:7 -->'};
+  let ackReads = 0;
+  assert.equal(await waitForAcceptRouterAck('X/y', 19, 7, 'fixture-token', {
+    request: async () => ++ackReads === 2 ? [ackComment] : [],
+    pause: async () => {},
+    attempts: 3,
+  }), true, 'delayed trusted receipt must settle before the Issue snapshot');
+  assert.equal(ackReads, 2);
+  for (const invalid of [
+    {...ackComment, user: {login: 'attacker', type: 'User'}},
+    {...ackComment, body: ackComment.body.replace('comment:7', 'comment:8')},
+    {...ackComment, body: ackComment.body.replace('Issue #19', 'Issue #20')},
+  ]) {
+    assert.equal(await waitForAcceptRouterAck('X/y', 19, 7, 'fixture-token', {
+      request: async () => [invalid], pause: async () => {}, attempts: 1,
+    }), false, 'spoofed or unrelated acknowledgment must not authorize closure');
+  }
+  assert.equal(await waitForAcceptRouterAck('X/y', 19, 7, 'fixture-token', {
+    request: async () => [], pause: async () => {}, attempts: 2,
+  }), false, 'missing acknowledgment must fail closed');
   const mock = async (path, options = {}) => {
     if (path.startsWith('/search/issues?')) return { incomplete_results: false, total_count: 1,
       items: [{ number: 21, pull_request: {} }] };
@@ -1698,6 +1758,8 @@ async function selfTest() {
       return [{number:21,head:effectivePr.head,base:effectivePr.base}];
     if (path.endsWith('/branches/staging')) return { commit: { sha: stagingSha } };
     if (path.includes('/compare/')) return validCompare;
+    if (path.endsWith('/issues/19/comments?per_page=100&sort=created&direction=desc'))
+      return [ackComment];
     if (path.endsWith('/issues/19/events?per_page=100')) return [];
     if (path.endsWith('/actions/workflows/agent-sc-acceptance.yml/dispatches')) {
       assert.equal(options.method, 'POST');
