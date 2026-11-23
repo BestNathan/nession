@@ -385,7 +385,7 @@ function selfTest(){
     const rotationRuns=new Map([[source.file,[run]],[nextSource.file,[alternate]]]);
     assert.equal((await chooseMissing(rotationRuns,new Map(),async()=>1,1)).run_id,400,
       'round-robin recovery must not permanently prioritize Provider');
-    assert.throws(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
+    await assert.rejects(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
       /invalid recovery rotation/);
     const selected=await chooseMissing(runs,new Map(),async()=>1);
     assert.equal(selected.run_id,321);
