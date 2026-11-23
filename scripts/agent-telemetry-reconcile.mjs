@@ -110,10 +110,13 @@ export function indexedSourceSummaries(root){
   }
   return new Map([...summaryCounts].map(([key,value])=>[key,value.size]));
 }
-export async function chooseMissing(runsBySource,summaryCounts,artifactCount){
-  // Provider is first so a cancelled ingest cannot strand merged-SHA SC wake.
-  // Oldest eligible first within each bounded source listing avoids starvation.
-  for(const source of SOURCES){
+export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rotation=0){
+  // Round-robin starting source on each scheduled tick, oldest first WITHIN
+  // each source. A permanently backlogged Provider must not starve Audit.
+  if(!Number.isSafeInteger(rotation)||rotation<0)fail('invalid recovery rotation');
+  const offset=rotation%SOURCES.length;
+  const orderedSources=[...SOURCES.slice(offset),...SOURCES.slice(0,offset)];
+  for(const source of orderedSources){
     const runs=runsBySource.get(source.file)??[];
     if(!Array.isArray(runs)||runs.length>MAX_RUNS)fail('unbounded source listing');
     const ordered=runs.filter(run=>trustedSource(run,source))
@@ -152,10 +155,13 @@ async function select(store){
     if(!Array.isArray(response.workflow_runs))fail('malformed GitHub workflow run listing');
     runsBySource.set(source.file,response.workflow_runs);
   }
+  // GitHub run_number is main-owned; rotation is not client/dispatch input.
+  const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
+  if(!positive(runNumber))fail('trusted schedule run_number required for fairness');
   const result=await chooseMissing(runsBySource,summaryCounts,async run=>{
     const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
     return countArtifactSummaries(artifacts,run);
-  });
+  },runNumber%SOURCES.length);
   console.log(JSON.stringify(result??{run_id:null}));
 }
 // The scheduled replay is allowed only through trusted main-selected workflow
@@ -373,6 +379,14 @@ function selfTest(){
   assert.throws(()=>countArtifactSummaries(both,{id:321,run_attempt:0}),/invalid source/);
   const runs=new Map([[source.file,[{...run,id:322,created_at:'2026-10-14T01:00:00Z'},run]]]);
   return (async()=>{
+    const nextSource=SOURCES[1];
+    const alternate={...run,id:400,path:'.github/workflows/'+nextSource.file,
+      name:nextSource.name,event:nextSource.events[0]};
+    const rotationRuns=new Map([[source.file,[run]],[nextSource.file,[alternate]]]);
+    assert.equal((await chooseMissing(rotationRuns,new Map(),async()=>1,1)).run_id,400,
+      'round-robin recovery must not permanently prioritize Provider');
+    assert.throws(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
+      /invalid recovery rotation/);
     const selected=await chooseMissing(runs,new Map(),async()=>1);
     assert.equal(selected.run_id,321);
     const replay=await chooseMissing(runs,new Map([
