@@ -549,8 +549,8 @@ function selfTest(){
     "- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'workflow_run'"
   )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'",
-    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count == '0'"
+    "github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'",
+    "github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count == '0'"
   )),/empty telemetry events/);
   // Empty telemetry must not proceed through source resolution after preflight.
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
