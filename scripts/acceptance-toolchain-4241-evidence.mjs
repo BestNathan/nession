@@ -76,6 +76,28 @@ function attestReadback(log,name,version,digest) {
       'ghcr.io/bestnathan/nession-toolchain:'+name+'-'+version+'@sha256:'+digest),
     'missing independent remote raw EROFS/OCI readback '+name+' '+version);
 }
+function attestOrphan(pr,num,merge,commit,comparison,files) {
+  denied(pr?.number===Number(num)&&pr.merge_commit_sha===merge&&
+    pr.merged_at&&repoOwned(pr)&&pr.base.ref==='toolchains' &&
+    pr.state==='closed' &&
+    /(?:^|\n)Refs\s+#4241\b/i.test(String(pr.body??'')),
+    'untrusted orphan PR association #'+num);
+  denied(commit?.sha===merge&&commit.parents?.length===2,
+    'orphan source must be a genuine two-parent merge #'+num);
+  denied(ancestor(comparison,merge),'detached or stale orphan merge #'+num);
+  denied(Array.isArray(files)&&files.length>0&&files.length<100 &&
+    files.every(f=>/^[a-z][a-z0-9-]*\/[0-9][a-zA-Z0-9.-]*\/build\.sh$/.test(f.filename) &&
+      ['added','modified'].includes(f.status)),'untrusted PR files #'+num);
+  return {number:Number(num),merge_sha:merge,paths:files.map(f=>f.filename)};
+}
+function attestRecipe(file,fingerprint,name) {
+  denied(file?.type==='file'&&file.encoding==='base64'&&
+    typeof file.content==='string','unavailable immutable recipe '+name);
+  const script=Buffer.from(file.content.replace(/\s/g,''),'base64');
+  denied(script.length>0&&script.length<131072 &&
+    createHash('sha256').update(script).digest('hex')===fingerprint,
+    'tampered recipe script bytes '+name);
+}
 export function shouldCollectToolchain4241(stage,issue) {
   return stage==='post-merge'&&String(issue)==='4241';
 }
@@ -109,22 +131,10 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
   const uniquePrs=new Map();
   for(const [num,merge] of Object.entries(SOURCE_PRS)){
     const pr=await read(PREFIX+'/pulls/'+num);
-    denied(pr?.number===Number(num)&&pr.merge_commit_sha===merge&&
-      pr.merged_at&&repoOwned(pr)&&pr.base.ref==='toolchains' &&
-      pr.state==='closed' &&
-      /(?:^|\n)Refs\s+#4241\b/i.test(String(pr.body??'')),
-      'untrusted orphan PR association #'+num);
     const commit=await read(PREFIX+'/commits/'+merge);
-    denied(commit?.sha===merge&&commit.parents?.length===2,
-      'orphan source must be a genuine two-parent merge #'+num);
-    denied(ancestor(await read(PREFIX+'/compare/'+merge+'...'+currentCatalog),merge),
-      'detached or stale orphan merge #'+num);
+    const comparison=await read(PREFIX+'/compare/'+merge+'...'+currentCatalog);
     const files=await read(PREFIX+'/pulls/'+num+'/files?per_page=100');
-    denied(Array.isArray(files)&&files.length>0&&files.length<100 &&
-      files.every(f=>/^[a-z][a-z0-9-]*\/[0-9][a-zA-Z0-9.-]*\/build\.sh$/.test(f.filename) &&
-        ['added','modified'].includes(f.status)),'untrusted PR files #'+num);
-    uniquePrs.set(Number(num),{number:Number(num),merge_sha:merge,
-      paths:files.map(f=>f.filename)});
+    uniquePrs.set(Number(num),attestOrphan(pr,num,merge,commit,comparison,files));
   }
   const accepted=[];
   for(const [name,version,id,catalog,fingerprint,digest,primaryPr] of RELEASES) {
@@ -135,12 +145,7 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
     if(primaryPr) denied(uniquePrs.get(primaryPr)?.paths.includes(name+'/'+version+'/build.sh'),
       'unrelated orphan PR cannot implement '+name+' '+version);
     const file=await read(PREFIX+'/contents/'+name+'/'+version+'/build.sh?ref='+catalog);
-    denied(file?.type==='file'&&file.encoding==='base64'&&
-      typeof file.content==='string','unavailable immutable recipe '+name);
-    const script=Buffer.from(file.content.replace(/\s/g,''),'base64');
-    denied(script.length>0&&script.length<131072 &&
-      createHash('sha256').update(script).digest('hex')===fingerprint,
-      'tampered recipe script bytes '+name+' '+version);
+    attestRecipe(file,fingerprint,name+' '+version);
     const run=await read(PREFIX+'/actions/runs/'+id);
     denied(run?.id===id&&run.run_attempt===1&&run.name==='Release / Toolchains'&&
       run.path==='.github/workflows/release-toolchains.yml'&&
@@ -212,6 +217,37 @@ export function selfTestToolchain4241() {
     'gh','2.105.0',RELEASES[0][4],RELEASES[0][5]),/architecture/);
   assert.throws(()=>attestReadback('success','gh','2.105.0',RELEASES[0][5]),
     /readback/);
+  // Real source selectors are tested against forged mentions, foreign stores,
+  // detached ancestry, invalid merge parent count, and malicious file paths.
+  const merge=SOURCE_PRS[4242],other='a'.repeat(40);
+  const sameRepo={full_name:REPO};
+  const pr={number:4242,merge_commit_sha:merge,
+    merged_at:'2026-11-22T00:00:00Z',state:'closed',body:'Refs #4241',
+    head:{repo:sameRepo},base:{repo:sameRepo,ref:'toolchains'}};
+  const commit={sha:merge,parents:[{sha:'b'.repeat(40)},{sha:'c'.repeat(40)}]};
+  const cmp={base_commit:{sha:merge},merge_base_commit:{sha:merge},
+    ahead_by:1,behind_by:0,status:'ahead'};
+  const files=[{filename:'node/24.22.3/build.sh',status:'added'}];
+  assert.equal(attestOrphan(pr,4242,merge,commit,cmp,files).number,4242);
+  assert.throws(()=>attestOrphan({...pr,body:'Refs #9999'},4242,merge,commit,cmp,files),/association/);
+  assert.throws(()=>attestOrphan({...pr,base:{repo:sameRepo,ref:'gitops'}},
+    4242,merge,commit,cmp,files),/association/);
+  assert.throws(()=>attestOrphan({...pr,head:{repo:{full_name:'other/repo'}}},
+    4242,merge,commit,cmp,files),/association/);
+  assert.throws(()=>attestOrphan({...pr,merge_commit_sha:other},
+    4242,merge,commit,cmp,files),/association/);
+  assert.throws(()=>attestOrphan(pr,4242,merge,
+    {...commit,parents:[...commit.parents,{sha:'d'.repeat(40)}]},cmp,files),/two-parent/);
+  assert.throws(()=>attestOrphan(pr,4242,merge,commit,
+    {...cmp,merge_base_commit:{sha:other}},files),/stale/);
+  assert.throws(()=>attestOrphan(pr,4242,merge,commit,cmp,
+    [{filename:'scripts/evil.sh',status:'added'}]),/files/);
+  const script='#!/bin/sh\necho fixture\n';
+  const fingerprint=createHash('sha256').update(script).digest('hex');
+  const file={type:'file',encoding:'base64',content:Buffer.from(script).toString('base64')};
+  attestRecipe(file,fingerprint,'fixture');
+  assert.throws(()=>attestRecipe(file,'a'.repeat(64),'fixture'),/tampered/);
+  assert.throws(()=>attestRecipe({...file,content:'!!!'},fingerprint,'fixture'),/tampered/);
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
