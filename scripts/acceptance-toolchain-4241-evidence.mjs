@@ -357,6 +357,62 @@ export function selfTestToolchain4241() {
   attestRecipe(file,fingerprint,'fixture');
   assert.throws(()=>attestRecipe(file,'a'.repeat(64),'fixture'),/tampered/);
   assert.throws(()=>attestRecipe({...file,content:'!!!'},fingerprint,'fixture'),/tampered/);
+  // Source-verified Issue closure cannot be inferred from Release runs alone.
+  const sc=['SC-01','SC-02','SC-03','SC-04','SC-05'];
+  const fence=String.fromCharCode(96).repeat(3);
+  const fixtureBody='## Success Criteria\n'+sc.map(id=>'- [x] '+id+' done').join('\n')+
+    '\n\n## Acceptance Plan\n'+fence+'yaml\nacceptance:\n'+
+    sc.map(id=>'  '+id+':\n    when: '+(id==='SC-01'?'pr':'merged')+'\n'+
+      (id==='SC-01'?'':'    branch: main\n')+'    method: agent').join('\n')+
+    '\n'+fence+'\n\n## Acceptance Report\n'+
+    '| Criterion | Result | Evidence |\n| --- | --- | --- |\n'+
+    sc.map(id=>'| '+id+' | Pass | run '+(id==='SC-01'?44980355063:SOURCE_ACCEPT_RUN)+
+      '; ref '+(id==='SC-01'?SC01_HEAD:MAIN_ANCHOR)+
+      '; source agent-qwen; independent verified result |').join('\n');
+  const closedAt='2026-11-23T03:20:42Z';
+  const parent={number:4241,body:fixtureBody,state:'closed',
+    state_reason:'completed',closed_at:closedAt};
+  const events=[{event:'closed',created_at:closedAt,
+    actor:{login:'github-actions[bot]'}}];
+  const run={id:SOURCE_ACCEPT_RUN,run_attempt:1,name:'Agent / SC Acceptance',
+    path:'.github/workflows/agent-sc-acceptance.yml',event:'workflow_dispatch',
+    head_branch:'main',head_sha:SOURCE_ACCEPT_HEAD,status:'completed',
+    conclusion:'success',repository:{id:19,full_name:REPO},
+    head_repository:{full_name:REPO}};
+  const job=(name,id,steps)=>({name,id,run_id:SOURCE_ACCEPT_RUN,
+    run_attempt:1,head_sha:SOURCE_ACCEPT_HEAD,status:'completed',
+    conclusion:'success',steps:steps.map(name=>({name,status:'completed',
+      conclusion:'success'}))});
+  const execute=job('Execute acceptance',21,[
+    'Collect trusted GitHub Actions evidence','Run read-only Acceptance Agent',
+    'Upload structured Acceptance Result']);
+  const update=job('Deterministic Issue updater',22,
+    ['Apply Acceptance Report and checkbox projection']);
+  const jobs={jobs:[execute,update]};
+  const artifact={id:23,digest:'sha256:'+'a'.repeat(64),
+    name:'acceptance-result-4241-post-merge-'+SOURCE_ACCEPT_RUN+'-1',
+    expired:false,size_in_bytes:900,workflow_run:{id:SOURCE_ACCEPT_RUN,
+      head_sha:SOURCE_ACCEPT_HEAD,repository_id:19}};
+  const result={schema_version:1,issue:4241,stage:'post-merge',
+    run_id:SOURCE_ACCEPT_RUN,target_ref:MAIN_ANCHOR,source:'agent-qwen',
+    contract_sha256:'b'.repeat(64),selected_criteria:sc.slice(1),
+    criteria:sc.slice(1).map(criterion=>({criterion,result:'Pass'}))};
+  const release={published:RELEASES.map(([tool,version])=>({tool,version}))};
+  const verify=(...args)=>attest4297ParentClosure(...args);
+  assert.equal(verify(parent,events,run,jobs,artifact,result,true,release).published,14);
+  for(const args of [
+    [{...parent,state:'open'},events,run,jobs,artifact,result,true,release],
+    [parent,[{...events[0],actor:{login:'BestNathan'}}],
+      run,jobs,artifact,result,true,release],
+    [parent,events,{...run,run_attempt:2},jobs,artifact,result,true,release],
+    [parent,events,run,{jobs:[execute]},artifact,result,true,release],
+    [parent,events,run,jobs,{...artifact,digest:'invalid'},result,true,release],
+    [parent,events,run,jobs,artifact,
+      {...result,criteria:result.criteria.slice(1)},true,release],
+    [parent,events,run,jobs,artifact,result,false,release],
+    [parent,events,run,jobs,artifact,result,true,
+      {published:release.published.slice(1)}],
+  ])assert.throws(()=>verify(...args),/toolchain #4241 readback/);
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
