@@ -153,8 +153,14 @@ function gh(endpoint){
   return JSON.parse(execFileSync('gh',['api','repos/'+REPO+'/'+endpoint],
     {encoding:'utf8',timeout:30000,maxBuffer:8*1024*1024,stdio:['ignore','pipe','pipe']}));
 }
+export function ghTextArgs4342(endpoint){
+  if(!/^actions\/jobs\/[1-9][0-9]*\/logs$/.test(endpoint))
+    reject('raw log read restricted to authenticated numeric Job');
+  // `gh api` otherwise rejects legitimate ANSI-colored GitHub Job logs.
+  return ['api','--allow-escape-sequences','repos/'+REPO+'/'+endpoint];
+}
 function ghText(endpoint){
-  return execFileSync('gh',['api','repos/'+REPO+'/'+endpoint],
+  return execFileSync('gh',ghTextArgs4342(endpoint),
     {encoding:'utf8',timeout:30000,maxBuffer:9*1024*1024,stdio:['ignore','pipe','pipe']});
 }
 function gitJsonBlob(relative,commit){
@@ -196,6 +202,13 @@ function collect(file,sha){
   console.log('SC-08 post-Store Provider delivery authenticated; Reviewer not applicable in bounded source window');
 }
 function selfTest(){
+  assert.deepEqual(ghTextArgs4342('actions/jobs/137670055701/logs'),[
+    'api','--allow-escape-sequences',
+    'repos/'+REPO+'/actions/jobs/137670055701/logs',
+  ]);
+  for(const bad of ['actions/jobs/0/logs','actions/runs/45168056749',
+    'actions/jobs/137670055701/logs?token=attacker'])
+    assert.throws(()=>ghTextArgs4342(bad),/raw log read restricted/);
   const raw=buildAgentWorkflowTelemetry({
     workflow_id:'agent-provider-smoke',github_run_id:BOUND.source,
     github_run_attempt:1,repository:REPO,event:'push',
