@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {execFileSync} from 'node:child_process';
-import {validateAgentWorkflowTelemetry,telemetryStoragePath}
+import {buildAgentWorkflowTelemetry,validateAgentWorkflowTelemetry,telemetryStoragePath}
   from './agent-workflow-telemetry.mjs';
 
 const REPO='BestNathan/nession', SHA=/^[a-f0-9]{40}$/;
@@ -196,22 +196,79 @@ function collect(file,sha){
   console.log('SC-08 post-Store Provider delivery authenticated; Reviewer not applicable in bounded source window');
 }
 function selfTest(){
-  const sample={schema_version:1,kind:'agent_workflow_run',
-    identity:{workflow_id:'agent-provider-smoke',github_run_id:BOUND.source,
-      github_run_attempt:1,unique_run_name:'45167810720-1-issue-1556-staging-claude-code',
-      repository:REPO,event:'push',github_workflow:'Agent / Provider Smoke'},
+  const raw=buildAgentWorkflowTelemetry({
+    workflow_id:'agent-provider-smoke',github_run_id:BOUND.source,
+    github_run_attempt:1,repository:REPO,event:'push',
+    github_workflow:'Agent / Provider Smoke',
+    unique_run_name:'45167810720-1-issue-1556-staging-claude-code',
     task:{id:'issue-1556-staging',type:'provider-smoke',issue:1556},
-    agent:{provider:'qwen',id:'legacy-acceptance-claude-code',role:'acceptor',status:'finished'},
-    execution:{turns:null,model_requests:null,tools:{observed:false,total:null,unique:null,by_name:null}},
-    tokens:{input:null,output:null,cache_read:null,cache_write:null,reasoning:null,total:null},
-    cost:{raw_usd:null,charged_usd:null,estimated_usd:null},
-    timing:{started_at:'2026-11-23T11:44:00.000Z',finished_at:null,agent_duration_ms:null,workflow_duration_ms:null},
-    result:{status:'completed'}};
-  // Use the production builder for strict schema, path and attribution parity.
-  const {buildAgentWorkflowTelemetry}=requireFallbackNeverUsed();
-  void sample; void buildAgentWorkflowTelemetry;
+    agent:{provider:'claude-code',id:'legacy-acceptance-claude-code',
+      role:'acceptor',status:'finished'},
+    timing:{started_at:'2026-11-23T11:44:00Z'},
+    result:{status:'completed'},
+  });
+  assert.equal(telemetryStoragePath(raw),BOUND.raw);
+  const run=(id,p,event)=>({id,path:p,event,run_attempt:1,
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    head_branch:'main',head_sha:BOUND.sha,status:'completed',conclusion:'success'});
+  const source=run(BOUND.source,BOUND.source_path,'push');
+  const writer=run(BOUND.writer,BOUND.writer_path,'workflow_run');
+  const sourceArtifacts={total_count:3,artifacts:[
+    'agent-telemetry-provider-smoke-qwen-45167810720-1',
+    'agent-telemetry-provider-smoke-qwen-reviewer-45167810720-1',
+    'agent-telemetry-provider-smoke-qwen-developer-45167810720-1',
+  ].map((name,i)=>({id:11+i,name,expired:false,size_in_bytes:100}))};
+  const writerArtifacts={total_count:1,artifacts:[{
+    id:24,name:'run-store-receipt-45168056749-1-agent',
+    expired:false,size_in_bytes:100}]};
+  const jobs={jobs:[{id:50,name:'ingest',run_id:writer.id,run_attempt:1,
+    status:'completed',conclusion:'success',steps:[
+      'Validate and append immutable telemetry','Commit metrics history',
+      'Verify immutable Git bytes before uploading Run Store receipts',
+      'Notify Acceptance of durable Provider evidence',
+    ].map(name=>({name,conclusion:'success'})).concat([{
+      name:'Notify Store of durable Reviewer evidence',conclusion:'skipped'}])}]};
+  const commit='c'.repeat(40);
+  const log='2026-11-23T11:47:48Z SOURCE_RUN_ID: '+source.id+'\n'+
+    '2026-11-23T11:47:48Z EXPECTED_WORKFLOW_ID: agent-provider-smoke\n'+
+    '2026-11-23T11:47:53Z '+JSON.stringify({schema_version:1,
+      kind:'run_store_receipt_readback',store:'metrics',commit_sha:commit,
+      source_run_id:String(source.id),ingester_run_id:String(writer.id),
+      checked_records:3,changed_records:3});
+  const reviewListing={total_count:1,workflow_runs:[{
+    created_at:'2026-11-23T03:08:49Z',
+    path:'.github/workflows/agent-review.yml',
+    repository:{full_name:REPO}}]};
+  const args={source,writer,sourceArtifacts,writerArtifacts,jobs,log,raw,
+    recordCommits:[{sha:commit}],reviewListing};
+  const proof=attest4342Downstream(args);
+  assert.equal(proof.status,'authenticated');
+  assert.equal(proof.reviewer_notification,'not_applicable_no_reviewer_source_since_fix');
+  const context={issue:{number:4342},stage:'post-merge',target_ref:BOUND.sha,
+    ci_evidence:{verified_4342_poststore_delivery:{...proof,target_sha:BOUND.sha}}};
+  const pending={criteria:[{criterion:'SC-08',result:'Pending',evidence:[]}]};
+  assert.equal(verified4342DownstreamCriterion(context,pending).criteria[0].result,'Pass');
+  assert.equal(verified4342DownstreamCriterion({...context,ci_evidence:null},pending)
+    .criteria[0].result,'Pending');
+  assert.throws(()=>verified4342DownstreamCriterion({...context,ci_evidence:null},{
+    criteria:[{criterion:'SC-08',result:'Pass',evidence:[]}]
+  }),/Pass lacks authenticated/);
+  assert.throws(()=>attest4342Downstream({...args,source:{...source,
+    repository:{full_name:'attacker/fork'}}}),/provenance mismatch/);
+  assert.throws(()=>attest4342Downstream({...args,jobs:{jobs:[{
+    ...jobs.jobs[0],steps:jobs.jobs[0].steps.filter(x=>
+      x.name!=='Notify Acceptance of durable Provider evidence')
+  }]}}),/notification\/commit did not execute/);
+  assert.throws(()=>attest4342Downstream({...args,
+    recordCommits:[{sha:commit},{sha:'d'.repeat(40)}]}),/unique immutable Store/);
+  assert.throws(()=>attest4342Downstream({...args,reviewListing:{
+    total_count:2,workflow_runs:[...reviewListing.workflow_runs,{
+      path:'.github/workflows/agent-review.yml',
+      repository:{full_name:REPO},created_at:'2026-11-23T11:45:00Z'
+    }]
+  }}),/Reviewer post-Store applicability/);
+  console.log('4342 source-bound post-Store Provider and Reviewer N/A positive/adversarial fixtures passed');
 }
-function requireFallbackNeverUsed(){return {buildAgentWorkflowTelemetry:()=>{}};}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.argv[2]==='collect'&&process.argv[3]&&process.argv[4])
     collect(process.argv[3],process.argv[4]);
