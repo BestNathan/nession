@@ -64,8 +64,8 @@ export function inspectConflictPaths(repo,target,source){
     fs.rmSync(root,{recursive:true,force:true});
   }
 }
-function pathsFromUnmergedOrEmpty(cwd){
-  const raw=git(cwd,['ls-files','-u','-z']).stdout;
+function pathsFromUnmergedOrEmpty(cwd,env={}){
+  const raw=git(cwd,['ls-files','-u','-z'],{env}).stdout;
   return [...new Set(raw.split('\0').filter(Boolean).map(x=>x.split('\t').slice(1).join('\t')))];
 }
 function finalize(repo,context,mode,outDir) {
@@ -78,21 +78,31 @@ function finalize(repo,context,mode,outDir) {
      git(dir,['rev-parse','MERGE_HEAD']).stdout.trim()!==source)throw Error('stale or foreign worktree merge identity');
   const original=mergeTree(repo,target,source);
   if(!original.conflict||original.tree!==auto)throw Error('stale or forged merge-tree identity');
-  const pending=pathsFromUnmergedOrEmpty(dir);
+  // Stage in an alternate index. Failed independent validation must NEVER
+  // erase stage 1/2/3 conflict entries from the Agent's live worktree:
+  // a bounded correction pass needs those exact original Git blob identities.
+  const scratch=fs.mkdtempSync(path.join(os.tmpdir(),'nession-repair-workindex-'));
+  const indexFile=path.join(scratch,'index');
+  try {
+  const originalIndex=git(dir,
+    ['rev-parse','--path-format=absolute','--git-path','index']).stdout.trim();
+  fs.copyFileSync(originalIndex,indexFile);
+  const env={GIT_INDEX_FILE:indexFile};
+  const pending=pathsFromUnmergedOrEmpty(dir,env);
   if(!pending.every(p=>conflicts.includes(p)))throw Error('conflict set changed');
-  git(dir,['add','--',...conflicts]);
-  const untracked=git(dir,['ls-files','--others','--exclude-standard','-z']).stdout.split('\0').filter(Boolean);
-  const unstaged=git(dir,['diff','--name-only','-z']).stdout.split('\0').filter(Boolean);
+  git(dir,['add','--',...conflicts],{env});
+  const untracked=git(dir,['ls-files','--others','--exclude-standard','-z'],{env}).stdout.split('\0').filter(Boolean);
+  const unstaged=git(dir,['diff','--name-only','-z'],{env}).stdout.split('\0').filter(Boolean);
   if([...untracked,...unstaged].some(p=>!conflicts.includes(p)))throw Error('Agent modified non-conflicting paths');
-  if(git(dir,['ls-files','-u','-z']).stdout)throw Error('unmerged files remain');
+  if(git(dir,['ls-files','-u','-z'],{env}).stdout)throw Error('unmerged files remain');
   for(const p of conflicts) {
     if(!fs.existsSync(path.join(dir,p)))throw Error('pilot requires text-file resolution');
     const content=fs.readFileSync(path.join(dir,p),'utf8');
     if(/^(<<<<<<< |=======\s*$|>>>>>>> )/m.test(content))throw Error('unresolved conflict marker');
   }
-  const staged=git(dir,['diff','--cached','--check'],{allowConflict:true});
+  const staged=git(dir,['diff','--cached','--check'],{allowConflict:true,env});
   if(staged.status!==0)throw Error('resolved changes failed whitespace check');
-  const tree=validSha(git(dir,['write-tree']).stdout.trim());
+  const tree=validSha(git(dir,['write-tree'],{env}).stdout.trim());
   const changed=git(dir,['diff','--name-only','-z',auto,tree]).stdout.split('\0').filter(Boolean);
   if(changed.some(p=>!conflicts.includes(p)))throw Error('resolution modified clean merged paths');
   if(!changed.length)throw Error('resolution made no change');
@@ -100,15 +110,18 @@ function finalize(repo,context,mode,outDir) {
   if(mode==='source-repair') {
     const indexFile=path.join(os.tmpdir(),'nession-conflict-index-'+process.pid+'-'+Date.now());
     try {
-      const env={GIT_INDEX_FILE:indexFile};
-      git(repo,['read-tree',target],{env});
+      const candidateEnv={GIT_INDEX_FILE:indexFile};
+      git(repo,['read-tree',target],{env:candidateEnv});
       for(const p of conflicts) {
-        const entry=git(dir,['ls-files','-s','--',p]).stdout.trim();
+        // Worktree's resolved stage-0 blob is in the FIRST scratch index.
+        // The candidate index starts as untouched TARGET and must never be
+        // mistaken for the resolved source blob.
+        const entry=git(dir,['ls-files','-s','--',p],{env}).stdout.trim();
         const match=/^(100644|100755) ([a-f0-9]{40}) 0\t/.exec(entry);
         if(!match)throw Error('invalid resolved source blob');
-        git(repo,['update-index','--add','--cacheinfo',match[1]+','+match[2]+','+p],{env});
+        git(repo,['update-index','--add','--cacheinfo',match[1]+','+match[2]+','+p],{env:candidateEnv});
       }
-      candidateTree=validSha(git(repo,['write-tree'],{env}).stdout.trim());
+      candidateTree=validSha(git(repo,['write-tree'],{env:candidateEnv}).stdout.trim());
     } finally {fs.rmSync(indexFile,{force:true});}
     if(candidateTree===git(repo,['rev-parse',target+'^{tree}']).stdout.trim())
       throw Error('source repair is empty');
@@ -134,6 +147,7 @@ function finalize(repo,context,mode,outDir) {
     fs.writeFileSync(path.join(outDir,'candidate.json'),JSON.stringify(report,null,2)+'\n');
     fs.writeFileSync(path.join(outDir,'candidate.patch'),patch);}
   return report;
+  } finally {fs.rmSync(scratch,{recursive:true,force:true});}
 }
 function testFixture(root){
   const repo=path.join(root,'repo');fs.mkdirSync(repo);
@@ -193,6 +207,9 @@ function selfTest(){
     assert.throws(()=>finalize(f.repo,a,'source-repair',null),/unresolved conflict marker/);
     fs.writeFileSync(path.join(a.worktree,'conflict.txt'),'policy=both\n');
     assert.throws(()=>finalize(f.repo,a,'source-repair',null),/source repair did not reproduce/);
+    // A rejected source replay must leave the three-way Git index intact;
+    // the correction Agent can still read BASE/OURS/THEIRS at exact SHAs.
+    assert.notEqual(git(a.worktree,['ls-files','-u','-z']).stdout,'');
     fs.writeFileSync(path.join(a.worktree,'conflict.txt'),'policy=main\n');
     const resultA=finalize(f.repo,a,'source-repair',null);
     assert.deepEqual(resultA.parents,[f.target]);

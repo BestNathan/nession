@@ -125,10 +125,13 @@ function main(){
   const productionIssue=Number(process.env.REPAIR_ISSUE_NUMBER??0);
   if(production&&(!Number.isSafeInteger(productionIssue)||productionIssue<1))
     throw Error('production conflict repair needs a preexisting Issue identity');
+  const retry=process.env.CONVERGENCE_REPLAY_FEEDBACK??'';
+  if(retry&&!(production&&mode==='source-repair'&&retry==='source-replay-mismatch'))
+    throw Error('unapproved source repair feedback');
   const threeWay=production?threeWayConflictContext(r.worktree,r.conflict_paths):null;
   const instructions=production
     ? (mode==='source-repair'
-      ? 'Resolve the original conflict by editing only the listed conflicted text files. Produce a source-repair change based on TARGET that makes a subsequent merge of SOURCE conflict-free and reproduces the resolved Git tree. Preserve behavioral invariants of both sides. If that cannot be done safely, do not invent a merge resolution.'
+      ? 'Source Repair is a premerge single-parent commit on TARGET, NOT the final two-parent merge. Overlapping hunks must align with the SOURCE changes so that Git can replay the original SOURCE commit cleanly onto the repaired TARGET. Preserve TARGET-only semantics in disjoint hunks. Do not synthesize overlapping hunks that make the replay merge conflict or create a different tree. If safe SOURCE-aligned repair cannot preserve semantics, explain that and do not invent a passing result.'
       : 'Resolve both versions into the Git three-way integration result. Preserve clean auto-merged paths, semantics of both source histories, and change only the listed conflict paths. Do not invent a passing test.')
     : (mode==='source-repair'
       ? 'For this controlled Add/Add or content conflict proof, make conflict-probe.txt exactly match the SOURCE version. That should allow a later ordinary merge of SOURCE into TARGET after the one-parent repair.'
@@ -146,6 +149,9 @@ function main(){
       ? 'Production conflict: the listed conflict files contain real product/repository logic. Do not modify workflow, Gate, credentials or repository instructions. If semantics are unclear, explain the uncertainty; never delete a side solely to satisfy Git.'
       : 'For this pilot the conflict file is scripts/fixtures/conflict-probe.txt; no product logic is involved.',
     instructions,
+    retry==='source-replay-mismatch'
+      ? 'INDEPENDENT VALIDATOR FEEDBACK (trusted category): your previous file edits did not replay SOURCE into the repaired TARGET with exactly the same resolved tree. Revise only the conflicted files, paying attention to SOURCE-aligned overlapping hunks; the Git index still has original BASE/OURS/THEIRS. The prior edits are present in the worktree. Do NOT claim that simply combining both sides is a clean one-parent replay.'
+      : '',
     'Edit the file directly with Edit/Write. Respond in plain text with a short rationale. The independent Git validator will decide success.'
   ].join('\n');
   let envelope=null,status='error';
@@ -165,15 +171,15 @@ function main(){
     console.log('Coding Agent edit attempt completed for '+mode+'; pending independent Git validation');
   } finally {
     const now=new Date().toISOString();
-    const template=(production?'staging-convergence-conflict-':'merge-conflict-probe-')+mode+'-v1';
+    const template=(production?'staging-convergence-conflict-':'merge-conflict-probe-')+mode+(retry?'-retry1':'')+'-v1';
     const record=buildAgentWorkflowTelemetry({
       workflow_id:WORKFLOW_ID,
       github_workflow:process.env.GITHUB_WORKFLOW||'Agent / Staging Convergence Review',
       unique_run_name:providerScopedRunName({workflowId:WORKFLOW_ID,
         runId:process.env.GITHUB_RUN_ID,runAttempt:process.env.GITHUB_RUN_ATTEMPT,
-        taskId:(production?'repair-':'probe-')+mode,provider:'claude-code'}),
+        taskId:(production?'repair-':'probe-')+mode+(retry?'-retry1':''),provider:'claude-code'}),
       job:'resolve',
-      task:{id:(production?'repair-':'probe-')+mode,
+      task:{id:(production?'repair-':'probe-')+mode+(retry?'-retry1':''),
         type:production?'staging-convergence-repair':'merge-conflict-probe',
         issue:production?productionIssue:4124,
         target_ref:r.target_sha,fingerprint:r.target_sha+':'+r.source_sha+':'+mode},
