@@ -31,6 +31,8 @@ concurrency:
   group: store-agent-development-ingest-${{ github.event.workflow_run.id || inputs.source_run_id }}-${{ github.event.workflow_run.run_attempt || '1' }}
   cancel-in-progress: false
 
+# #4174: one exact owner-created #4065 comment may re-attest the
+# previously committed Qwen Repair Worker; it never launches a model.
 jobs:
   # #3885 exact Owner Run recovery; Ingest independently verifies GitHub
   # Claim, main ancestry, Artifact digests and signed Store before publication.
