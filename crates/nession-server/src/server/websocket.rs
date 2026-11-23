@@ -1171,6 +1171,30 @@ async fn handle_ws_stream(
                                 session_name
                             );
                             close_reason = "relay-agent-half-open";
+                            // Unlike a stalled browser, this browser is still
+                            // draining its socket. Expose a bounded, typed
+                            // WebSocket close reason instead of leaving the
+                            // client to guess why its Relay disappeared.
+                            // A saturated outbound queue cannot keep teardown
+                            // open: the close is best-effort and time limited.
+                            let close = WsFrame::Close(Some(
+                                nession_runtime::frame::WsCloseFrame {
+                                    code: 1011,
+                                    reason: "relay-agent-half-open".to_string(),
+                                },
+                            ));
+                            if !matches!(
+                                tokio::time::timeout(
+                                    std::time::Duration::from_secs(2),
+                                    sender.send_reply(close),
+                                ).await,
+                                Ok(Ok(()))
+                            ) {
+                                warn!(
+                                    session = %session_name,
+                                    "Could not deliver bounded Agent-leg close reason"
+                                );
+                            }
                             break;
                         }
                         Ok(RelayEnd::ClientStalled) => {
