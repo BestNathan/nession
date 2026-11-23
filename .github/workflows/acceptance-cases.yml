@@ -533,10 +533,21 @@ jobs:
       # per Case. Each Case still emits its own record and verdict; eligible
       # Cases (manifest `isolation: shared`) may share one runtime. Every Case
       # still runs even when an earlier one fails, and the step still fails.
+      # Authenticated reads are staged by trusted main before uncredentialed Cases.
+      - name: Pre-stage trusted GitHub readback for #3072 without Case credentials
+        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && steps.select.outputs.count != '0' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NESSION_CASE_SELECTION: ${{ runner.temp }}/selected-cases.json
+          NESSION_CASE_TARGET_SHA: ${{ steps.target.outputs.target_sha }}
+          NESSION_CASE_SOURCE_SNAPSHOT: ${{ runner.temp }}/3072-github-source.json
+        run: node trusted/scripts/acceptance-case-3072-prestage.mjs
+
       - name: Execute selected Cases in one job-scoped batch
         id: cases
         if: steps.select.outputs.count != '0'
         env:
+          NESSION_CASE3072_GITHUB_SNAPSHOT: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && format('{0}/3072-github-source.json', runner.temp) || '' }}
           TARGET_SHA: ${{ steps.target.outputs.target_sha }}
           ACCEPTANCE_STAGE: ${{ steps.target.outputs.stage }}
           DEPLOYMENT_BINDING: ${{ steps.deployment.outputs.binding }}
