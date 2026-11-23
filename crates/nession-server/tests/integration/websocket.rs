@@ -4148,9 +4148,13 @@ fn keep_mock_agent_control_healthy(agent: TestWs) {
                             "active_sessions": 1,
                         },
                     });
-                    if sink.send(tokio_tungstenite::tungstenite::Message::Text(
-                        frame.to_string(),
-                    )).await.is_err() {
+                    if sink
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            frame.to_string(),
+                        ))
+                        .await
+                        .is_err()
+                    {
                         break;
                     }
                 }
