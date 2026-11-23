@@ -153,6 +153,17 @@ pub const GIT_INVALIDATION_LIMITS: Limits = Limits {
     frames: 256,
 };
 
+/// The key prefix Activity levels publish under in the session-state class.
+///
+/// Inventory uses the bare Session name; Activity uses this namespaced key so
+/// the two levels coalesce independently (a shared key would let one supersede
+/// the other). The prefix also names the dependency the drain order keeps: a
+/// Session's inventory frame is admitted by the Server before its Activity
+/// level can apply, so an inventory key drains before any `activity:` key
+/// (#4291). tmux Session names cannot contain `:`, so no inventory key can
+/// collide with this prefix.
+const ACTIVITY_KEY_PREFIX: &str = "activity:";
+
 /// The key the two whole-agent classes publish under.
 ///
 /// There is one agent per connection, so neither a heartbeat nor an address list
@@ -489,8 +500,16 @@ impl Outbox {
     /// are two levels about one Session, and a shared key would let one
     /// supersede the other. The namespaced key keeps them independently
     /// coalesced, and both are re-derived by the same full re-sync.
+    ///
+    /// The Server applies a level only to an admitted inventory row, so while
+    /// both keys are pending the writer drains the inventory first (#4291);
+    /// see [`OutboxFrames::try_next`].
     pub fn send_session_activity(&self, session: &str, msg: WsMessage) -> Result<()> {
-        self.publish(Class::SessionState, &format!("activity:{session}"), msg)
+        self.publish(
+            Class::SessionState,
+            &format!("{ACTIVITY_KEY_PREFIX}{session}"),
+            msg,
+        )
     }
 
     /// Publish one session's terminal size, superseding any resize still pending
@@ -654,11 +673,25 @@ impl OutboxFrames {
     /// agent's liveness level behind them. *Which* pending session comes out first
     /// is not specified, on the same reasoning as `crate::server::resize`: each key
     /// holds one frame, so a caller's job is the same for any of them.
+    ///
+    /// One dependency is specified, because the Server enforces it: within the
+    /// session-state class a Session's **inventory** frame drains before any
+    /// pending Activity level (#4291). The Server applies a level only to an
+    /// admitted row, so draining an `activity:` key while its inventory key is
+    /// still pending would deliver a level the Server must refuse — and the
+    /// watcher remembers a level as published once enqueued, so the refusal
+    /// would leave the Session `unknown` until a workload change or reconnect.
+    /// This is a per-key preference, not a queue: coalescing, the bounds and
+    /// every other class are unchanged.
     pub fn try_next(&mut self) -> Option<WsMessage> {
         let mut state = lock(&self.state);
         for class in Class::ALL {
             let (room, _) = class.parts(&mut state);
-            if let Some(frame) = take(room) {
+            let frame = match class {
+                Class::SessionState => take_session_state(room),
+                _ => take(room),
+            };
+            if let Some(frame) = frame {
                 return Some(frame);
             }
         }
@@ -686,7 +719,29 @@ impl Drop for OutboxFrames {
 /// Take one frame out of a room, whichever key it belongs to.
 fn take(room: &mut Room) -> Option<WsMessage> {
     let key = room.entries.keys().next()?.clone();
-    let pending = room.entries.remove(&key)?;
+    take_key(room, &key)
+}
+
+/// Take one frame out of the session-state room, inventory keys first.
+///
+/// A Session's inventory admission precedes its Activity level at the Server,
+/// so while both are pending the inventory key is taken first (#4291). An
+/// Activity key with no pending inventory — the ordinary incremental level
+/// change for an already-admitted Session — is taken as soon as no inventory
+/// key remains, so nothing is held back indefinitely.
+fn take_session_state(room: &mut Room) -> Option<WsMessage> {
+    let key = room
+        .entries
+        .keys()
+        .find(|key| !key.starts_with(ACTIVITY_KEY_PREFIX))
+        .or_else(|| room.entries.keys().next())?
+        .clone();
+    take_key(room, &key)
+}
+
+/// Remove one key's frame, refunding exactly what it charged.
+fn take_key(room: &mut Room, key: &str) -> Option<WsMessage> {
+    let pending = room.entries.remove(key)?;
     room.charged_bytes = room.charged_bytes.saturating_sub(pending.charged);
     Some(pending.message)
 }
@@ -795,6 +850,121 @@ mod tests {
         delivered.sort();
         assert_eq!(delivered, vec!["s1:active", "s2:detached"]);
         assert_eq!(frames.snapshot().session_state.pending, 0);
+    }
+
+    /// #4291: a Session's inventory drains before its pending Activity level,
+    /// even when the level was published first — the adverse publish order the
+    /// watcher's incremental poll used to produce. The Server applies a level
+    /// only to an admitted row, so the unordered selection this replaces could
+    /// deliver a level the Server must refuse, and the watcher remembers a
+    /// level as published once enqueued.
+    #[test]
+    fn a_sessions_inventory_drains_before_its_pending_activity_level() {
+        let (outbox, mut frames, _) = outbox();
+        outbox
+            .send_session_activity("dev", text("activity-1"))
+            .expect("publish failed");
+        outbox
+            .send_session_update("dev", text("inventory-1"))
+            .expect("publish failed");
+
+        assert_eq!(
+            body(frames.try_next().expect("nothing pending")),
+            "inventory-1",
+            "the admission frame must precede the level"
+        );
+        assert_eq!(
+            body(frames.try_next().expect("the level was lost")),
+            "activity-1"
+        );
+        assert!(frames.try_next().is_none());
+    }
+
+    /// The ordering is a per-key preference, not a queue: coalescing is
+    /// unchanged, and the newest superseding level is what follows the
+    /// inventory.
+    #[test]
+    fn a_superseded_activity_still_drains_after_the_inventory() {
+        let (outbox, mut frames, _) = outbox();
+        outbox
+            .send_session_activity("dev", text("activity-1"))
+            .expect("publish failed");
+        outbox
+            .send_session_update("dev", text("inventory-1"))
+            .expect("publish failed");
+        outbox
+            .send_session_activity("dev", text("activity-2"))
+            .expect("publish failed");
+
+        let snapshot = frames.snapshot().session_state;
+        assert_eq!(
+            snapshot.pending, 2,
+            "the two keys stay independently coalesced"
+        );
+        assert_eq!(snapshot.superseded, 1);
+        assert_eq!(snapshot.dropped, 0);
+
+        assert_eq!(
+            body(frames.try_next().expect("nothing pending")),
+            "inventory-1"
+        );
+        assert_eq!(
+            body(frames.try_next().expect("the level was lost")),
+            "activity-2",
+            "the newest level survives the supersession"
+        );
+        assert!(frames.try_next().is_none());
+    }
+
+    /// Every pending inventory drains before any Activity level, so a level
+    /// never interleaves ahead of another Session's admission either.
+    #[test]
+    fn every_pending_inventory_drains_before_any_activity_level() {
+        let (outbox, mut frames, _) = outbox();
+        outbox
+            .send_session_activity("s1", text("s1-level"))
+            .expect("publish failed");
+        for session in ["s1", "s2"] {
+            outbox
+                .send_session_update(session, text(&format!("{session}-inventory")))
+                .expect("publish failed");
+        }
+
+        let mut inventories = vec![
+            body(frames.try_next().expect("nothing pending")),
+            body(frames.try_next().expect("only one inventory was delivered")),
+        ];
+        inventories.sort();
+        assert_eq!(inventories, vec!["s1-inventory", "s2-inventory"]);
+        assert_eq!(
+            body(frames.try_next().expect("the level was lost")),
+            "s1-level"
+        );
+        assert!(frames.try_next().is_none());
+    }
+
+    /// An Activity level with no pending inventory — the ordinary incremental
+    /// change for an already-admitted Session — is not held back behind other
+    /// Sessions' levels: it drains as soon as no inventory key remains.
+    #[test]
+    fn an_activity_level_without_pending_inventory_still_drains() {
+        let (outbox, mut frames, _) = outbox();
+        outbox
+            .send_session_activity("solo", text("solo-level"))
+            .expect("publish failed");
+        outbox
+            .send_session_update("other", text("other-inventory"))
+            .expect("publish failed");
+
+        assert_eq!(
+            body(frames.try_next().expect("nothing pending")),
+            "other-inventory"
+        );
+        assert_eq!(
+            body(frames.try_next().expect("the level was held back")),
+            "solo-level"
+        );
+        assert!(frames.try_next().is_none());
     }
 
     /// A flood of session updates holds one frame per session — never one per
