@@ -34,6 +34,14 @@ import type { ProtocolManifest } from './types';
  * that has since gone away, and a stale manifest is worse than a missing one:
  * it resolves to a version the target no longer serves, which is exactly the
  * "target manifest stale" case the server's gate exists to catch.
+ *
+ * ## Emptied at a physical connection boundary
+ *
+ * The snapshot also belongs to the socket it was learned on. A service that
+ * reconnects keeps this directory, so the transport invalidates it when that
+ * socket is lost and when a replacement opens: until the new connection's own
+ * Agent list arrives, every target is `unknown`, which refuses rather than
+ * resolving against the previous connection's manifests (#3990).
  */
 
 /**
@@ -83,6 +91,19 @@ export class ProtocolDirectory {
     for (const [agentId, manifest] of manifests) {
       this.manifests.set(agentId, manifest);
     }
+  }
+
+  /**
+   * Forget every entry at a physical connection boundary.
+   *
+   * The entries describe peers on one socket, including the `null` ones —
+   * "this target advertised nothing" is a fact about the previous connection,
+   * not a gap in the current one. The state afterwards is the same as before
+   * the first publish: every target is `unknown`, so nothing can resolve
+   * against a manifest learned on a generation that is gone.
+   */
+  invalidate(): void {
+    this.manifests.clear();
   }
 
   /**
