@@ -13,7 +13,10 @@ import {validateTelemetrySourceRun} from './agent-workflow-telemetry-contract.mj
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
-const MAX_RUNS=100, MAX_ARTIFACTS=100, MAX_BYTES=1024*1024;
+const MAX_RUNS=400, MAX_ARTIFACTS=100, MAX_BYTES=1024*1024;
+const MAX_HISTORY_PAGES=12, HISTORY_PAGES_PER_TICK=3;
+const MAX_ARTIFACT_INSPECTIONS=250;
+const HISTORY_START='2026-11-09T00:00:00Z';
 // All source keys, paths, groups and events come from the canonical Catalog.
 // Provider is prioritized to avoid stranding a post-Store Acceptance wake.
 const SOURCES=Object.freeze(telemetryWorkflowSources()
@@ -110,10 +113,14 @@ export function indexedSourceSummaries(root){
   }
   return new Map([...summaryCounts].map(([key,value])=>[key,value.size]));
 }
-export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rotation=0){
+export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rotation=0,
+  maxInspections=Infinity){
   // Round-robin starting source on each scheduled tick, oldest first WITHIN
   // each source. A permanently backlogged Provider must not starve Audit.
   if(!Number.isSafeInteger(rotation)||rotation<0)fail('invalid recovery rotation');
+  if(maxInspections!==Infinity&&(!Number.isSafeInteger(maxInspections)||maxInspections<1))
+    fail('invalid bounded artifact-inspection budget');
+  let inspected=0;
   const offset=rotation%SOURCES.length;
   const orderedSources=[...SOURCES.slice(offset),...SOURCES.slice(0,offset)];
   for(const source of orderedSources){
@@ -122,6 +129,8 @@ export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rot
     const ordered=runs.filter(run=>trustedSource(run,source))
       .sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
     for(const run of ordered){
+      if(inspected>=maxInspections)return null; // incomplete, NOT zero missing
+      inspected++;
       const key=source.id+'/'+run.id+'/'+run.run_attempt;
       const recorded=summaryCounts.get(key)??0;
       const published=await artifactCount(run);
@@ -145,24 +154,80 @@ export function validateReconciliationContext(env){
   if(env.GITHUB_EVENT_NAME==='schedule')return 'schedule';
   fail('reconciliation denied: only main schedule may scan history');
 }
+
+// The main schedule, not a user-selected ref, deterministically samples
+// historical pages beyond the newest 100. We retain the live first-page scan,
+// and deliberately report truncation when the requested pages are incomplete.
+// No new writer or privileged workflow_dispatch is introduced.
+export function historicalRecoveryProbe(runNumber,now=new Date()) {
+  if(!positive(runNumber)||!(now instanceof Date)||
+     !Number.isFinite(now.getTime())||now.getTime()<Date.parse(HISTORY_START))
+    fail('invalid main-owned historical recovery slot');
+  const source=SOURCES[runNumber%SOURCES.length];
+  const initial=1+(Math.floor(runNumber/SOURCES.length)%MAX_HISTORY_PAGES);
+  const pages=Array.from({length:HISTORY_PAGES_PER_TICK},(_,i)=>
+    1+((initial+i-1)%MAX_HISTORY_PAGES));
+  const created=encodeURIComponent(HISTORY_START+'..'+now.toISOString());
+  return Object.freeze({
+    source_workflow_key:source.key,source_file:source.file,
+    pages,created_since:HISTORY_START,created_until:now.toISOString(),
+    max_pages:MAX_HISTORY_PAGES,
+    queries:pages.map(page=>'actions/workflows/'+source.file+
+      '/runs?status=completed&created='+created+
+      '&per_page=100&page='+page),
+  });
+}
 async function select(store){
   validateReconciliationContext(process.env);
   if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
+  // GitHub run_number is created by protected main scheduling, not a source
+  // Artifact or repository_dispatch. It bounds historical source/page rotation.
+  const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
+  if(!positive(runNumber))fail('trusted schedule run_number required for fairness');
   const summaryCounts=indexedSourceSummaries(store),runsBySource=new Map();
   for(const source of SOURCES){
     const response=ghJson('actions/workflows/'+source.file+
-      '/runs?status=completed&per_page='+MAX_RUNS);
-    if(!Array.isArray(response.workflow_runs))fail('malformed GitHub workflow run listing');
+      '/runs?status=completed&per_page=100');
+    if(!Array.isArray(response.workflow_runs)||response.workflow_runs.length>100)
+      fail('malformed GitHub recent source run listing');
     runsBySource.set(source.file,response.workflow_runs);
   }
-  // GitHub run_number is main-owned; rotation is not client/dispatch input.
-  const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
-  if(!positive(runNumber))fail('trusted schedule run_number required for fairness');
+  const probe=historicalRecoveryProbe(runNumber);
+  const historical=[];
+  let highestTotal=0;
+  for(const query of probe.queries) {
+    const response=ghJson(query);
+    if(!Array.isArray(response.workflow_runs)||response.workflow_runs.length>100||
+       !Number.isSafeInteger(response.total_count)||response.total_count<0)
+      fail('malformed bounded historical source run listing');
+    highestTotal=Math.max(highestTotal,response.total_count);
+    historical.push(...response.workflow_runs);
+  }
+  const recent=runsBySource.get(probe.source_file)??[];
+  // GitHub listing may repeat the same Run across mutable pages; only one
+  // immutable Run/Attempt can be counted and replayed per scheduled selection.
+  const unique=new Map();
+  for(const run of [...recent,...historical]) {
+    const key=String(run.id)+'/'+String(run.run_attempt);
+    if(!unique.has(key))unique.set(key,run);
+  }
+  if(unique.size>MAX_RUNS)fail('historical source listing exceeds bounded scan');
+  runsBySource.set(probe.source_file,[...unique.values()]);
   const result=await chooseMissing(runsBySource,summaryCounts,async run=>{
     const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
     return countArtifactSummaries(artifacts,run);
-  },runNumber%SOURCES.length);
-  console.log(JSON.stringify(result??{run_id:null}));
+  },runNumber%SOURCES.length,MAX_ARTIFACT_INSPECTIONS);
+  const history_probe={
+    source_workflow_key:probe.source_workflow_key,
+    pages:probe.pages,total_count:highestTotal,
+    created_since:probe.created_since,created_until:probe.created_until,
+    truncated:highestTotal>MAX_HISTORY_PAGES*100,
+    artifact_inspection_limit:MAX_ARTIFACT_INSPECTIONS,
+    // A bounded single tick is always PARTIAL until independent full inventory
+    // and immutable readback prove recovery. Absence is not a zero-call claim.
+    completeness:'bounded-partial',
+  };
+  console.log(JSON.stringify({...result??{run_id:null},history_probe}));
 }
 // The scheduled replay is allowed only through trusted main-selected workflow
 // code; an arbitrary-ref workflow_dispatch cannot obtain the metrics writer.
@@ -328,6 +393,15 @@ function selfTest(){
   assert.equal(new Set(SOURCES.map(s=>s.file)).size,14);
   assert.equal(SOURCES.filter(s=>s.id==='requirement-acceptance').length,3);
   assert.equal(SOURCES[0].key,'agent-provider-smoke');
+  const probe=historicalRecoveryProbe(14,new Date('2026-11-23T12:00:00Z'));
+  assert.equal(probe.source_workflow_key,SOURCES[0].key);
+  assert.equal(probe.pages.length,HISTORY_PAGES_PER_TICK);
+  assert.equal(new Set(probe.pages).size,HISTORY_PAGES_PER_TICK);
+  assert.ok(probe.queries.every(q=>q.includes('status=completed&created=')&&
+    q.includes('2026-11-09T00')===false&&q.includes('per_page=100&page=')));
+  assert.deepEqual(historicalRecoveryProbe(28,new Date('2026-11-23T12:00:00Z')).pages,
+    probe.pages.map(p=>1+p%MAX_HISTORY_PAGES));
+  assert.throws(()=>historicalRecoveryProbe(0),/invalid main-owned/);
   const auditSource=SOURCES.find(item=>item.file==='agent-issue-audit.yml');
   assert.ok(auditSource);
   for(const [name,event] of [
@@ -397,6 +471,12 @@ function selfTest(){
     assert.equal(complete,null);
     const absent=await chooseMissing(runs,new Map(),async()=>0);
     assert.equal(absent,null);
+    let inspected=0;
+    assert.equal(await chooseMissing(runs,new Map(),async()=>{inspected++;return 0;},
+      0,1),null);
+    assert.equal(inspected,1,'bounded inspection may not imply no missing history');
+    await assert.rejects(()=>chooseMissing(runs,new Map(),async()=>1,0,0),
+      /invalid bounded artifact-inspection budget/);
     assert.equal(await chooseMissing(new Map([[source.file,[{
       ...run,head_repository:{full_name:'attacker/fork'}}]]]),
     new Map(),async()=>1),null);
