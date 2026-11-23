@@ -680,16 +680,19 @@ function selfTest() {
     pods: mirrorFixtures.pods,
   });
   assert.equal(mirrorObservation.workloads.length, 3);
-  const wrongTagFixtures = kubernetesFixtures();
-  wrongTagFixtures.pods.items[0].status.containerStatuses[0].image =
-    'mirror.example.com/nession:agent-0000000';
+  // #4304: the observer binds the immutable imageID digest reported by the ready
+  // role container, not the mutable image tag (a mirror tag rewrite is covered by
+  // mirrorFixtures above). A pod that reports no matching role container status
+  // cannot attest the deployment image and must fail closed.
+  const noRoleStatusFixtures = kubernetesFixtures();
+  noRoleStatusFixtures.pods.items[0].status.containerStatuses[0].name = 'unrelated-sidecar';
   assert.throws(() => observationFromKubernetes({
     overlay: parseEnvironmentOverlay(OVERLAY_PATH, OVERLAY_TEXT),
     environmentId: 'staging',
     clusterContext: 'home-k8s',
     observedAt: '2026-10-24T16:00:00Z',
-    deployments: wrongTagFixtures.deployments,
-    pods: wrongTagFixtures.pods,
+    deployments: noRoleStatusFixtures.deployments,
+    pods: noRoleStatusFixtures.pods,
   }), /no ready pod reports the agent deployment image/);
 
   // #2523: lanes share one namespace, so a sibling whose name extends this

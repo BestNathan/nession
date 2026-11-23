@@ -765,6 +765,7 @@ is broken by it.
 | A target the directory has not heard from is not relayed to | `ProtocolDirectory.targetProtocols` — `unknown` is its own answer, and `addressedPayload` refuses it rather than treating "not fetched yet" as "advertises nothing" |
 | An unversioned call is refused where it is ambiguous | the relay, when the target serves more than one version of that unit — one version has one possible meaning, so it still relays |
 | Every path that learns an agent list publishes it | `AgentsPlugin.listAgents` and the `server.agents.changed` push, both calling one `publishProtocols` |
+| A manifest does not outlive the physical socket it was learned on | `WebSocketService` invalidates `ProtocolDirectory` at every generation boundary (loss, teardown, replacement open); `AgentsPlugin` refuses a list response that settles on a later generation, so a delayed G1 reply cannot repopulate G2 (#3990) |
 | The agent list carries the same fields on every path | `server/agent_view.rs` — one builder, because the two hand-built ones had already drifted |
 | Generated bindings are what the contracts say | `just check-codegen` (`scripts/check-codegen-drift.sh`) — regenerate into a scratch directory, diff |
 | Every advertised contract has generated bindings | `nession-protocol-codegen`'s `every_advertised_contract_is_in_the_catalog`, against all four runtimes' own declarations — the agent's `served_descriptors`, the server's `server_manifest`, and the two providers' `descriptors()` |

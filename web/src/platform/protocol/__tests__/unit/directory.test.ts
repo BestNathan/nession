@@ -62,6 +62,26 @@ describe('ProtocolDirectory', () => {
     directory.publish(new Map([['agent-a', null]]));
     expect(directory.targetProtocols('agent-a')).toEqual({ kind: 'none' });
   });
+
+  it('forgets every target at a physical connection boundary', () => {
+    // Entries describe peers on one socket. When that socket is gone the
+    // snapshot is about a connection that no longer exists, and both answers
+    // it could give — `present` with a version to resolve against, or `none`
+    // for a target that advertised nothing — are claims about the wrong
+    // connection. `invalidate` returns the directory to its pre-list state:
+    // everything is our own gap, and nothing can be resolved against it
+    // (#3990).
+    const directory = new ProtocolDirectory();
+    directory.publish(new Map([
+      ['agent-a', MANIFEST],
+      ['agent-b', null],
+    ]));
+
+    directory.invalidate();
+
+    expect(directory.targetProtocols('agent-a')).toEqual({ kind: 'unknown' });
+    expect(directory.targetProtocols('agent-b')).toEqual({ kind: 'unknown' });
+  });
 });
 
 describe('manifestsOf', () => {
