@@ -2047,17 +2047,25 @@ mod native {
             "a Manifest whose EROFS layer failed is never mount-ready"
         );
 
-        // Cache lease correctness: a pinned blob refuses eviction; after the
+        // Cache lease correctness: a pinned blob refuses eviction (the
+        // cache's contract is `Ok(false)` — refusal, not an error); after the
         // pin releases, eviction reclaims it. No partial file is Ready.
         let pin = cache_c.pin(&outcome.layer_digest).unwrap();
         assert!(
-            cache_c.evict(&outcome.layer_digest).is_err(),
+            !cache_c.evict(&outcome.layer_digest).unwrap(),
             "a pinned blob must refuse eviction"
         );
+        assert!(
+            cache_c.blob_path(&outcome.layer_digest).unwrap().exists(),
+            "the refused eviction must keep the pinned bytes"
+        );
         drop(pin);
-        cache_c
-            .evict(&outcome.layer_digest)
-            .expect("unpinned eviction");
+        assert!(
+            cache_c
+                .evict(&outcome.layer_digest)
+                .expect("unpinned eviction"),
+            "the released blob must be evicted"
+        );
         assert!(!cache_c.blob_path(&outcome.layer_digest).unwrap().exists());
 
         peer_handle.abort();
