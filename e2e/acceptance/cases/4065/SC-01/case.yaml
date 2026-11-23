@@ -1,0 +1,12 @@
+schema_version: 1
+issue: 4065
+criterion: SC-01
+stage: staging
+runtime: full-stack-local
+isolation: isolated
+verifiers:
+  - type: runtime
+    entry: half-open.cjs
+  - type: runtime
+    entry: idle-healthy.cjs
+result_policy: all-pass
