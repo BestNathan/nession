@@ -2,6 +2,7 @@ mod agent_view;
 pub mod client_registry;
 pub mod command_broker;
 pub mod execution;
+pub mod extension_tools;
 mod handler;
 mod mcp;
 pub mod offline_grace;

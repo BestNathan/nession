@@ -7,7 +7,7 @@
 //
 // Local runs are forbidden for the same reason as fixture-app.spec.ts: the
 // e2e webServer stack operates tmux. CI-only.
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 
 declare global {
   interface Window {
@@ -16,6 +16,13 @@ declare global {
       replaceIncarnation: (sessionId: string) => void;
       /** Report the current incarnation again: an ordinary list refresh (#3424). */
       refresh: (sessionId: string) => void;
+      /** Hold the next metadata read until `releaseRead()` (#3319). */
+      holdNextRead: () => void;
+      releaseRead: () => void;
+      /** Hold the next successful save answer until `releaseSave()` (#2970). */
+      releaseSave: () => void;
+      saves: () => number;
+      heldRead: () => boolean;
     };
   }
 }
@@ -137,6 +144,116 @@ test.describe('Web', () => {
     await expect(page.getByTestId('session-details')).not.toContainText(
       'Terminal reconnect reliability',
     );
+  });
+
+  // #3748 — a save's successful answer is only the cache's answer while the
+  // public id still names the instance the write was sent under. These Cases
+  // hold the answer the fixture committed to the previous incarnation, recreate
+  // the Session under the same name, and settle the two responses in both
+  // orders. The sidebar row and the Edit details dialog read the same cache
+  // entry, so both are asserted.
+  const INCARNATION_ROUTE = '/#/fixture?sessionMetadata=ownership-save';
+  const OLD_SAVE_TITLE = 'Previous incarnation title';
+  const TMUX_NAME = 'fix-terminal-reconnect';
+
+  async function beginHeldSave(page: Page) {
+    await page.goto(INCARNATION_ROUTE);
+    const row = page.getByTestId(`session-item-${SELECTED_ID}`);
+    await expect(row.getByTestId('session-item-title')).toHaveText(
+      'Terminal reconnect reliability',
+    );
+
+    // The authoritative list names the current durable instance before the
+    // write starts; the save is sent under it (#3424/#3748).
+    await page.evaluate((id) => window.fixtureSessionMetadata?.refresh(id), SELECTED_ID);
+
+    await page.getByTestId(`session-actions-${SELECTED_ID}`).click();
+    await page.getByTestId(`session-actions-edit-${SELECTED_ID}`).click();
+    const dialog = page.getByTestId('session-details-dialog');
+    await expect(dialog).toBeVisible();
+    await expect(page.getByTestId('session-title')).toHaveText(
+      'Terminal reconnect reliability',
+    );
+
+    await page.getByLabel('Title').fill(OLD_SAVE_TITLE);
+    await page.getByTestId('session-metadata-save').click();
+    // The fixture commits the write to the previous incarnation and holds its
+    // answer until the Case releases it.
+    await expect.poll(() => page.evaluate(() => window.fixtureSessionMetadata?.saves())).toBe(1);
+    return { row, dialog };
+  }
+
+  test('a held save answer cannot restore the previous incarnation after its replacement read', async ({ page }) => {
+    const { row, dialog } = await beginHeldSave(page);
+
+    // The tmux Session is killed and recreated under the same public id; the
+    // replacement's empty metadata read settles first. The editor is still
+    // saving, so the header and row are the cache projections that are visible.
+    await page.evaluate(
+      (id) => window.fixtureSessionMetadata?.replaceIncarnation(id),
+      SELECTED_ID,
+    );
+    await expect(page.getByTestId('session-title')).toHaveText(TMUX_NAME);
+    await expect(row.getByTestId('session-item-title')).toHaveText(TMUX_NAME);
+
+    // The previous incarnation's already-committed answer now settles. It must
+    // neither publish its title nor fence the replacement's answer.
+    await page.evaluate(() => window.fixtureSessionMetadata?.releaseSave());
+    await expect(page.getByTestId('session-metadata-notice')).toContainText(
+      'Session ID are unchanged',
+    );
+    await expect(page.getByTestId('session-title')).toHaveText(TMUX_NAME);
+    await expect(row.getByTestId('session-item-title')).toHaveText(TMUX_NAME);
+    await expect(dialog).not.toContainText(OLD_SAVE_TITLE);
+    await expect(dialog).toContainText('no saved details yet');
+  });
+
+  test('a held save answer cannot fence the replacement read that settles after it', async ({ page }) => {
+    const { row, dialog } = await beginHeldSave(page);
+
+    // Hold the new instance's own read, then recreate the Session.
+    await page.evaluate(() => window.fixtureSessionMetadata?.holdNextRead());
+    await page.evaluate(
+      (id) => window.fixtureSessionMetadata?.replaceIncarnation(id),
+      SELECTED_ID,
+    );
+    await expect.poll(() => page.evaluate(() => window.fixtureSessionMetadata?.heldRead())).toBe(true);
+    await expect(page.getByTestId('session-title')).toHaveText(TMUX_NAME);
+    await expect(row.getByTestId('session-item-title')).toHaveText(TMUX_NAME);
+
+    // The old answer settles first. It must not publish, and it must not fence
+    // the replacement's still-pending read.
+    await page.evaluate(() => window.fixtureSessionMetadata?.releaseSave());
+    await expect(page.getByTestId('session-metadata-notice')).toContainText(
+      'Session ID are unchanged',
+    );
+    await expect(page.getByTestId('session-title')).toHaveText(TMUX_NAME);
+    await expect(row.getByTestId('session-item-title')).toHaveText(TMUX_NAME);
+    await expect(page.getByTestId('session-metadata-loading')).toBeVisible();
+
+    // Releasing the replacement's read publishes its own empty context.
+    await page.evaluate(() => window.fixtureSessionMetadata?.releaseRead());
+    await expect(page.getByTestId('session-metadata-loading')).toHaveCount(0);
+    await expect(page.getByTestId('session-metadata-description-empty')).toContainText(
+      'no saved details yet',
+    );
+    await expect(page.getByTestId('session-title')).toHaveText(TMUX_NAME);
+    await expect(row.getByTestId('session-item-title')).toHaveText(TMUX_NAME);
+    await expect(dialog).not.toContainText(OLD_SAVE_TITLE);
+  });
+
+  test('a save for the unchanged incarnation still updates the row and details', async ({ page }) => {
+    // The negative control for the incarnation fence: with no replacement
+    // observed, the successful answer publishes immediately (SC-02).
+    const { row, dialog } = await beginHeldSave(page);
+
+    await page.evaluate(() => window.fixtureSessionMetadata?.releaseSave());
+    await expect(page.getByTestId('session-metadata-notice')).toContainText(
+      'Session ID are unchanged',
+    );
+    await expect(page.getByTestId('session-title')).toHaveText(OLD_SAVE_TITLE);
+    await expect(row.getByTestId('session-item-title')).toHaveText(OLD_SAVE_TITLE);
+    await expect(dialog).toContainText(OLD_SAVE_TITLE);
   });
 
   test('an unreachable Agent reports the failure instead of a save', async ({ page }) => {

@@ -275,6 +275,7 @@ function FixtureAppDialogs({
         projects={projectLayer.projectShell.projects}
         busy={projectBinding.busy}
         error={projectBinding.error}
+        conflict={projectBinding.conflict}
         onSave={(projectId) => {
           void projectBinding.save(projectId);
         }}
@@ -492,7 +493,7 @@ export function FixtureApp() {
       data-testid="shell"
       data-sf-design="polish"
       data-experience="app"
-      className="shell flex h-[100dvh] flex-col bg-background"
+      className="shell flex h-dvh flex-col bg-background"
     >
       <AppLayout
         layer={layer}

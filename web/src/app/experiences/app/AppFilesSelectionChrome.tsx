@@ -46,11 +46,14 @@ export function AppFilesSelectionBottomBar({
   onDelete: () => void;
   disabled: boolean;
 }) {
+  // #4115: the band's border, ground and bottom padding belong to the Host's
+  // Bottom Actions slot. This element contributes the action row itself, so it
+  // stays usable above the floating Capsule at every overlay height without
+  // computing a safe-area or Capsule value in Files.
   return (
     <div
       className={cn(
-        'flex shrink-0 items-center justify-around gap-2 border-t border-border bg-background px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)]',
-        'pb-[max(var(--nession-shell-space-2),env(safe-area-inset-bottom))]',
+        'flex items-center justify-around gap-2 px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)]',
       )}
       data-testid="files-app-selection-bottom"
     >

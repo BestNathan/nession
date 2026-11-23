@@ -115,6 +115,10 @@ mod tests {
             foreground_command: None,
             working_dir: None,
             instance_id: None,
+            metadata: None,
+            activity: None,
+            activity_epoch: None,
+            activity_generation: 0,
             created_at: chrono::Utc::now() - chrono::Duration::hours(48),
             last_activity: chrono::Utc::now(),
         }
@@ -141,6 +145,28 @@ mod tests {
         .await
         .expect("age session");
         info.session_id
+    }
+
+    /// Make every DELETE on `sessions` fail at SQLite's execution boundary
+    /// while leaving the persisted rows readable — a controlled fault for the
+    /// #4166 error path, not a corrupted database.
+    async fn fail_session_deletes(db: &Database) {
+        use sea_orm::ConnectionTrait;
+        db.connection()
+            .execute_unprepared(
+                "CREATE TRIGGER fail_recovering_delete BEFORE DELETE ON sessions \
+                 BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END",
+            )
+            .await
+            .expect("install the delete-failure trigger");
+    }
+
+    async fn allow_session_deletes(db: &Database) {
+        use sea_orm::ConnectionTrait;
+        db.connection()
+            .execute_unprepared("DROP TRIGGER fail_recovering_delete")
+            .await
+            .expect("drop the delete-failure trigger");
     }
 
     async fn bind(env: &EnvService, session_id: &str, agent_id: &str) {
@@ -269,6 +295,153 @@ mod tests {
         eprintln!(
             "#2848 SC-02 measured: selected={} reclaimed={} skipped={} stale_memory={stale_memory} stale_row={stale_row} stale_binding={stale_binding} live_memory={live_memory} live_binding={live_binding}",
             outcome.selected, outcome.reclaimed, outcome.skipped
+        );
+    }
+
+    /// #4166 SC-01: a database error at the conditional DELETE must not hide a
+    /// still-durable recovering Session from the live registry, and must not
+    /// clear its desired Environment Binding.
+    #[tokio::test]
+    async fn delete_failure_keeps_the_stale_session_in_the_live_registry() {
+        let (db, registry, env) = fixture().await;
+        let session_id = seed_persisted(&db, "agent-a", "stale", "recovering", 48 * HOUR).await;
+        registry.load_from_db().await;
+        bind(&env, &session_id, "agent-a").await;
+
+        let (cutoff, selected) =
+            select_stale_recovering(&db, Duration::from_secs(24 * HOUR as u64))
+                .await
+                .expect("select stale rows");
+        assert_eq!(selected.len(), 1);
+
+        fail_session_deletes(&db).await;
+        let outcome = reclaim_selected(&selected, cutoff, &registry, &env).await;
+        allow_session_deletes(&db).await;
+
+        let live = registry
+            .get(&session_id)
+            .await
+            .expect("a failed DELETE must keep the Session in the live registry");
+        let row = db
+            .get_session(&session_id)
+            .await
+            .expect("read row")
+            .expect("the persisted row must remain");
+        let binding_present = env
+            .bindings
+            .get(&session_id)
+            .await
+            .expect("read binding")
+            .is_some();
+
+        assert_eq!(outcome.selected, 1);
+        assert_eq!(outcome.reclaimed, 0, "a failed DELETE reclaimed nothing");
+        assert_eq!(outcome.skipped, 1);
+        assert_eq!(live.status, SessionStatus::Recovering);
+        assert_eq!(row.status, "recovering");
+        assert!(
+            binding_present,
+            "the desired Environment Binding must survive"
+        );
+
+        eprintln!(
+            "#4166 SC-01 measured: selected={} reclaimed={} skipped={} registry={:?} persisted={} binding_present={binding_present}",
+            outcome.selected, outcome.reclaimed, outcome.skipped, live.status, row.status
+        );
+    }
+
+    /// #4166 SC-02: with the injected DELETE failure removed, a later sweep
+    /// reclaims the same still-expired Session and its binding, while a
+    /// distinct active Session and its binding stay untouched.
+    #[tokio::test]
+    async fn retry_after_a_delete_failure_reclaims_only_the_stale_session() {
+        let (db, registry, env) = fixture().await;
+        let stale = seed_persisted(&db, "agent-a", "stale", "recovering", 48 * HOUR).await;
+        let active = seed_persisted(&db, "agent-a", "active", "active", 48 * HOUR).await;
+        registry.load_from_db().await;
+        bind(&env, &stale, "agent-a").await;
+        bind(&env, &active, "agent-a").await;
+
+        let (cutoff, selected) =
+            select_stale_recovering(&db, Duration::from_secs(24 * HOUR as u64))
+                .await
+                .expect("select stale rows");
+        assert_eq!(selected.len(), 1, "only the recovering row is selected");
+
+        fail_session_deletes(&db).await;
+        let failed = reclaim_selected(&selected, cutoff, &registry, &env).await;
+        allow_session_deletes(&db).await;
+
+        assert_eq!(failed.reclaimed, 0);
+        assert_eq!(failed.skipped, 1);
+        assert!(
+            registry.get(&stale).await.is_some(),
+            "the failed attempt keeps the stale Session live"
+        );
+        assert!(
+            db.get_session(&stale).await.expect("read row").is_some(),
+            "the failed attempt keeps the persisted row"
+        );
+
+        // The Session is still expired, so a later sweep selects it again.
+        let (retry_cutoff, retry_selected) =
+            select_stale_recovering(&db, Duration::from_secs(24 * HOUR as u64))
+                .await
+                .expect("re-select stale rows");
+        assert_eq!(retry_selected.len(), 1);
+        assert_eq!(retry_selected[0].session_id, stale);
+
+        let retry = reclaim_selected(&retry_selected, retry_cutoff, &registry, &env).await;
+
+        assert_eq!(retry.reclaimed, 1);
+        assert_eq!(retry.skipped, 0);
+        assert!(
+            registry.get(&stale).await.is_none(),
+            "the stale Session is reclaimed on retry"
+        );
+        assert!(
+            db.get_session(&stale).await.expect("read row").is_none(),
+            "the stale persisted row is reclaimed on retry"
+        );
+        assert!(
+            env.bindings
+                .get(&stale)
+                .await
+                .expect("read binding")
+                .is_none(),
+            "the stale binding is reclaimed on retry"
+        );
+        assert!(
+            registry.get(&active).await.is_some(),
+            "a different Session is untouched"
+        );
+        assert!(
+            db.get_session(&active).await.expect("read row").is_some(),
+            "a different Session's persisted row is untouched"
+        );
+        assert!(
+            env.bindings
+                .get(&active)
+                .await
+                .expect("read binding")
+                .is_some(),
+            "a different Session's binding is untouched"
+        );
+
+        eprintln!(
+            "#4166 SC-02 measured: selected={} reclaimed={} skipped={} retry_reclaimed={} retry_skipped={} stale_removed={} active_memory={} active_binding_present={}",
+            failed.selected,
+            failed.reclaimed,
+            failed.skipped,
+            retry.reclaimed,
+            retry.skipped,
+            registry.get(&stale).await.is_none(),
+            registry.get(&active).await.is_some(),
+            env.bindings
+                .get(&active)
+                .await
+                .expect("read binding")
+                .is_some()
         );
     }
 }

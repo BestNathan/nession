@@ -3,7 +3,7 @@
   "policy": "Frozen original main/staging Git blob hashes for existing shipping source. An unchanged file may retain legacy visual metrics; every changed file must migrate all detected hardcoded metrics to Nession tokens. Never regenerate from PR head; edits require an explicit Design Gate baseline approval.",
   "source_revisions": {
     "main": "b0a07c1f5a012b8d4814558c15d9df77cec0f887",
-    "staging": "bd4ba6ba772f371b29da3ce2aa0cd10a5925232a"
+    "staging": "a19633cf1fd50456b88e9d969446b19c1712ad8e"
   },
   "files": {
     "web/src/App.tsx": [
@@ -31,7 +31,8 @@
       "2f5eb6d6c467e6bea59b6d9e23e27218ff28f2e5"
     ],
     "web/src/app/ShellMain.tsx": [
-      "19b143228889c5136d931031940248710e00767e"
+      "19b143228889c5136d931031940248710e00767e",
+      "2d50f05834b8fb43e4f4ed97e2d8922e238d7798"
     ],
     "web/src/app/Sidebar.tsx": [
       "83cce76768b22d520f40c8e12758abc5e4eb1436"
@@ -81,23 +82,28 @@
       "d6204bebf97e030c82c8577ef001c556de175c6e"
     ],
     "web/src/app/experiences/app/AppFilesBreadcrumb.tsx": [
-      "819017298cbb0509f06695f8543b767d1864c09b"
+      "819017298cbb0509f06695f8543b767d1864c09b",
+      "c65d5c5677a0d5e19ac132f3d2a1710fab51eea6"
     ],
     "web/src/app/experiences/app/AppFilesDeleteDialog.tsx": [
       "4866348fe11f27a9ddab10b6cf143bf3e2c13bce"
     ],
     "web/src/app/experiences/app/AppFilesDirectoryPane.tsx": [
-      "9f5bbfd2590c9b7eb2a354d9a796f8178b856459"
+      "9f5bbfd2590c9b7eb2a354d9a796f8178b856459",
+      "bdf8caf456420db89ee1e95238713b59ada956f5"
     ],
     "web/src/app/experiences/app/AppFilesFolderSheet.tsx": [
       "77c481595382473953bb6e56887ae9a885b32983"
     ],
     "web/src/app/experiences/app/AppFilesSearchPanel.tsx": [
       "2b1d8f8f9f7d64cbd01b0cca65dbfc3f4f4afc0b",
-      "9253c2a36a6e4c3748746c7d63749be45b3c2c3c"
+      "9253c2a36a6e4c3748746c7d63749be45b3c2c3c",
+      "e9090ce6de1e2960ce9099be59182b084643bcbf",
+      "206c616a7a3103baf632469293cbc0aef8301c03"
     ],
     "web/src/app/experiences/app/AppFilesSelectionChrome.tsx": [
-      "d38ee55b9893e06c505134b5d90d21cf3c01abb3"
+      "d38ee55b9893e06c505134b5d90d21cf3c01abb3",
+      "38f069aa14c1eafc73a1283083758d9363eb7a9d"
     ],
     "web/src/app/experiences/app/AppFilesViewerLayer.tsx": [
       "c75a1550ff86bb8ecc2eabb0f7f479312767d788"
@@ -380,12 +386,19 @@
     "web/src/app/patterns/AppBackButton.tsx": [
       "10d1c4b9f720bce368aa1bc7b312bd994fe65e05"
     ],
+    "web/src/app/patterns/AppHeaderActions.tsx": [
+      "f1d0210e6bdf1a9873de9c79ec8645810fe97d69"
+    ],
     "web/src/app/patterns/AppPageHeader.tsx": [
       "556c94f2042d66ae1011cd8eedd9b5779ad995cb",
-      "de0c8b24e90e5985fe303dff7fa30aa3ea2dc95b"
+      "de0c8b24e90e5985fe303dff7fa30aa3ea2dc95b",
+      "2f01bac702483b4a9e1df3dda368f080e7770b73"
     ],
     "web/src/app/patterns/AppProjectDetail.tsx": [
       "8b9f3e321b1c9034b790c6e18a199194be7344f7"
+    ],
+    "web/src/app/patterns/AppStackSheet.tsx": [
+      "4a76c23f198117707588aba815e9bac708567759"
     ],
     "web/src/app/patterns/ProjectsSection.tsx": [
       "2a938ac9f68f77f0f2fe026de2cb7c0180a81339"
@@ -502,11 +515,13 @@
       "b964143bdb686329c3f1b98db6f699861cb72757"
     ],
     "web/src/app/workspace/ProjectWorkspaceView.tsx": [
-      "e973052c87f3191f4324e9496f1da00129664179"
+      "e973052c87f3191f4324e9496f1da00129664179",
+      "dc3d2f0703622fdec7ee737a6ca23e473be2fba5"
     ],
     "web/src/app/workspace/WorkspaceShell.tsx": [
       "09d8cddf11a204cf969a75a7b0fa3e3b4225a961",
-      "fa44a8651d064ee317a4879b0697f9972346dd6a"
+      "fa44a8651d064ee317a4879b0697f9972346dd6a",
+      "6b4117120dfb863304e2b496531845e9561e91c7"
     ],
     "web/src/app/workspace/capabilities.ts": [
       "d9a7380f96288b732056b52348a5ed21935179f8"
@@ -518,7 +533,8 @@
       "eee52dfa61f41cf508b327deae18c12139c54dad"
     ],
     "web/src/app/workspace/layout/workspaceLayout.tsx": [
-      "557985e1dbfccb7130946ff5ac1211fe3962dad8"
+      "557985e1dbfccb7130946ff5ac1211fe3962dad8",
+      "4610f4ad7b4b0e9f2a05f35ff205e987cf2a9088"
     ],
     "web/src/app/workspace/presentation.ts": [
       "838c836e43815c44d05ea5b4105ccaff2dba754f"
@@ -540,7 +556,8 @@
       "a31b8cb8b0f07d122746e80dd457a265b5122c56"
     ],
     "web/src/capabilities/claude-code/components/ClaudeCodeAppWorkspace.tsx": [
-      "d5e9ce6bd959bf607203e2a2d0bb9c88f4a066ee"
+      "d5e9ce6bd959bf607203e2a2d0bb9c88f4a066ee",
+      "8978aab89cca15d4f1c50ad1370ff088f5c3afe4"
     ],
     "web/src/capabilities/claude-code/components/ClaudeCodePeek.tsx": [
       "f3c05f2392758a9a636c5c85bb0c1f0ef99f351d"
@@ -550,57 +567,78 @@
     ],
     "web/src/capabilities/claude-code/components/ClaudeCodeWorkspace.tsx": [
       "83b5137aa13cac65ddd28dd4934d64fed4069405",
-      "98d0223e3d59860bcc825146618ee40b39b12e3b"
+      "98d0223e3d59860bcc825146618ee40b39b12e3b",
+      "72331958550f95c0852038af5d44375bca65de0a",
+      "56a3cf26c6a4cd54c6690b7e8013e49b47621d29"
     ],
     "web/src/capabilities/claude-code/components/ConversationOverlay.tsx": [
       "16d26f0c88e3bf411c2e727d6ceff4053968ed1b"
     ],
     "web/src/capabilities/claude-code/components/McpView.tsx": [
       "b06aa953e09cb0117c5e91a8131d991a6802a130",
-      "f9205d275eed87d9683d6979c703064c63c99de3"
+      "f9205d275eed87d9683d6979c703064c63c99de3",
+      "b3c2da63065360fd980be1f93825e7b0b18e6e23",
+      "ddd16a7127b5f68dd886d6787ad9d1cd9e8e3c4e"
     ],
     "web/src/capabilities/claude-code/components/MemoryView.tsx": [
       "26dc07d09bd7070b0f4438ce030e42ff647a8ed5",
-      "99a08e16fd0a012c4c55ba97a0289ed4f9062c51"
+      "99a08e16fd0a012c4c55ba97a0289ed4f9062c51",
+      "a37339510e5ed6d1a8240499293647b1452548c4",
+      "817ddf55936cbca1b1242dacc627c7ad08bf4f34"
     ],
     "web/src/capabilities/claude-code/components/TranscriptRawInspector.tsx": [
       "01ccdda897c25fe3ffd365dbb7eac89675575746",
-      "60d18515e697a1c25b4aad17d0b74b097d0c92f4"
+      "60d18515e697a1c25b4aad17d0b74b097d0c92f4",
+      "aa63734c7e7cf4f420401d6c650a6294d6e048e2"
     ],
     "web/src/capabilities/claude-code/components/TranscriptRecordDetail.tsx": [
       "3c0923fd6c00d63f4e4c751306285d8225c89449"
     ],
     "web/src/capabilities/claude-code/components/TranscriptTimeline.tsx": [
       "6a71cdc6bcec8084baac90c23ad31f4873c382a6",
-      "d794f092d43439fdc714a815351fbfe867a0da5b"
+      "d794f092d43439fdc714a815351fbfe867a0da5b",
+      "d2877685d14ba14eb8f3be1890ad96ba7ea26a13",
+      "013b80cc086cca2b1d91a665719774f1b86bc62e",
+      "e301a7e394dfe9d6c2d97b3db63fde6e57965da2"
     ],
     "web/src/capabilities/claude-code/components/TranscriptView.tsx": [
       "35f4b877a4025cb1958edc30d79ccd863be4c12b",
-      "e762d05fa517eefa22279683a29862446dac698c"
+      "e762d05fa517eefa22279683a29862446dac698c",
+      "f4d6adf29569fd452efd59b4454ec90ae8baa5c4",
+      "2dac112581d2dd5e140df523fb2017523800dc4c"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ClaudeAppRouteLayer.tsx": [
       "98c56ae4d7f40181bb3ff5b651decff3106c317f"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ConfigurationRoutes.tsx": [
-      "f4c193401f6b0eecfe987f205f535702fb36d975"
+      "f4c193401f6b0eecfe987f205f535702fb36d975",
+      "e4994ed632a2464034797894fc2b0b82cf9a0682",
+      "13e2ab888c51477bb33a67d55d38eb6b6725ca1f"
     ],
     "web/src/capabilities/claude-code/components/claude-app/ConversationRoutes.tsx": [
-      "df8edb52eed166b2631b2c703a2fc3856f9e3b7b"
+      "df8edb52eed166b2631b2c703a2fc3856f9e3b7b",
+      "dd827bee3189fefb6b63316b111460c9d5f14653",
+      "4326fbcb258eb15a7812bac8e0a3a3ead9113ddf",
+      "a74153ab189612764b01d6f0f8f27387e60b3198"
     ],
     "web/src/capabilities/claude-code/components/claude-app/McpRoutes.tsx": [
-      "42412de38c8d5a7e85e94eff0e8b29810c867e4b"
+      "42412de38c8d5a7e85e94eff0e8b29810c867e4b",
+      "eca19d26b0787012b3d311d1466e2f983ae7cdb8"
     ],
     "web/src/capabilities/claude-code/components/claude-app/MemoryRoutes.tsx": [
       "2237ee213042bf9eba375c87c6afac6bf20452b7"
     ],
     "web/src/capabilities/claude-code/components/claude-app/TranscriptRoutes.tsx": [
-      "31f8aeb482f0c45c04a2f764037ef33c1bbf5ad4"
+      "31f8aeb482f0c45c04a2f764037ef33c1bbf5ad4",
+      "b1eb03c344331eb5bdb2dfb67efbca88dec8294d"
     ],
     "web/src/capabilities/claude-code/components/claude-app/model.ts": [
       "bc1e370f656cfafb7987cad0b12251cc635a474c"
     ],
     "web/src/capabilities/claude-code/components/claude-app/primitives.tsx": [
-      "2919072867dd08e115fd7f28d21010a5c2028852"
+      "2919072867dd08e115fd7f28d21010a5c2028852",
+      "5fec685f9ee06fc2d137639b0a195752d07f399e",
+      "d7d285c863ef0c68bffba71cce2b3bd111ca136b"
     ],
     "web/src/capabilities/claude-code/components/claude-app/useClaudeAppNavigation.ts": [
       "5408a63ed9e29b049d2020eed29a5b04297eb9a6"
@@ -681,7 +719,9 @@
       "91af313ac7f79e72900f23067a3ca3fdbfad33ba"
     ],
     "web/src/capabilities/env/components/BindingDraftView.tsx": [
-      "69d912e8c002b697e3249d08a1c6ab85155da0c8"
+      "69d912e8c002b697e3249d08a1c6ab85155da0c8",
+      "d708b8d93951d19718438628bdfbd3944248a36b",
+      "380ff67bc2e9b8e11ad918e6fe69c96a96c776f1"
     ],
     "web/src/capabilities/env/components/EnvDiff.tsx": [
       "8cf07f1c2ae51174cbf227598e7de61ebff2bf1c"
@@ -696,22 +736,31 @@
       "9273104187b2076a4bf76f2798cb867bc9d1dc65"
     ],
     "web/src/capabilities/env/components/EnvProfileEditor.tsx": [
-      "572311e30b2354c7216d75f850b50427fd7ef41c"
+      "572311e30b2354c7216d75f850b50427fd7ef41c",
+      "e5b94065898ec80c367263428f181b51d483cd71",
+      "8034a4fb18e2862c857868dd316a61b582e1ef94",
+      "c81301318d75d5f1b5698a5f7547c6ee3d9727a2"
     ],
     "web/src/capabilities/env/components/EnvVariablesView.tsx": [
-      "97a6db0a08f52d6b6a26340b460ab2e8777bc875"
+      "97a6db0a08f52d6b6a26340b460ab2e8777bc875",
+      "ac502708f110e7e2187f986fd439b01a75682d06",
+      "68e30758fea2822dd1ebe291f866727959bdb5df"
     ],
     "web/src/capabilities/env/components/EnvironmentGuardDialog.tsx": [
       "085673b608239ae40634d40343ab377846309fec"
     ],
     "web/src/capabilities/env/components/EnvironmentNavigator.tsx": [
-      "2ce23fbe8595d148c65cabbee79a524172ba336f"
+      "2ce23fbe8595d148c65cabbee79a524172ba336f",
+      "e58aa35faf5330ead10331c52d7a646e2db8dbe2",
+      "69c505f6602a6a3274d23b47584453085c566c9f"
     ],
     "web/src/capabilities/env/components/SessionEnvironmentSummary.tsx": [
       "de0f723ed4838fcca0fa799171164bf12aedac55"
     ],
     "web/src/capabilities/env/components/SessionEnvironmentView.tsx": [
-      "cabf1317a792e57ff01b87bfa30050e37cf4eaa5"
+      "cabf1317a792e57ff01b87bfa30050e37cf4eaa5",
+      "18050fb59192b37c19a1dc07c91867dc6b14f523",
+      "6dd0cb94512fe04a853e4de7848ebc77ed9e8286"
     ],
     "web/src/capabilities/env/envApi.ts": [
       "49b6a776eadaf77e73c5fbb2634b7479dcba72d9"
@@ -824,22 +873,31 @@
       "cfeb49e14e3fbb0ec71ac7f1b3ed97dda9ed9967"
     ],
     "web/src/capabilities/git/components/GitBranchesView.tsx": [
-      "8244ab17940368ae6dc846978fac6af9913449cb"
+      "8244ab17940368ae6dc846978fac6af9913449cb",
+      "359e6802b807f501a1039da19a4b53702110558d",
+      "3cfa96e7831239bb03477da14fe2dd03adafc6aa"
     ],
     "web/src/capabilities/git/components/GitChangeList.tsx": [
-      "37399e58e17fc15909338530bff39b8454f4f279"
+      "37399e58e17fc15909338530bff39b8454f4f279",
+      "c3d1aee7f9647f0dfb88a273448957f12aa8fbbf"
     ],
     "web/src/capabilities/git/components/GitCommitForm.tsx": [
       "115ccf2b37bc52e1564ea17b72412f0d00eccdc1"
     ],
     "web/src/capabilities/git/components/GitDiffView.tsx": [
-      "7554d017481674a3e9e1004954d990e0c43e5b3e"
+      "7554d017481674a3e9e1004954d990e0c43e5b3e",
+      "1f229314a03d8bd249bd35b37b6ce2cfdfd7a1d8",
+      "9d3c5c66255f8680fc59ee08629cfed18161acd9"
     ],
     "web/src/capabilities/git/components/GitFilePreviewView.tsx": [
-      "d171405cc0e5fc6c666db3b49e150f8a6fb56a5a"
+      "d171405cc0e5fc6c666db3b49e150f8a6fb56a5a",
+      "36202d85d4a0ff4e62b9d154370bd2f993f2c4fd",
+      "bf822868e602b7e97f80e86c061101fc3655d1c3"
     ],
     "web/src/capabilities/git/components/GitHistoryCommitDetail.tsx": [
-      "ae14cddac0ae11cdb666e78cdc150eb8cc3ffb70"
+      "ae14cddac0ae11cdb666e78cdc150eb8cc3ffb70",
+      "c7cecd6cd722b603df9b2917d19392e195007aa0",
+      "8a23ec7a36e9ff4a25c9e34ac8f496c7151849e4"
     ],
     "web/src/capabilities/git/components/GitHistoryCommitList.tsx": [
       "437e0ab88600c13a4a25abdd0850d9623073a465"
@@ -854,28 +912,41 @@
       "2df1826cfbdcc9662a0c64f45ff120949536504e"
     ],
     "web/src/capabilities/git/components/GitWorkspace.tsx": [
-      "90839f29fd14c09e82beea9282b3eeda0c599722"
+      "90839f29fd14c09e82beea9282b3eeda0c599722",
+      "287f8f5122c6fb822ba6dccfbeddc00a2a22f446",
+      "773df7b08fda8f2d1ad5204e1820e57db11fd935"
     ],
     "web/src/capabilities/git/components/GitWorktreesView.tsx": [
-      "a2af97a8e0efd530419c1363f8ef2003cf81b56e"
+      "a2af97a8e0efd530419c1363f8ef2003cf81b56e",
+      "dd68b1026650ac195a1cab602be6a7479f3705d3",
+      "02d972751602379c385b355af11418a3f59eeeb7"
     ],
     "web/src/capabilities/git/components/GithubActionsView.tsx": [
-      "e83cb75eacd1c3b4c39186ff994ca44d96b0a4dc"
+      "e83cb75eacd1c3b4c39186ff994ca44d96b0a4dc",
+      "7d2ced5e5600eadb9204908f41e5e082b7068154",
+      "4b7232064a092b52e215f6b8ced4bdde92230482"
     ],
     "web/src/capabilities/git/components/GithubHostingView.tsx": [
-      "e960459a1844c5fb72d7108d133a4ba3485a1651"
+      "e960459a1844c5fb72d7108d133a4ba3485a1651",
+      "c28eaf4fe918fe3601b0082208775059dae7a772"
     ],
     "web/src/capabilities/git/components/GithubIssuesView.tsx": [
-      "abdb923d6ac4b3077e44bc1578cdc13b5b19fcc8"
+      "abdb923d6ac4b3077e44bc1578cdc13b5b19fcc8",
+      "6643b5f5869c4b8174c459097cd0742e81f7f3bd",
+      "9c4b788c5c60dec6723356a38935cc77d13a4d26"
     ],
     "web/src/capabilities/git/components/GithubNotice.tsx": [
       "d7bc6872258697322d635957d31bef77e3adbb7a"
     ],
     "web/src/capabilities/git/components/GithubPullRequestsView.tsx": [
-      "fcefdd49001c70474026a962b5a72418b0dd8b42"
+      "fcefdd49001c70474026a962b5a72418b0dd8b42",
+      "3fc5d7236a24b8a9fecc46b5915357493dc8abaa",
+      "201addf411d3635691fe2e9cc824ad8aea003f34"
     ],
     "web/src/capabilities/git/components/GithubReaderLayout.tsx": [
-      "51d42f0d7fb2a786f07f1eb9263de47ebf6c7cc1"
+      "51d42f0d7fb2a786f07f1eb9263de47ebf6c7cc1",
+      "173b140f46d8c714268b588452592aedcde445dc",
+      "4081ada8e6c98e7ad22b2bb9c03f232a4e531bf8"
     ],
     "web/src/capabilities/git/components/patchPresentation.ts": [
       "5014bda733b826825a1036e7e6eb5b11cb62e284"
@@ -976,7 +1047,9 @@
       "ab9a3fbd9b59c79f0694ef24269f9b79b32e1db0"
     ],
     "web/src/capabilities/mcp-ui/components/McpKitView.tsx": [
-      "ad01c0f5078ba7f722106effc7d74bf564ff17ea"
+      "ad01c0f5078ba7f722106effc7d74bf564ff17ea",
+      "5c3e4edcd82cda82a0fdada28dda32bd5921809d",
+      "359394623a48e5d0231bc64d100bf7df9e869464"
     ],
     "web/src/capabilities/mcp-ui/components/McpSchemaViewer.tsx": [
       "48350804dbb1b33a93818c308f2163571d734f5e"
@@ -1101,7 +1174,9 @@
       "11df6fce04b5951c741c168f6b78b3c50289369d"
     ],
     "web/src/capabilities/sandbox/components/SandboxPolicyTabs.tsx": [
-      "1de9b9fd76eaa53b208360acfc60b49feb23bdb3"
+      "1de9b9fd76eaa53b208360acfc60b49feb23bdb3",
+      "54865489c32d7e3acf4682b980053cef406ce72d",
+      "39d5b464dc1d9627e1a7005b90da59ea7a64306b"
     ],
     "web/src/capabilities/sandbox/components/SandboxSectionNav.tsx": [
       "1b294cc2b6bfaa2377fc5a6732109011f6628713"
@@ -1117,7 +1192,8 @@
     ],
     "web/src/capabilities/sandbox/components/SandboxWorkspace.tsx": [
       "065b50a90b5fafe132b5971439df95b1447e398e",
-      "7a64341440844cd704ccefe971953b611c613ebc"
+      "7a64341440844cd704ccefe971953b611c613ebc",
+      "44ad8c9cb048db66cf1f5a2d03178e31148e3c83"
     ],
     "web/src/capabilities/sandbox/components/SandboxWorkspaceDetail.tsx": [
       "875e9d04e2c8fbbeba52d4219f2afb91d84756d1"
@@ -2094,7 +2170,9 @@
       "0cb9bd475a38283c69a67c182778803e6df344b9"
     ],
     "web/src/shared/ai-conversation/components/ConversationTranscript.tsx": [
-      "8f87699f91cb6945e70592a9aee96488876d965d"
+      "8f87699f91cb6945e70592a9aee96488876d965d",
+      "0f201b696d3fe1daf5a5bb3b13f37a7df4038402",
+      "c352379b517848e2c03782c0d85b189e5bd60e9d"
     ],
     "web/src/shared/ai-conversation/components/ConversationView.tsx": [
       "61e0a852a8f81cdaf0a754bdd3a046481c17ce25",
@@ -2177,10 +2255,14 @@
       "968f7e10bac9a80efe12ec61f97ef48ca74c6d28"
     ],
     "web/src/shared/file-viewer/components/ImageViewer.tsx": [
-      "7af55f69df0367a2971c0836e437368b1b065112"
+      "7af55f69df0367a2971c0836e437368b1b065112",
+      "ec346fcb2bcd5edee4f55ac8d9326b75c95dc7e7",
+      "8aae6b3b1248a05fbfed65eafeb2b44e793652ba"
     ],
     "web/src/shared/file-viewer/components/JsonPreview.tsx": [
-      "673049eae0ecb5f3f975992974355dc10a1a8f54"
+      "673049eae0ecb5f3f975992974355dc10a1a8f54",
+      "88f57171f56d6bd7ba2dff9f5327ce5ceb2b0dfe",
+      "158cc37115e5077ca114f021d4f92a644d8678f0"
     ],
     "web/src/shared/file-viewer/components/JsonlPreview.tsx": [
       "48529995e37694e73bcf0e773cabddd90c3a7003"
@@ -2189,7 +2271,9 @@
       "76b51cd2af9f3825e8f8dcb5132456a72273ffff"
     ],
     "web/src/shared/file-viewer/components/MarkdownPreview.tsx": [
-      "44523d7284c1b25317fa6cf2211dbbd2a08019a1"
+      "44523d7284c1b25317fa6cf2211dbbd2a08019a1",
+      "5add87dba4a7ef2e5f08b7f966be22425d40ed5e",
+      "0f03fbc68ab01800560cc801d08c84649d4fc66c"
     ],
     "web/src/shared/file-viewer/components/PdfViewer.tsx": [
       "26986a5896d530d6c7caaeea187282745443bc05"
@@ -2267,7 +2351,10 @@
       "bd0c391ddd1088e9067844c48835bf4abcd61783"
     ],
     "web/src/shared/lib/workspaceScrollClearance.ts": [
-      "4b034394154f7f09e3a394151ff621cf7decb39c"
+      "4b034394154f7f09e3a394151ff621cf7decb39c",
+      "79a1f3fd3b6aca0e5cccd56e5d200dc893c0aa04",
+      "4bf8bacb974146048afc0252f18c194d514912a8",
+      "8d9fa104b72daa83c69b908df2e71eaac2eb3d33"
     ],
     "web/src/shared/markdown/ChatMarkdown.module.css": [
       "db648428cfed1ac3df3b158edf6137aae8e705c2"

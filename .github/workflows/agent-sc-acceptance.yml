@@ -34,6 +34,11 @@ on:
         required: false
         default: ''
         type: string
+      source_replacement_comment_id:
+        description: Original Owner comment ID selecting exact merged replacement PRs
+        required: false
+        default: ''
+        type: string
 
   workflow_call:
     inputs:
@@ -55,6 +60,10 @@ on:
         default: ''
         type: string
       deterministic_result_json:
+        required: false
+        default: ''
+        type: string
+      source_replacement_comment_id:
         required: false
         default: ''
         type: string
@@ -151,6 +160,7 @@ jobs:
       TARGET_REF: ${{ inputs.target_ref }}
       DEPLOYMENT: ${{ inputs.deployment }}
       DETERMINISTIC_RESULT_JSON: ${{ inputs.deterministic_result_json }}
+      ACCEPTANCE_REPLACEMENT_COMMENT_ID: ${{ inputs.source_replacement_comment_id }}
       PROVIDER_SOURCE_RUN_ID: ${{ inputs.provider_source_run_id }}
       PROVIDER_SOURCE_RUN_ATTEMPT: ${{ inputs.provider_source_run_attempt }}
 
@@ -223,9 +233,10 @@ jobs:
       # PR-stage CI readback remains exceptional: #2917 has bounded timing
       # evidence and #3001 independently proves its original Qwen implementing
       # PR and Reviewer against pinned GitHub/Store source. Trusted Main owns
-      # both collectors; other PR-stage SCs have no GitHub evidence cost.
+      # both collectors; #4117 adds a single bounded original-PR browser repair receipt.
+      # Other PR-stage SCs have no GitHub evidence cost.
       - name: Collect trusted GitHub Actions evidence
-        if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195'))
+        if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117'))
         working-directory: trusted
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -241,6 +252,9 @@ jobs:
                 "${GITHUB_WORKSPACE}/workspace" \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
               3195) node scripts/acceptance-pr-pages-e2e-evidence.mjs collect \
+                "${GITHUB_WORKSPACE}/workspace" \
+                "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
+              4117) node scripts/acceptance-4117-pr-evidence.mjs collect \
                 "${GITHUB_WORKSPACE}/workspace" \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
               *) echo "Unsupported PR-stage collector Issue: ${ISSUE_NUMBER}" >&2; exit 1 ;;
@@ -261,7 +275,7 @@ jobs:
         run: |
           set -euo pipefail
           ci_evidence_file="-"
-          if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 ]]; then
+          if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 4117 ]]; then
             ci_evidence_file="${RUNNER_TEMP}/acceptance-ci-evidence.json"
           fi
           node scripts/acceptance-executor.mjs prepare \

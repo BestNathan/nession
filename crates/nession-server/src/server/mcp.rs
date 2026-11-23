@@ -29,10 +29,16 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListResponsePayload, ClientEnvWritePayload,
     ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::project::v1::{
+    ProjectGetPayload, ProjectGetResponsePayload, ProjectListResponsePayload,
+};
 use nession_protocol::contracts::session::v1::{
+    ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
     ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
-    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload, SessionInfo,
-    SessionKillResponse,
+    ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
+    ServerSessionListReply, SessionInitialMetadata, SessionKillResponse, SessionMetadata,
+    SessionMetadataPatchPayload, SessionMetadataResponse, SessionRefusal,
+    WebSessionMetadataGetPayload, WebSessionMetadataPatchPayload, WebSessionsListResponse,
 };
 use nession_protocol::Message;
 use nession_runtime::frame::WsFrame;
@@ -65,10 +71,21 @@ pub(crate) fn build(
         .validate_for_host(&config.auth_token, "auth_token")?;
 
     let agent_registry = Arc::clone(&deps.agent_registry);
+    // The contribution catalog is the Server's one owner of Agent manifests
+    // (#3778). Production constructs it before this build so registration can
+    // install manifests; a directly built service (tests) still gets a valid
+    // baseline catalog rather than an empty route.
+    let extension_tools = match deps.extension_tools.clone() {
+        Some(tools) => tools,
+        None => Arc::new(crate::server::extension_tools::ExtensionToolCatalog::new(
+            Arc::clone(&deps.agent_registry),
+            Arc::clone(&deps.command_broker),
+        )?),
+    };
     let handler = ConnectionHandler::new_authenticated(
         deps,
         ConnectionHandlerConfig {
-            server_auth_token: config.auth_token.clone(),
+            server_auth: nession_protocol::TokenVerifier::new(config.auth_token.clone()),
             heartbeat_interval_secs: config.heartbeat_interval_secs,
             terminal_cols: config.terminal_cols,
             terminal_web_font_size: config.terminal_web_font_size,
@@ -84,6 +101,7 @@ pub(crate) fn build(
         handler,
         agent_registry,
         mutations,
+        extension_tools: Arc::clone(&extension_tools),
     });
 
     let allowed_hosts =
@@ -93,13 +111,30 @@ pub(crate) fn build(
     let service_config = ServiceConfig {
         path: config.mcp.path.clone(),
         auth_token: nession_protocol::TokenVerifier::new(config.auth_token.clone()),
+        allow_query_token: false, // Embedded hosts remain Bearer-only.
         tool_timeout: std::time::Duration::from_secs(config.mcp.tool_timeout_secs),
         max_concurrent_calls: config.mcp.max_concurrent_calls,
         allowed_origins: config.mcp.allowed_origins.clone(),
         allowed_hosts,
     };
-    let service = McpService::new(service_config, cluster, node)?;
-    Ok(Some(Arc::new(service)))
+    let service = Arc::new(McpService::with_catalog(
+        service_config,
+        cluster,
+        node,
+        extension_tools.catalog(),
+    )?);
+    // The contribution catalog and the mounted endpoint are both live now;
+    // connect the explicit-manifest-update announcer to the endpoint's
+    // legacy-session list-change notification (`#3778` P2).
+    {
+        let weak = Arc::downgrade(&service);
+        extension_tools.set_change_notifier(Arc::new(move || {
+            if let Some(service) = weak.upgrade() {
+                service.notify_catalog_changed();
+            }
+        }));
+    }
+    Ok(Some(service))
 }
 
 struct ServerClusterBackend {
@@ -156,6 +191,29 @@ where
     })
 }
 
+/// Interpret the `server.session.list` union for either Server-owned consumer.
+///
+/// The Project query and the Agent Session view must agree on what a refusal
+/// means; neither may turn it into an empty list.
+async fn list_sessions_via(
+    handler: ConnectionHandler,
+    agent_id: Option<&str>,
+    force: bool,
+) -> Result<WebSessionsListResponse, ToolError> {
+    match dispatch_typed::<ServerSessionListReply>(
+        handler,
+        "server.session.list",
+        json!({ "agent_id": agent_id, "force": force }),
+    )
+    .await?
+    {
+        ServerSessionListReply::Listed(listed) => Ok(listed),
+        ServerSessionListReply::Refused(SessionRefusal { status, message }) => {
+            Err(ToolError::backend(format!("{status}: {message}")))
+        }
+    }
+}
+
 #[async_trait::async_trait]
 impl ClusterBackend for ServerClusterBackend {
     async fn list_agents(&self) -> Result<WebAgentsListResponse, ToolError> {
@@ -167,6 +225,36 @@ impl ClusterBackend for ServerClusterBackend {
                 Err(ToolError::backend(format!("{status}: {message}")))
             }
         }
+    }
+
+    async fn list_sessions(
+        &self,
+        agent_id: Option<&str>,
+        force: bool,
+    ) -> Result<WebSessionsListResponse, ToolError> {
+        list_sessions_via(self.handler.clone(), agent_id, force).await
+    }
+
+    async fn project_list(&self) -> Result<ProjectListResponsePayload, ToolError> {
+        dispatch_typed(self.handler.clone(), "server.project.list", json!({})).await
+    }
+
+    async fn project_get(
+        &self,
+        payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_typed(self.handler.clone(), "server.project.get", payload).await
+    }
+
+    async fn create_project_session(
+        &self,
+        payload: ClientSessionCreatePayload,
+    ) -> Result<ClientSessionCreateResponsePayload, ToolError> {
+        let payload =
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?;
+        dispatch_typed(self.handler.clone(), "server.session.create", payload).await
     }
 
     async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
@@ -246,6 +334,8 @@ impl ClusterBackend for ServerClusterBackend {
 struct ServerNodeBackend {
     handler: ConnectionHandler,
     agent_registry: Arc<AgentRegistry>,
+    /// The Server's validated contribution catalog and broker route (#3778).
+    extension_tools: Arc<crate::server::extension_tools::ExtensionToolCatalog>,
     /// The runtime's keyed mutation lane. A node create/kill is ordered against
     /// a cluster `server.session.create`/`kill` of the same Session, because
     /// both name the same registry resource.
@@ -312,31 +402,16 @@ fn map_agent_error(error: String) -> ToolError {
 impl NodeBackend for ServerNodeBackend {
     async fn list_sessions(&self, agent_id: &str) -> Result<SessionListOutput, ToolError> {
         self.require_online(agent_id).await?;
-        let response = self
-            .handler
-            .clone()
-            .agent_command_with_timeout(
-                agent_id,
-                "agent.session.list",
-                json!({}),
-                std::time::Duration::from_secs(35),
-            )
-            .await
-            .map_err(map_agent_error)?;
-        if let Some(error) = response.get("error").and_then(Value::as_str) {
-            return Err(ToolError::backend(error.to_string()));
-        }
-        let sessions: Vec<SessionInfo> =
-            serde_json::from_value(response.get("sessions").cloned().unwrap_or(json!([])))
-                .map_err(|error| {
-                    ToolError::backend(format!(
-                "the Agent's `agent.session.list` reply does not match its typed contract: {error}"
-            ))
-                })?;
-        // An Agent's own answer has nothing stale: this field exists for the
-        // Server's fan-out, and the two tool families still share one result
-        // shape.
-        Ok(SessionListOutput::from_agent_sessions(&sessions))
+        // The canonical `server.session.list` route with `force: true` asks
+        // the named Agent for its live tmux state and joins the Server-owned
+        // Project association for the same Session incarnation. Reading the
+        // Agent command directly would return Agent truth without the Server
+        // metadata the Tool now promises.
+        let listed = list_sessions_via(self.handler.clone(), Some(agent_id), true).await?;
+        Ok(SessionListOutput::from_web_sessions(
+            &listed.sessions,
+            listed.stale_agents,
+        ))
     }
 
     async fn create_session(
@@ -344,12 +419,14 @@ impl NodeBackend for ServerNodeBackend {
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<&SessionInitialMetadata>,
     ) -> Result<SessionCreatedOutput, ToolError> {
         self.require_online(agent_id).await?;
         let handler = self.handler.clone();
         let target = agent_id.to_string();
         let session_name = name.to_string();
         let working_dir = working_dir.map(str::to_owned);
+        let initial_metadata = initial_metadata.cloned();
         let response = self
             .run_keyed(
                 ResourceKey::Session(format!("{agent_id}:{name}")),
@@ -368,6 +445,9 @@ impl NodeBackend for ServerNodeBackend {
                                 "env_snapshots": [],
                                 "binding_profiles": [],
                                 "binding_revision": null,
+                                // Initial work context committed with the
+                                // create by the Agent (#4081).
+                                "initial_metadata": initial_metadata,
                             }),
                             std::time::Duration::from_secs(35),
                         )
@@ -390,6 +470,22 @@ impl NodeBackend for ServerNodeBackend {
                         "the Agent's create warnings do not match their typed contract: {error}"
                     ))
                 })?;
+        let instance_id = response
+            .get("instance_id")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let metadata: Option<SessionMetadata> = response
+            .get("metadata")
+            .filter(|value| !value.is_null())
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value).map_err(|error| {
+                    ToolError::backend(format!(
+                        "the Agent's committed metadata does not match its typed contract: {error}"
+                    ))
+                })
+            })
+            .transpose()?;
         Ok(SessionCreatedOutput {
             name: response
                 .get("session_name")
@@ -397,6 +493,8 @@ impl NodeBackend for ServerNodeBackend {
                 .unwrap_or(name)
                 .to_string(),
             warnings,
+            instance_id,
+            metadata,
         })
     }
 
@@ -435,6 +533,54 @@ impl NodeBackend for ServerNodeBackend {
         Ok(SessionKillResponse {
             name: name.to_string(),
         })
+    }
+
+    async fn get_session_metadata(
+        &self,
+        agent_id: &str,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.require_online(agent_id).await?;
+        // Route through the same `server.session.metadata.get` unit the Web
+        // uses; the Server authorizes and the Agent answers.
+        dispatch_typed::<SessionMetadataResponse>(
+            self.handler.clone(),
+            "server.session.metadata.get",
+            serde_json::to_value(WebSessionMetadataGetPayload {
+                session_id: format!("{agent_id}:{name}"),
+            })
+            .map_err(|error| ToolError::backend(error.to_string()))?,
+        )
+        .await
+    }
+
+    async fn update_session_metadata(
+        &self,
+        agent_id: &str,
+        request: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ToolError> {
+        self.require_online(agent_id).await?;
+        let payload = WebSessionMetadataPatchPayload {
+            session_id: format!("{agent_id}:{}", request.name),
+            expected_instance_id: request.expected_instance_id,
+            expected_revision: request.expected_revision,
+            patch: request.patch,
+        };
+        dispatch_typed::<SessionMetadataResponse>(
+            self.handler.clone(),
+            "server.session.metadata.patch",
+            serde_json::to_value(payload).map_err(|error| ToolError::backend(error.to_string()))?,
+        )
+        .await
+    }
+
+    async fn call_extension_tool(
+        &self,
+        agent_id: &str,
+        tool: &str,
+        arguments: serde_json::Map<String, Value>,
+    ) -> Result<Value, ToolError> {
+        self.extension_tools.call(agent_id, tool, arguments).await
     }
 }
 

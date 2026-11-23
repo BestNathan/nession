@@ -33,7 +33,7 @@ use super::{
     MkfsRunner, Packaging, ProcessControl, ResumePoint, SnapshotCheckpoint, SnapshotSource, Stage,
     TreeManifest, SNAPSHOT_CHECKPOINT_VERSION,
 };
-use crate::blob::store::{BlobDigest, BlobStore};
+use crate::blob::store::{BlobDigest, FsBlobStore};
 use crate::digest::file_digest;
 use crate::oci::annotation::{
     ANNOTATION_COMPOSE_FORMAT, ANNOTATION_COMPOSE_SOURCES, ANNOTATION_KIND,
@@ -189,7 +189,7 @@ fn is_executable(path: &Path) -> bool {
 pub struct ErofsComposer {
     pub extractor: Arc<dyn ErofsExtractor>,
     pub mkfs: Arc<dyn MkfsRunner>,
-    pub blobs: BlobStore,
+    pub blobs: FsBlobStore,
     pub work_root: PathBuf,
 }
 
@@ -197,7 +197,7 @@ impl ErofsComposer {
     pub fn new(
         extractor: Arc<dyn ErofsExtractor>,
         mkfs: Arc<dyn MkfsRunner>,
-        blobs: BlobStore,
+        blobs: FsBlobStore,
         work_root: impl Into<PathBuf>,
     ) -> Result<Self> {
         let work_root = work_root.into();
@@ -986,7 +986,7 @@ mod tests {
         let composer = ErofsComposer::new(
             extractor.clone(),
             mkfs.clone(),
-            BlobStore::new(root.join("blobs")).unwrap(),
+            FsBlobStore::new(root.join("blobs")).unwrap(),
             root.join("work"),
         )
         .unwrap();
@@ -1297,7 +1297,7 @@ mod tests {
         let composer = ErofsComposer::new(
             Arc::new(ProcessErofsExtractor::default()),
             mkfs,
-            BlobStore::new(root.path().join("blobs")).unwrap(),
+            FsBlobStore::new(root.path().join("blobs")).unwrap(),
             root.path().join("work"),
         )
         .unwrap();

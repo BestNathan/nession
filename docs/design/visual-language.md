@@ -216,6 +216,28 @@ Rules:
   [OperationSurface](design-system/patterns/operation-surface.md) rather than
   assembling a local hierarchy from valid primitives. The host owns its shell,
   navigation and scroll; the recipe owns the content's internal hierarchy.
+- **App Workspace regions** use the same principle through the semantic
+  `WorkspaceSurface` (primary/secondary), `WorkspaceSection`, `WorkspaceGroup`
+  and `WorkspaceRow` roles (`web/src/components/ui/workspace-content.tsx`).
+  A Collection is grouped contiguous rows, a Configuration is named sections,
+  a Reader is one predominant continuous surface, and a Detail is identity plus
+  grouped facts. A row does not become a card, and a capability does not invent
+  a feature palette or local row density (#3971).
+
+## Icon-first App actions
+
+Compact App chrome and repeated row/toolbar actions use **one semantic icon
+vocabulary and one geometry**: Back, Browse, Search, More, Create, Edit,
+Refresh, Filter, Copy, Open, Confirm, Save, Delete. A capability contributes the
+meaning; Nession owns the glyph and the 44px App touch target.
+
+- one or two priority icons at most, then More; missing actions leave no
+  placeholder;
+- every icon-only action has an accessible name and a visible focus state;
+- menus and destructive confirmations keep **icon + text**, and identities stay
+  readable text;
+- this is App chrome. A narrow Web viewport that is still Web keeps its Web
+  labels and density.
 
 ## Density hierarchy
 

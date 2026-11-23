@@ -10,14 +10,19 @@ import { parseAcceptanceSources } from './acceptance-sources.mjs';
 import { deploymentRecord } from '../e2e/acceptance/evaluator/run-case.mjs';
 import { normalizeAcceptanceResult, normalizeCriterion } from './acceptance-result-contract.mjs';
 import {enforceLiveFullFailure,requiresLiveFullFailureProof} from './acceptance-main-full-failure-bug-evidence.mjs';
-import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging } from './issue-lifecycle-reconcile.mjs';
+import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging,
+  independentReplacementContract, independentReplacementSourceEvidence,
+} from './issue-lifecycle-reconcile.mjs';
 import { verifiedIssueAuditCriterion, verifiedIssueAudit3843Criterion, SIDEBAR_AUDIT_REPAIR_PROOF, ISSUE_AUDIT_3843_PROOF } from './acceptance-issue-audit-readback.mjs';
 import {
   collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
   enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
   requiresPrToolingEvidence, requiresPrRustQualityEvidence,
   requiresExactHeadRustQuality, validWebQualityReceipt, validRustQualityReceipt,
+  collectPrRequiredQuality, validPrRequiredQualityReceipt, enforcePrRequiredQuality,
+  requiresPrRequiredQualityEvidence,
 } from './acceptance-pr-web-quality-receipt.mjs';
+import { acceptanceModelView } from './lib/agent/tasks/acceptance.mjs';
 
 import {collectPrCiTriad, requiresPrCiTriad, requiresPrVisualEvidenceCriterion,
   validPrCiTriadReceipt, enforcePrCiTriad, selfTestPrCiTriad}
@@ -322,6 +327,211 @@ export function verifiedPrSourceSupersession(issueNumber, previous, next, proof)
       .test(String(current.body || ''))));
 }
 
+// #4146: a checked PR-stage Pass at a *failed* Quality source is historical
+// evidence, not a permanent lock against correcting the SAME implementing PR.
+// Every input here is independently fetched from GitHub on trusted main.
+// A different implementing PR, newer Run ID alone, PR prose or a green status
+// on a different SHA cannot authorize replacement.
+export function verifiedFailedPrQualityRecovery(issueNumber, previous, next, {
+  previousQuality, nextQuality, sourceProof,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next || previousQuality?.status !== 'fail' ||
+      nextQuality?.status !== 'pass' ||
+      !validPrRequiredQualityReceipt(nextQuality.receipt, next) ||
+      !verifiedPrSourceSupersession(issueNumber, previous, next, sourceProof)) return null;
+  const from = sourceProof.previous_pulls;
+  const to = sourceProof.next_pulls;
+  const matches = from.filter(old => to.some(current =>
+    old.number === current.number &&
+    current.head?.sha === next &&
+    current.base?.ref === old.base?.ref &&
+    current.base?.repo?.full_name === sourceProof.repo &&
+    current.head?.repo?.full_name === sourceProof.repo &&
+    // Both merged and still-open implementing PRs may be re-evaluated, but
+    // abandoned closed-unmerged PRs cannot reopen their accepted evidence.
+    (current.state === undefined || current.state === 'open' ||
+      Boolean(current.merged_at))));
+  if (matches.length !== 1) return null;
+  return Object.freeze({
+    issue: Number(issueNumber), previous, next, pr_number: matches[0].number,
+    qualified_quality_run_id: nextQuality.receipt.run_id,
+    qualified_quality_attempt: nextQuality.receipt.run_attempt,
+    reason: 'prior accepted PR-stage source has failed exact-HEAD Quality',
+  });
+}
+
+export function liveFailedPrQualityRecovery(issueNumber, previous, next, {
+  qualityReader = collectPrRequiredQuality, sourceReader = livePrSourceSupersession,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next) return null;
+  const previousQuality = qualityReader(previous);
+  // Fail-closed when the original Run is missing/unknown rather than
+  // rewriting an authenticated positive source.
+  if (previousQuality?.status !== 'fail') return null;
+  const nextQuality = qualityReader(next);
+  if (nextQuality?.status !== 'pass') return null;
+  const proof = sourceReader(issueNumber, previous, next);
+  return verifiedFailedPrQualityRecovery(issueNumber, previous, next,
+    {previousQuality, nextQuality, sourceProof: proof});
+}
+
+// This is only a *selection* adapter. It never edits an Issue or claims
+// a reviewer result. The updater re-attests the exact same recovery later.
+export function recoverFailedQualityPrCriteria(issue, context, {
+  recoveryReader = liveFailedPrQualityRecovery,
+} = {}) {
+  if (context.stage !== 'pr' || !SHA.test(context.target_ref)) return context;
+  const complete = buildAcceptanceContext(issue, 'pr', {
+    targetRef: context.target_ref, runId: context.run_id, method: 'agent',
+    skipAcceptedPrCriteria: false,
+  });
+  const contract = parseContract(issue.body);
+  const already = new Set(context.criteria.map(x => x.criterion));
+  const locked = complete.criteria.filter(x =>
+    !already.has(x.criterion) &&
+    contract.rows.get(x.criterion)?.result === 'Pass' &&
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion)));
+  const previous = [...new Set(locked.map(x =>
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion))))];
+  if (previous.length !== 1 || previous[0] === context.target_ref ||
+      locked.length > 16) return context;
+  const recovery = recoveryReader(Number(issue.number), previous[0], context.target_ref);
+  if (!recovery) return context;
+  const restore = new Set(locked.map(x => x.criterion));
+  return {
+    ...context,
+    criteria: complete.criteria.filter(x => already.has(x.criterion) ||
+      restore.has(x.criterion)),
+    pr_quality_recovery: {
+      ...recovery, criteria: locked.map(x => x.criterion),
+    },
+  };
+}
+
+// A PR-stage Pass is normally pinned to its accepted source. When the SAME
+// implementing PR advances to a descendant head after acceptance, the merged
+// head is what the close guard must verify; re-evaluate the locked criteria
+// there instead of leaving the Issue permanently blocked (#4204). A different
+// PR, a non-descendant head or missing/failed Quality still selects nothing.
+export function verifiedSamePrHeadAdvance(issueNumber, previous, next, {
+  previousQuality, nextQuality, sourceProof,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next ||
+      previousQuality?.status !== 'pass' ||
+      nextQuality?.status !== 'pass' ||
+      !validPrRequiredQualityReceipt(nextQuality.receipt, next) ||
+      !verifiedPrSourceSupersession(issueNumber, previous, next, sourceProof)) {
+    return null;
+  }
+  const from = sourceProof.previous_pulls;
+  const to = sourceProof.next_pulls;
+  // The exact accepted commit must belong to the one implementing PR whose
+  // current head is `next`; same PR number, same base, no unrelated successor.
+  const matches = from.filter(old => to.some(current =>
+    old.number === current.number &&
+    current.head?.sha === next &&
+    current.base?.ref === old.base?.ref &&
+    current.base?.repo?.full_name === sourceProof.repo &&
+    current.head?.repo?.full_name === sourceProof.repo &&
+    // Both merged and still-open implementing PRs may advance; an abandoned
+    // closed-unmerged PR cannot reopen its accepted evidence.
+    (current.state === undefined || current.state === 'open' ||
+      Boolean(current.merged_at))));
+  if (matches.length !== 1) return null;
+  return Object.freeze({
+    issue: Number(issueNumber), previous, next, pr_number: matches[0].number,
+    qualified_quality_run_id: nextQuality.receipt.run_id,
+    qualified_quality_attempt: nextQuality.receipt.run_attempt,
+    reason: 'same implementing PR advanced its accepted source head',
+  });
+}
+
+export function liveSamePrHeadAdvance(issueNumber, previous, next, {
+  qualityReader = collectPrRequiredQuality, sourceReader = livePrSourceSupersession,
+} = {}) {
+  if (!SHA.test(String(previous || '')) || !SHA.test(String(next || '')) ||
+      previous === next) return null;
+  // The accepted source must have been green when accepted; a failed source
+  // stays on the #4146 failed-Quality recovery path below.
+  if (qualityReader(previous)?.status !== 'pass') return null;
+  const nextQuality = qualityReader(next);
+  if (nextQuality?.status !== 'pass') return null;
+  const proof = sourceReader(issueNumber, previous, next);
+  return verifiedSamePrHeadAdvance(issueNumber, previous, next,
+    {previousQuality: {status: 'pass'}, nextQuality, sourceProof: proof});
+}
+
+// Selection adapter only; the deterministic updater re-attests the same
+// same-PR lineage from independent GitHub data before projecting.
+export function recoverAdvancedGreenPrCriteria(issue, context, {
+  recoveryReader = liveSamePrHeadAdvance,
+} = {}) {
+  if (context.stage !== 'pr' || !SHA.test(context.target_ref)) return context;
+  const complete = buildAcceptanceContext(issue, 'pr', {
+    targetRef: context.target_ref, runId: context.run_id, method: 'agent',
+    skipAcceptedPrCriteria: false,
+  });
+  const contract = parseContract(issue.body);
+  const already = new Set(context.criteria.map(x => x.criterion));
+  const locked = complete.criteria.filter(x =>
+    !already.has(x.criterion) &&
+    contract.rows.get(x.criterion)?.result === 'Pass' &&
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion)));
+  const previous = [...new Set(locked.map(x =>
+    acceptedPrSourceRef(contract.criteria.get(x.criterion),
+      contract.rows.get(x.criterion))))];
+  if (previous.length !== 1 || previous[0] === context.target_ref ||
+      locked.length > 16) return context;
+  const recovery = recoveryReader(Number(issue.number), previous[0], context.target_ref);
+  if (!recovery) return context;
+  const restore = new Set(locked.map(x => x.criterion));
+  return {
+    ...context,
+    criteria: complete.criteria.filter(x => already.has(x.criterion) ||
+      restore.has(x.criterion)),
+    pr_head_advance: {
+      ...recovery, criteria: locked.map(x => x.criterion),
+    },
+  };
+}
+
+// #4253. Only a fresh, unedited Owner Issue comment can opt into a distinct,
+// already merged replacement. GitHub REST independently proves both PRs,
+// exact replacement HEAD association, two-parent merge and branch ancestry.
+// This never reclassifies the old accepted PR receipt as replacement evidence.
+export function liveIndependentReplacement(issue, targetRef, commentId,
+  read = path => JSON.parse(execFileSync('gh',['api',path],
+    {encoding:'utf8',env:process.env,maxBuffer:4*1024*1024}))) {
+  const repo = String(process.env.GITHUB_REPOSITORY || '');
+  const n = Number(commentId);
+  if (!/^[\w.-]+\/[\w.-]+$/.test(repo) ||
+      !Number.isSafeInteger(n) || n <= 0 ||
+      !SHA.test(String(targetRef || ''))) return null;
+  const base = 'repos/' + repo;
+  const comment = read(base+'/issues/comments/'+n);
+  const match = /^\/accept replace ([1-9][0-9]{0,8}) ([1-9][0-9]{0,8})$/
+    .exec(String(comment?.body || ''));
+  if (!match) return null;
+  const previous = read(base+'/pulls/'+match[1]);
+  const replacement = read(base+'/pulls/'+match[2]);
+  const proof = independentReplacementContract(issue,previous,replacement,repo,comment);
+  if (!proof || proof.target_ref !== targetRef) return null;
+  const associated = read(base+'/commits/'+targetRef+'/pulls?per_page=100');
+  const branch = read(base+'/branches/'+replacement.base.ref);
+  const merge = read(base+'/commits/'+replacement.merge_commit_sha);
+  if (!SHA.test(String(branch?.commit?.sha || ''))) return null;
+  const compare = read(base+'/compare/'+replacement.merge_commit_sha+
+    '...'+branch.commit.sha);
+  return independentReplacementSourceEvidence(proof,replacement,
+    associated,branch,merge,compare,repo) ? proof : null;
+}
+
 function priorAcceptedPrRefs(body, normalized) {
   if (stageOf(normalized.stage) !== 'pr') return [];
   const contract = parseContract(body);
@@ -342,7 +552,7 @@ const COMPARE_EVIDENCE_JQ =
   'base_commit: {sha: .base_commit.sha}, ' +
   'merge_base_commit: {sha: .merge_base_commit.sha}}';
 const PULLS_EVIDENCE_JQ =
-  '[.[] | {number: .number, body: .body, title: .title, ' +
+  '[.[] | {number: .number, body: .body, title: .title, state: .state, merged_at: .merged_at, ' +
   'head: {sha: .head.sha, repo: {full_name: .head.repo.full_name}}, ' +
   'base: {ref: .base.ref, repo: {full_name: .base.repo.full_name}}}]';
 
@@ -529,7 +739,14 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   for (const [id] of resultMap) {
     if (stage === 'pr') {
       const oldRef = acceptedPrSourceRef(contract.criteria.get(id), contract.rows.get(id));
+      const replacement = options.prSourceReplacement;
+      const independentlyReplaced = replacement &&
+        JSON.stringify(replacement) === JSON.stringify(normalized.pr_source_replacement) &&
+        replacement.issue === normalized.issue &&
+        replacement.target_ref === normalized.target_ref &&
+        replacement.criteria.includes(id) && replacement.old_sources.includes(oldRef);
       if (oldRef && oldRef !== normalized.target_ref &&
+          !independentlyReplaced &&
           !verifiedPrSourceSupersession(normalized.issue, oldRef,
             normalized.target_ref, options.prSourceSupersession)) {
         throw new Error(id + ' accepted PR source ' + oldRef +
@@ -546,6 +763,84 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
 
   let updated = updateCheckboxes(body, resultMap);
   updated = updateReport(updated, contract, resultMap, { ...normalized, run_id: runId });
+  // Preserve the prior accepted SC row verbatim in a separate non-authority
+  // history section; current Acceptance Report remains the only active row.
+  // Without a trusted same-PR failed-Quality recovery selector, retain the
+  // existing ordinary supersession behavior and do not add recovery history.
+  const recovery = normalized.pr_quality_recovery;
+  if (stage === 'pr' && recovery && Array.isArray(recovery.criteria) &&
+      recovery.issue === normalized.issue && recovery.next === normalized.target_ref) {
+    const replaced = recovery.criteria.filter(id =>
+      resultMap.has(id) &&
+      acceptedPrSourceRef(contract.criteria.get(id),contract.rows.get(id)) === recovery.previous);
+    if (replaced.length) {
+      const heading = '## Acceptance Source Recovery History';
+      const marker = 'quality-recovery:'+recovery.previous+':'+normalized.target_ref+
+        ':'+runId;
+      if (!updated.includes(marker)) {
+        const rows = replaced.map(id => {
+          const row = contract.rows.get(id);
+          return '- '+id+' prior '+row.result+' at '+recovery.previous+
+            ' (evidence: '+escapeCell(row.evidence)+'); superseded by '+
+            normalized.target_ref+' at acceptance run '+runId;
+        });
+        updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
+          '<!-- '+marker+' -->\n'+rows.join('\n');
+      }
+    }
+  }
+  // Keep the original SC evidence verbatim in immutable historical context.
+  // The NEW active Pass is evaluated at an independent, verified source.
+  const separate = options.prSourceReplacement;
+  if (stage === 'pr' && separate &&
+      JSON.stringify(separate) === JSON.stringify(normalized.pr_source_replacement) &&
+      separate.issue === normalized.issue &&
+      separate.target_ref === normalized.target_ref) {
+    const historical = separate.criteria.filter(id => resultMap.has(id) &&
+      separate.old_sources.includes(acceptedPrSourceRef(
+        contract.criteria.get(id),contract.rows.get(id))));
+    if (historical.length !== separate.criteria.length)
+      throw new Error('independent replacement must cover every original accepted PR criterion');
+    const heading = '## Acceptance Source Recovery History';
+    const marker = 'independent-replacement:'+separate.previous_pr+':'+
+      separate.replacement_pr+':'+runId;
+    if (!updated.includes(marker)) {
+      const rows = historical.map(id => {
+        const row=contract.rows.get(id);
+        return '- '+id+' historical '+row.result+' at '+
+          acceptedPrSourceRef(contract.criteria.get(id),row)+
+          ' (evidence: '+escapeCell(row.evidence)+'); independently re-attested by merged PR #'+
+          separate.replacement_pr+' at '+normalized.target_ref+' in run '+runId;
+      });
+      updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
+        '<!-- '+marker+' -->\n'+rows.join('\n');
+    }
+  }
+  // A green accepted source that the same PR advanced past keeps its prior
+  // authenticated row in the same non-authority history section (#4204).
+  const advance = normalized.pr_head_advance;
+  if (stage === 'pr' && advance && Array.isArray(advance.criteria) &&
+      advance.issue === normalized.issue && advance.next === normalized.target_ref) {
+    const replaced = advance.criteria.filter(id =>
+      resultMap.has(id) &&
+      acceptedPrSourceRef(contract.criteria.get(id),contract.rows.get(id)) === advance.previous);
+    if (replaced.length) {
+      const heading = '## Acceptance Source Recovery History';
+      const marker = 'head-advance:'+advance.previous+':'+normalized.target_ref+
+        ':'+runId;
+      if (!updated.includes(marker)) {
+        const rows = replaced.map(id => {
+          const row = contract.rows.get(id);
+          return '- '+id+' prior '+row.result+' at '+advance.previous+
+            ' (evidence: '+escapeCell(row.evidence)+'); superseded by '+
+            normalized.target_ref+' at acceptance run '+runId+
+            ' after the same implementing PR advanced its head';
+        });
+        updated += '\n\n'+(updated.includes(heading)?'':heading+'\n')+
+          '<!-- '+marker+' -->\n'+rows.join('\n');
+      }
+    }
+  }
   return updated;
 }
 
@@ -613,16 +908,44 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   const ciEvidence = evidencePath
     ? JSON.parse(fs.readFileSync(evidencePath, 'utf8'))
     : null;
-  const context = buildAcceptanceContext(issue, stage, {
+  const replacementCommentId = process.env.ACCEPTANCE_REPLACEMENT_COMMENT_ID || '';
+  if (replacementCommentId && (stage !== 'pr' ||
+      process.env.DETERMINISTIC_RESULT_JSON))
+    throw new Error('independent PR replacement requires real PR-stage Agent evidence');
+  const replacement = replacementCommentId
+    ? liveIndependentReplacement(issue,targetRef,replacementCommentId) : null;
+  if (replacementCommentId && !replacement)
+    throw new Error('independent PR replacement lacks current Owner/PR/merge proof');
+  let context = buildAcceptanceContext(issue, stage, {
     targetRef,
     deployment,
     ciEvidence,
     method: 'agent',
     // Only a LIVE PR Agent evaluation skips previously source-accepted SCs.
     // Historical Case/CI readback must still see those original criteria.
-    skipAcceptedPrCriteria: true,
+    skipAcceptedPrCriteria: !replacement,
     runId: process.env.ACCEPTANCE_RUN_ID ?? process.env.GITHUB_RUN_ID,
   });
+  context = recoverFailedQualityPrCriteria(issue, context);
+  // A green accepted source whose SAME PR advanced is re-evaluated at the
+  // merged head; the updater re-attests the lineage before projecting (#4204).
+  context = recoverAdvancedGreenPrCriteria(issue, context);
+  if (replacement) {
+    const selected = context.criteria.map(x=>x.criterion).sort();
+    if (JSON.stringify(selected) !== JSON.stringify(replacement.criteria))
+      throw new Error('independent replacement must re-evaluate every historical PR SC');
+    context.pr_source_replacement = replacement;
+  }
+  // Every PR-stage model Pass must be independently Quality-qualified even
+  // when the SC text does not explicitly name test execution (#4146).
+  if (context.stage === 'pr' && context.criteria.length > 0) {
+    context.pr_required_quality = collectPrRequiredQuality(context.target_ref);
+    // #4231: expose the aggregate receipt to the model only when a criterion
+    // explicitly names it; the normalizer's enforcePrRequiredQuality barrier
+    // still rejects any Pass without a valid exact-head receipt.
+    context.pr_required_quality_exposed =
+      requiresPrRequiredQualityEvidence(context);
+  }
   // The trusted prepare step has read-only Actions credentials. Read the
   // required Web Gate only for executable Web integration SCs, not every PR.
   if (context.stage === 'pr' && context.criteria.some(item =>
@@ -652,6 +975,10 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
       };
     }
   }
+  if (replacement && (context.pr_required_quality?.status !== 'pass' ||
+      !validPrRequiredQualityReceipt(context.pr_required_quality.receipt,
+        replacement.target_ref)))
+    throw new Error('independent replacement lacks exact-head required Quality');
   fs.writeFileSync(outFile, JSON.stringify(context, null, 2) + '\n');
   console.log('prepared ' + context.criteria.length + ' ' + context.stage + ' criteria for requirement #' + issueNumber);
 }
@@ -663,10 +990,22 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
     context, normalizeAcceptanceResult(context, raw, source)));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
-  const gated = enforceLiveFullFailure(context,
-    enforcePrRustQuality(context, enforcePrWebQuality(context,
-      enforcePrCiTriad(context, normalized))));
-  fs.writeFileSync(outFile, JSON.stringify(gated, null, 2) + '\n');
+  const gated = enforcePrRequiredQuality(context,
+    enforceLiveFullFailure(context,
+      enforcePrRustQuality(context, enforcePrWebQuality(context,
+        enforcePrCiTriad(context, normalized)))));
+  // Trusted prepare-time source lineage is retained only as a locator;
+  // the Issue writer re-authenticates it from independent GitHub REST.
+  const frozen = {
+    ...gated,
+    ...(context.pr_quality_recovery
+      ? {pr_quality_recovery: context.pr_quality_recovery} : {}),
+    ...(context.pr_head_advance
+      ? {pr_head_advance: context.pr_head_advance} : {}),
+    ...(context.pr_source_replacement
+      ? {pr_source_replacement: context.pr_source_replacement} : {}),
+  };
+  fs.writeFileSync(outFile, JSON.stringify(frozen, null, 2) + '\n');
 }
 
 function isSupersededRunError(error) {
@@ -678,6 +1017,85 @@ function applyCommand(issueNumber, resultFile) {
   if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
+  // A downloadable normalized result is not permission to project Pass. The
+  // trusted Issue writer MUST independently re-read the latest exact-run
+  // Quality status and compare its identity with the prepare-time receipt.
+  // A rerun/new attempt invalidates the old normalization (#4146).
+  if (stageOf(normalized.stage) === 'pr' &&
+      (normalized.criteria ?? []).some(item => item.result === 'Pass')) {
+    const actual = collectPrRequiredQuality(normalized.target_ref);
+    const claimed = normalized.pr_required_quality_receipt;
+    if (actual.status !== 'pass' ||
+        !validPrRequiredQualityReceipt(claimed, normalized.target_ref) ||
+        !validPrRequiredQualityReceipt(actual.receipt, normalized.target_ref) ||
+        claimed.run_id !== actual.receipt.run_id ||
+        claimed.run_attempt !== actual.receipt.run_attempt ||
+        claimed.scope_job_id !== actual.receipt.scope_job_id ||
+        claimed.web_check_job_id !== actual.receipt.web_check_job_id ||
+        JSON.stringify(claimed.job_outcomes) !== JSON.stringify(actual.receipt.job_outcomes)) {
+      throw new Error('PR Acceptance Pass lacks current independent exact-HEAD required Quality qualification');
+    }
+  }
+  // An old accepted source can be re-evaluated only after independent proof
+  // that its Quality failed and a SAME-PR descendant now passes Quality.
+  // Never trust a prepared Artifact's claimed recovery selector by itself.
+  if (normalized.pr_quality_recovery) {
+    const recovery = normalized.pr_quality_recovery;
+    const readback = liveFailedPrQualityRecovery(issueNumber,
+      recovery.previous, normalized.target_ref);
+    if (!readback || readback.pr_number !== recovery.pr_number ||
+        recovery.next !== normalized.target_ref ||
+        recovery.issue !== issueNumber ||
+        !Array.isArray(recovery.criteria) ||
+        recovery.criteria.length === 0 || recovery.criteria.length > 16 ||
+        recovery.criteria.some(id => !normalized.selected_criteria.includes(id)) ||
+        recovery.qualified_quality_run_id !== readback.qualified_quality_run_id ||
+        recovery.qualified_quality_attempt !== readback.qualified_quality_attempt) {
+      throw new Error('PR Quality recovery lacks current authenticated same-PR source lineage');
+    }
+  }
+  // The same implementing PR may advance a green accepted source to its merged
+  // head. Re-attest same-PR ancestry and exact-HEAD Quality; never trust the
+  // prepared Artifact's claimed advance by itself (#4204).
+  if (normalized.pr_head_advance) {
+    const advance = normalized.pr_head_advance;
+    const readback = liveSamePrHeadAdvance(issueNumber,
+      advance.previous, normalized.target_ref);
+    if (!readback || readback.pr_number !== advance.pr_number ||
+        advance.next !== normalized.target_ref ||
+        advance.issue !== issueNumber ||
+        !Array.isArray(advance.criteria) ||
+        advance.criteria.length === 0 || advance.criteria.length > 16 ||
+        advance.criteria.some(id => !normalized.selected_criteria.includes(id)) ||
+        advance.qualified_quality_run_id !== readback.qualified_quality_run_id ||
+        advance.qualified_quality_attempt !== readback.qualified_quality_attempt) {
+      throw new Error('PR head advance lacks current authenticated same-PR green Quality lineage');
+    }
+  }
+  let replacementReadback = null;
+  if (normalized.pr_source_replacement) {
+    // An authenticated, already projected same Run is a no-op. Replayed
+    // delivery never consumes the historical one-shot replacement again.
+    const prior = normalized.pr_source_replacement;
+    const marker = 'independent-replacement:'+prior.previous_pr+':'+
+      prior.replacement_pr+':'+normalized.run_id;
+    const report = parseAcceptanceReport(extractSection(issue.body,'Acceptance Report'));
+    if (issue.body.includes('<!-- '+marker+' -->') &&
+        normalized.selected_criteria?.every(id =>
+          new RegExp('^run '+normalized.run_id+'; ref '+normalized.target_ref+
+            '; source agent(?:-[a-z0-9-]+)?;','i').test(
+              String(report.rows.get(id)?.evidence || '')))) {
+      console.log('replacement Acceptance '+normalized.run_id+' already projected; no-op');
+      return;
+    }
+    replacementReadback = liveIndependentReplacement(issue,normalized.target_ref,
+      normalized.pr_source_replacement.comment_id);
+    if (!replacementReadback ||
+        JSON.stringify(replacementReadback) !==
+          JSON.stringify(normalized.pr_source_replacement) ||
+        normalized.source === 'deterministic-caller')
+      throw new Error('replacement Acceptance result lacks independent current Owner/PR/source attestation');
+  }
   // Concurrent Acceptance runs may finish out of order. Never project older
   // evidence over a newer run, but treat the superseded updater as a no-op.
   // All other contract, provenance and result validation errors still fail.
@@ -686,11 +1104,12 @@ function applyCommand(issueNumber, resultFile) {
     const conflicts = [...new Set(priorAcceptedPrRefs(issue.body, normalized))];
     // One explicit source lineage proof may authorize multiple SCs anchored
     // to the same prior head; multiple predecessors are ambiguous and rejected.
-    const proof = conflicts.length === 1
+    const proof = !replacementReadback && conflicts.length === 1
       ? livePrSourceSupersession(issueNumber, conflicts[0], normalized.target_ref)
       : null;
     updated = applyAcceptanceResultToBody(issue.body, normalized,
-      { prSourceSupersession: proof });
+      { prSourceSupersession: proof,
+        prSourceReplacement: replacementReadback });
   } catch (error) {
     if (isSupersededRunError(error)) {
       console.log('superseded acceptance run ' + normalized.run_id + ' for requirement #' + issueNumber + '; newer Issue evidence preserved');
@@ -743,6 +1162,20 @@ function fixtureBody() {
 
 function selfTest() {
   assert.equal(selfTestPrCiTriad(), true);
+  // #4231: the aggregate Quality receipt is visible to the model only for an
+  // explicitly activated PR criterion; unactivated/staging views omit it.
+  const aggregateView = {
+    stage: 'pr',
+    pr_required_quality: { status: 'pass', receipt: { kind: 'pr_required_quality_v1' } },
+    pr_required_quality_exposed: true,
+    criteria: [],
+    requirement_body: '',
+  };
+  assert.equal(acceptanceModelView(aggregateView).pr_required_quality?.status, 'pass');
+  assert.equal(acceptanceModelView({
+    ...aggregateView, pr_required_quality_exposed: false }).pr_required_quality, null);
+  assert.equal(acceptanceModelView({
+    ...aggregateView, stage: 'staging' }).pr_required_quality, null);
   // Both issue kinds use the same trusted Acceptance context/projector.
   // Discussions without an eligible label remain out of scope.
   for (const labels of [['bug'], [{ name: 'bug' }], ['requirement'], [{ name: 'requirement' }]]) {
@@ -780,6 +1213,54 @@ function selfTest() {
   assert.match(passedBody, /\| SC-01 \| staging \| Pass \| run 100; ref abc123;/);
   assert.match(passedBody, /Keep this paragraph exactly\./);
   assert.equal(validateRequirementBody(passedBody, { mode: 'merge' }).ok, true);
+
+  // #4253: a force-pushed/orphaned historical SC can be re-evaluated only
+  // after an independently validated replacement. Preserve exact old receipt
+  // in history; NEVER copy old "Pass" into a new unsigned result.
+  const oldPrSha='a'.repeat(40), newPrSha='b'.repeat(40);
+  const replacementBody=[
+    '## Success Criteria',
+    '- [x] SC-01 original behavior must be proved again',
+    '',
+    '## Acceptance Plan',
+    '```yaml','acceptance:','  SC-01:','    when: pr',
+    '    method: agent','```','',
+    '## Acceptance Report','| Criterion | Result | Evidence |',
+    '|---|---|---',
+    '| SC-01 | Pass | run 100; ref '+oldPrSha+
+      '; source agent-qwen; test: historical source |',
+  ].join('\n');
+  const replaceIssue={number:19,title:'historical',body:replacementBody};
+  const replaceContext=buildAcceptanceContext(replaceIssue,'pr',{
+    targetRef:newPrSha,runId:207,skipAcceptedPrCriteria:false,method:'agent'});
+  const replacementProof={issue:19,previous_pr:31,replacement_pr:32,
+    target_ref:newPrSha,comment_id:501,
+    old_sources:[oldPrSha],criteria:['SC-01']};
+  const replacementRaw=normalizeAcceptanceResult(replaceContext,{
+    criteria:[{criterion:'SC-01',result:'Pass',
+      evidence:[{type:'test',value:'new independent source fixture'}],
+      summary:'independently re-run at replacement head'}]},
+    'agent-qwen');
+  const replacementResult={...replacementRaw,pr_source_replacement:replacementProof};
+  assert.throws(()=>applyAcceptanceResultToBody(replacementBody,replacementResult),
+    /cannot be overwritten by unrelated exact head/);
+  assert.throws(()=>applyAcceptanceResultToBody(replacementBody,replacementResult,
+    {prSourceReplacement:{...replacementProof,comment_id:502}}),
+    /cannot be overwritten by unrelated exact head/);
+  const replaced=applyAcceptanceResultToBody(replacementBody,replacementResult,
+    {prSourceReplacement:replacementProof});
+  assert.match(replaced,/\| SC-01 \| Pass \| run 207; ref b{40}; source agent-qwen;/);
+  assert.match(replaced,/independent-replacement:31:32:207/);
+  assert.match(replaced,/run 100; ref a{40}; source agent-qwen; test: historical source/);
+  assert.equal(validateRequirementBody(replaced,{mode:'closure'}).ok,true);
+  assert.throws(()=>applyAcceptanceResultToBody(replacementBody,
+    {...replacementResult,pr_source_replacement:{...replacementProof,
+      criteria:[]}},
+    {prSourceReplacement:replacementProof}),/cannot be overwritten/);
+  assert.equal(buildAcceptanceContext(replaceIssue,'pr',{
+    targetRef:newPrSha,runId:207,method:'agent',
+    skipAcceptedPrCriteria:true}).criteria.length,0,
+    'normal acceptance never overwrites accepted sources without explicit recovery');
 
   // #3857: a later PR addressing only a pending post-merge criterion
   // must not redispatch already accepted PR-head SCs on a foreign SHA.
@@ -838,6 +1319,130 @@ function selfTest() {
     targetRef:exactB,runId:2,skipAcceptedPrCriteria:true,
   }).criteria.map(x=>x.criterion),['SC-04']);
 
+  // #4146: old model Pass at failing PR Quality is neither immutable success
+  // nor a reason to borrow a newer, unrelated PR's green CI. The same
+  // implementing PR can be re-evaluated only with actual GitHub ancestry,
+  // exact-head Quality success and fully retained historical row evidence.
+  const recoveryPr={number:4188,title:'fix (#3843)',body:'Refs #3843',
+    state:'closed',merged_at:'2026-11-20T10:17:54Z',
+    head:{sha:exactB,repo:{full_name:'BestNathan/nession'}},
+    base:{ref:'main',repo:{full_name:'BestNathan/nession'}}};
+  const recoveryProof={
+    issue:3843,previous:exactA,next:exactB,repo:'BestNathan/nession',
+    comparison:{status:'ahead',ahead_by:2,behind_by:0,
+      base_commit:{sha:exactA},merge_base_commit:{sha:exactA}},
+    previous_pulls:[recoveryPr],next_pulls:[recoveryPr],
+  };
+  const qualitySucceeded={status:'pass',receipt:{
+    kind:'pr_required_quality_v1',
+    repository:'BestNathan/nession',workflow:'.github/workflows/ci-quality.yml',
+    head_sha:exactB,result:'success',run_id:99,run_attempt:1,
+    scope_job_id:98,web_check_job_id:97,
+    scope_step:'Classify the exact PR or main-push change',
+    web_check_step:'Enforce applicable Quality results at the stable check name',
+    job_outcomes:{'instruction-check':'skipped','workflow-check':'skipped',
+      'rust-check':'skipped','tooling-check':'success','web-tests':'skipped'},
+  }};
+  const qualityRecover=verifiedFailedPrQualityRecovery(3843,exactA,exactB,{
+    previousQuality:{status:'fail',reason:'old web-check failed'},
+    nextQuality:qualitySucceeded,sourceProof:recoveryProof});
+  assert.equal(qualityRecover.pr_number,4188);
+  for (const bad of [
+    {previousQuality:{status:'pass'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'pending'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:{status:'pending'},sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:{...qualitySucceeded,
+      receipt:{...qualitySucceeded.receipt,head_sha:exactA}},sourceProof:recoveryProof},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,comparison:{...recoveryProof.comparison,behind_by:1}}},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,number:4189,
+        body:'Supersedes #4188'}]}},
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,
+        merged_at:null,state:'closed'}]}},
+  ])assert.equal(verifiedFailedPrQualityRecovery(3843,exactA,exactB,bad),null);
+  const recoverContext=recoverFailedQualityPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>qualityRecover});
+  assert.deepEqual(recoverContext.criteria.map(x=>x.criterion),
+    ['SC-01','SC-02','SC-04']);
+  const recoveredResult=normalizeAcceptanceResult(recoverContext,{
+    criteria:recoverContext.criteria.map(c=>({criterion:c.criterion,result:'Pass',
+      evidence:'test: independent Quality and same-PR source proof'})),
+  },'agent-qwen');
+  const recoveredBody=applyAcceptanceResultToBody(anchoredBody,{
+    ...recoveredResult,pr_quality_recovery:{...qualityRecover,criteria:['SC-01','SC-02','SC-04']}},
+    {prSourceSupersession:recoveryProof});
+  assert.match(recoveredBody,/Acceptance Source Recovery History/);
+  assert.match(recoveredBody,/SC-01 prior Pass at a{40}/);
+  assert.match(recoveredBody,/SC-04 prior Pass at a{40}/);
+  assert.match(recoveredBody,/SC-01 \| Pass \| run 200; ref b{40};/);
+  assert.equal(validateRequirementBody(recoveredBody,{mode:'closure'}).ok,false,
+    'merged-stage SC-03 remains independently Pending after PR recovery');
+  const stillLocked=recoverFailedQualityPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:200,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>null});
+  assert.deepEqual(stillLocked.criteria,[]);
+  // #4204: a GREEN accepted source may advance to its same implementing PR's
+  // descendant merged head. Selection restores the locked criteria and the
+  // updater rebinds them while preserving the prior row. A different PR,
+  // non-descendant head, closed-unmerged PR or failed/pending Quality at
+  // either end selects nothing.
+  const previousGreen={status:'pass',receipt:{...qualitySucceeded.receipt,
+    head_sha:exactA}};
+  const advance=verifiedSamePrHeadAdvance(3843,exactA,exactB,{
+    previousQuality:previousGreen,nextQuality:qualitySucceeded,
+    sourceProof:recoveryProof});
+  assert.equal(advance.pr_number,4188);
+  assert.equal(advance.qualified_quality_run_id,99);
+  for (const bad of [
+    {previousQuality:{status:'fail'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:{status:'pending'},nextQuality:qualitySucceeded,sourceProof:recoveryProof},
+    {previousQuality:previousGreen,nextQuality:{status:'pending'},sourceProof:recoveryProof},
+    {previousQuality:previousGreen,nextQuality:{...qualitySucceeded,
+      receipt:{...qualitySucceeded.receipt,head_sha:exactA}},sourceProof:recoveryProof},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,comparison:{...recoveryProof.comparison,behind_by:1}}},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,number:4189,
+        body:'Supersedes #4188'}]}},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,
+        merged_at:null,state:'closed'}]}},
+    {previousQuality:previousGreen,nextQuality:qualitySucceeded,
+      sourceProof:{...recoveryProof,next_pulls:[{...recoveryPr,head:{...recoveryPr.head,
+        sha:exactA}}]}},
+  ])assert.equal(verifiedSamePrHeadAdvance(3843,exactA,exactB,bad),null,
+    'only the same PR, descendant, green-Quality advance may re-select');
+  const advancedContext=recoverAdvancedGreenPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:300,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>advance});
+  assert.deepEqual(advancedContext.criteria.map(x=>x.criterion),
+    ['SC-01','SC-02','SC-04']);
+  assert.equal(advancedContext.pr_head_advance.pr_number,4188);
+  const noAdvance=recoverAdvancedGreenPrCriteria(anchoredIssue,
+    buildAcceptanceContext(anchoredIssue,'pr',{
+      targetRef:exactB,runId:300,method:'agent',skipAcceptedPrCriteria:true}),
+    {recoveryReader:()=>null});
+  assert.deepEqual(noAdvance.criteria,[]);
+  const advancedResult=normalizeAcceptanceResult(advancedContext,{
+    criteria:advancedContext.criteria.map(c=>({criterion:c.criterion,result:'Pass',
+      evidence:'test: source-aligned tests at the advanced head'})),
+  },'agent-qwen');
+  const advancedBody=applyAcceptanceResultToBody(anchoredBody,{
+    ...advancedResult,
+    pr_head_advance:{...advance,criteria:['SC-01','SC-02','SC-04']}},
+    {prSourceSupersession:recoveryProof});
+  assert.match(advancedBody,/SC-01 prior Pass at a{40}/);
+  assert.match(advancedBody,/same implementing PR advanced its head/);
+  assert.match(advancedBody,/SC-01 \| Pass \| run 300; ref b{40};/);
+  assert.equal(validateRequirementBody(advancedBody,{mode:'closure'}).ok,false,
+    'merged-stage SC-03 remains independently Pending after the head advance');
+  // The old Issue is never silently accepted just because a new Run exists.
   const post = buildAcceptanceContext({ ...issue, body: passedBody }, 'post-merge', {
     targetRef: 'def456', deployment: 'production', runId: 101,
   });
@@ -1378,6 +1983,9 @@ function selfTest() {
     {stdio:'inherit'});
   execFileSync(process.execPath,
     [fileURLToPath(new URL('./acceptance-staging-batch-pr-evidence.mjs',import.meta.url)),'self-test'],
+    {stdio:'inherit'});
+  execFileSync(process.execPath,
+    [fileURLToPath(new URL('./acceptance-pr-quality-waker.mjs',import.meta.url)),'self-test'],
     {stdio:'inherit'});
   console.log('acceptance-executor self-test: legacy, mixed-method and provenance cases passed');
 }

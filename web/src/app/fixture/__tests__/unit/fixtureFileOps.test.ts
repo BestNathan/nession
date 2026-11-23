@@ -139,6 +139,62 @@ describe('fixtureFileOps', () => {
     fixtureFilesControl().reset();
   });
 
+  it('holds the next write until released, persisting exactly the submitted snapshot (#3959)', async () => {
+    fixtureFilesControl().reset();
+    const target = fixtureFileOps();
+    const control = fixtureFilesControl();
+    const path = 'web/src/index.css';
+    const original = control.contentsOf(path);
+    expect(original).not.toBeNull();
+
+    control.holdNextWrite();
+    let settled = false;
+    const held = target.writeFile(path, `${original}B`).then((result) => {
+      settled = true;
+      return result;
+    });
+    // The held write has not persisted anything yet, and the control is consumed.
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(control.contentsOf(path)).toBe(original);
+    await expect(target.writeFile(path, 'meanwhile')).resolves.toBeTruthy();
+    expect(control.contentsOf(path)).toBe('meanwhile');
+
+    // Releasing applies the captured snapshot, not the editor's later state.
+    control.releaseHeldWrite();
+    const result = await held;
+    expect(settled).toBe(true);
+    expect(control.contentsOf(path)).toBe(`${original}B`);
+    expect(result.revision).toBe(control.revisionOf(path));
+
+    // A held write can be failed deterministically instead.
+    control.holdNextWrite();
+    const failing = target.writeFile(path, 'never persisted');
+    control.failHeldWrite('fixture: held write failed');
+    await expect(failing).rejects.toThrow('fixture: held write failed');
+    expect(control.contentsOf(path)).toBe(`${original}B`);
+
+    expect(() => control.releaseHeldWrite()).toThrow('no write is held');
+    fixtureFilesControl().reset();
+  });
+
+  it('a held write still honors revision CAS at release time (#3959)', async () => {
+    fixtureFilesControl().reset();
+    const target = fixtureFileOps();
+    const control = fixtureFilesControl();
+    const path = 'web/src/index.css';
+
+    control.holdNextWrite();
+    const held = target.writeFile(path, 'stale snapshot', {
+      expectedRevision: control.revisionOf(path),
+    });
+    control.writeExternal(path, 'competing writer');
+    control.releaseHeldWrite();
+    await expect(held).rejects.toThrow('conflict');
+    expect(control.contentsOf(path)).toBe('competing writer');
+    fixtureFilesControl().reset();
+  });
+
   it('getCwd answers the fixture root', async () => {
     await expect(ops.getCwd('s')).resolves.toEqual({ path: '' });
   });

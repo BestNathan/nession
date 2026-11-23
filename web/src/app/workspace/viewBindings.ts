@@ -22,11 +22,16 @@ import type { WorkspaceViewBinding, WorkspaceViewId } from './workspaceContext';
  * with what strength, comes from its provider's state and Nession's presence
  * policy (see `capabilities.ts`).
  */
-const WORKSPACE_VIEWS: readonly { id: WorkspaceViewId; icon: LucideIcon }[] = [
-  { id: 'files', icon: FileText },
+const WORKSPACE_VIEWS: readonly {
+  id: WorkspaceViewId;
+  icon: LucideIcon;
+  /** #4115: Files and Env are collections with their own internal scrollers. */
+  appScroll?: 'document' | 'bounded';
+}[] = [
+  { id: 'files', icon: FileText, appScroll: 'bounded' },
   { id: 'session', icon: Settings2 },
   { id: 'agent', icon: UserRound },
-  { id: 'env', icon: FileCog },
+  { id: 'env', icon: FileCog, appScroll: 'bounded' },
   { id: 'sandbox', icon: Shield },
 ];
 
@@ -40,9 +45,12 @@ const WORKSPACE_VIEWS: readonly { id: WorkspaceViewId; icon: LucideIcon }[] = [
  * experience difference does not need the app layer to write one for it.
  */
 export const WORKSPACE_VIEW_BINDINGS: readonly WorkspaceViewBinding[] = [
-  ...WORKSPACE_VIEWS.map(({ id, icon }) => ({
+  ...WORKSPACE_VIEWS.map(({ id, icon, appScroll }) => ({
     id,
     icon,
+    // Omitted rather than `undefined`: the key set is the binding's own
+    // declaration, and a document view declares no scroll mode.
+    ...(appScroll === undefined ? {} : { appScroll }),
     layout: { web: WEB_WORKSPACE_VIEWS[id], app: APP_WORKSPACE_VIEWS[id] },
   })),
   claudeCodeView,

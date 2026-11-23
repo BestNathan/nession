@@ -32,26 +32,26 @@ use http_body_util::{BodyExt, Empty};
 use nession_protocol::TokenVerifier;
 use rmcp::model::{
     CacheScope, CallToolResponse, CallToolResult, ContentBlock, Implementation, ListToolsResult,
-    PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
+    MetaObject, PaginatedRequestParams, ProtocolVersion, ServerCapabilities, ServerConfig,
 };
-use rmcp::service::RequestContext;
+use rmcp::service::{Peer, RequestContext};
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
 use rmcp::{ErrorData as McpError, RoleServer, ServerHandler};
 use serde_json::{json, Value};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::sync::Semaphore;
+use tokio::sync::{broadcast, Semaphore};
 use tokio::time::timeout;
 use tower_service::Service;
 use tracing::{info, warn};
 
 use crate::backend::{ClusterBackend, NodeBackend};
+use crate::catalog::McpCatalog;
 use crate::error::ToolError;
 use crate::http::PrefixedStream;
 use crate::protocol;
-use crate::registry::ToolRegistry;
+use crate::provider::McpToolProvider;
 use crate::tool::{reply_is_error, ToolContext};
-use crate::tools;
 
 /// The exact response body type the rmcp Streamable HTTP service produces.
 type RmcpBody = BoxBody<Bytes, Infallible>;
@@ -61,8 +61,11 @@ type RmcpBody = BoxBody<Bytes, Infallible>;
 pub struct ServiceConfig {
     /// The endpoint path, normally `/mcp`.
     pub path: String,
-    /// The required inbound bearer token, owned by this endpoint.
+    /// The required inbound MCP token, owned by this endpoint.
     pub auth_token: TokenVerifier,
+    /// Allow an exact `?token=...` as a credential on this MCP endpoint.
+    /// Off by default; the standalone host must explicitly opt in.
+    pub allow_query_token: bool,
     /// Bound on one tool execution (and on waiting for a concurrency slot).
     pub tool_timeout: Duration,
     /// Maximum concurrent tool executions.
@@ -85,6 +88,7 @@ impl ServiceConfig {
         Self {
             path: protocol::DEFAULT_PATH.to_string(),
             auth_token: TokenVerifier::new(auth_token),
+            allow_query_token: false,
             tool_timeout: Duration::from_secs(protocol::DEFAULT_TOOL_TIMEOUT_SECS),
             max_concurrent_calls: protocol::DEFAULT_MAX_CONCURRENT_CALLS,
             allowed_origins: Vec::new(),
@@ -128,7 +132,7 @@ pub enum ServiceConfigError {
     /// The concurrency bound is zero.
     #[error("MCP max_concurrent_calls must be greater than zero")]
     InvalidConcurrency,
-    /// The explicit Tool registration did not satisfy the registry contract.
+    /// The composed Tool catalog did not satisfy the registry contract.
     #[error("MCP Tool registry is invalid: {0}")]
     InvalidRegistry(String),
 }
@@ -169,28 +173,70 @@ pub fn allowed_hosts_for_bind(bind_address: &str) -> Vec<String> {
 /// The shared MCP access layer.
 pub struct McpService {
     path: Arc<str>,
+    /// The host-owned catalog the endpoint reads. Kept here so a host that
+    /// owns the service can explicitly reconfigure it (`#3778`).
+    catalog: Arc<McpCatalog>,
+    /// The context every local Tool handler receives. Exposed so the same
+    /// Agent can execute its contributions through the Server-relayed route
+    /// (`#3778`) instead of building a second backend graph.
+    context: Arc<ToolContext>,
+    /// Catalog-generation changes, broadcast to every legacy session so it can
+    /// receive `notifications/tools/list_changed` (`#3778` P2). A stateless
+    /// modern request has no channel to notify; it reads the revision from
+    /// `tools/list` `_meta` instead.
+    catalog_changes: broadcast::Sender<u64>,
     /// The authenticated, path-scoped tower service in front of rmcp.
     endpoint: AuthorizedMcp,
 }
 
 impl McpService {
-    /// Build a service and validate its configuration.
-    ///
-    /// The Tool registry is constructed here, once, from the explicit
-    /// registration list in [`crate::tools`].
+    /// Build a service with the baseline Tool catalog.
     pub fn new(
         config: ServiceConfig,
         cluster: Arc<dyn ClusterBackend>,
         node: Arc<dyn NodeBackend>,
     ) -> Result<Self, ServiceConfigError> {
-        config.validate()?;
-        let registry = tools::registry()
+        Self::with_providers(config, cluster, node, Vec::new())
+    }
+
+    /// Build a service whose catalog also carries the given Extension
+    /// contributions (`#3778`).
+    ///
+    /// The providers are enumerated and validated once, during this call. A
+    /// provider that cannot answer, a name claimed by two owners or a Tool
+    /// without a typed output contract fails the mount instead of advertising
+    /// a partial catalog.
+    pub fn with_providers(
+        config: ServiceConfig,
+        cluster: Arc<dyn ClusterBackend>,
+        node: Arc<dyn NodeBackend>,
+        tool_providers: Vec<Arc<dyn McpToolProvider>>,
+    ) -> Result<Self, ServiceConfigError> {
+        let catalog = McpCatalog::with_providers(&tool_providers)
             .map_err(|error| ServiceConfigError::InvalidRegistry(error.to_string()))?;
+        Self::with_catalog(config, cluster, node, Arc::new(catalog))
+    }
+
+    /// Build a service over a catalog the host already owns.
+    ///
+    /// The host decides when an explicit [`McpCatalog::reconfigure`] happens;
+    /// this endpoint only reads immutable snapshots, so a later swap becomes
+    /// visible without rebuilding the transport.
+    pub fn with_catalog(
+        config: ServiceConfig,
+        cluster: Arc<dyn ClusterBackend>,
+        node: Arc<dyn NodeBackend>,
+        catalog: Arc<McpCatalog>,
+    ) -> Result<Self, ServiceConfigError> {
+        config.validate()?;
+        let context = Arc::new(ToolContext::new(cluster, node));
+        let (catalog_changes, _) = broadcast::channel(16);
         let handler = RegistryServer {
-            registry: Arc::new(registry),
-            context: Arc::new(ToolContext::new(cluster, node)),
+            catalog: Arc::clone(&catalog),
+            context: Arc::clone(&context),
             calls: Arc::new(Semaphore::new(config.max_concurrent_calls)),
             tool_timeout: config.tool_timeout,
+            peer: Arc::new(std::sync::RwLock::new(None)),
         };
 
         let mut transport = StreamableHttpServerConfig::default()
@@ -215,15 +261,83 @@ impl McpService {
         };
 
         let inner: StreamableHttpService<RegistryServer, LocalSessionManager> =
-            StreamableHttpService::new(move || Ok(handler.clone()), Default::default(), transport);
+            StreamableHttpService::new(
+                {
+                    let template = handler;
+                    let session_changes = catalog_changes.clone();
+                    move || {
+                        let mut session = template.clone();
+                        // One peer slot per MCP session; the template's is
+                        // never written. A watcher forwards every explicit
+                        // catalog change to that session's legacy peer.
+                        session.peer = Arc::new(std::sync::RwLock::new(None));
+                        let peer_slot = Arc::clone(&session.peer);
+                        let mut changes = session_changes.subscribe();
+                        tokio::spawn(async move {
+                            while changes.recv().await.is_ok() {
+                                let peer = match peer_slot.read() {
+                                    Ok(peer) => peer.clone(),
+                                    Err(poisoned) => poisoned.into_inner().clone(),
+                                };
+                                let Some(peer) = peer else { continue };
+                                // A closed session is not a failure worth
+                                // logging: the notification simply has no
+                                // recipient, and a later request carries the
+                                // fresh generation anyway.
+                                if peer.notify_tool_list_changed().await.is_err() {
+                                    break;
+                                }
+                            }
+                        });
+                        Ok(session)
+                    }
+                },
+                Default::default(),
+                transport,
+            );
         Ok(Self {
             path: Arc::from(config.path.as_str()),
+            catalog,
+            context,
+            catalog_changes,
             endpoint: AuthorizedMcp {
                 inner,
                 path: Arc::from(config.path.as_str()),
                 auth_token: config.auth_token,
+                allow_query_token: config.allow_query_token,
             },
         })
+    }
+
+    /// The catalog this service reads.
+    ///
+    /// A host that owns the Agent's providers uses this to perform an
+    /// explicit reconfiguration; requests pick up the new generation
+    /// atomically.
+    pub fn catalog(&self) -> Arc<McpCatalog> {
+        Arc::clone(&self.catalog)
+    }
+
+    /// The context local Tool handlers receive.
+    ///
+    /// An Agent uses this to execute an Extension contribution through the
+    /// Server-relayed route: the same backends, deadlines and owner state its
+    /// embedded endpoint uses, not a second graph.
+    pub fn tool_context(&self) -> Arc<ToolContext> {
+        Arc::clone(&self.context)
+    }
+
+    /// Announce that the advertised catalog generation changed (`#3778` P2).
+    ///
+    /// Connected legacy sessions receive `notifications/tools/list_changed`.
+    /// Stateless modern requests have no notification channel; they observe
+    /// the new definitions and `_meta.nession/catalogRevision` on their next
+    /// `tools/list`. Call this only after an explicit successful
+    /// [`McpCatalog::reconfigure`] — never for runtime state such as a Session
+    /// appearing or an Extension switching between idle and busy.
+    pub fn notify_catalog_changed(&self) {
+        // No receivers is the ordinary stateless case, not a failure.
+        let _ = self.catalog_changes.send(self.catalog.revision());
     }
 
     /// The endpoint path this service answers on.
@@ -274,14 +388,32 @@ impl McpService {
     }
 }
 
-/// The MCP handler rmcp drives: flat registry, bounded execution, stable result
-/// shape.
+/// The MCP handler rmcp drives: one catalog snapshot per request, bounded
+/// execution, stable result shape.
 #[derive(Clone)]
 struct RegistryServer {
-    registry: Arc<ToolRegistry>,
+    catalog: Arc<McpCatalog>,
     context: Arc<ToolContext>,
     calls: Arc<Semaphore>,
     tool_timeout: Duration,
+    /// The peer of the MCP session this handler serves, recorded on its first
+    /// request so catalog-change notifications have a recipient. The factory
+    /// installs a fresh slot per session; the template's is never written.
+    peer: Arc<std::sync::RwLock<Option<Peer<RoleServer>>>>,
+}
+
+impl RegistryServer {
+    /// Remember this session's peer so a later explicit catalog change can
+    /// notify it (`#3778` P2). A stateless modern request re-records the same
+    /// transient peer; sending a notification to it is harmless and it closes
+    /// with the response.
+    fn remember_peer(&self, context: &RequestContext<RoleServer>) {
+        let mut peer = match self.peer.write() {
+            Ok(peer) => peer,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *peer = Some(context.peer.clone());
+    }
 }
 
 impl ServerHandler for RegistryServer {
@@ -308,18 +440,29 @@ impl ServerHandler for RegistryServer {
     async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<ListToolsResult, McpError> {
-        Ok(ListToolsResult::with_all_items(self.registry.list())
+        self.remember_peer(&context);
+        let snapshot = self.catalog.snapshot();
+        let mut result = ListToolsResult::with_all_items(snapshot.tools())
             .with_ttl_ms(protocol::TOOLS_LIST_TTL_MS)
-            .with_cache_scope(CacheScope::Private))
+            .with_cache_scope(CacheScope::Private);
+        // The generation is observable even to a client that did not receive a
+        // list-change notification (a stateless modern request has no channel
+        // for one). `_meta` is the protocol's extension point for exactly this.
+        result.meta = Some(MetaObject(serde_json::Map::from_iter([(
+            "nession/catalogRevision".to_string(),
+            json!(snapshot.revision()),
+        )])));
+        Ok(result)
     }
 
     async fn call_tool(
         &self,
         request: rmcp::model::CallToolRequestParams,
-        _context: RequestContext<RoleServer>,
+        context: RequestContext<RoleServer>,
     ) -> Result<CallToolResponse, McpError> {
+        self.remember_peer(&context);
         let name = request.name.to_string();
         let arguments = request.arguments;
 
@@ -338,9 +481,13 @@ impl ServerHandler for RegistryServer {
             }
         };
 
+        // One generation per request: the Tool that is looked up and the Tool
+        // that executes are the same owner's handler even if a host swaps the
+        // catalog while this call is in flight (#3778).
+        let snapshot = self.catalog.snapshot();
         let outcome = timeout(
             self.tool_timeout,
-            self.registry.call(&self.context, &name, arguments),
+            snapshot.call(&self.context, &name, arguments),
         )
         .await;
         drop(permit);
@@ -408,6 +555,7 @@ struct AuthorizedMcp {
     inner: StreamableHttpService<RegistryServer, LocalSessionManager>,
     path: Arc<str>,
     auth_token: TokenVerifier,
+    allow_query_token: bool,
 }
 
 impl AuthorizedMcp {
@@ -445,10 +593,18 @@ where
         if request.uri().path() != &*self.path {
             return Box::pin(async { Ok(Self::not_found()) });
         }
-        if !authorized_by(&request, &self.auth_token) {
-            warn!("MCP request refused: no valid bearer token");
+        if !authorized_by(&request, &self.auth_token, self.allow_query_token) {
+            // Do not log the request target: it may contain the query credential.
+            warn!("MCP request refused: no valid credential");
             return Box::pin(async { Ok(Self::unauthorized()) });
         }
+        // The MCP protocol uses the path, not URL query parameters. Strip the
+        // credential-bearing query before forwarding to rmcp's transport.
+        let mut request = request;
+        let Ok(path_only) = request.uri().path().parse::<http::Uri>() else {
+            return Box::pin(async { Ok(Self::unauthorized()) });
+        };
+        *request.uri_mut() = path_only;
         let mut inner = self.inner.clone();
         Box::pin(async move {
             match inner.call(request).await {
@@ -463,28 +619,145 @@ where
     }
 }
 
-fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier) -> bool {
-    let Some(value) = request
-        .headers()
-        .get(http::header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-    else {
-        return false;
+/// Extract the single query credential, never exposing it in an error or log.
+/// Form-query decoding accepts percent-encoded reserved characters (including
+/// '+' as %2B) and rejects incomplete escapes rather than normalizing them.
+fn query_token(query: Option<&str>) -> Result<Option<String>, ()> {
+    let Some(query) = query else {
+        return Ok(None);
     };
-    let mut parts = value.splitn(2, ' ');
-    let scheme = parts.next().unwrap_or_default();
-    if !scheme.eq_ignore_ascii_case("bearer") {
+    let mut token = None;
+    for parameter in query.split('&') {
+        let (key, value) = parameter.split_once('=').unwrap_or((parameter, ""));
+        if decode_query_component(key).ok_or(())? == "token" {
+            if token.is_some() {
+                return Err(());
+            }
+            let decoded = decode_query_component(value).ok_or(())?;
+            if decoded.is_empty() {
+                return Err(());
+            }
+            token = Some(decoded);
+        }
+    }
+    Ok(token)
+}
+
+fn decode_query_component(component: &str) -> Option<String> {
+    let bytes = component.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut offset = 0;
+    while let Some(&byte) = bytes.get(offset) {
+        match byte {
+            b'%' => {
+                let high = hex_digit(*bytes.get(offset + 1)?)?;
+                let low = hex_digit(*bytes.get(offset + 2)?)?;
+                decoded.push((high << 4) | low);
+                offset += 3;
+            }
+            b'+' => {
+                decoded.push(b' ');
+                offset += 1;
+            }
+            _ => {
+                decoded.push(byte);
+                offset += 1;
+            }
+        }
+    }
+    String::from_utf8(decoded).ok()
+}
+
+fn hex_digit(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
+fn authorized_by<B>(request: &Request<B>, verifier: &TokenVerifier, allow_query: bool) -> bool {
+    // Authorization must not be ambiguous even when multiple headers appear.
+    let all_headers = request.headers().get_all(http::header::AUTHORIZATION);
+    let mut headers = all_headers.iter();
+    let header = headers.next();
+    if headers.next().is_some() {
         return false;
     }
-    let Some(presented) = parts.next() else {
-        return false;
+    let query = match query_token(request.uri().query()) {
+        Ok(query) => query,
+        Err(()) => return false,
     };
-    verifier.verify(presented.trim())
+    if query.is_some() && !allow_query {
+        return false;
+    }
+
+    let bearer = match header {
+        None => None,
+        Some(value) => {
+            let Ok(value) = value.to_str() else {
+                return false;
+            };
+            let mut parts = value.splitn(2, ' ');
+            if !parts
+                .next()
+                .is_some_and(|scheme| scheme.eq_ignore_ascii_case("bearer"))
+            {
+                return false;
+            }
+            let Some(presented) = parts.next() else {
+                return false;
+            };
+            Some(presented.trim())
+        }
+    };
+    match (bearer, query.as_deref()) {
+        (Some(bearer), Some(query)) => bearer == query && verifier.verify(bearer),
+        (Some(bearer), None) => verifier.verify(bearer),
+        (None, Some(query)) => verifier.verify(query),
+        (None, None) => false,
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::{UnavailableClusterBackend, UnavailableNodeBackend};
+    use crate::provider::ToolProviderError;
+    use crate::tool::ToolHandler;
+
+    struct OfflineProvider;
+
+    impl McpToolProvider for OfflineProvider {
+        fn provider_name(&self) -> &str {
+            "offline-extension"
+        }
+
+        fn tools(&self) -> Result<Vec<Arc<dyn ToolHandler>>, ToolProviderError> {
+            Err(ToolProviderError::new("the Extension is not installed"))
+        }
+    }
+
+    #[test]
+    fn a_failing_extension_provider_fails_the_mount() {
+        let cluster: Arc<dyn ClusterBackend> =
+            Arc::new(UnavailableClusterBackend::new("no server"));
+        let node: Arc<dyn NodeBackend> = Arc::new(UnavailableNodeBackend::new("no agent"));
+        let error = match McpService::with_providers(
+            ServiceConfig::new("token"),
+            cluster,
+            node,
+            vec![Arc::new(OfflineProvider)],
+        ) {
+            Ok(_) => panic!("a failing provider must fail the mount"),
+            Err(error) => error,
+        };
+        assert!(
+            matches!(&error, ServiceConfigError::InvalidRegistry(message) if message.contains("offline-extension")),
+            "{error}"
+        );
+    }
 
     #[test]
     fn execution_timeout_does_not_report_a_confirmed_failed_mutation() {
@@ -505,6 +778,91 @@ mod tests {
         assert!(!verifier.verify("abd"));
         assert!(!verifier.verify("ab"));
         assert!(!verifier.verify(""));
+    }
+
+    #[test]
+    fn query_credentials_require_opt_in_and_do_not_override_bearer() {
+        fn allowed(uri: &str, headers: &[&str], allow_query: bool) -> bool {
+            let mut request = Request::builder().uri(uri);
+            for header in headers {
+                request = request.header(http::header::AUTHORIZATION, *header);
+            }
+            let request = request.body(()).expect("test request");
+            authorized_by(
+                &request,
+                &TokenVerifier::new("value+with/slash"),
+                allow_query,
+            )
+        }
+
+        assert!(!allowed("/mcp?token=value%2Bwith%2Fslash", &[], false));
+        assert!(allowed("/mcp", &["Bearer value+with/slash"], false));
+        assert!(allowed("/mcp?token=value%2Bwith%2Fslash", &[], true));
+        assert!(allowed(
+            "/mcp?irrelevant=a&token=value%2Bwith%2Fslash",
+            &[],
+            true
+        ));
+        assert!(allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer value+with/slash"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer wrong"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=wrong",
+            &["Bearer value+with/slash"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Basic wrong"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer"],
+            true
+        ));
+        assert!(!allowed(
+            "/mcp?token=value%2Bwith%2Fslash",
+            &["Bearer value+with/slash", "Bearer value+with/slash"],
+            true
+        ));
+        for target in [
+            "/mcp",
+            "/mcp?token=",
+            "/mcp?token=wrong",
+            "/mcp?token=value+with%2Fslash",
+            "/mcp?token=value%2Bwith%2Fslash&token=value%2Bwith%2Fslash",
+            "/mcp?token=value%",
+            "/mcp?token=value%2",
+            "/mcp?token=value%ZZ",
+            "/mcp?%74oken=wrong",
+        ] {
+            assert!(
+                !allowed(target, &[], true),
+                "unexpected authorization: {target}"
+            );
+        }
+    }
+
+    #[test]
+    fn query_token_decoding_rejects_invalid_encoding_and_duplicate_keys() {
+        assert_eq!(query_token(None), Ok(None));
+        assert_eq!(
+            query_token(Some("token=a%2Bb%26c")),
+            Ok(Some("a+b&c".into()))
+        );
+        assert_eq!(query_token(Some("%74oken=value")), Ok(Some("value".into())));
+        assert_eq!(query_token(Some("foo=bar")), Ok(None));
+        assert_eq!(query_token(Some("token=%")), Err(()));
+        assert_eq!(query_token(Some("token=%FF")), Err(()));
+        assert_eq!(query_token(Some("token=x&%74oken=x")), Err(()));
     }
 
     #[test]

@@ -458,6 +458,152 @@ test('History bounds what it offers, and unmounts the section it replaced (#826)
   await expect(page.getByTestId('git-change-list')).toHaveCount(0);
 });
 
+// #4116: a failed continuation is a rejected `git.log`, not an error-shaped
+// answer. The `history-overlap` fixture holds the first older read so the Case
+// decides when it rejects — after a retry setup or after a Session move — and
+// an init-script observer proves the rejection never escapes as an unhandled
+// Promise rejection. The assertions are about the list the user still has:
+// its rows, its continuation boundary, and a visible retryable failure.
+type FixtureGitHistoryOverlapControl = {
+  olderRequests: () => number;
+  olderSettled: () => boolean;
+  releaseOlder: (fail?: boolean) => void;
+};
+type FixtureGitHistoryWindow = Window & {
+  fixtureGitHistoryOverlap?: FixtureGitHistoryOverlapControl;
+  fixtureGitSelectSession?: (sessionId: string) => void;
+  fixtureGitSelectedSession?: () => string;
+  fixtureUnhandledRejections?: string[];
+};
+
+function historyWindow(page: import('@playwright/test').Page) {
+  return {
+    olderRequests: () =>
+      page.evaluate(() => (window as FixtureGitHistoryWindow).fixtureGitHistoryOverlap?.olderRequests() ?? 0),
+    olderSettled: () =>
+      page.evaluate(() => (window as FixtureGitHistoryWindow).fixtureGitHistoryOverlap?.olderSettled() ?? false),
+    releaseOlder: (fail: boolean) =>
+      page.evaluate((shouldFail) => {
+        (window as FixtureGitHistoryWindow).fixtureGitHistoryOverlap?.releaseOlder(shouldFail);
+      }, fail),
+    selectSession: (sessionId: string) =>
+      page.evaluate((id) => {
+        (window as FixtureGitHistoryWindow).fixtureGitSelectSession?.(id);
+      }, sessionId),
+    selectedSession: () =>
+      page.evaluate(() => (window as FixtureGitHistoryWindow).fixtureGitSelectedSession?.() ?? ''),
+    unhandledRejections: () =>
+      page.evaluate(() => (window as FixtureGitHistoryWindow).fixtureUnhandledRejections ?? []),
+  };
+}
+
+/** Record every unhandled rejection from the first document script onward. */
+async function observeUnhandledRejections(
+  page: import('@playwright/test').Page,
+): Promise<void> {
+  await page.addInitScript(() => {
+    (window as FixtureGitHistoryWindow).fixtureUnhandledRejections = [];
+    window.addEventListener('unhandledrejection', (event) => {
+      (window as FixtureGitHistoryWindow).fixtureUnhandledRejections?.push(String(event.reason));
+    });
+  });
+}
+
+async function gotoHistoryOverlap(page: import('@playwright/test').Page): Promise<void> {
+  await page.goto('/#/fixture/workspace?capability=git&git=history-overlap');
+  await page.getByTestId('git-change-list').waitFor();
+  await page.getByRole('tab', { name: 'History' }).click();
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(50);
+  await page.waitForFunction(
+    () => Boolean((window as FixtureGitHistoryWindow).fixtureGitHistoryOverlap),
+  );
+}
+
+test('a failed older page is visible and retryable, never an unhandled rejection (#4116 SC-01)', async ({
+  page,
+}) => {
+  await observeUnhandledRejections(page);
+  await gotoHistoryOverlap(page);
+  const control = historyWindow(page);
+
+  const loadOlder = page.getByTestId('git-history-load-more');
+  await expect(loadOlder).toHaveText('Load older commits');
+  await expect(loadOlder).toBeEnabled();
+
+  // Hold the continuation, then settle it as a transport failure.
+  await loadOlder.click();
+  await expect.poll(() => control.olderRequests()).toBe(1);
+  await expect(loadOlder).toHaveText('Loading older commits…');
+  await control.releaseOlder(true);
+  await expect.poll(() => control.olderSettled()).toBe(true);
+
+  // The loaded page survives untouched, and the failure is an alert beside the
+  // still-enabled control — not a lost list, not an inert button, not silence.
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(50);
+  await expect(page.getByText('A first page 1 commit 1', { exact: true })).toHaveCount(1);
+  const error = page.getByTestId('git-history-older-error');
+  await expect(error).toBeVisible();
+  await expect(error).toHaveAttribute('role', 'alert');
+  await expect(error).not.toBeEmpty();
+  await expect(loadOlder).toHaveText('Load older commits');
+  await expect(loadOlder).toBeEnabled();
+
+  // The retry reads from the retained cursor and appends the expected page
+  // exactly once; the error does not outlive the request that supersedes it.
+  await loadOlder.click();
+  await expect(page.getByText('A older page 1 commit 1', { exact: true })).toHaveCount(1);
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(100);
+  await expect(page.getByTestId('git-history-older-error')).toHaveCount(0);
+  await expect(page.getByTestId('git-history-load-more')).toHaveCount(0);
+  await expect(page.getByTestId('git-history-more')).toContainText('End of history');
+  expect(await control.olderRequests()).toBe(2);
+  expect(await control.unhandledRejections()).toEqual([]);
+});
+
+test('a stale Session’s failed older page cannot publish into the successor (#4116 SC-02)', async ({
+  page,
+}) => {
+  await observeUnhandledRejections(page);
+  await gotoHistoryOverlap(page);
+  const control = historyWindow(page);
+
+  // Hold Session A's continuation while the Workspace moves to Session B.
+  const loadOlder = page.getByTestId('git-history-load-more');
+  await loadOlder.click();
+  await expect.poll(() => control.olderRequests()).toBe(1);
+  await expect(loadOlder).toHaveText('Loading older commits…');
+
+  await page.waitForFunction(
+    () => typeof (window as FixtureGitHistoryWindow).fixtureGitSelectSession === 'function',
+  );
+  await control.selectSession('devbox-01:design-system');
+  await expect.poll(() => control.selectedSession()).toBe('devbox-01:design-system');
+  await expect(page.getByText('B first page 1 commit 1', { exact: true })).toHaveCount(1);
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(50);
+  await expect(loadOlder).toHaveText('Load older commits');
+  await expect(loadOlder).toBeEnabled();
+
+  // A's continuation now rejects. It describes a list that is gone: it may
+  // neither publish an error nor disturb B's loading state.
+  await control.releaseOlder(true);
+  await expect.poll(() => control.olderSettled()).toBe(true);
+  await expect(page.getByTestId('git-history-older-error')).toHaveCount(0);
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(50);
+  await expect(page.getByTestId('git-commit-row').filter({ hasText: /^A / })).toHaveCount(0);
+  await expect(loadOlder).toHaveText('Load older commits');
+  await expect(loadOlder).toBeEnabled();
+
+  // B's own continuation still works from B's cursor, and the stale failure
+  // never escaped as an unhandled rejection in either Session.
+  await loadOlder.click();
+  await expect(page.getByText('B older page 1 commit 1', { exact: true })).toHaveCount(1);
+  await expect(page.getByTestId('git-commit-row')).toHaveCount(100);
+  await expect(page.getByTestId('git-commit-row').filter({ hasText: /^A / })).toHaveCount(0);
+  await expect(page.getByTestId('git-history-older-error')).toHaveCount(0);
+  expect(await control.olderRequests()).toBe(2);
+  expect(await control.unhandledRejections()).toEqual([]);
+});
+
 test('Branches tells apart the states that arrive identically (#846)', async ({ page }) => {
   await gotoGit(page);
   await page.getByRole('tab', { name: 'Branches' }).click();

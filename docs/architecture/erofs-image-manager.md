@@ -63,7 +63,11 @@ are in
 
 ## Sources
 
-V1 accepts three source shapes:
+V1 accepts three source shapes. The Web Build editor offers exactly these
+kinds: the lower-level archive and OCI-conversion boundaries are not Server
+Build Source DTOs, so they are not presented as selectable adapters (#3795).
+An invalid or unauthorized declaration is refused by the editor before a
+durable build record exists.
 
 1. **Public GitHub HTTPS repository** — `https://github.com/<owner>/<repo>`
    with a branch name or a full 40-character commit SHA. The canonical
@@ -72,7 +76,11 @@ V1 accepts three source shapes:
    path segments are refused. A fixed SHA that the remote cannot fetch is an
    explicit build failure.
 2. **Validated local directory or bundle** — an absolute path with no `..` or
-   control characters. The tree is copied without following symlinks, scanned,
+   control characters, inside the one Server-authorized `image_source_root`
+   (#3795). The Server refuses the local adapter entirely when no root is
+   configured, so a browser can never point a build at an arbitrary host path;
+   an existing path is additionally canonicalized so a symlinked source cannot
+   escape the root. The tree is copied without following symlinks, scanned,
    and built from the private copy.
 3. **Flattened Compose of catalog Images** (#3696) — one to sixteen sources,
    each naming a catalog `repository`, a Tag or immutable digest, and a
@@ -201,9 +209,9 @@ packaging stage reports stage and elapsed time and **no invented percentage**.
 |---|---|---|
 | `server.image.build.submit` | Inline | Validate input, create the durable directory and `building` row, return the queued record promptly |
 | `server.image.build.get` | Query | Read the authoritative durable record (valid after reconnect/restart) |
-| `server.image.build.list` | Query | Durable build inventory, newest first |
-| `server.image.build.cancel` | Inline | Terminate owned subprocesses, record truthful `canceled`; idempotent on a terminal record |
-| `server.image.build.retry` | Inline | New attempt in the same record, reusing a verified snapshot |
+| `server.image.build.list` | Query | Durable build inventory, newest first; status/source filters and bounded substring search apply before pagination |
+| `server.image.build.cancel` | Inline | Terminate owned subprocesses, record truthful `canceled`; idempotent on a terminal record; an observed `attempt` mismatch is a conflict |
+| `server.image.build.retry` | Inline | New attempt in the same record, reusing a verified snapshot; an observed `attempt` mismatch is a conflict |
 | `server.image.build` | Inline | **Legacy synchronous compatibility path**: submits the same durable build and waits for the terminal record, then returns the ready/failed `ImageDescriptor` |
 
 The legacy unit is explicit and versioned, not reinterpreted: a client that
@@ -213,9 +221,11 @@ contract types and validation live in
 `nession-protocol::contracts::image::v1`.
 
 The Server pushes `server.image.build.updated` with the descriptor read from the
-durable state at each transition. A client that misses a push (navigation or
-reconnect) re-reads `server.image.build.get|list`; there is no client-side
-fabrication of progress.
+durable state at each transition. Every descriptor also carries the record's
+bounded terminal attempt history with each attempt's last diagnostic, so a
+retry never erases why the previous attempt failed. A client that misses a push
+(navigation or reconnect) re-reads `server.image.build.get|list`; there is no
+client-side fabrication of progress.
 
 ### Stage-level restart recovery
 
@@ -252,10 +262,13 @@ bytes, fails only its own registry row and never changes a Project reference or
 alias.
 
 Retry creates the next attempt in the same record and preserves the terminal
-attempt's stage/error history. A verified snapshot is reused without the source;
-packaging is rerun; a Git source with no snapshot is refetched (pinned commit
-when one exists); a local source without a snapshot is refused with "submit a
-new build". A succeeded build cannot be retried.
+attempt's stage/diagnostic/error history. A verified snapshot is reused without
+the source; packaging is rerun; a Git source with no snapshot is refetched
+(pinned commit when one exists); a local source without a snapshot is refused
+with "submit a new build". A succeeded build cannot be retried. A cancel or
+retry names the attempt the caller observed; if the record moved to another
+attempt in the meantime, the Server returns `conflict` and mutates nothing, so
+an action can never terminate or retry an attempt the user did not see.
 
 `image_max_concurrent_builds` still bounds simultaneous workers with an
 in-process semaphore. Each build ID has at most one active execution; a
@@ -284,11 +297,25 @@ sweep over registry rows.
 
 | Unit | Policy | Meaning |
 |---|---|---|
-| `server.image.list` | Query | Complete inventory, newest first, paginated and searchable |
+| `server.image.list` | Query | Complete legacy inventory, newest first, paginated and searchable |
 | `server.image.get` | Query | Exactly one of `digest` or `alias` |
+| `server.image.library.list` | Query | Server Catalog Library page: Repository/Tags, Manifest identity, advisory role/default target, platform, representation and closure |
+| `server.image.impact.get` | Query | Known Project/Session pins, other Tags, leases and Compose references for one Tag |
+| `server.image.tag.set` | Inline | CAS-guarded Tag create (expected absent) or move (exact expected digest) |
+| `server.image.tag.remove` | Inline | CAS-guarded logical Tag unlink with explicit reference-impact confirmation |
 
 All require an authenticated client. The contract types and validation live in
 `nession-protocol::contracts::image::v1`.
+
+The Library units separate the three identities the UI must not conflate: the
+legacy digest/alias registry row, the immutable Manifest/Index/Composite digest
+from the catalog, and the mutable repository-scoped Tag. A legacy row without a
+readable catalog identity is returned with explicit unknown metadata; no
+platform, representation or reference count is invented from the legacy
+descriptor. Tag mutations require the target to be a published Manifest, Index
+or Composite and never touch a pinned consumer. Removal is a logical unlink:
+known references require `accept_reference_impact`, unobservable impact fails
+closed, and CAS bytes/GC roots remain untouched.
 
 `server.image.list` takes an absolute `offset`, a `limit` (default 200 for an
 older client, maximum 200) and an optional case-sensitive `query` over alias,

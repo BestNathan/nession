@@ -68,7 +68,7 @@ impl Gate {
 /// until the test releases a gate. Used for prompt submission, cancellation,
 /// concurrency, GC protection and alias ordering.
 struct SharedBlobBackend {
-    blobs: BlobStore,
+    blobs: FsBlobStore,
     gate: Arc<Gate>,
     active: AtomicUsize,
     max_active: AtomicUsize,
@@ -77,7 +77,7 @@ struct SharedBlobBackend {
 }
 
 impl SharedBlobBackend {
-    fn new(blobs: BlobStore, entered: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
+    fn new(blobs: FsBlobStore, entered: tokio::sync::mpsc::UnboundedSender<String>) -> Self {
         Self {
             blobs,
             gate: Arc::new(Gate::default()),
@@ -195,7 +195,7 @@ fn real_builder(dir: &Path, mkfs: Arc<dyn MkfsRunner>) -> Arc<dyn ImageBuildBack
         ErofsBuilder::new(
             Arc::new(ProcessGitRunner::default()),
             mkfs,
-            BlobStore::new(dir.join("blobs")).unwrap(),
+            FsBlobStore::new(dir.join("blobs")).unwrap(),
             dir.join("work"),
         )
         .unwrap(),
@@ -206,6 +206,7 @@ fn options(dir: &Path, max_concurrent: usize) -> ImageManagerOptions {
     ImageManagerOptions {
         max_concurrent_builds: max_concurrent,
         build_root: dir.join("builds"),
+        source_root: Some(std::path::PathBuf::from("/")),
         build_stage_timeout: Some(Duration::from_secs(30)),
         build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
         build_retention_secs: 60,
@@ -218,7 +219,7 @@ async fn manager_with(
     max_concurrent: usize,
 ) -> (Arc<ImageManager>, Arc<Database>) {
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let blobs = BlobStore::new(dir.join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.join("blobs")).unwrap();
     let manager = Arc::new(
         ImageManager::new(
             Arc::clone(&db),
@@ -276,7 +277,7 @@ async fn wait_for_stage(
 async fn submission_returns_a_durable_record_before_the_build_finishes() {
     let dir = tempfile::tempdir().unwrap();
     let source = source_tree(dir.path());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, mut entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let (manager, _db) = manager_with(dir.path(), backend.clone(), 1).await;
@@ -321,7 +322,7 @@ async fn submission_returns_a_durable_record_before_the_build_finishes() {
 async fn duplicate_submission_is_idempotent_and_legacy_build_returns_a_ready_image() {
     let dir = tempfile::tempdir().unwrap();
     let source = source_tree(dir.path());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, _entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let (manager, _db) = manager_with(dir.path(), backend.clone(), 1).await;
@@ -359,7 +360,7 @@ async fn duplicate_submission_is_idempotent_and_legacy_build_returns_a_ready_ima
 async fn concurrent_duplicate_submissions_create_one_build() {
     let dir = tempfile::tempdir().unwrap();
     let source = source_tree(dir.path());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, _entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let (manager, _db) = manager_with(dir.path(), backend.clone(), 1).await;
@@ -479,9 +480,21 @@ async fn retry_reuses_a_verified_snapshot_and_never_recopies_the_source() {
     assert!(failed.error.as_deref().unwrap().contains("simulated"));
     assert_eq!(failed.progress.files, Some(2));
 
+    // A stale attempt is a conflict: retrying does not silently open an
+    // attempt for a record the caller did not observe (#3798).
+    let conflict = manager
+        .retry_build_at(&submitted.build_id, Some(2))
+        .await
+        .unwrap_err();
+    assert_eq!(conflict.kind(), "conflict");
+    assert!(conflict.message().contains("attempt 1"));
+
     // Only the durable snapshot can produce the image after this point.
     std::fs::remove_dir_all(&source).unwrap();
-    let retried = manager.retry_build(&submitted.build_id).await.unwrap();
+    let retried = manager
+        .retry_build_at(&submitted.build_id, Some(1))
+        .await
+        .unwrap();
     assert_eq!(retried.attempt, 2);
     assert_eq!(retried.status, ImageBuildStatus::Queued);
     let done = manager.wait_terminal(&submitted.build_id).await.unwrap();
@@ -490,6 +503,11 @@ async fn retry_reuses_a_verified_snapshot_and_never_recopies_the_source() {
     assert_eq!(done.attempts.len(), 2);
     assert_eq!(done.attempts[0].attempt, 1);
     assert_eq!(done.attempts[0].status, "failed");
+    assert_eq!(
+        done.attempts[0].diagnostic.as_deref(),
+        done.attempts[0].error.as_deref(),
+        "the failed attempt keeps the diagnostic after a retry clears the current record"
+    );
     assert_eq!(done.attempts[1].attempt, 2);
     assert_eq!(done.attempts[1].status, "succeeded");
     assert!(manager.retry_build(&submitted.build_id).await.is_err());
@@ -572,7 +590,7 @@ async fn restart_recovery_resumes_from_the_verified_snapshot() {
         ImageManager::new(
             Arc::new(Database::new(":memory:").await.unwrap()),
             real_builder(dir.path(), good_mkfs),
-            BlobStore::new(dir.path().join("blobs")).unwrap(),
+            FsBlobStore::new(dir.path().join("blobs")).unwrap(),
             options(dir.path(), 1),
         )
         .unwrap(),
@@ -601,7 +619,7 @@ async fn restart_recovery_resumes_from_the_verified_snapshot() {
 async fn a_second_manager_on_one_build_root_is_refused() {
     let dir = tempfile::tempdir().unwrap();
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let first = ImageManager::new(
         Arc::clone(&db),
         Arc::new(UnavailableBackend),
@@ -625,7 +643,7 @@ async fn a_second_manager_on_one_build_root_is_refused() {
     ImageManager::new(
         db,
         Arc::new(UnavailableBackend),
-        BlobStore::new(dir.path().join("blobs")).unwrap(),
+        FsBlobStore::new(dir.path().join("blobs")).unwrap(),
         options(dir.path(), 1),
     )
     .expect("the lock is released with its owner");
@@ -646,7 +664,7 @@ async fn corrupted_durable_state_is_rejected_not_resumed() {
         ImageManager::new(
             Arc::new(Database::new(":memory:").await.unwrap()),
             Arc::new(UnavailableBackend),
-            BlobStore::new(dir.path().join("blobs")).unwrap(),
+            FsBlobStore::new(dir.path().join("blobs")).unwrap(),
             options(dir.path(), 1),
         )
         .unwrap(),
@@ -665,7 +683,7 @@ async fn corrupted_durable_state_is_rejected_not_resumed() {
 #[tokio::test]
 async fn concurrent_builds_respect_the_worker_limit_and_do_not_share_workspaces() {
     let dir = tempfile::tempdir().unwrap();
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, mut entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let (manager, _db) = manager_with(dir.path(), backend.clone(), 2).await;
@@ -720,7 +738,7 @@ async fn concurrent_builds_respect_the_worker_limit_and_do_not_share_workspaces(
 #[tokio::test]
 async fn a_stale_completion_does_not_overwrite_a_newer_alias_intent() {
     let dir = tempfile::tempdir().unwrap();
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, mut entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let older_source = dir.path().join("older-source");
@@ -772,7 +790,7 @@ async fn a_stale_completion_does_not_overwrite_a_newer_alias_intent() {
 async fn gc_skips_a_building_row_owned_by_a_live_build() {
     let dir = tempfile::tempdir().unwrap();
     let source = source_tree(dir.path());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, mut entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let (manager, db) = manager_with(dir.path(), backend.clone(), 1).await;
@@ -812,7 +830,7 @@ async fn gc_skips_a_building_row_owned_by_a_live_build() {
 async fn cleanup_expires_terminal_directories_but_never_active_work() {
     let dir = tempfile::tempdir().unwrap();
     let source = source_tree(dir.path());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let (entered_tx, _entered_rx) = channel();
     let backend = Arc::new(SharedBlobBackend::new(blobs, entered_tx));
     let (manager, _db) = manager_with(dir.path(), backend, 1).await;
@@ -841,13 +859,13 @@ async fn cleanup_expires_terminal_directories_but_never_active_work() {
 /// A backend that records the pinned Compose sources it was handed and
 /// publishes one deterministic flattened layer.
 struct ComposeRecordingBackend {
-    blobs: BlobStore,
+    blobs: FsBlobStore,
     gate: Arc<Gate>,
     seen: StdMutex<Vec<Vec<String>>>,
 }
 
 impl ComposeRecordingBackend {
-    fn new(blobs: BlobStore) -> Self {
+    fn new(blobs: FsBlobStore) -> Self {
         Self {
             blobs,
             gate: Arc::new(Gate::default()),
@@ -913,7 +931,7 @@ impl ImageBuildBackend for ComposeRecordingBackend {
 
 async fn publish_test_source(
     db: &Database,
-    blobs: &BlobStore,
+    blobs: &FsBlobStore,
     repository: &str,
     tag: &str,
     payload: &[u8],
@@ -964,7 +982,7 @@ fn compose_source(repository: &str, destination: &str) -> ImageComposeSource {
 async fn compose_pins_sources_publishes_provenance_and_survives_a_tag_move() {
     let dir = tempfile::tempdir().unwrap();
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let backend = Arc::new(ComposeRecordingBackend::new(blobs.clone()));
     let manager = Arc::new(
         ImageManager::new(
@@ -1091,7 +1109,7 @@ async fn compose_pins_sources_publishes_provenance_and_survives_a_tag_move() {
 async fn compose_rejects_unresolvable_and_wrong_platform_sources_before_publication() {
     let dir = tempfile::tempdir().unwrap();
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let backend = Arc::new(ComposeRecordingBackend::new(blobs.clone()));
     let manager = Arc::new(
         ImageManager::new(
@@ -1143,13 +1161,13 @@ async fn compose_rejects_unresolvable_and_wrong_platform_sources_before_publicat
 /// A backend that publishes one referenced Composite identity and records
 /// the Manifest/Composite digests it handed the manager.
 struct ReferencedRecordingBackend {
-    blobs: BlobStore,
+    blobs: FsBlobStore,
     manifest: StdMutex<Option<String>>,
     composite: StdMutex<Option<String>>,
 }
 
 impl ReferencedRecordingBackend {
-    fn new(blobs: BlobStore) -> Self {
+    fn new(blobs: FsBlobStore) -> Self {
         Self {
             blobs,
             manifest: StdMutex::new(None),
@@ -1307,7 +1325,7 @@ impl ImageBuildBackend for ReferencedRecordingBackend {
 async fn a_referenced_composite_publishes_a_distinct_identity_and_full_closure() {
     let dir = tempfile::tempdir().unwrap();
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let backend = Arc::new(ReferencedRecordingBackend::new(blobs.clone()));
     let manager = Arc::new(
         ImageManager::new(
@@ -1418,7 +1436,7 @@ async fn a_referenced_composite_publishes_a_distinct_identity_and_full_closure()
 async fn a_referenced_identity_is_never_served_as_a_legacy_erofs_payload() {
     let dir = tempfile::tempdir().unwrap();
     let db = Arc::new(Database::new(":memory:").await.unwrap());
-    let blobs = BlobStore::new(dir.path().join("blobs")).unwrap();
+    let blobs = FsBlobStore::new(dir.path().join("blobs")).unwrap();
     let backend = Arc::new(ReferencedRecordingBackend::new(blobs.clone()));
     let manager = Arc::new(
         ImageManager::new(

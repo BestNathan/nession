@@ -65,4 +65,90 @@ describe('AppPageHeader', () => {
     await user.click(screen.getByTestId('app-page-back'));
     expect(onBack).toHaveBeenCalled();
   });
+
+  it('renders capability action semantics as host icons, never as a second bar', async () => {
+    // #3971: the capability contributes meaning; the host owns the glyph,
+    // geometry, touch target and overflow. One header per depth still.
+    const onActivate = vi.fn();
+    render(
+      <AppPageHeader
+        backLabel="Back to terminal"
+        onBack={vi.fn()}
+        title="Claude Code"
+        actions={[
+          {
+            id: 'browse',
+            label: 'Browse',
+            ariaLabel: 'Browse Claude',
+            icon: 'browse',
+            priority: true,
+            onActivate,
+          },
+        ]}
+      />,
+    );
+    expect(screen.getAllByTestId('app-page-header')).toHaveLength(1);
+    const action = screen.getByTestId('app-page-action-browse');
+    expect(action).toHaveAccessibleName('Browse Claude');
+    const user = userEvent.setup();
+    await user.click(action);
+    expect(onActivate).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a truthful secondary line and opens the Stack Sheet from it', async () => {
+    const onJumpToAncestor = vi.fn();
+    render(
+      <AppPageHeader
+        backLabel="Back to Transcripts"
+        onBack={vi.fn()}
+        title="Raw record"
+        subtitle="Claude Code / Transcripts / Transcript"
+        ancestors={[
+          { id: 'transcript:t1', title: 'Focused transcript' },
+          { id: 'transcripts', title: 'Transcripts' },
+          { id: 'claude-root', title: 'Claude Code' },
+        ]}
+        onJumpToAncestor={onJumpToAncestor}
+      />,
+    );
+    expect(screen.getByTestId('app-page-subtitle-text')).toHaveTextContent(
+      'Claude Code / Transcripts / Transcript',
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('app-page-subtitle'));
+    expect(screen.getByTestId('app-stack-sheet')).toBeInTheDocument();
+    await user.click(screen.getByTestId('app-stack-ancestor-transcripts'));
+    expect(onJumpToAncestor).toHaveBeenCalledWith('transcripts');
+  });
+
+  it('moves extra and destructive actions into More with readable text', async () => {
+    const onRefresh = vi.fn();
+    const onDelete = vi.fn();
+    render(
+      <AppPageHeader
+        backLabel="Back to terminal"
+        onBack={vi.fn()}
+        title="MCP server"
+        actions={[
+          { id: 'browse', label: 'Browse', icon: 'browse', priority: true, onActivate: vi.fn() },
+          { id: 'copy', label: 'Copy reference', icon: 'copy', priority: true, onActivate: vi.fn() },
+          { id: 'refresh', label: 'Refresh', icon: 'refresh', onActivate: onRefresh },
+          { id: 'delete', label: 'Remove server', icon: 'delete', destructive: true, onActivate: onDelete },
+        ]}
+      />,
+    );
+    expect(screen.getByTestId('app-page-action-browse')).toBeInTheDocument();
+    expect(screen.getByTestId('app-page-action-copy')).toBeInTheDocument();
+    // Exactly two compact icons; everything else is overflow.
+    expect(screen.queryByTestId('app-page-action-refresh')).toBeNull();
+    expect(screen.queryByTestId('app-page-action-delete')).toBeNull();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId('app-page-more'));
+    const refresh = await screen.findByTestId('app-page-action-refresh');
+    expect(refresh).toHaveTextContent('Refresh');
+    const remove = screen.getByTestId('app-page-action-delete');
+    expect(remove).toHaveTextContent('Remove server');
+    await user.click(refresh);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
 });

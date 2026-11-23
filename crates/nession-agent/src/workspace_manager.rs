@@ -57,8 +57,15 @@ pub struct AgentWorkspace {
     pub auto_created: bool,
     pub created_at: u64,
     pub last_used_at: u64,
+    pub updated_at: u64,
     pub status: WorkspaceStatus,
     pub detail: Option<String>,
+    pub lower_digests: Vec<String>,
+    pub overlay_storage: bool,
+    pub used_bytes: Option<u64>,
+    pub consumers: Vec<String>,
+    pub mounted: bool,
+    pub lease_count: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -87,6 +94,10 @@ struct WorkspaceRecord {
     auto_created: bool,
     created_at: u64,
     last_used_at: u64,
+    /// The last durable registry update. A legacy record has no field; its
+    /// descriptor falls back to `last_used_at`.
+    #[serde(default)]
+    updated_at: u64,
     /// The immutable Project EROFS lower this Workspace's durable upper was
     /// prepared against (#3407 SC-04). Absent means a plain directory bind.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -116,18 +127,37 @@ pub struct WorkspaceOverlayStorage {
     pub work: PathBuf,
 }
 
+/// The actual mount/consumer state one Guards observes for a Workspace.
+///
+/// Consumers are Session names only: an observation must never disclose a
+/// host path, a grant, or another consumer's private runtime identity.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct WorkspaceObservation {
+    /// A human-readable reason when the Workspace is still in use.
+    pub in_use: Option<String>,
+    /// Session names holding a lease or bound execution, sorted and unique.
+    pub consumers: Vec<String>,
+    /// Whether an Overlay Merged View is currently observed mounted.
+    pub mounted: bool,
+}
+
 /// An observed-resource probe the Agent consults before deleting a managed
-/// Workspace (#3582).
+/// Workspace (#3582) and when describing one (#3797).
 ///
 /// The Workspace Manager owns the deletion policy; the probe reports actual
 /// physical mount/consumer state. A volatile process-local lease count alone
 /// cannot prove that no physical Overlay is mounted.
 pub trait WorkspaceUseGuard: Send + Sync {
-    /// A human-readable reason when the Workspace is still in use.
+    /// The observed lease/mount/consumer state of one Workspace.
     ///
     /// `directory` is the Workspace Manager's own derived durable directory,
     /// so an observer never has to recreate the storage layout.
-    fn workspace_in_use(&self, workspace_id: &str, directory: &Path) -> Option<String>;
+    fn observe_workspace(&self, workspace_id: &str, directory: &Path) -> WorkspaceObservation;
+
+    /// A human-readable reason when the Workspace is still in use.
+    fn workspace_in_use(&self, workspace_id: &str, directory: &Path) -> Option<String> {
+        self.observe_workspace(workspace_id, directory).in_use
+    }
 }
 
 /// The Agent's durable named Workspace registry.
@@ -178,6 +208,60 @@ fn effective_lower_layers(record: &WorkspaceRecord) -> Vec<String> {
         return record.lower_layers.clone();
     }
     record.lower_digest.iter().cloned().collect()
+}
+
+/// The measured persistent bytes under one directory tree.
+///
+/// Symlinks are inspected but never followed, so an external target is not
+/// counted or entered. A tree larger than [`MAX_USAGE_ENTRIES`] is reported as
+/// unmeasured (`None`) rather than as a partial number. For an Overlay-backed
+/// Workspace only its durable `upper` layer is persistent; `work` is scratch.
+fn measured_usage(directory: &Path, overlay_storage: bool) -> Option<u64> {
+    const MAX_USAGE_ENTRIES: usize = 100_000;
+    const MAX_USAGE_DEPTH: usize = 64;
+
+    fn walk(
+        path: &Path,
+        depth: usize,
+        total: &mut u64,
+        entries: &mut usize,
+    ) -> std::io::Result<()> {
+        if depth > MAX_USAGE_DEPTH {
+            return Err(std::io::Error::other("usage depth exceeded"));
+        }
+        for entry in std::fs::read_dir(path)? {
+            let entry = entry?;
+            *entries += 1;
+            if *entries > MAX_USAGE_ENTRIES {
+                return Err(std::io::Error::other("usage entry bound exceeded"));
+            }
+            let metadata = std::fs::symlink_metadata(entry.path())?;
+            let file_type = metadata.file_type();
+            if file_type.is_symlink() {
+                continue;
+            }
+            if file_type.is_dir() {
+                walk(&entry.path(), depth + 1, total, entries)?;
+            } else if file_type.is_file() {
+                *total = total.saturating_add(metadata.len());
+            }
+        }
+        Ok(())
+    }
+
+    let root = if overlay_storage {
+        directory.join("upper")
+    } else {
+        directory.to_path_buf()
+    };
+    let metadata = std::fs::symlink_metadata(&root).ok()?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return None;
+    }
+    let mut total = 0u64;
+    let mut entries = 0usize;
+    walk(&root, 0, &mut total, &mut entries).ok()?;
+    Some(total)
 }
 
 fn validate_lower_layers(layers: &[String]) -> Result<()> {
@@ -346,18 +430,23 @@ impl WorkspaceManager {
             .unwrap_or(0)
     }
 
-    fn observed_use(&self, workspace_id: &str) -> Option<String> {
-        self.use_guard.as_ref().and_then(|guard| {
-            guard.workspace_in_use(workspace_id, &self.workspace_dir(workspace_id))
-        })
+    fn observation(&self, workspace_id: &str) -> WorkspaceObservation {
+        self.use_guard
+            .as_ref()
+            .map(|guard| guard.observe_workspace(workspace_id, &self.workspace_dir(workspace_id)))
+            .unwrap_or_default()
     }
 
-    fn status_for(&self, workspace_id: &str) -> (WorkspaceStatus, Option<String>) {
+    fn status_for(
+        &self,
+        workspace_id: &str,
+        observation: &WorkspaceObservation,
+    ) -> (WorkspaceStatus, Option<String>) {
         if self.lease_count(workspace_id) > 0 {
             return (WorkspaceStatus::InUse, None);
         }
-        if let Some(reason) = self.observed_use(workspace_id) {
-            return (WorkspaceStatus::InUse, Some(reason));
+        if let Some(reason) = &observation.in_use {
+            return (WorkspaceStatus::InUse, Some(reason.clone()));
         }
         let path = self.workspace_dir(workspace_id);
         match std::fs::symlink_metadata(&path) {
@@ -382,7 +471,9 @@ impl WorkspaceManager {
     }
 
     fn descriptor(&self, record: &WorkspaceRecord) -> AgentWorkspace {
-        let (status, detail) = self.status_for(&record.workspace_id);
+        let observation = self.observation(&record.workspace_id);
+        let (status, detail) = self.status_for(&record.workspace_id, &observation);
+        let directory = self.workspace_dir(&record.workspace_id);
         AgentWorkspace {
             workspace_id: record.workspace_id.clone(),
             name: record.name.clone(),
@@ -390,8 +481,19 @@ impl WorkspaceManager {
             auto_created: record.auto_created,
             created_at: record.created_at,
             last_used_at: record.last_used_at,
+            updated_at: if record.updated_at == 0 {
+                record.last_used_at
+            } else {
+                record.updated_at
+            },
             status,
             detail,
+            lower_digests: effective_lower_layers(record),
+            overlay_storage: record.overlay_storage,
+            used_bytes: measured_usage(&directory, record.overlay_storage),
+            consumers: observation.consumers,
+            mounted: observation.mounted,
+            lease_count: self.lease_count(&record.workspace_id),
         }
     }
 
@@ -454,6 +556,7 @@ impl WorkspaceManager {
                 );
             }
             record.last_used_at = unix_now();
+            record.updated_at = record.last_used_at;
             let descriptor = self.descriptor(record);
             self.write_registry(&registry)?;
             return Ok(descriptor);
@@ -476,6 +579,7 @@ impl WorkspaceManager {
             auto_created,
             created_at: now,
             last_used_at: now,
+            updated_at: now,
             lower_digest: None,
             lower_layers: Vec::new(),
             overlay_storage: false,
@@ -502,7 +606,7 @@ impl WorkspaceManager {
         if self.lease_count(workspace_id) > 0 {
             anyhow::bail!("workspace is in use; release every attachment before deleting it");
         }
-        if let Some(reason) = self.observed_use(workspace_id) {
+        if let Some(reason) = self.observation(workspace_id).in_use {
             anyhow::bail!(
                 "workspace is in use ({reason}); release every attachment before deleting it"
             );
@@ -601,6 +705,7 @@ impl WorkspaceManager {
                 };
                 record.lower_digest = Some(first.clone());
                 record.lower_layers = layers.to_vec();
+                record.updated_at = unix_now();
                 self.write_registry(&registry)
             }
         }
@@ -679,6 +784,7 @@ impl WorkspaceManager {
         }
         if changed {
             record.overlay_storage = true;
+            record.updated_at = unix_now();
             self.write_registry(&registry)?;
         }
         Ok(WorkspaceOverlayStorage {
@@ -1179,9 +1285,16 @@ mod tests {
 
     struct InUseGuard;
     impl WorkspaceUseGuard for InUseGuard {
-        fn workspace_in_use(&self, workspace_id: &str, _directory: &Path) -> Option<String> {
-            (workspace_id == OBSERVED_WORKSPACE)
-                .then(|| "a physical Overlay is mounted".to_string())
+        fn observe_workspace(&self, workspace_id: &str, _directory: &Path) -> WorkspaceObservation {
+            if workspace_id == OBSERVED_WORKSPACE {
+                WorkspaceObservation {
+                    in_use: Some("a physical Overlay is mounted".to_string()),
+                    consumers: vec!["fixture-session".to_string()],
+                    mounted: true,
+                }
+            } else {
+                WorkspaceObservation::default()
+            }
         }
     }
 
@@ -1205,6 +1318,63 @@ mod tests {
             format!("{error:#}").contains("a physical Overlay is mounted"),
             "{error:#}"
         );
+    }
+
+    struct ConsumersGuard;
+    impl WorkspaceUseGuard for ConsumersGuard {
+        fn observe_workspace(
+            &self,
+            _workspace_id: &str,
+            _directory: &Path,
+        ) -> WorkspaceObservation {
+            WorkspaceObservation {
+                in_use: Some("a live Sandbox execution is bound to this Workspace".to_string()),
+                consumers: vec!["a1:fix-terminal".to_string()],
+                mounted: true,
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn a_descriptor_reports_lowers_usage_consumers_and_registry_update_time() {
+        const LOWER: &str =
+            "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+        let dir = tempfile::tempdir().unwrap();
+        let manager = Arc::new(
+            WorkspaceManager::open_with_guard(
+                dir.path().join("workspaces"),
+                Some(Arc::new(ConsumersGuard)),
+            )
+            .unwrap(),
+        );
+        let workspace = manager
+            .get_or_create(None, "detailed", false)
+            .await
+            .unwrap();
+        assert_eq!(workspace.updated_at, workspace.created_at);
+        manager
+            .pin_lower_layers(&workspace.workspace_id, Some(&[LOWER.to_string()]))
+            .await
+            .unwrap();
+        let workspace_dir = manager
+            .workspace_directory(&workspace.workspace_id)
+            .unwrap();
+        std::fs::create_dir(workspace_dir.join("nested")).unwrap();
+        std::fs::write(workspace_dir.join("nested").join("edit.txt"), b"12345").unwrap();
+
+        let listed = manager.list(None).await.unwrap();
+        let descriptor = listed
+            .iter()
+            .find(|entry| entry.workspace_id == workspace.workspace_id)
+            .unwrap();
+        assert_eq!(descriptor.lower_digests, vec![LOWER.to_string()]);
+        assert!(!descriptor.overlay_storage);
+        assert_eq!(descriptor.used_bytes, Some(5));
+        assert_eq!(descriptor.consumers, vec!["a1:fix-terminal".to_string()]);
+        assert!(descriptor.mounted);
+        assert_eq!(descriptor.status, WorkspaceStatus::InUse);
+        assert!(descriptor.updated_at >= descriptor.created_at);
+        assert_eq!(descriptor.lease_count, 0);
     }
 
     #[tokio::test]

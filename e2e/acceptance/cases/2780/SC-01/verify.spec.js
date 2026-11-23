@@ -25,7 +25,7 @@ test('SC-01: a Files detail no longer fences the Agent root after a Capsule swit
   }
   await expect(page.getByTestId('codemirror-editor')).toBeVisible();
   await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
-  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to src');
 
   // The Capsule is intentionally available at every depth (#1347). Switching
   // to Agent must publish Agent's root depth, not Files' pushed depth.
@@ -46,7 +46,7 @@ test('SC-01: a Files detail no longer fences the Agent root after a Capsule swit
   test.info().annotations.push({
     type: 'evidence',
     description:
-      'exact SHA ' + sha + ' at 390x844: after opening web/src/App.tsx (Back to Files) and ' +
+      'exact SHA ' + sha + ' at 390x844: after opening web/src/App.tsx (Back to src) and ' +
       'switching to Agent with the always-visible Capsule, the header was Agent with Back to ' +
       'terminal and a rightward shell swipe on release moved data-layer to terminal, unmounting ' +
       'the Workspace layer instead of being suppressed by the retired Files depth',

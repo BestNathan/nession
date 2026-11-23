@@ -265,13 +265,16 @@ export function collectQwenDevelopmentPatch(snapshot,{events}={}){
   const observed=Array.isArray(events)?toolUseNames(events):null;
   // Grep/Glob are read-only discovery tools. The native CLI may invoke
   // them while locating a tracked file; their use is not a source mutation.
-  // Still require real Read and Edit/Write tool events, and reject Bash/MCP.
-  const allowed=new Set(['Read','Grep','Glob','Edit','Write']);
-  if(!observed||!observed.includes('Read')||
-      !observed.some(x=>x==='Edit'||x==='Write'))
-    fail('required actual restricted native Read/Edit evidence missing');
-  if(observed.some(x=>!allowed.has(x)))
+  // #4174: Write can create files the Publisher cannot accept.
+  // Reject forbidden tool use before checking the mandatory real Read/Edit
+  // evidence so a malicious or mistaken tool never masquerades as missing
+  // evidence. Neither form may grant an admitted source patch.
+  const allowed=new Set(['Read','Grep','Glob','Edit']);
+  if(observed?.some(x=>!allowed.has(x)))
     fail('unapproved native Developer tool was invoked');
+  if(!observed||!observed.includes('Read')||
+      !observed.includes('Edit'))
+    fail('required actual restricted native Read/Edit evidence missing');
   return checkedGitPatch(snapshot);
 }
 export function verifyQwenPatchStillMatches(snapshot,previous){

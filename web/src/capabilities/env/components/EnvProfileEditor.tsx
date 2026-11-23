@@ -1,6 +1,8 @@
 import { useEffect } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
+import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -189,29 +191,41 @@ function EditorBody({
           filename={draft.isNew ? draft.name : (profile?.name ?? '')}
         />
       </div>
-      {warnings.length > 0 ? (
-        <div className="border-t px-4 py-2" data-testid="env-editor-warnings">
-          <p className={cn('text-warning', chromeSansRole('metadata'))}>
-            {warnings.length === 1
-              ? '1 line will be skipped'
-              : `${warnings.length} lines will be skipped`}
-          </p>
-          {warnings.map((w, i) => (
-            <p key={i} className={cn('mt-0.5 font-mono text-muted-foreground', chromeSansRole('metadata'))}>
-              {w}
-            </p>
-          ))}
-        </div>
-      ) : null}
-      {hasDiff ? (
-        <details className="border-t px-4 py-2" data-testid="env-editor-review">
-          <summary className={cn('cursor-pointer select-none text-muted-foreground', chromeSansRole('metadata'))}>
-            Review changes
-          </summary>
-          <div className="mt-2">
-            <EnvDiff original={draft.originalContent} modified={draft.content} />
-          </div>
-        </details>
+      {/* #4188: warnings and the Review-changes detail are the editor depth's
+          feedback surface. They sit below the CodeMirror fill region, so they
+          get their own bounded scroll owner that spends the host inset: a long
+          warning list or an expanded diff stays reachable above the Capsule
+          without taking scroll ownership away from the editor. */}
+      {warnings.length > 0 || hasDiff ? (
+        <WorkspaceBoundedScrollport
+          viewportClassName="max-h-[40%] flex-none border-t"
+          data-testid="env-editor-feedback"
+        >
+          {warnings.length > 0 ? (
+            <div className="px-4 py-2" data-testid="env-editor-warnings">
+              <p className={cn('text-warning', chromeSansRole('metadata'))}>
+                {warnings.length === 1
+                  ? '1 line will be skipped'
+                  : `${warnings.length} lines will be skipped`}
+              </p>
+              {warnings.map((w, i) => (
+                <p key={i} className={cn('mt-0.5 font-mono text-muted-foreground', chromeSansRole('metadata'))}>
+                  {w}
+                </p>
+              ))}
+            </div>
+          ) : null}
+          {hasDiff ? (
+            <details className="border-t px-4 py-2" data-testid="env-editor-review">
+              <summary className={cn('cursor-pointer select-none text-muted-foreground', chromeSansRole('metadata'))}>
+                Review changes
+              </summary>
+              <div className="mt-2">
+                <EnvDiff original={draft.originalContent} modified={draft.content} />
+              </div>
+            </details>
+          ) : null}
+        </WorkspaceBoundedScrollport>
       ) : null}
     </>
   );
@@ -366,10 +380,20 @@ export function EnvProfileEditor({
         onRetry={() => void reload()}
       />
       {flow.error ? (
-        <p className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'))}>{flow.error}</p>
+        <p
+          data-workspace-fixed-role="context"
+          data-testid="env-editor-error-note"
+          className={cn('border-t px-4 py-2 text-destructive', chromeSansRole('body'), workspaceFixedContextClearanceClass)}
+        >
+          {flow.error}
+        </p>
       ) : null}
       {!draft.nameValid && draft.isNew ? (
-        <p className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'))}>
+        <p
+          data-workspace-fixed-role="context"
+          data-testid="env-editor-name-note"
+          className={cn('border-t px-4 py-2 text-muted-foreground', chromeSansRole('metadata'), workspaceFixedContextClearanceClass)}
+        >
           Name the environment to save it.
         </p>
       ) : null}

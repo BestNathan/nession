@@ -21,6 +21,12 @@ use nession_protocol::contracts::env::v1::{
     ClientEnvGetResponsePayload, ClientEnvListPayload, ClientEnvListResponsePayload,
     ClientEnvWritePayload, ClientEnvWriteResponsePayload,
 };
+use nession_protocol::contracts::mcp::v1::{
+    McpToolCallPayload, McpToolCallReply, McpToolsListRequest, McpToolsListResponse,
+};
+use nession_protocol::contracts::project::v1::{
+    ProjectGetPayload, ProjectGetResponsePayload, ProjectListPayload, ProjectListResponsePayload,
+};
 use nession_protocol::contracts::sandbox::v1::SandboxPolicy;
 use nession_protocol::contracts::server::v1::{ServerInfoRequest, ServerInfoResponse};
 use nession_protocol::contracts::session::v1::{
@@ -29,7 +35,8 @@ use nession_protocol::contracts::session::v1::{
     ClientSessionCreateResponsePayload, ClientSessionEnvBindingGetPayload,
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingResponsePayload,
     ClientSessionEnvBindingSetPayload, ClientSessionKillPayload, ClientSessionKillResponsePayload,
-    ServerSessionListPayload, ServerSessionListReply,
+    ServerSessionListPayload, ServerSessionListReply, SessionInitialMetadata,
+    SessionMetadataResponse, WebSessionMetadataGetPayload, WebSessionMetadataPatchPayload,
 };
 use nession_protocol::Message;
 
@@ -54,6 +61,22 @@ impl UnitRequest for AgentListPayload {
 
 impl UnitRequest for ServerSessionListPayload {
     type Reply = ServerSessionListReply;
+}
+
+impl UnitRequest for WebSessionMetadataGetPayload {
+    type Reply = SessionMetadataResponse;
+}
+
+impl UnitRequest for WebSessionMetadataPatchPayload {
+    type Reply = SessionMetadataResponse;
+}
+
+impl UnitRequest for ProjectListPayload {
+    type Reply = ProjectListResponsePayload;
+}
+
+impl UnitRequest for ProjectGetPayload {
+    type Reply = ProjectGetResponsePayload;
 }
 
 impl UnitRequest for ClientEnvListPayload {
@@ -98,6 +121,14 @@ impl UnitRequest for ClientSessionKillPayload {
 
 impl UnitRequest for ServerInfoRequest {
     type Reply = ServerInfoResponse;
+}
+
+impl UnitRequest for McpToolsListRequest {
+    type Reply = McpToolsListResponse;
+}
+
+impl UnitRequest for McpToolCallPayload {
+    type Reply = McpToolCallReply;
 }
 
 /// Capture preview's replies are a union the contract does not declare: the
@@ -296,6 +327,55 @@ impl ClientConnection {
         .await
     }
 
+    /// `server.session.metadata.get` — one Session's Agent-owned work context.
+    ///
+    /// The reply carries the durable `instance_id` alongside the record, so a
+    /// caller can use it as the precondition of a later guarded update.
+    pub async fn get_session_metadata(
+        &mut self,
+        session_id: &str,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_SESSION_METADATA_GET,
+            WebSessionMetadataGetPayload {
+                session_id: session_id.to_string(),
+            },
+        ))
+        .await
+    }
+
+    /// `server.session.metadata.patch` — partial update with the required
+    /// incarnation and revision preconditions (#4007).
+    pub async fn patch_session_metadata(
+        &mut self,
+        payload: WebSessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        self.request(proto_msg(wire::SERVER_SESSION_METADATA_PATCH, payload))
+            .await
+    }
+
+    /// `server.project.list` — every Project declaration the Server owns.
+    ///
+    /// The reply carries `error` separately from an empty `projects` list, so a
+    /// failed read is never presented to a caller as "there are no Projects".
+    pub async fn project_list(&mut self) -> Result<ProjectListResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_PROJECT_LIST, ProjectListPayload {}))
+            .await
+    }
+
+    /// `server.project.get` — one Project declaration by identity.
+    ///
+    /// The reply is returned whole: `error_kind` distinguishes an unknown
+    /// Project from an unavailable read, and the Server's own sentence is the
+    /// useful thing to hand on.
+    pub async fn project_get(
+        &mut self,
+        payload: ProjectGetPayload,
+    ) -> Result<ProjectGetResponsePayload, ClientError> {
+        self.request(proto_msg(wire::SERVER_PROJECT_GET, payload))
+            .await
+    }
+
     /// `server.session.attach` — ask the Server how to reach a session.
     ///
     /// Returns the **contract's** reply, not a narrowed copy, and that is
@@ -485,37 +565,54 @@ impl ClientConnection {
         name: &str,
         sandbox: Option<SandboxPolicy>,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
-        self.create_session_in(agent_id, name, None, sandbox).await
+        self.create_session_in(agent_id, name, None, sandbox, None)
+            .await
     }
 
-    /// `server.session.create` with an explicit initial working directory.
+    /// `server.session.create` with an explicit initial working directory and
+    /// optional initial Session Metadata (#4081).
     ///
     /// The Server passes `working_dir` to the target Agent on the same
     /// canonical create route; an MCP caller that names a directory must not
     /// silently lose it (`#3264`). The Sandbox policy is an explicit parameter
     /// of the same call (`#2681`): Nession MCP Tools do not expose it, so they
-    /// pass `None` and the Server's create path applies its default.
+    /// pass `None` and the Server's create path applies its default. The
+    /// initial metadata is the creation-time work context the Agent commits
+    /// with the create; absent preserves the pre-#4081 request.
     pub async fn create_session_in(
         &mut self,
         agent_id: &str,
         name: &str,
         working_dir: Option<&str>,
         sandbox: Option<SandboxPolicy>,
+        initial_metadata: Option<SessionInitialMetadata>,
+    ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
+        self.create_session_payload(ClientSessionCreatePayload {
+            agent_id: agent_id.to_string(),
+            name: name.to_string(),
+            working_dir: working_dir.map(str::to_owned),
+            env_files: Vec::new(),
+            env_selection_mode: None,
+            sandbox,
+            project_id: None,
+            managed: None,
+            initial_metadata,
+        })
+        .await
+    }
+
+    /// `server.session.create` with the whole typed request.
+    ///
+    /// A Project-context create needs the request's Project, Environment
+    /// selection and Managed target, so the caller owns the payload. Keeping
+    /// this single method means every field the Server reads is the contract's
+    /// field, not a hand-built JSON object that can silently omit one.
+    pub async fn create_session_payload(
+        &mut self,
+        payload: ClientSessionCreatePayload,
     ) -> Result<ClientSessionCreateResponsePayload, ClientError> {
         self.request_within(
-            proto_msg(
-                wire::SERVER_SESSION_CREATE,
-                ClientSessionCreatePayload {
-                    agent_id: agent_id.to_string(),
-                    name: name.to_string(),
-                    working_dir: working_dir.map(str::to_owned),
-                    env_files: Vec::new(),
-                    env_selection_mode: None,
-                    sandbox,
-                    project_id: None,
-                    managed: None,
-                },
-            ),
+            proto_msg(wire::SERVER_SESSION_CREATE, payload),
             SESSION_CREATE_TIMEOUT,
         )
         .await
@@ -590,6 +687,35 @@ impl ClientConnection {
             wire::SERVER_AGENT_DELETE,
             ClientAgentDeletePayload {
                 agent_id: agent_id.to_string(),
+            },
+        ))
+        .await
+    }
+
+    /// `server.mcp.tools.list` — the Server's validated Extension contribution
+    /// manifest (`#3778`).
+    pub async fn list_mcp_tools(&mut self) -> Result<McpToolsListResponse, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_MCP_TOOLS_LIST,
+            McpToolsListRequest {},
+        ))
+        .await
+    }
+
+    /// `server.mcp.tool.call` — route one contributed Tool call to the Agent
+    /// the caller explicitly names (`#3778`).
+    pub async fn call_mcp_tool(
+        &mut self,
+        agent_id: &str,
+        tool: &str,
+        arguments: serde_json::Value,
+    ) -> Result<McpToolCallReply, ClientError> {
+        self.request(proto_msg(
+            wire::SERVER_MCP_TOOL_CALL,
+            McpToolCallPayload {
+                agent_id: agent_id.to_string(),
+                tool: tool.to_string(),
+                arguments,
             },
         ))
         .await

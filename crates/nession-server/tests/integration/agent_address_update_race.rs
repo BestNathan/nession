@@ -55,7 +55,7 @@ fn image_manager(db: Arc<Database>) -> anyhow::Result<Arc<nession_server::image:
 
 fn config() -> ConnectionHandlerConfig {
     ConnectionHandlerConfig {
-        server_auth_token: "secret".to_string(),
+        server_auth: nession_protocol::TokenVerifier::new("secret"),
         heartbeat_interval_secs: 30,
         terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
         terminal_web_font_size: nession_common::config::DEFAULT_TERMINAL_WEB_FONT_SIZE,
@@ -75,6 +75,7 @@ impl Fixture {
             env_service: Arc::clone(&self.env),
             image_manager: image_manager(Arc::clone(&self.db))?,
             db: Arc::clone(&self.db),
+            extension_tools: None,
         })
     }
 

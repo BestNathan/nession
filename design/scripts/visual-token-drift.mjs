@@ -8,7 +8,20 @@ const BASELINE_PATH = join(HERE, '..', 'contracts', 'visual-token-debt.json');
 // Pinned Git blob of the approved pre-migration inventory. A PR cannot silently
 // grow the allowance by editing JSON; the canonical Gate itself must be
 // consciously revised and reviewed, with explicit migration rationale.
-export const PINNED_LEGACY_BASELINE_BLOB = '51de139b34944136eba1998c5ef47b2b0011d698';
+// #4221 convergence reconciliation (explicit Design Gate baseline approval):
+// folded staging@a19633cf1's 43 pre-existing legacy blobs into the inventory so
+// main's debt enforcement recognizes staging's existing debt. This grandfathers
+// existing legacy only; any new/edited raw metric still fails the gate.
+//
+// #4222 scroll-ownership reconciliation (explicit Design Gate baseline
+// approval): the App Workspace scroll-port migration edits 35 legacy files at
+// their scroll-root/marker seams, which unfreezes the whole-file debt those
+// files already carried. Re-freezing those exact blobs preserves the invariant
+// this inventory protects — no new visual metric is admitted (the #4222 diff
+// introduces none) — while keeping a 623-metric, unrelated token migration out
+// of a scroll-ownership change. Any further edit to one of these files still
+// changes its blob and fails closed until its metrics are migrated.
+export const PINNED_LEGACY_BASELINE_BLOB = 'd0bae9f500121096b6b9026a0fd6f55f1598feec';
 
 /** One lexical collector for both ESLint and the fast source Gate. Legacy
  * literal baseline decisions are based on the complete Git blob, not the

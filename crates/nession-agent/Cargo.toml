@@ -27,7 +27,10 @@ nession-github = { path = "../nession-github" }
 nession-sandbox = { path = "../nession-sandbox" }
 # The reusable EROFS cache mechanics (#3303). The Agent adapter supplies the
 # configured root and identity; the crate owns download/verify/publish/pin.
-nession-erofs = { path = "../nession-erofs", default-features = false, features = ["cache", "mount"] }
+# #4090: `registry-service` mounts the shared read-only `/v2/` Registry over the
+# verified cache. It is deliberately independent of the Server-owned `registry`
+# client feature, so an Agent build compiles no upstream credential provider.
+nession-erofs = { path = "../nession-erofs", default-features = false, features = ["cache", "mount", "registry-service"] }
 # The shared MCP access layer (#565). The Agent supplies the node backend and
 # reuses the Server client for the cluster backend.
 nession-mcp = { path = "../nession-mcp", features = ["remote"] }
@@ -70,11 +73,22 @@ libc = "0.2"
 
 [dev-dependencies]
 tokio = { workspace = true, features = ["full", "test-util"] }
+# The integration harness implements the async SessionCreatedHook seam (#4073).
+async-trait.workspace = true
 nession-server = { path = "../nession-server" }
+# #4091: the two-Agent + Server peer-fetch fixture seeds the Server's authoritative
+# Catalog over an in-memory SQLite connection (test-only; no production dependency).
+sea-orm.workspace = true
+# The fixture Extension Tool in the MCP composition test derives its typed
+# schemas the same way a real provider does (#3778).
+schemars.workspace = true
 base64.workspace = true
 rand.workspace = true
 tempfile = "3"
 httptest = "0.16"
+# #4090: drive the mounted read-only `/v2/` Registry router in adapter tests.
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
 # A self-signed identity for the TLS half of the P2P handshake-deadline tests
 # (#2653). Generated per test rather than committed as PEM material.
 rcgen = "0.13"

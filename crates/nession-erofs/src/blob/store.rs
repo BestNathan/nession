@@ -35,11 +35,11 @@ pub struct StoreUsage {
 
 /// A filesystem-backed content-addressed store.
 #[derive(Debug, Clone)]
-pub struct BlobStore {
+pub struct FsBlobStore {
     root: PathBuf,
 }
 
-impl BlobStore {
+impl FsBlobStore {
     /// Open (and create) a store rooted at `root`.
     ///
     /// The layout is `root/sha256/<hex>` and `root/.tmp`; a digest can never
@@ -180,6 +180,15 @@ impl BlobStore {
             File::open(source)
                 .with_context(|| format!("failed to open build output {}", source.display()))?,
         );
+        self.put_reader(&mut reader)
+    }
+
+    /// Stream bytes into the store, hashing while writing (#4087).
+    ///
+    /// The digest is computed from the bytes actually stored, never from a
+    /// caller claim. Publication is atomic and deduplicates identical digests
+    /// without rewriting stored bytes.
+    pub fn put_reader(&self, reader: &mut dyn Read) -> Result<BlobDigest> {
         let mut hasher = Sha256::new();
         let temp = self
             .root
@@ -195,7 +204,7 @@ impl BlobStore {
         loop {
             let read = reader
                 .read(&mut buffer)
-                .context("failed to read build output")?;
+                .context("failed to read blob input")?;
             if read == 0 {
                 break;
             }
@@ -256,6 +265,52 @@ impl BlobStore {
     }
 }
 
+/// The Server-owned authoritative CAS adapter of the reusable #4087 contract.
+///
+/// Retention (GC) stays with the catalog owner; the shared contract exposes no
+/// removal, so a Registry reader can never reclaim bytes by itself.
+impl crate::contracts::BlobStore for FsBlobStore {
+    fn contains(&self, digest: &str) -> Result<bool> {
+        FsBlobStore::contains(self, digest)
+    }
+
+    fn size(&self, digest: &str) -> Result<u64> {
+        FsBlobStore::size(self, digest)
+    }
+
+    fn path_for(&self, digest: &str) -> Result<PathBuf> {
+        FsBlobStore::path_for(self, digest)
+    }
+
+    fn open(&self, digest: &str) -> Result<File> {
+        FsBlobStore::open(self, digest)
+    }
+
+    fn read(&self, digest: &str) -> Result<Vec<u8>> {
+        FsBlobStore::read(self, digest)
+    }
+
+    fn put_bytes(&self, bytes: &[u8]) -> Result<BlobDigest> {
+        FsBlobStore::put_bytes(self, bytes)
+    }
+
+    fn put_file(&self, source: &Path) -> Result<BlobDigest> {
+        FsBlobStore::put_file(self, source)
+    }
+
+    fn put_reader(&self, reader: &mut dyn Read) -> Result<BlobDigest> {
+        FsBlobStore::put_reader(self, reader)
+    }
+
+    fn verify(&self, digest: &str) -> Result<()> {
+        FsBlobStore::verify(self, digest)
+    }
+
+    fn verify_named_size(&self, digest: &str, expected_size: u64) -> Result<()> {
+        FsBlobStore::verify_named_size(self, digest, expected_size)
+    }
+}
+
 /// Make a rename/unlink durable by syncing the containing directory.
 #[cfg(unix)]
 fn sync_directory(path: &Path) -> Result<()> {
@@ -303,7 +358,7 @@ mod tests {
     #[test]
     fn storing_identical_bytes_reuses_one_physical_blob() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let input = file_with(dir.path(), "image.bin", b"immutable image bytes");
         let first = store.put_file(&input).unwrap();
         let second = store.put_file(&input).unwrap();
@@ -322,7 +377,7 @@ mod tests {
     #[test]
     fn a_different_input_gets_a_different_digest() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let a = file_with(dir.path(), "a.bin", b"a");
         let b = file_with(dir.path(), "b.bin", b"b");
         assert_ne!(
@@ -334,7 +389,7 @@ mod tests {
     #[test]
     fn a_corrupted_blob_fails_verification() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let input = file_with(dir.path(), "image.bin", b"original");
         let stored = store.put_file(&input).unwrap();
         fs::write(&stored.path, b"tampered").unwrap();
@@ -347,7 +402,7 @@ mod tests {
     #[test]
     fn an_interrupted_publication_never_exposes_a_ready_blob() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let digest = format!("sha256:{}", "ab".repeat(32));
         fs::write(dir.path().join("store/.tmp/blob-aborted"), b"partial bytes").unwrap();
 
@@ -363,7 +418,7 @@ mod tests {
     #[test]
     fn usage_separates_ready_blob_bytes_from_unpublished_temporary_files() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let input = file_with(dir.path(), "image.bin", b"ready bytes");
         let stored = store.put_file(&input).unwrap();
         fs::write(dir.path().join("store/.tmp/interrupted.part"), b"temporary").unwrap();
@@ -380,7 +435,7 @@ mod tests {
     #[test]
     fn put_bytes_publishes_exact_bytes_and_rehashes_preexisting_objects() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let first = store.put_bytes(br#"{"schemaVersion":2}"#).unwrap();
         let second = store.put_bytes(br#"{"schemaVersion":2}"#).unwrap();
         assert_eq!(first.digest, second.digest);
@@ -402,7 +457,7 @@ mod tests {
     #[test]
     fn remove_reclaims_one_blob_and_tolerates_a_missing_file() {
         let dir = tempfile::tempdir().unwrap();
-        let store = BlobStore::new(dir.path().join("store")).unwrap();
+        let store = FsBlobStore::new(dir.path().join("store")).unwrap();
         let stored = store.put_bytes(b"reclaim me").unwrap();
         assert!(store.remove(&stored.digest).unwrap());
         assert!(!store.contains(&stored.digest).unwrap());

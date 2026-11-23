@@ -216,6 +216,19 @@ impl Default for SandboxConfig {
     }
 }
 
+/// The opt-in Agent-hosted read-only OCI Registry capability (#4090).
+///
+/// Disabled by default: an Agent never advertises its private local CAS unless
+/// `[registry] enabled = true` is set explicitly. Enabling mounts the shared
+/// read-only `/v2/` service on the Agent's own ingress; the exposed closure is
+/// still limited to authorized tags registered against verified cache objects.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentRegistryConfig {
+    /// Whether this Agent mounts its read-only `/v2/` Registry endpoint.
+    #[serde(default)]
+    pub enabled: bool,
+}
+
 /// Agent configuration loaded from a TOML file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentConfig {
@@ -367,6 +380,11 @@ pub struct AgentConfig {
     /// Agent — the MCP bearer check is independent of P2P authorization.
     #[serde(default)]
     pub mcp: McpConfig,
+    /// Opt-in read-only OCI Registry capability (`#4090`). Disabled unless
+    /// `[registry] enabled = true`; the private local CAS is never exposed by
+    /// default.
+    #[serde(default)]
+    pub registry: AgentRegistryConfig,
 }
 
 impl Default for AgentConfig {
@@ -403,6 +421,7 @@ impl Default for AgentConfig {
             terminal_cols: default_terminal_cols(),
             sandbox: SandboxConfig::default(),
             mcp: McpConfig::default(),
+            registry: AgentRegistryConfig::default(),
         }
     }
 }

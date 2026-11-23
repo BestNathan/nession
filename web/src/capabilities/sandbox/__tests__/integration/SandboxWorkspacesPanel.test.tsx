@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentWorkspaceDescriptor } from '../../WorkspacePlugin';
@@ -61,21 +61,53 @@ describe('Sandbox Workspaces panel', () => {
 
     // Reopen immediately after the close: this is the order flip the old
     // always-mounted dialog could hit.
-    await screen.getByRole('button', { name: 'Delete Workspace beta' }).click();
+    await screen.getByRole('button', { name: 'Delete Workspace alpha' }).click();
     const confirm = await screen.findByTestId('sandbox-workspace-delete-confirm');
-    workspaceApiMock.remove.mockRejectedValueOnce(new Error('Workspace is leased'));
     await userEvent.click(confirm);
     await waitFor(() =>
       expect(workspaceApiMock.remove).toHaveBeenCalledWith(
         'a1:s1',
-        'ws_00000000-0000-4000-8000-000000000002',
+        'ws_00000000-0000-4000-8000-000000000001',
       ),
-    );
-    expect(await screen.findByTestId('sandbox-workspaces-action-error')).toHaveTextContent(
-      'leased',
     );
     await waitFor(() =>
       expect(screen.queryByTestId('sandbox-workspace-delete-confirm')).toBeNull(),
     );
+
+    // A leased Workspace cannot even open the confirmation (#3797 SC-02).
+    expect(
+      screen.getByRole('button', { name: 'Delete Workspace beta' }),
+    ).toBeDisabled();
+  });
+
+  it('expands one Workspace detail and never offers delete for a user-owned Project Location', async () => {
+    workspaceApiMock.list.mockResolvedValue([
+      descriptor('ws_00000000-0000-4000-8000-000000000001', 'alpha', 'available'),
+      {
+        ...descriptor(
+          'project_location:devbox-01:/srv/nession',
+          'nession',
+          'unobserved',
+        ),
+        kind: 'project_location',
+        path: '/srv/nession',
+      },
+    ]);
+    render(<SandboxWorkspacesPanel sessionId="a1:s1" agentLabel="devbox-01" />);
+    await screen.findByText('alpha');
+
+    await userEvent.click(screen.getAllByTestId('sandbox-workspace-row-select')[0]);
+    const detail = await screen.findByTestId('sandbox-workspace-detail');
+    expect(detail).toHaveTextContent('Agent-managed');
+    expect(detail).toHaveTextContent('devbox-01');
+    expect(detail).toHaveTextContent('Not measured');
+
+    const locationRow = screen
+      .getAllByTestId('sandbox-workspace-row')
+      .find((row) => row.getAttribute('data-workspace-kind') === 'project_location');
+    expect(locationRow).toBeDefined();
+    expect(locationRow).toHaveTextContent('user-owned');
+    expect(within(locationRow as HTMLElement).getByTestId('sandbox-workspace-no-delete')).toBeVisible();
+    expect(within(locationRow as HTMLElement).queryByTestId('sandbox-workspace-delete')).toBeNull();
   });
 });

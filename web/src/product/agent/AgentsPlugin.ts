@@ -54,7 +54,7 @@ export class AgentsPlugin implements TransportPlugin {
       connection.subscribe('server.agents.changed', (payload) => {
         const agents = (payload as { agents?: Agent[] })?.agents;
         if (agents) {
-          this.notify(agents);
+          this.notify(connection, agents);
         }
       }),
       // The list's own wire, so a message of this type that is *not* a pending
@@ -66,7 +66,7 @@ export class AgentsPlugin implements TransportPlugin {
       connection.subscribe(AGENT_LIST_WIRE, (payload) => {
         const agents = (payload as { agents?: Agent[] })?.agents;
         if (agents) {
-          this.notify(agents);
+          this.notify(connection, agents);
         }
       }),
     ];
@@ -102,11 +102,24 @@ export class AgentsPlugin implements TransportPlugin {
    * as a Legacy Peer and goes out unversioned, which is the pre-`#678` request.
    */
   async listAgents(): Promise<Agent[]> {
-    const response = await this.requireConnection().request<AgentsListResponse>(
+    const connection = this.requireConnection();
+    // The answer describes the Agent registry on the physical socket the
+    // request went out on. Capture that generation only when the request is
+    // issued on a live socket: a request queued behind the readiness gate will
+    // travel on whatever socket connects next, so its answer is current by
+    // construction. Without the capture, a delayed reply from a replaced
+    // socket could install its snapshot on the socket that replaced it
+    // (#3990).
+    const physicalGeneration = connection.connectionState === 'connected'
+      ? connection.physicalGeneration
+      : undefined;
+    const response = await connection.request<AgentsListResponse>(
       AGENT_LIST_WIRE,
       {},
     );
-    this.publishProtocols(response.agents);
+    if (this.isCurrent(connection, physicalGeneration)) {
+      this.publishProtocols(connection, response.agents);
+    }
     return response.agents;
   }
 
@@ -142,28 +155,57 @@ export class AgentsPlugin implements TransportPlugin {
     };
   }
 
-  private notify(agents: Agent[]): void {
-    this.publishProtocols(agents);
+  private notify(connection: PluginSurface, agents: Agent[]): void {
+    // A message describes the surface it arrived on. After a rebind the old
+    // surface is no longer this plugin's connection, so its snapshot must
+    // neither overwrite the live directory nor reach consumers as if it were
+    // current.
+    if (this.connection !== connection) {
+      return;
+    }
+    this.publishProtocols(connection, agents);
     for (const entry of this.callbacks) {
       entry.cb(agents);
     }
   }
 
   /**
-   * Hand each agent's advertised protocol set to the connection's directory
+   * Whether an answer received from `connection` still describes the current
+   * connection.
+   *
+   * The generation is captured before an asynchronous request. When the
+   * surface can report one, a response captured on an earlier generation is
+   * refused even though it settled on this object; `connected` is required
+   * because between loss and a replacement socket there is no connection whose
+   * snapshot a late response could be (#3990).
+   *
+   * The generation is optional because legacy/test surfaces may not track it;
+   * the real transport always does.
+   */
+  private isCurrent(
+    connection: PluginSurface,
+    physicalGeneration?: number,
+  ): boolean {
+    if (this.connection !== connection || connection.connectionState !== 'connected') {
+      return false;
+    }
+    return physicalGeneration === undefined
+      || (connection.physicalGeneration ?? -1) === physicalGeneration;
+  }
+
+  /**
+   * Hand each agent's advertised protocol set to `connection`'s directory
    * (`#678`, Phase 4).
    *
-   * Called from both paths that actually receive an agent list — `listAgents`
-   * and the `server.agents.changed` push, the latter via {@link notify}. Wholesale
-   * replacement, not a merge: this list is a snapshot, and keeping an entry for
-   * an agent it no longer contains would resolve against a manifest nobody
-   * serves any more.
+   * Reached from both paths that actually receive an agent list — `listAgents`
+   * and the `server.agents.changed` push, the latter via {@link notify} — after
+   * the caller established the snapshot belongs to the current connection
+   * (#3990). Wholesale replacement, not a merge: this list is a snapshot, and
+   * keeping an entry for an agent it no longer contains would resolve against
+   * a manifest nobody serves any more.
    */
-  private publishProtocols(agents: Agent[]): void {
-    if (!this.connection) {
-      return;
-    }
-    this.connection.protocols.publish(manifestsOf(agents));
+  private publishProtocols(connection: PluginSurface, agents: Agent[]): void {
+    connection.protocols.publish(manifestsOf(agents));
   }
 
   /** Drop the registrations made under one (now-released) install generation. */

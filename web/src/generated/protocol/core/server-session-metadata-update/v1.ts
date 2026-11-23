@@ -21,19 +21,54 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type WebSessionMetadataUpdatePayload = { session_id: string, title: string | null, description: string | null, tags: Array<string>, expected_revision: number, };
-export type SessionMetadataResponse = { success: boolean, error?: string | null, error_kind?: string | null, metadata?: SessionMetadata | null, };
+export type WebSessionMetadataUpdatePayload = { session_id: string, title: string | null, description: string | null, tags: Array<string>, expected_revision: number, expected_instance_id?: string | null, };
+export type SessionMetadataResponse = { success: boolean, error?: string | null, error_kind?: string | null, metadata?: SessionMetadata | null, 
+/**
+ * The durable tmux instance this answer describes (#4007).
+ *
+ * Present on success, alongside `metadata`; a caller uses it as the
+ * `expected_instance_id` of its next guarded write. Absent on failure.
+ */
+instance_id?: string | null, };
 export type SessionMetadata = { 
 /**
  * 0 means no metadata has been recorded (a legacy Session).
  */
-revision: number, title?: string | null, description?: string | null, tags: Array<string>, created_at?: number | null, updated_at?: number | null, };
+revision: number, 
+/**
+ * Display alias shown in navigation; never a tmux rename. Absent is the
+ * tmux-name fallback.
+ */
+title?: string | null, 
+/**
+ * What this work is about, in the user's or AI's own words.
+ */
+description?: string | null, 
+/**
+ * User-chosen labels, normalized and case-insensitively unique.
+ */
+tags: Array<string>, 
+/**
+ * Unix seconds when the first revision was saved.
+ */
+created_at?: number | null, 
+/**
+ * Unix seconds of the last committed revision.
+ */
+updated_at?: number | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionMetadataUpdateCall = { session_id: string, title: string | null, description: string | null, tags: Array<string>, expected_revision: number, };
+export type SessionMetadataUpdateCall = { session_id: string, title: string | null, description: string | null, tags: Array<string>, expected_revision: number, expected_instance_id?: string | null, };
 
 /** The payload the provider answers with. */
-export type SessionMetadataUpdateReply = { success: boolean, error?: string | null, error_kind?: string | null, metadata?: SessionMetadata | null, };
+export type SessionMetadataUpdateReply = { success: boolean, error?: string | null, error_kind?: string | null, metadata?: SessionMetadata | null, 
+/**
+ * The durable tmux instance this answer describes (#4007).
+ *
+ * Present on success, alongside `metadata`; a caller uses it as the
+ * `expected_instance_id` of its next guarded write. Absent on failure.
+ */
+instance_id?: string | null, };
 

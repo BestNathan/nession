@@ -77,9 +77,12 @@ export async function boundedQwenReviewBaseFiles({files,baseSha,fetcher,
        !/^[A-Za-z0-9+/=\s]+$/.test(entry.content))
       fail('missing authenticated PR base file');
     const bytes=Buffer.from(entry.content.replace(/\s/g,''),'base64');
-    if(bytes.length<1||bytes.length>maxSourceBytes||
+    if(bytes.length<1||
        (Number.isSafeInteger(entry.size)&&entry.size!==bytes.length))
       fail('unsafe PR base file');
+    // #4192: a verified large original is unsafe to *embed*, not an
+    // unauthorized PR. Omit ALL optional base files; never truncate bytes.
+    if(bytes.length>maxSourceBytes){omit=true;continue;}
     total+=bytes.length;
     if(total>embedBudget){omit=true;continue;}
     const text=bytes.toString('utf8');

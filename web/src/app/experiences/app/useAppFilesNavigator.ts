@@ -1,4 +1,3 @@
-import type { FileRef } from '@/capabilities/files';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { WorkspaceDepthControl } from '@/app/workspace/workspaceContext';
 import {
@@ -6,6 +5,7 @@ import {
   directoryPathToStack,
   filesWorkspaceContextLine,
 } from './appFilesNavigation';
+import { useAppFilesLeaveGuard, type AppFilesSelection } from './useAppFilesLeaveGuard';
 import { useAppFilesPushedSurface } from './useAppFilesPushedSurface';
 import { useAppFilesSearchDepth } from './useAppFilesSearchDepth';
 
@@ -14,6 +14,7 @@ export interface AppFilesNavigatorSession {
   agentLabel?: string | null;
 }
 
+
 export function useAppFilesNavigator(
   depth: WorkspaceDepthControl,
   session: AppFilesNavigatorSession,
@@ -21,14 +22,7 @@ export function useAppFilesNavigator(
   sourceId: string,
 ) {
   const [dirStack, setDirStack] = useState<string[]>(['']);
-  const [selected, setSelected] = useState<{
-    ref: FileRef;
-    path: string;
-    filename: string;
-    size: number;
-    initialLine?: number;
-    initialColumn?: number;
-  } | null>(null);
+  const [selected, setSelected] = useState<AppFilesSelection | null>(null);
   const [dirty, setDirty] = useState(false);
   const [showDiscardDialog, setShowDiscardDialog] = useState(false);
   const scrollByPath = useRef(new Map<string, number>());
@@ -43,11 +37,21 @@ export function useAppFilesNavigator(
 
   const currentDir = dirStack[dirStack.length - 1] ?? '';
 
+  const { requestLeave, confirmDiscard, clearForward } = useAppFilesLeaveGuard({
+    depth,
+    selected,
+    setSelected,
+    dirty,
+    setDirty,
+    setShowDiscardDialog,
+  });
+
   useEffect(() => {
     setDirStack(['']);
     setSelected(null);
+    clearForward();
     scrollByPath.current.clear();
-  }, [resetKey, sourceId]);
+  }, [clearForward, resetKey, sourceId]);
 
   const snapshotScroll = useCallback(
     (scrollTop: number) => {
@@ -60,31 +64,33 @@ export function useAppFilesNavigator(
     if (dirStack.length <= 1) {
       return;
     }
+    clearForward();
     const parent = dirStack[dirStack.length - 2] ?? '';
     setRestoredScrollTop(scrollByPath.current.get(parent));
     setDirStack((stack) => stack.slice(0, -1));
-  }, [dirStack]);
+  }, [clearForward, dirStack]);
 
   const enterDirectory = useCallback((path: string) => {
+    clearForward();
     setRestoredScrollTop(undefined);
     setDirStack((stack) => [...stack, path]);
-  }, []);
+  }, [clearForward]);
 
   const navigateToPath = useCallback((path: string) => {
+    clearForward();
     setRestoredScrollTop(scrollByPath.current.get(path));
     setDirStack(directoryPathToStack(path));
-  }, []);
+  }, [clearForward]);
 
   useAppFilesPushedSurface(depth, {
     selected,
     searchOpen,
     dirStack,
     currentDir,
-    dirty,
+    requestLeave,
     closeSearch,
-    setSelected,
-    setShowDiscardDialog,
     popDirectory,
+    navigateToPath,
   });
 
   const workspaceContextLine = useMemo(
@@ -104,6 +110,7 @@ export function useAppFilesNavigator(
     ) => {
       setDirty(false);
       setShowDiscardDialog(false);
+      clearForward();
       if (searchOpen) {
         closeSearch();
       }
@@ -116,13 +123,8 @@ export function useAppFilesNavigator(
         initialColumn: options?.initialColumn,
       });
     },
-    [closeSearch, searchOpen, sourceId],
+    [clearForward, closeSearch, searchOpen, sourceId],
   );
-
-  const confirmDiscard = useCallback(() => {
-    setShowDiscardDialog(false);
-    setSelected(null);
-  }, []);
 
   return {
     currentDir,
@@ -137,6 +139,7 @@ export function useAppFilesNavigator(
     workspaceContextLine,
     breadcrumbSegments,
     openFile,
+    requestLeave,
     confirmDiscard,
     searchOpen,
     openSearch,

@@ -1,0 +1,13 @@
+schema_version: 1
+issue: 4222
+criterion: SC-04
+stage: staging
+runtime: full-stack-local
+verifiers:
+  - type: browser
+    entry: verify-claude-residuals.spec.js
+  - type: browser
+    entry: verify-git-history.spec.js
+  - type: browser
+    entry: verify-files-env-notes.spec.js
+result_policy: all-pass

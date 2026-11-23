@@ -130,49 +130,98 @@ pub fn build(
         .is_some_and(|filesystem| filesystem.composition.is_some());
     match (&policy.filesystem, composition) {
         (Some(_), Some(resolved)) if composition_requested => {
-            let workspace = Path::new("/workspace");
-            if !(working_dir == workspace || working_dir.starts_with(workspace)) {
-                return Err(SandboxError::InvalidPolicy(format!(
-                    "the composition working directory {} must be /workspace or below",
-                    working_dir.display()
-                )));
-            }
-            // Start with an empty writable root and bind the prepared,
-            // digest-verified Base Runtime over it. Later mounts shadow
-            // earlier ones, which is exactly how the writable workspace
-            // overrides the read-only Project image.
-            args.push("--tmpfs".to_string());
-            args.push("/".to_string());
-            push_bind(
-                &mut args,
-                if resolved.base_writable {
-                    "--bind"
-                } else {
-                    "--ro-bind"
-                },
-                &resolved.base,
-                Path::new("/"),
-            );
-            match &resolved.workspace {
-                crate::linux::erofs::WorkspaceMount::Bind(path) => {
-                    push_bind(&mut args, "--bind", path, workspace);
+            if let Some(base) = &resolved.base {
+                let workspace = Path::new("/workspace");
+                if !(working_dir == workspace || working_dir.starts_with(workspace)) {
+                    return Err(SandboxError::InvalidPolicy(format!(
+                        "the composition working directory {} must be /workspace or below",
+                        working_dir.display()
+                    )));
                 }
-                crate::linux::erofs::WorkspaceMount::Overlay(path) => {
-                    push_bind(&mut args, "--bind", path, workspace);
+                // Start with an empty writable root and bind the prepared,
+                // digest-verified Base Runtime over it. Later mounts shadow
+                // earlier ones, which is exactly how the writable workspace
+                // overrides the read-only Project image.
+                args.push("--tmpfs".to_string());
+                args.push("/".to_string());
+                push_bind(
+                    &mut args,
+                    if resolved.base_writable {
+                        "--bind"
+                    } else {
+                        "--ro-bind"
+                    },
+                    base,
+                    Path::new("/"),
+                );
+                if let Some(workspace) = &resolved.workspace {
+                    match workspace {
+                        crate::linux::erofs::WorkspaceMount::Bind(path)
+                        | crate::linux::erofs::WorkspaceMount::Overlay(path) => {
+                            push_bind(&mut args, "--bind", path, Path::new("/workspace"));
+                        }
+                    }
                 }
+                for (target, mountpoint) in &resolved.toolchains {
+                    push_bind(&mut args, "--ro-bind", mountpoint, target);
+                }
+                args.push("--tmpfs".to_string());
+                args.push("/tmp".to_string());
+                args.push("--tmpfs".to_string());
+                args.push("/home".to_string());
+                warnings.push(
+                    "filesystem composition: empty tmpfs root with read-only Base Runtime, \
+                     writable /workspace bind, read-only toolchain mounts"
+                        .to_string(),
+                );
+            } else {
+                // Host-root composition (#3792): the ordinary host root stays
+                // the read-only root. A selected Workspace and every
+                // toolchain are layered over private mountpoints so a target
+                // directory never needs to exist in the host tree.
+                args.push("--ro-bind".to_string());
+                args.push("/".to_string());
+                args.push("/".to_string());
+                let masked = mask_host_control_paths(&mut args, forbidden, &mut warnings);
+                if masked {
+                    warnings.push(
+                        "backend baseline: host control paths were masked under the Host-root \
+                         composition"
+                            .to_string(),
+                    );
+                }
+                if let Some(workspace) = &resolved.workspace {
+                    // `/workspace` must already exist on the Host root: a
+                    // read-only root bind cannot grow a mountpoint. The
+                    // preparation fails closed before launching otherwise.
+                    args.push("--tmpfs".to_string());
+                    args.push("/workspace".to_string());
+                    match workspace {
+                        crate::linux::erofs::WorkspaceMount::Bind(path)
+                        | crate::linux::erofs::WorkspaceMount::Overlay(path) => {
+                            push_bind(&mut args, "--bind", path, Path::new("/workspace"));
+                        }
+                    }
+                }
+                if !resolved.toolchains.is_empty() {
+                    // A private /opt owns every `/opt/<name>` mountpoint; an
+                    // image can never bind over an arbitrary host `/opt` path.
+                    args.push("--tmpfs".to_string());
+                    args.push("/opt".to_string());
+                    for (target, mountpoint) in &resolved.toolchains {
+                        // The private /opt tmpfs is writable, so Bubblewrap
+                        // can create each `/opt/<name>` destination itself.
+                        push_bind(&mut args, "--ro-bind", mountpoint, target);
+                    }
+                }
+                args.push("--tmpfs".to_string());
+                args.push("/tmp".to_string());
+                warnings.push(
+                    "filesystem composition: host root with read-only /opt toolchain mounts and \
+                     an optional writable /workspace bind"
+                        .to_string(),
+                );
             }
-            for (target, mountpoint) in &resolved.toolchains {
-                push_bind(&mut args, "--ro-bind", mountpoint, target);
-            }
-            args.push("--tmpfs".to_string());
-            args.push("/tmp".to_string());
-            args.push("--tmpfs".to_string());
-            args.push("/home".to_string());
-            warnings.push(
-                "filesystem composition: empty tmpfs root with read-only Base Runtime, \
-                 writable /workspace bind, read-only toolchain mounts"
-                    .to_string(),
-            );
         }
         (Some(filesystem), _) if filesystem.composition.is_some() => {
             return Err(SandboxError::Prepare(
@@ -553,6 +602,66 @@ mod tests {
         )
         .expect("plan");
         assert!(!plan.argv.contains(&"--unshare-net".to_string()));
+    }
+
+    #[test]
+    fn a_host_root_composition_binds_the_workspace_and_a_private_opt() {
+        let toolchain = format!("sha256:{}", "c".repeat(64));
+        let policy = compiled(serde_json::json!({
+            "enabled": true,
+            "filesystem": {
+                "access": { "read": [], "write": [] },
+                "rootfs": { "kind": "local" },
+                "composition": {
+                    "workspace": { "write": "/tmp/ws" },
+                    "toolchains": [{
+                        "digest": toolchain,
+                        "source": "/tmp/mounts/tool.erofs",
+                        "target": "/opt/go",
+                    }],
+                },
+            },
+        }));
+        let resolved = crate::linux::erofs::ResolvedComposition {
+            base: None,
+            base_writable: false,
+            workspace: Some(crate::linux::erofs::WorkspaceMount::Bind(PathBuf::from(
+                "/tmp/ws",
+            ))),
+            toolchains: vec![(PathBuf::from("/opt/go"), PathBuf::from("/tmp/mounts/go"))],
+        };
+        let plan = build(
+            &policy,
+            Path::new("/workspace"),
+            &ForbiddenPaths::default(),
+            &bridge(),
+            &[],
+            &[],
+            &[],
+            Path::new("/tmp/seccomp"),
+            None,
+            &["/bin/sh".to_string(), "-l".to_string()],
+            Some(&resolved),
+            &settings(),
+        )
+        .expect("host-root plan");
+        let has = |parts: &[&str]| {
+            plan.argv
+                .windows(parts.len())
+                .any(|window| window.iter().map(String::as_str).eq(parts.iter().copied()))
+        };
+        assert!(
+            has(&["--ro-bind", "/", "/"]),
+            "the host root is the read-only root"
+        );
+        assert!(
+            !has(&["--tmpfs", "/"]),
+            "a Host-root composition is not an empty tmpfs"
+        );
+        assert!(has(&["--tmpfs", "/workspace"]));
+        assert!(has(&["--bind", "/tmp/ws", "/workspace"]));
+        assert!(has(&["--tmpfs", "/opt"]));
+        assert!(has(&["--ro-bind", "/tmp/mounts/go", "/opt/go"]));
     }
 
     #[test]

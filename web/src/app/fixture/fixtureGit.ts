@@ -80,14 +80,17 @@ type FixtureGitHistoryDiffRequest = FixtureGitHistoryRequest & { path: string };
 
 /**
  * Deterministic controls the `git=history-overlap` scenario exposes (#3751),
- * extended with request evidence for the selection-ownership Case (#3767).
+ * extended with request evidence for the selection-ownership Case (#3767)
+ * and a rejected continuation for the failure-feedback Case (#4116).
  *
  * The first older page is held until the Case releases it. The Case can switch
  * Session or refresh the first page first, then assert the held answer changed
  * nothing — no timer decides when the stale continuation settles. Detail and
  * diff reads are recorded with the target they were addressed to and the OID
  * they named, so a Case can prove the successor was never asked about the
- * predecessor's commit.
+ * predecessor's commit. Releasing with `fail` rejects the held read instead of
+ * answering it, so a Case can prove a continuation failure is visible and
+ * retryable without an unhandled rejection.
  */
 type FixtureGitHistoryOverlapWindow = Window & {
   fixtureGitHistoryOverlap?: {
@@ -95,7 +98,7 @@ type FixtureGitHistoryOverlapWindow = Window & {
     firstPageRequests: (session: string) => number;
     olderRequests: () => number;
     olderSettled: () => boolean;
-    releaseOlder: () => void;
+    releaseOlder: (fail?: boolean) => void;
     /** Every `git.commit` read, in order, with its target and OID. */
     commitRequests: () => readonly FixtureGitHistoryRequest[];
     /** Every commit-sourced `git.diff` read, in order. */
@@ -294,9 +297,13 @@ function mutateFixtureRepository(
  *
  *   /#/fixture/workspace?capability=git              → a repository with changes
  *   /#/fixture/workspace?capability=git&git=clean    → a clean working tree
+ *   /#/fixture/workspace?capability=git&git=many     → a long change list, for
+ *     end-of-scroll geometry (#4115)
  *   /#/fixture/workspace?capability=git&git=diff-states → one file of each diff
  *     state the renderer owns: ordinary, binary, mode-only, empty, truncated,
  *     malformed/raw-fallback, and one longer than the pane
+ *   /#/fixture/workspace?capability=git&git=long-lists → enough branches and
+ *     worktrees to overflow the nested App sections (#4188)
  *   /#/fixture/workspace?capability=git&git=preview-states → untracked,
  *     conflicted, binary, truncated, missing and changed previews
  *   /#/fixture/workspace?capability=git&git=overlap  → the first status read is
@@ -304,7 +311,9 @@ function mutateFixtureRepository(
  *     with the newer repository state (#2787)
  *   /#/fixture/workspace?capability=git&git=history-overlap → two Sessions with
  *     distinct pageable histories; the first older page is held until the Case
- *     releases it, after a Session move or a replaced first page (#3751)
+ *     releases it, after a Session move or a replaced first page (#3751), and
+ *     can be released as a rejection so a continuation failure is observable
+ *     (#4116)
  */
 export function fixtureGitSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('git') ?? 'changed';
@@ -320,11 +329,13 @@ export function fixtureGitSurface(search: string): PluginSurface {
   const status =
     scenario === 'clean'
       ? CLEAN_STATUS
-      : scenario === 'diff-states'
-        ? DIFF_STATE_STATUS
-        : scenario === 'preview-states'
-          ? PREVIEW_STATE_STATUS
-          : CHANGED_STATUS;
+      : scenario === 'many'
+        ? MANY_CHANGES_STATUS
+        : scenario === 'diff-states'
+          ? DIFF_STATE_STATUS
+          : scenario === 'preview-states'
+            ? PREVIEW_STATE_STATUS
+            : CHANGED_STATUS;
   // The write path is a small state machine: the fixture must be able to show
   // a stale review and an authoritative post-state, not a stub that always
   // answers ok. The state lives in one object so the request handler stays a
@@ -415,10 +426,14 @@ export function fixtureGitSurface(search: string): PluginSurface {
         return Promise.resolve(commitDetailFor(String(payload.oid)) as T);
       }
       if (type === 'git.branches') {
-        return Promise.resolve(branchesFor(payload.limit) as T);
+        return Promise.resolve(
+          (scenario === 'long-lists'
+            ? longBranchesFor(payload.limit)
+            : branchesFor(payload.limit)) as T,
+        );
       }
       if (type === 'git.worktrees') {
-        return Promise.resolve(WORKTREES as T);
+        return Promise.resolve((scenario === 'long-lists' ? LONG_WORKTREES : WORKTREES) as T);
       }
       return Promise.reject(new Error(`fixture git surface does not answer ${type}`));
     },
@@ -690,6 +705,7 @@ interface HistoryOverlapState {
     session: string;
     generation: number;
     resolve: (value: GitLogResponse) => void;
+    reject: (reason: Error) => void;
   } | null;
 }
 
@@ -734,11 +750,12 @@ function historyOverlapLog(
   state.olderRequests += 1;
   publish();
   if (state.olderRequests === 1) {
-    return new Promise<GitLogResponse>((resolve) => {
+    return new Promise<GitLogResponse>((resolve, reject) => {
       state.held = {
         session: fromCursor.session,
         generation: fromCursor.generation,
         resolve,
+        reject,
       };
       publish();
     });
@@ -836,18 +853,24 @@ function historyOverlapGitSurface(): PluginSurface {
       firstPageRequests: (session: string) => state.firstPageRequests.get(session) ?? 0,
       olderRequests: () => state.olderRequests,
       olderSettled: () => state.olderSettled,
-      releaseOlder: () => {
+      releaseOlder: (fail = false) => {
         const current = state.held;
         state.held = null;
         if (!current) {
           return;
         }
-        current.resolve(
-          rememberHistoryOverlapPage(
-            state,
-            historyOverlapOlderPage(current.session, current.generation),
-          ),
-        );
+        if (fail) {
+          // A transport failure is a rejected read, not an error-shaped answer:
+          // the hook's catch path is what the Case must observe (#4116).
+          current.reject(new Error('the held older page failed'));
+        } else {
+          current.resolve(
+            rememberHistoryOverlapPage(
+              state,
+              historyOverlapOlderPage(current.session, current.generation),
+            ),
+          );
+        }
         setTimeout(() => {
           state.olderSettled = true;
           publish();
@@ -1145,6 +1168,37 @@ const CHANGED_STATUS: GitStatusResponse = {
       { path: 'assets/logo.png', kind: 'modified', staged: false, unstaged: true },
     ],
     untracked: ['web/src/capabilities/git/index.ts', 'notes.md'],
+    unmerged: [],
+  },
+};
+
+/**
+ * A long, deterministic change list (#4115).
+ *
+ * The App Workspace endpoint Case must scroll a real Collection to its end;
+ * three rows fit under the Capsule on a phone, so the fixture needs a working
+ * tree whose list genuinely overflows. Every path is ordinary and every diff
+ * resolves through `changedDiff`, so no new renderer state is introduced.
+ */
+const MANY_CHANGES_STATUS: GitStatusResponse = {
+  state: 'ok',
+  root: FIXTURE_ROOT,
+  snapshot: fixtureSnapshot('fixture-many-0', 'fixture-head-many'),
+  truncated: false,
+  truncated_bytes: 0,
+  status: {
+    branch: 'feat/many-changes',
+    detached: false,
+    upstream: 'origin/feat/many-changes',
+    ahead: 0,
+    behind: 0,
+    modified: Array.from({ length: 36 }, (_, index) => ({
+      path: `src/many/change-${String(index).padStart(2, '0')}.ts`,
+      kind: 'modified',
+      staged: false,
+      unstaged: true,
+    })),
+    untracked: [],
     unmerged: [],
   },
 };
@@ -1841,6 +1895,91 @@ const WORKTREES: GitWorktreesResponse = {
         prunable: 'gitdir file points to non-existent location',
       },
     ],
+    truncated_bytes: 0,
+    truncated: false,
+  },
+};
+
+/**
+ * The deterministic long ref inventory behind `git=long-lists` (#4188).
+ *
+ * The canonical three-row answers cannot overflow the App bounded section at a
+ * phone width, so the nested Branches/Worktrees Cases had no fixture that could
+ * exercise their end-of-scroll geometry. These rows are ordinary shapes the
+ * agent really reports — current, tracking, detached, locked, bare, prunable —
+ * just enough of them to require scrolling.
+ */
+const LONG_REF_COUNT = 40;
+
+function longBranchesFor(limit: unknown): GitBranchesResponse {
+  const all = Array.from({ length: LONG_REF_COUNT }, (_, index) => {
+    const name = index === 0 ? 'feat/long-list' : `feat/list-${String(index).padStart(2, '0')}`;
+    return {
+      name,
+      current: index === 0,
+      upstream: `origin/${name}`,
+      ahead: index % 3 === 0 ? index : 0,
+      behind: index % 4 === 0 ? 1 : 0,
+      upstream_gone: false,
+    };
+  });
+  // Like the agent, honor the caller's limit and report what was asked.
+  const asked =
+    typeof limit === 'number' && limit > 0 ? Math.floor(limit) : DEFAULT_BRANCH_LIMIT;
+  const branches = all.slice(0, Math.min(asked, all.length));
+  return {
+    state: 'ok',
+    branches: {
+      branches,
+      limit: asked,
+      truncated_bytes: 0,
+      truncated: false,
+    },
+  };
+}
+
+const LONG_WORKTREES: GitWorktreesResponse = {
+  state: 'ok',
+  worktrees: {
+    worktrees: Array.from({ length: LONG_REF_COUNT }, (_, index) => {
+      const path = index === 0 ? FIXTURE_ROOT : `/Users/dev/code/nession-long.wt/${index}`;
+      if (index > 0 && index % 7 === 0) {
+        return {
+          path,
+          branch: undefined,
+          current: false,
+          detached: true,
+          bare: false,
+          locked: index % 14 === 0 ? 'on a removable drive' : '',
+        };
+      }
+      if (index > 0 && index % 11 === 0) {
+        return {
+          path,
+          branch: undefined,
+          current: false,
+          detached: false,
+          bare: true,
+        };
+      }
+      if (index > 0 && index % 13 === 0) {
+        return {
+          path,
+          branch: `chore/gone-${index}`,
+          current: false,
+          detached: false,
+          bare: false,
+          prunable: 'gitdir file points to non-existent location',
+        };
+      }
+      return {
+        path,
+        branch: index === 0 ? 'feat/long-list' : `feat/list-${String(index).padStart(2, '0')}`,
+        current: index === 0,
+        detached: false,
+        bare: false,
+      };
+    }),
     truncated_bytes: 0,
     truncated: false,
   },

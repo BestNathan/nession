@@ -107,11 +107,25 @@ const large='x'.repeat(34891);
 assert.deepEqual(await boundedQwenReviewBaseFiles({
   files:changed,baseSha,fetcher:fetchBase(large)}),[]);
 assert.equal(reads,1,'large original base still independently fetched');
+// #4192 authentic #4065/#4191 base websocket.rs is ~161KiB; the source is
+// valid but cannot fit the optional base embedding bound. Reviewer must run.
+const realSize=161379;
+assert.deepEqual(await boundedQwenReviewBaseFiles({
+  files:changed,baseSha,fetcher:fetchBase('x'.repeat(realSize))}),[],
+  'valid >128KiB base is omitted, not rejected');
 const small='pub fn small() {}\\n';
 assert.deepEqual(await boundedQwenReviewBaseFiles({
   files:changed,baseSha,fetcher:fetchBase(small)}),
   [{path:'src/large.rs',content:small}]);
 const two=[{filename:'src/large.rs'},{filename:'src/second.rs'}];
+assert.deepEqual(await boundedQwenReviewBaseFiles({
+  files:two,baseSha,fetcher:async p=>({
+    encoding:'base64',
+    content:Buffer.from(p.includes('second.rs')?
+      'y'.repeat(realSize):small).toString('base64'),
+    size:p.includes('second.rs')?realSize:Buffer.byteLength(small),
+  })}),[],
+  'mixed small + valid oversized source returns no partial base context');
 assert.deepEqual(await boundedQwenReviewBaseFiles({
   files:two,baseSha,fetcher:async p=>({
     encoding:'base64',content:Buffer.from(p.includes('second.rs')?
@@ -121,7 +135,7 @@ for(const fake of [
   {encoding:'utf8',content:'hello'},
   {encoding:'base64',content:'***'},
   {encoding:'base64',content:Buffer.from('x').toString('base64'),size:2},
-  {encoding:'base64',content:Buffer.from('y'.repeat(129*1024)).toString('base64')},
+  {encoding:'base64',content:Buffer.from('y'.repeat(129*1024)).toString('base64'),size:2},
 ]){
   await assert.rejects(()=>boundedQwenReviewBaseFiles({
     files:changed,baseSha,fetcher:async()=>fake}),

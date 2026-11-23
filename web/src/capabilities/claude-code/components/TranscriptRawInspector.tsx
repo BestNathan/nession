@@ -6,6 +6,7 @@ import { JsonTree } from '@/components/json/JsonTree';
 import { copyJsonValue } from '@/components/json/jsonCopy';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { useTranscriptRecordText, type TranscriptRecordTextState } from '../hooks/useTranscriptRecordText';
 import { parseTranscriptRecord, type ParsedTranscriptRecord } from '../model/transcriptRecord';
 import { formatSize } from '../format';
@@ -103,20 +104,17 @@ function RawBody({
   text,
   parsed,
   tab,
-  variant,
 }: {
   text: TranscriptRecordTextState;
   parsed: ParsedTranscriptRecord | null;
   tab: 'tree' | 'text';
-  variant: 'drawer' | 'pushed';
 }) {
   const showTree = tab === 'tree' && parsed !== null && parsed.validJson;
   return (
-    <div
-      className={cn(
-        'min-h-0 flex-1 overflow-auto p-3',
-        variant === 'pushed' && 'overflow-visible',
-      )}
+    <WorkspaceBoundedScrollport
+      className="p-3"
+      viewportClassName="overflow-auto"
+      data-testid="transcript-raw-scroll"
     >
       {showTree && parsed ? (
         <div data-testid="transcript-raw-tree">
@@ -137,7 +135,7 @@ function RawBody({
           Reading the record…
         </p>
       ) : null}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 
@@ -221,14 +219,24 @@ export function TranscriptRawInspector({
       {parsed?.validJson ? (
         <div className="shrink-0 border-b px-3 py-1">
           <Tabs value={tab} onValueChange={(value) => setTab(value as 'tree' | 'text')}>
-            <TabsList>
-              <TabsTrigger value="tree">Tree</TabsTrigger>
-              <TabsTrigger value="text">Original text</TabsTrigger>
+            <TabsList className={variant === 'pushed' ? 'h-auto' : undefined}>
+              <TabsTrigger
+                value="tree"
+                className={variant === 'pushed' ? 'min-h-11' : undefined}
+              >
+                Tree
+              </TabsTrigger>
+              <TabsTrigger
+                value="text"
+                className={variant === 'pushed' ? 'min-h-11' : undefined}
+              >
+                Original text
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>
       ) : null}
-      <RawBody text={text} parsed={parsed} tab={tab} variant={variant} />
+      <RawBody text={text} parsed={parsed} tab={tab} />
     </section>
   );
 }

@@ -17,6 +17,11 @@ import {
 } from '@/product/session/model/envSelection';
 import type { Project, ProjectLocation } from '@/product/project/types';
 import { ProjectLocationDetails } from '@/product/session/components/CreateSessionParts';
+import {
+  CreateSessionManagedFields,
+  CreateSessionRuntimeChoice,
+} from '@/product/session/components/CreateSessionManagedFields';
+import { CreateSessionReview } from '@/product/session/components/CreateSessionReview';
 import { AppOperationPage } from './AppOperationPage';
 
 type Phase = 'form' | 'location' | 'agent' | 'env';
@@ -298,51 +303,19 @@ function ChooseRow({
   );
 }
 
-function AppCreateFields({
+function ProjectSessionFields({
   form,
-  project,
-  agents,
   onPhase,
+  selectedAgent,
 }: {
   form: CreateForm;
-  project?: Project | null;
-  agents: Agent[];
   onPhase: (phase: Phase) => void;
+  selectedAgent: Agent | undefined;
 }) {
-  const selectedAgent = form.selectedLocation
-    ? agents.find((agent) => agent.agent_id === form.selectedLocation?.agent_id)
-    : undefined;
-  const envSummary = project
-    ? `${ENV_MODE_LABEL[form.envSelectionMode]} · ${
-        form.effectiveEnv.refs.length === 0
-          ? 'No ENV'
-          : form.effectiveEnv.refs.map((ref) => ref.name).join(', ')
-      }${form.unavailableEnv.length > 0 ? ' · missing file' : ''}`
-    : form.selectedEnv.length > 0
-      ? form.selectedEnv.map((ref) => ref.name).join(', ')
-      : 'Optional · None selected';
-
   return (
-    <form
-      id="app-create-session-form"
-      className="flex flex-col gap-[var(--nession-shell-space-3)]"
-      onSubmit={form.handleSubmit}
-    >
-      <div className="flex flex-col gap-2">
-        <Label htmlFor="name">Session Name</Label>
-        <Input
-          ref={form.nameInputRef}
-          id="name"
-          type="text"
-          value={form.sessionName}
-          onChange={(event) => form.setSessionName(event.target.value)}
-          placeholder="my-session"
-          disabled={form.loading}
-          autoComplete="off"
-          data-testid="app-session-name"
-        />
-      </div>
-      {project ? (
+    <>
+      <CreateSessionRuntimeChoice form={form} />
+      {form.runtimeMode === 'native' ? (
         <>
           <ChooseRow
             testId="app-session-location"
@@ -370,6 +343,76 @@ function AppCreateFields({
             </p>
           ) : null}
         </>
+      ) : (
+        <CreateSessionManagedFields form={form} />
+      )}
+    </>
+  );
+}
+
+function AppCreateFields({
+  form,
+  project,
+  agents,
+  onPhase,
+}: {
+  form: CreateForm;
+  project?: Project | null;
+  agents: Agent[];
+  onPhase: (phase: Phase) => void;
+}) {
+  const selectedAgent = form.selectedLocation
+    ? agents.find((agent) => agent.agent_id === form.selectedLocation?.agent_id)
+    : undefined;
+  const envSummary = project
+    ? `${ENV_MODE_LABEL[form.envSelectionMode]} · ${
+        form.effectiveEnv.refs.length === 0
+          ? 'No ENV'
+          : form.effectiveEnv.refs.map((ref) => ref.name).join(', ')
+      }${form.unavailableEnv.length > 0 ? ' · missing file' : ''}`
+    : form.selectedEnv.length > 0
+      ? form.selectedEnv.map((ref) => ref.name).join(', ')
+      : 'Optional · None selected';
+
+  if (form.reviewing) {
+    return (
+      <div className="flex flex-col gap-[var(--nession-shell-space-3)]">
+        <CreateSessionReview form={form} />
+        {form.error ? (
+          <p className={cn('text-destructive', bodyAppClass)} data-testid="create-session-error">
+            {form.error}
+          </p>
+        ) : null}
+      </div>
+    );
+  }
+
+  return (
+    <form
+      id="app-create-session-form"
+      className="flex flex-col gap-[var(--nession-shell-space-3)]"
+      onSubmit={form.handleSubmit}
+    >
+      <div className="flex flex-col gap-2">
+        <Label htmlFor="name">Session Name</Label>
+        <Input
+          ref={form.nameInputRef}
+          id="name"
+          type="text"
+          value={form.sessionName}
+          onChange={(event) => form.setSessionName(event.target.value)}
+          placeholder="my-session"
+          disabled={form.loading}
+          autoComplete="off"
+          data-testid="app-session-name"
+        />
+      </div>
+      {project ? (
+        <ProjectSessionFields
+          form={form}
+          onPhase={onPhase}
+          selectedAgent={selectedAgent}
+        />
       ) : (
         <ChooseRow
           testId="app-session-agent"
@@ -426,25 +469,41 @@ function AppCreateFormPage({
   onBack: () => void;
   onPhase: (phase: Phase) => void;
 }) {
+  const managedReview = Boolean(project) && form.runtimeMode === 'managed';
+  const unavailable = form.loading
+    || (project
+      ? form.runtimeMode === 'native'
+        ? !form.selectedLocation || form.locationUnavailable
+        : form.onlineAgents.length === 0
+      : !form.agentId);
   return (
     <AppOperationPage
       testId="app-create-session-page"
       title="New Session"
       backLabel={project ? project.name : 'Sessions'}
-      onBack={onBack}
+      onBack={form.reviewing ? form.backToForm : onBack}
       footer={
-        <Button
-          type="button"
-          data-testid="create-session-submit"
-          disabled={
-            form.loading ||
-            (project ? !form.selectedLocation || form.locationUnavailable : !form.agentId)
-          }
-          className="min-h-11 w-full"
-          onClick={() => void form.submit()}
-        >
-          {form.loading ? 'Creating...' : 'Create Session'}
-        </Button>
+        managedReview && !form.reviewing ? (
+          <Button
+            type="button"
+            data-testid="create-session-review"
+            disabled={unavailable}
+            className="min-h-11 w-full"
+            onClick={form.beginReview}
+          >
+            Review
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            data-testid="create-session-submit"
+            disabled={unavailable}
+            className="min-h-11 w-full"
+            onClick={() => void form.submit()}
+          >
+            {form.loading ? 'Creating...' : 'Create Session'}
+          </Button>
+        )
       }
     >
       <AppCreateFields form={form} project={project} agents={agents} onPhase={onPhase} />

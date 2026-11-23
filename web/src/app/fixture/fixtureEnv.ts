@@ -48,6 +48,11 @@ import { FIXTURE_AGENTS, FIXTURE_SELECTED_ID } from './fixtureData';
  *
  *   /#/fixture/workspace?capability=env                  → Session overview, in sync
  *   /#/fixture/workspace?capability=env&env=empty        → no profiles, no binding
+ *   /#/fixture/workspace?capability=env&env=many         → a long profile list,
+ *                                                          for end-of-scroll geometry
+ *   /#/fixture/workspace?capability=env&env=warnings     → one profile with a
+ *                                                          long variable list and
+ *                                                          many skipped lines (#4188)
  *   /#/fixture/workspace?capability=env&env=pending      → waiting for the next prompt
  *   /#/fixture/workspace?capability=env&env=outdated     → source changed; Reapply
  *   /#/fixture/workspace?capability=env&env=unsupported  → tmux applied, shell unsupported
@@ -120,6 +125,66 @@ const FILES: EnvFileInfo[] = [
   },
 ];
 
+/** The deterministic long list behind `env=many` (#4115's endpoint Case). */
+const MANY_PROFILE_COUNT = 24;
+
+function manyProfileName(index: number): string {
+  return `many-${String(index).padStart(2, '0')}.env`;
+}
+
+function manyProfileContent(index: number): string {
+  return [
+    `NODE_ENV=many-${index}`,
+    `API_BASE=https://many-${index}.internal`,
+    'LOG_LEVEL=info',
+    'FEATURE_FLAGS=workspace',
+  ].join('\n');
+}
+
+function isManyProfile(name: unknown): boolean {
+  return typeof name === 'string' && /^many-\d{2}\.env$/.test(name);
+}
+
+/** The `env=many` inventory: a long list of ordinary server profiles. */
+function manyProfiles(): EnvFileInfo[] {
+  return Array.from({ length: MANY_PROFILE_COUNT }, (_, index) => ({
+    name: manyProfileName(index),
+    source: 'server',
+    size: manyProfileContent(index).length,
+    modified: 1756400000 + index,
+    var_count: 4,
+  }));
+}
+
+/**
+ * The `env=warnings` profile (#4188): enough valid assignments to overflow the
+ * Variables list and enough skipped lines to overflow the warning block. The
+ * details and editor Cases need both surfaces to have real painted content past
+ * the first screenful at a phone width.
+ */
+const WARNINGS_PROFILE_NAME = 'noisy.env';
+const WARNINGS_VAR_COUNT = 36;
+const WARNINGS_SKIPPED_COUNT = 24;
+
+const WARNINGS_CONTENT = [
+  ...Array.from(
+    { length: WARNINGS_VAR_COUNT },
+    (_, index) => `LONG_LIST_KEY_${String(index).padStart(2, '0')}=value-${index}`,
+  ),
+  ...Array.from(
+    { length: WARNINGS_SKIPPED_COUNT },
+    (_, index) => `this line is not an assignment ${index}`,
+  ),
+].join('\n');
+
+const WARNINGS_PROFILE: EnvFileInfo = {
+  name: WARNINGS_PROFILE_NAME,
+  source: 'server',
+  size: WARNINGS_CONTENT.length,
+  modified: 1756492800,
+  var_count: WARNINGS_VAR_COUNT,
+};
+
 function contentFor(payload: Record<string, unknown>): EnvGetResponse {
   const key = `${String(payload.source)}:${String(payload.agent_id ?? '')}:${String(payload.name)}`;
   if (key === 'server::staging.env') {
@@ -133,6 +198,13 @@ function contentFor(payload: Record<string, unknown>): EnvGetResponse {
   }
   if (key === 'server::shared.env') {
     return { success: true, content: SHARED_CONTENT, in_use_by: [] };
+  }
+  if (key === `server::${WARNINGS_PROFILE_NAME}`) {
+    return { success: true, content: WARNINGS_CONTENT, in_use_by: [] };
+  }
+  if (key.startsWith('server::') && isManyProfile(payload.name)) {
+    const index = Number.parseInt(String(payload.name).slice(5, 7), 10);
+    return { success: true, content: manyProfileContent(index), in_use_by: [] };
   }
   return { success: false, error: `env file not found: ${String(payload.name)}` };
 }
@@ -428,7 +500,14 @@ export function fixtureEnvSurface(search: string): PluginSurface {
   const scenario = new URLSearchParams(search).get('env') ?? 'profiles';
   const race = scenario === 'race';
   const deferredBinding = scenario === 'deferred-binding';
-  const files: EnvFileInfo[] = scenario === 'empty' ? [] : [...FILES];
+  const files: EnvFileInfo[] = scenario === 'empty'
+    ? []
+    : scenario === 'warnings'
+      ? [WARNINGS_PROFILE]
+      : [...FILES];
+  if (scenario === 'many') {
+    files.push(...manyProfiles());
+  }
   if (scenario === 'project-env') {
     files.push({
       name: 'shared.env',

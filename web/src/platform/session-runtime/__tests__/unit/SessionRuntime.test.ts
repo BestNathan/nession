@@ -277,7 +277,14 @@ function answerPending(type: string, replyType: string, payload: unknown = {}): 
       // matches on. Reproducing that is the point: a reply with a different
       // id would prove nothing about correlation.
       ws.onmessage?.({
-        data: JSON.stringify({ msg_type: replyType, id: parsed.id, payload }),
+        // The canonical envelope always carries its sender timestamp; the P2P
+        // transport now rejects a frame that lacks it (#4070).
+        data: JSON.stringify({
+          msg_type: replyType,
+          id: parsed.id,
+          timestamp: Date.now(),
+          payload,
+        }),
       } as MessageEvent);
       answered += 1;
     }

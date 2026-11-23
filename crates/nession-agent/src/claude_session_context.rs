@@ -21,7 +21,7 @@ use nession_claude_code::binding::Binding;
 use nession_claude_code::session_context::{McpHostContext, SessionClaudeConfig, SessionContext};
 
 use crate::server::websocket::extract_session_name;
-use crate::tmux::manager::{SessionManager, INSTANCE_ID_ENV};
+use crate::tmux::manager::{SessionManager, INSTANCE_ID_ENV, LEGACY_INSTANCE_ID_ENV};
 
 /// Answers from the agent's own tmux addressing.
 pub struct TmuxSessionContext {
@@ -73,27 +73,25 @@ impl TmuxSessionContext {
     /// fenced Session treat "no binding" as an answer instead of falling back to
     /// a file a deleted Session may have left behind.
     async fn binding_file(&self, name: &str) -> Option<PathBuf> {
-        match self.tmux.get_session_env(name, INSTANCE_ID_ENV).await {
-            Ok(Some(_)) => {
-                let instance = match self.tmux.session_instance_id(name).await {
-                    Ok(instance) => instance,
-                    Err(err) => {
-                        tracing::debug!(
-                            session = %name,
-                            error = %err,
-                            "claude-code: session instance unavailable"
-                        );
-                        return None;
-                    }
-                };
-                match &self.binding_root {
-                    Some(root) => Some(crate::claude_binding::file_for_in(root, name, &instance)),
-                    None => crate::claude_binding::file_for(name, &instance),
+        // A surviving pre-upgrade Session may still carry only the old marker.
+        let fenced = match self.tmux.get_session_env(name, INSTANCE_ID_ENV).await {
+            Ok(Some(_)) => true,
+            Ok(None) => match self
+                .tmux
+                .get_session_env(name, LEGACY_INSTANCE_ID_ENV)
+                .await
+            {
+                Ok(Some(_)) => true,
+                Ok(None) => false,
+                Err(err) => {
+                    tracing::debug!(
+                        session = %name,
+                        variable = %LEGACY_INSTANCE_ID_ENV,
+                        error = %err,
+                        "claude-code: legacy session environment unavailable"
+                    );
+                    return None;
                 }
-            }
-            Ok(None) => match &self.binding_root {
-                Some(root) => Some(crate::claude_binding::legacy_file_for_in(root, name)),
-                None => crate::claude_binding::legacy_file_for(name),
             },
             Err(err) => {
                 tracing::debug!(
@@ -102,7 +100,29 @@ impl TmuxSessionContext {
                     error = %err,
                     "claude-code: session environment unavailable"
                 );
-                None
+                return None;
+            }
+        };
+        if fenced {
+            let instance = match self.tmux.session_instance_id(name).await {
+                Ok(instance) => instance,
+                Err(err) => {
+                    tracing::debug!(
+                        session = %name,
+                        error = %err,
+                        "claude-code: session instance unavailable"
+                    );
+                    return None;
+                }
+            };
+            match &self.binding_root {
+                Some(root) => Some(crate::claude_binding::file_for_in(root, name, &instance)),
+                None => crate::claude_binding::file_for(name, &instance),
+            }
+        } else {
+            match &self.binding_root {
+                Some(root) => Some(crate::claude_binding::legacy_file_for_in(root, name)),
+                None => crate::claude_binding::legacy_file_for(name),
             }
         }
     }
@@ -473,6 +493,48 @@ mod tests {
             restarted.session_claude_binding(&name).await,
             None,
             "a deleted instance's late write cannot bind a newer same-name Session"
+        );
+    }
+
+    #[tokio::test]
+    async fn surviving_old_fenced_session_keeps_its_claude_binding() {
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let fixture = binding_fixture("claude-binding-old-marker").await;
+        let name = fixture.session.name().to_string();
+        let instance = delivered_instance(&fixture.tmux, &name).await;
+        fixture
+            .tmux
+            .env()
+            .tmux()
+            .ops()
+            .set_environment(&name, LEGACY_INSTANCE_ID_ENV, &instance)
+            .await
+            .expect("set old marker");
+        fixture
+            .tmux
+            .env()
+            .tmux()
+            .ops()
+            .unset_environment(&name, INSTANCE_ID_ENV)
+            .await
+            .expect("remove new marker");
+
+        let file = crate::claude_binding::file_for_in(fixture.root.path(), &name, &instance);
+        std::fs::write(&file, hook_payload("legacy-fenced")).expect("old binding");
+        let restarted = TmuxSessionContext::with_binding_root(
+            Arc::new(SessionManager::new()),
+            fixture.root.path().to_path_buf(),
+        );
+        assert_eq!(
+            restarted
+                .session_claude_binding(&name)
+                .await
+                .expect("old Session binding")
+                .claude_session_id,
+            "legacy-fenced"
         );
     }
 

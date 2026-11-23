@@ -35,6 +35,8 @@ use std::cell::RefCell;
 
 use serde_json::Value;
 
+use crate::fingerprint;
+
 /// How much to read at a time while scanning backwards for a page boundary.
 const READ_CHUNK: u64 = 64 * 1024;
 
@@ -470,13 +472,26 @@ fn tail_facts(path: &Path) -> TailFacts {
 /// cursor, not of the shape a reader renders them as — which is why selection
 /// lives here and interpretation lives in [`crate::messages`].
 pub(crate) struct Selected {
-    /// Oldest-first within the page, each with the byte offset it starts at.
-    pub(crate) records: Vec<(u64, String)>,
+    /// Oldest-first within the page.
+    pub(crate) records: Vec<SelectedRecord>,
     /// Byte offset to pass back to read the page before this one.
     pub(crate) next_offset: Option<u64>,
     pub(crate) has_more: bool,
     /// The file ended mid-record. Normal for a transcript being appended to.
     pub(crate) partial_tail: bool,
+}
+
+/// One physical line selected into a page.
+pub(crate) struct SelectedRecord {
+    /// Byte offset where the line starts.
+    pub(crate) offset: u64,
+    /// The line's length in bytes, as stored in the file.
+    pub(crate) size_bytes: u64,
+    /// The line's display text. Lines are read as UTF-8 lossily; the
+    /// fingerprint below still covers the original bytes.
+    pub(crate) line: String,
+    /// FNV-1a over the line's original bytes.
+    pub(crate) fingerprint: u64,
 }
 
 /// Choose the `limit` newest records ending at `end`, reading backwards.
@@ -491,8 +506,8 @@ pub(crate) fn select_records(
     end: u64,
     limit: usize,
 ) -> std::io::Result<Selected> {
-    // Records newest-first, each with the byte offset it starts at.
-    let mut records: Vec<(u64, String)> = Vec::new();
+    // Records newest-first.
+    let mut records: Vec<SelectedRecord> = Vec::new();
     let mut cursor = end;
     let mut partial_tail = false;
     let mut first_chunk = true;
@@ -516,36 +531,43 @@ pub(crate) fn select_records(
         let mut buf = vec![0u8; span];
         file.seek(SeekFrom::Start(start))?;
         file.read_exact(&mut buf)?;
-        let text = String::from_utf8_lossy(&buf).into_owned();
 
-        let lines: Vec<&str> = text.split('\n').collect();
-        let last_index = lines.len().saturating_sub(1);
-        let mut offset = start;
+        let mut position = 0;
         // Oldest-first within this chunk, then pushed onto `records` in reverse
         // so that `records` is newest-first overall — which is what "take the
         // first `limit`" has to mean.
-        let mut chunk: Vec<(u64, String)> = Vec::new();
+        let mut chunk: Vec<SelectedRecord> = Vec::new();
 
-        for (index, line) in lines.iter().enumerate() {
-            if index > 0 {
-                // +1 for the newline that separated this line from the last.
-                offset += 1;
-            }
-            let line_start = offset;
-            offset += line.len() as u64;
-
-            // The element after the final newline: empty when the chunk ends
-            // cleanly, or a record still being written when it ends at EOF.
-            if index == last_index {
-                if end == file_len && !line.trim().is_empty() && first_chunk {
-                    partial_tail = true;
-                }
+        // Split on the raw newline byte, not on the lossy string: offsets and
+        // sizes are properties of the file, and a stretched replacement
+        // character must not move the next record's boundary (`#4027`).
+        let mut remaining = buf.get(position..).unwrap_or_default();
+        while let Some(newline) = remaining.iter().position(|byte| *byte == b'\n') {
+            let line_end = position + newline;
+            let Some(bytes) = remaining.get(..newline) else {
                 break;
-            }
+            };
+            let offset = start + position as u64;
+            position = line_end + 1;
+            remaining = buf.get(position..).unwrap_or_default();
+
+            let line = String::from_utf8_lossy(bytes);
             if line.trim().is_empty() {
                 continue;
             }
-            chunk.push((line_start, line.to_string()));
+            chunk.push(SelectedRecord {
+                offset,
+                size_bytes: bytes.len() as u64,
+                line: line.into_owned(),
+                fingerprint: fingerprint::fnv1a64(bytes),
+            });
+        }
+
+        // The element after the final newline: empty when the chunk ends
+        // cleanly, or a record still being written when it ends at EOF.
+        let trailing = String::from_utf8_lossy(buf.get(position..).unwrap_or_default());
+        if first_chunk && end == file_len && !trailing.trim().is_empty() {
+            partial_tail = true;
         }
 
         records.extend(chunk.into_iter().rev());
@@ -556,7 +578,7 @@ pub(crate) fn select_records(
     // The newest `limit` records form the page; older ones are the next page.
     // The page reads oldest-first, which is the order a conversation is read in.
     let take = records.len().min(limit);
-    let mut page_records: Vec<(u64, String)> = records.drain(..take).collect();
+    let mut page_records: Vec<SelectedRecord> = records.drain(..take).collect();
     page_records.reverse();
 
     // Continue from the oldest record this page showed; everything before it is
@@ -566,7 +588,7 @@ pub(crate) fn select_records(
     let next_offset = if records.is_empty() {
         None
     } else {
-        page_records.first().map(|(offset, _)| *offset)
+        page_records.first().map(|record| record.offset)
     };
     let has_more = !records.is_empty();
 
@@ -1186,8 +1208,8 @@ mod tests {
         selected
             .records
             .iter()
-            .filter_map(|(_, line)| {
-                let record = serde_json::from_str::<Value>(line).ok()?;
+            .filter_map(|record| {
+                let record = serde_json::from_str::<Value>(&record.line).ok()?;
                 record
                     .pointer("/message/content")
                     .and_then(Value::as_str)

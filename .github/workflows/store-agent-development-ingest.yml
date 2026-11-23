@@ -31,6 +31,8 @@ concurrency:
   group: store-agent-development-ingest-${{ github.event.workflow_run.id || inputs.source_run_id }}-${{ github.event.workflow_run.run_attempt || '1' }}
   cancel-in-progress: false
 
+# #4174: one exact owner-created #4065 comment may re-attest the
+# previously committed Qwen Repair Worker; it never launches a model.
 jobs:
   # #3885 exact Owner Run recovery; Ingest independently verifies GitHub
   # Claim, main ancestry, Artifact digests and signed Store before publication.
@@ -141,7 +143,16 @@ jobs:
          !github.event.issue.pull_request &&
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body,
-           '/nession ingest-qwen issue=3001 worker_run='))
+           '/nession ingest-qwen issue=3001 worker_run=')) ||
+        (github.event_name == 'issue_comment' &&
+         github.ref == 'refs/heads/main' &&
+         github.actor == 'BestNathan' &&
+         github.event.action == 'created' &&
+         github.event.issue.number == 4065 &&
+         github.event.issue.state == 'open' &&
+         !github.event.issue.pull_request &&
+         github.event.comment.user.login == 'BestNathan' &&
+         github.event.comment.body == '/nession ingest-qwen issue=4065 worker_run=44928066276')
       )
     runs-on: ubuntu-24.04
     environment: cursor

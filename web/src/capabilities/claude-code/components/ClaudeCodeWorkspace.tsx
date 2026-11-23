@@ -1,190 +1,48 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { claudeCodeApi } from '../ClaudeCodePlugin';
-import type {
-  ClaudeCodeListResponse,
-  ClaudeCodeReadOk,
-  ClaudeCodeReadResponse,
-} from '../types';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
-import { ConversationView, useAIConversation } from '@/shared/ai-conversation';
+import { ConversationView } from '@/shared/ai-conversation';
 import { claudeCodeConversationAdapter } from '../conversation/adapter';
-import { useTranscripts } from '../hooks/useTranscripts';
-import { useTranscriptRecords } from '../hooks/useTranscriptRecords';
 import { useMemory } from '../hooks/useMemory';
-import { useMcp } from '../hooks/useMcp';
+import type { useMcp } from '../hooks/useMcp';
+import {
+  SCOPES,
+  useClaudeCodeWorkspace,
+  type ClaudeCodeConfigFile,
+  type ClaudeCodeConfigScope,
+  type ClaudeCodeResourceView,
+  type ScopeState,
+} from '../hooks/useClaudeCodeWorkspace';
 import { TranscriptView } from './TranscriptView';
 import { MemoryView } from './MemoryView';
 import { McpPane } from './McpView';
 import { formatSize } from '../format';
 
-type Scope = 'global' | 'project';
-
 /**
- * What the Workspace is showing — and, deliberately, **not** which config scope.
+ * The configuration file list for one scope.
  *
- * `#1120` item 7: `Conversation | Global | Project` flattened two different
- * axes into one row. A conversation is a resource a person works in;
- * `Project` and `Global` are scopes *of configuration*. The top level now names
- * the two sections, and the scope lives inside the section that has scopes —
- * so this type does not contain `Scope` at all any more, which is what makes
- * the flattening unrepresentable rather than merely fixed.
- *
- * `conversations` is first and is where a Session change lands, because `#1005`
- * decision 3 makes the current work the entry point and configuration the thing
- * you go looking for. Both remain reachable; neither is a fallback for the
- * other.
- *
- * `memory` is a sibling of `configuration`, not a scope inside it (#2689): its
- * subject is the current Session's repository, resolved agent-side, so it has
- * no Global/Project axis and no repository picker.
+ * Exported because the App's Claude composition draws the same owner as a
+ * pushed single-column screen; the rows keep one definition so the two
+ * experiences cannot disagree about which files exist or what selecting one
+ * means. `touch` raises the row floor to the App's 44px target without
+ * changing Web's denser pointer row.
  */
-type View = 'conversations' | 'transcripts' | 'memory' | 'mcp' | 'configuration';
-type ConfigCategory = ClaudeCodeListResponse['categories'][number];
-type ConfigFile = ConfigCategory['files'][number];
-
-interface ScopeState {
-  categories: ConfigCategory[];
-  available: boolean | null;
-  loading: boolean;
-  error: string | null;
-  selectedFile: ConfigFile | null;
-  content: string;
-  contentType: string;
-  totalSize: number;
-  hasMore: boolean;
-  nextOffset: number;
-  readLoading: boolean;
-  readError: string | null;
-}
-
-type ScopeStates = Record<Scope, ScopeState>;
-type ScopeRequestIds = Record<Scope, number>;
-
-const SCOPES: Scope[] = ['global', 'project'];
-
-function createScopeState(loading: boolean): ScopeState {
-  return {
-    categories: [],
-    available: null,
-    loading,
-    error: null,
-    selectedFile: null,
-    content: '',
-    contentType: '',
-    totalSize: 0,
-    hasMore: false,
-    nextOffset: 0,
-    readLoading: false,
-    readError: null,
-  };
-}
-
-function createScopeStates(loading: boolean): ScopeStates {
-  return {
-    global: createScopeState(loading),
-    project: createScopeState(loading),
-  };
-}
-
-function updateScope(
-  setStates: React.Dispatch<React.SetStateAction<ScopeStates>>,
-  scope: Scope,
-  update: (state: ScopeState) => ScopeState,
-) {
-  setStates((current) => ({
-    ...current,
-    [scope]: update(current[scope]),
-  }));
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Unable to load Claude Code files';
-}
-
-/**
- * Where the next chunk starts.
- *
- * Takes the ok half, not the union: `offset` and `content` exist on the success
- * shape alone, and the union has no discriminator to narrow on — which is
- * precisely what the flattened mirror hid by declaring both optional on one
- * interface.
- */
-function responseNextOffset(response: ClaudeCodeReadOk): number {
-  return response.offset + new TextEncoder().encode(response.content).length;
-}
-
-/**
- * A read response, folded into the scope state it belongs to.
- *
- * `append` is the whole difference between opening a file and continuing one:
- * everything else — which half of the union this is, what the offsets become,
- * whether more remains — is the same question. The failure half is handled first
- * and leaves the content alone, so a failed continuation keeps what was already
- * readable rather than blanking it.
- */
-function readInto(
-  state: ScopeState,
-  response: ClaudeCodeReadResponse,
-  append: boolean,
-): ScopeState {
-  if ('error' in response) {
-    return { ...state, readLoading: false, readError: response.error };
-  }
-  return {
-    ...state,
-    content: append ? state.content + response.content : response.content,
-    contentType: append ? state.contentType : response.content_type,
-    totalSize: append ? state.totalSize : response.total_size,
-    hasMore: response.has_more,
-    nextOffset: responseNextOffset(response),
-    readLoading: false,
-    readError: null,
-  };
-}
-
-function scopeRequest(
-  agentId: string,
-  sessionId: string,
-  scope: Scope,
-): { agent_id: string; scope: Scope; session_id?: string } {
-  if (scope === 'project') {
-    return { agent_id: agentId, scope, session_id: sessionId };
-  }
-  return { agent_id: agentId, scope };
-}
-
-function scopeReadRequest({
-  agentId,
-  sessionId,
-  scope,
-  path,
-  offset,
-}: {
-  agentId: string;
-  sessionId: string;
-  scope: Scope;
-  path: string;
-  offset: number;
-}) {
-  return { ...scopeRequest(agentId, sessionId, scope), path, offset };
-}
-
-function FileList({
+export function FileList({
   state,
   scope,
   onFileClick,
   active,
+  touch = false,
 }: {
   state: ScopeState;
-  scope: Scope;
-  onFileClick: (scope: Scope, file: ConfigFile) => void;
+  scope: ClaudeCodeConfigScope;
+  onFileClick: (scope: ClaudeCodeConfigScope, file: ClaudeCodeConfigFile) => void;
   active: boolean;
+  touch?: boolean;
 }) {
   return (
     <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
@@ -203,6 +61,7 @@ function FileList({
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
                   'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+                  touch && 'min-h-11',
                   chromeSansRole('secondary'),
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',
@@ -219,18 +78,25 @@ function FileList({
   );
 }
 
-function ScopePanel({
+/**
+ * One configuration scope: the list, or the provider's own answer for why it
+ * cannot be listed. Exported for the App composition for the same reason as
+ * `FileList`.
+ */
+export function ScopePanel({
   state,
   scope,
   onFileClick,
   onRetry,
   active,
+  touch = false,
 }: {
   state: ScopeState;
-  scope: Scope;
-  onFileClick: (scope: Scope, file: ConfigFile) => void;
-  onRetry: (scope: Scope) => void;
+  scope: ClaudeCodeConfigScope;
+  onFileClick: (scope: ClaudeCodeConfigScope, file: ClaudeCodeConfigFile) => void;
+  onRetry: (scope: ClaudeCodeConfigScope) => void;
   active: boolean;
+  touch?: boolean;
 }) {
   if (state.loading) {
     return (
@@ -269,24 +135,27 @@ function ScopePanel({
     );
   }
   return (
-    <div
-      className={cn('min-h-0 flex-1 overflow-y-auto', workspaceScrollClearanceClass)}
+    <WorkspaceBoundedScrollport
       data-testid={`claude-code-scope-${scope}`}
       data-scope={scope}
     >
-      <FileList state={state} scope={scope} onFileClick={onFileClick} active={active} />
-    </div>
+      <FileList state={state} scope={scope} onFileClick={onFileClick} active={active} touch={touch} />
+    </WorkspaceBoundedScrollport>
   );
 }
 
-function ContentPanel({
+/**
+ * The read half of Configuration: the selected file's identity and content.
+ * Exported for the App's pushed file depth.
+ */
+export function ContentPanel({
   state,
   scope,
   onLoadMore,
 }: {
   state: ScopeState;
-  scope: Scope;
-  onLoadMore: (scope: Scope) => void;
+  scope: ClaudeCodeConfigScope;
+  onLoadMore: (scope: ClaudeCodeConfigScope) => void;
 }) {
   if (!state.selectedFile) {
     return <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view its content.</p>;
@@ -314,317 +183,26 @@ function ContentPanel({
       </div>
       {state.readLoading && <p className={cn('py-3 text-muted-foreground', chromeSansRole('secondary'))}>Loading content...</p>}
       {state.readError && <p className={cn('py-3 text-destructive', chromeSansRole('body'))} role="alert">{state.readError}</p>}
-      <pre data-testid="claude-code-content" className={cn('min-h-0 flex-1 overflow-auto whitespace-pre-wrap py-4', chromeMonoRole('code'), workspaceScrollClearanceClass)}>
-        {state.content || (state.readLoading ? '' : '(empty)')}
-      </pre>
+      <WorkspaceBoundedScrollport viewportClassName="overflow-auto" data-testid="claude-code-content">
+        <pre className={cn('whitespace-pre-wrap py-4', chromeMonoRole('code'))}>
+          {state.content || (state.readLoading ? '' : '(empty)')}
+        </pre>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }
 
-function useScopeLoader({
-  agentId,
-  sessionId,
-  requestKey,
-  setScopeStates,
-  readRequestIds,
-}: {
-  agentId: string | undefined;
-  sessionId: string | undefined;
-  requestKey: string | null;
-  setScopeStates: React.Dispatch<React.SetStateAction<ScopeStates>>;
-  readRequestIds: React.MutableRefObject<ScopeRequestIds>;
-}) {
-  const currentRequestKey = useRef<string | null>(null);
-  const contextGeneration = useRef(0);
-  const listRequestIds = useRef<ScopeRequestIds>({ global: 0, project: 0 });
-  const loadScope = useCallback(async (scope: Scope, key: string, generation: number) => {
-    if (!agentId || !sessionId || currentRequestKey.current !== key) {
-      return;
-    }
-    const requestId = ++listRequestIds.current[scope];
-    const isCurrentRequest = () => (
-      currentRequestKey.current === key
-      && contextGeneration.current === generation
-      && listRequestIds.current[scope] === requestId
-    );
-    updateScope(setScopeStates, scope, (state) => ({ ...state, loading: true, error: null }));
-    try {
-      const response: ClaudeCodeListResponse = await claudeCodeApi.claudeCodeList(
-        scopeRequest(agentId, sessionId, scope),
-      );
-      if (!isCurrentRequest()) {
-        return;
-      }
-      updateScope(setScopeStates, scope, (state) => ({
-        ...state,
-        categories: response.categories,
-        available: response.available,
-        loading: false,
-        // No `error` to read: `claude-code.list` reports "that directory does
-        // not exist" as `available: false` with an empty list, which is an
-        // answer rather than an error. The field this used to read was invented
-        // by the hand-written mirror.
-        error: null,
-      }));
-    } catch (error) {
-      if (!isCurrentRequest()) {
-        return;
-      }
-      updateScope(setScopeStates, scope, (state) => ({
-        ...state,
-        loading: false,
-        error: errorMessage(error),
-      }));
-    }
-  }, [agentId, sessionId, setScopeStates]);
-
-  useEffect(() => {
-    contextGeneration.current += 1;
-    const generation = contextGeneration.current;
-    currentRequestKey.current = requestKey;
-    readRequestIds.current.global += 1;
-    readRequestIds.current.project += 1;
-    setScopeStates(createScopeStates(Boolean(requestKey)));
-    if (!requestKey) {
-      return;
-    }
-    void loadScope('global', requestKey, generation);
-    void loadScope('project', requestKey, generation);
-  }, [loadScope, readRequestIds, requestKey, setScopeStates]);
-
-  return { contextGeneration, currentRequestKey, loadScope };
-}
-
 /**
- * Reading a config file: open one, and continue one.
+ * The Web presentation of Claude Code's Workspace (#1120, #1234, #2689, #3600).
  *
- * The two are the same request with a different offset, and they share the one
- * thing worth getting right — a response that arrives after the user changed
- * Session, or picked another file, must be **dropped rather than rendered**.
- * Written twice that comparison would be two places to get subtly wrong, and a
- * wrong one here shows another Session's file contents under this Session's
- * name. So the guard lives in one place and both callers use it.
+ * Five sections in one tab strip, with master/detail Configuration and
+ * Transcript views. App no longer shares this composition: it draws the
+ * conversation-first stack in `ClaudeCodeAppWorkspace` (#3829), while both
+ * surfaces share `useClaudeCodeWorkspace` so the data and its guards stay one
+ * owner.
  */
-function useFileReader({
-  agentId,
-  sessionId,
-  currentRequestKey,
-  readRequestIds,
-  setScopeStates,
-  scopeStates,
-}: {
-  agentId: string | undefined;
-  sessionId: string | undefined;
-  currentRequestKey: { current: string | null };
-  readRequestIds: { current: ScopeRequestIds };
-  setScopeStates: React.Dispatch<React.SetStateAction<ScopeStates>>;
-  scopeStates: ScopeStates;
-}) {
-  /** Whether an answer that just arrived is still the one being waited for. */
-  const wanted = useCallback(
-    (key: string, scope: Scope, requestId: number) =>
-      currentRequestKey.current === key && readRequestIds.current[scope] === requestId,
-    [currentRequestKey, readRequestIds],
-  );
-
-  const fail = useCallback(
-    (key: string, scope: Scope, requestId: number, error: unknown) => {
-      if (!wanted(key, scope, requestId)) {
-        return;
-      }
-      updateScope(setScopeStates, scope, (state) => ({
-        ...state,
-        readLoading: false,
-        readError: errorMessage(error),
-      }));
-    },
-    [setScopeStates, wanted],
-  );
-
-  const handleFileClick = useCallback(
-    async (scope: Scope, file: ConfigFile) => {
-      if (!agentId || !sessionId || !currentRequestKey.current) {
-        return;
-      }
-      const key = currentRequestKey.current;
-      const requestId = ++readRequestIds.current[scope];
-      // Only the read half is reset. `createScopeState` would also clear
-      // `categories` and `available`, which is the *list* — and clearing the
-      // list on a file click makes the file you just clicked disappear.
-      updateScope(setScopeStates, scope, (state) => ({
-        ...state,
-        selectedFile: file,
-        content: '',
-        contentType: '',
-        totalSize: 0,
-        hasMore: false,
-        nextOffset: 0,
-        readLoading: true,
-        readError: null,
-      }));
-      try {
-        const response = await claudeCodeApi.claudeCodeRead(
-          scopeReadRequest({ agentId, sessionId, scope, path: file.path, offset: 0 }),
-        );
-        if (!wanted(key, scope, requestId)) {
-          return;
-        }
-        updateScope(setScopeStates, scope, (state) => readInto(state, response, false));
-      } catch (error) {
-        fail(key, scope, requestId, error);
-      }
-    },
-    [agentId, currentRequestKey, fail, readRequestIds, sessionId, setScopeStates, wanted],
-  );
-
-  const handleLoadMore = useCallback(
-    async (scope: Scope) => {
-      if (!agentId || !sessionId || !currentRequestKey.current) {
-        return;
-      }
-      const state = scopeStates[scope];
-      if (!state.selectedFile || !state.hasMore) {
-        return;
-      }
-      const key = currentRequestKey.current;
-      const requestId = ++readRequestIds.current[scope];
-      updateScope(setScopeStates, scope, (current) => ({
-        ...current,
-        readLoading: true,
-        readError: null,
-      }));
-      try {
-        const response = await claudeCodeApi.claudeCodeRead(
-          scopeReadRequest({
-            agentId,
-            sessionId,
-            scope,
-            path: state.selectedFile.path,
-            offset: state.nextOffset,
-          }),
-        );
-        if (!wanted(key, scope, requestId)) {
-          return;
-        }
-        updateScope(setScopeStates, scope, (current) => readInto(current, response, true));
-      } catch (error) {
-        fail(key, scope, requestId, error);
-      }
-    },
-    [agentId, currentRequestKey, fail, readRequestIds, scopeStates, sessionId, setScopeStates, wanted],
-  );
-
-  return { handleFileClick, handleLoadMore };
-}
-
-function useClaudeCodeWorkspace(ctx: WorkspaceContext) {
-  const agentId = ctx.agent?.agent_id;
-  const sessionId = ctx.session?.session_id;
-  const requestKey = agentId && sessionId ? `${agentId}:${sessionId}` : null;
-  const readRequestIds = useRef<ScopeRequestIds>({ global: 0, project: 0 });
-  const [scopeStates, setScopeStates] = useState<ScopeStates>(() => createScopeStates(true));
-  // The conversation is where a Session lands (`#1005` decision 3: the current
-  // work is the entry point). Not re-forced on a Session change, though — the
-  // hook drops the old Session's answers on its own, and throwing someone out of
-  // the config browser mid-read would be a view decision they did not make.
-  const [activeView, setActiveView] = useState<View>('conversations');
-  // Its own state now that the top-level tabs no longer name a scope (#1120
-  // item 7). It used to be *derived* from the tab, with a comment warning that
-  // two sources for the scope is how the Project tab came to render the Global
-  // panel — so the hazard is worth answering rather than ignoring.
-  //
-  // It does not come back: this is now the only source. It drives both the
-  // scope selector's value and the panel that renders, so the two cannot
-  // disagree, which is a stronger guarantee than the derivation gave — that one
-  // was correct but only because the tab and the scope were the same value.
-  //
-  // `project` by default: the more specific scope is the more likely one to
-  // want, and it is the order `#1120` writes the pair in.
-  const [activeScope, setActiveScope] = useState<Scope>('project');
-  // The conversation comes from the shared framework (#1363). What is
-  // Claude-specific is the adapter; the runtime, the paging, the refresh and
-  // every state below it are Nession's, and the same ones the capsule Peek
-  // draws in the Terminal.
-  const conversation = useAIConversation(
-    claudeCodeConversationAdapter,
-    agentId && sessionId ? { agentId, sessionId } : null,
-  );
-
-  // `#1234`. The transcript projection is a second first-class view over the
-  // same upstream sessions, not a debug switch on the conversation one — which
-  // is why it is a tab and not a toggle inside the conversation panel.
-  //
-  // Which transcript is open is this component's state rather than the hook's,
-  // because the list outlives the selection: switching tabs must not forget
-  // where the reader was, and the list does not depend on what is open.
-  const [openTranscript, setOpenTranscript] = useState<string | null>(null);
-  const transcripts = useTranscripts({ agentId, sessionId });
-  const transcriptRecords = useTranscriptRecords({
-    agentId,
-    sessionId,
-    transcriptId: openTranscript,
-  });
-
-  // A different Session or Agent is a different transcript scope. The open
-  // transcript and any raw inspector from the previous scope must not remain
-  // readable under the new one (#3726).
-  useEffect(() => {
-    setOpenTranscript(null);
-  }, [agentId, sessionId]);
-  // Memory is fetched only while its view is active, so a Session that never
-  // opens it pays nothing. `active` is also the refresh trigger: entering the
-  // tab re-resolves the Session's repository before any file is shown (#2689).
-  const memory = useMemory({ agentId, sessionId, active: activeView === 'memory' });
-  // MCP is a resource view of the same Session (#3600). It reads configuration
-  // only while the tab is open; the explicit Inspect action is what contacts a
-  // server, and it lives behind the same generation guard as every other answer.
-  const mcp = useMcp({ agentId, sessionId, active: activeView === 'mcp' });
-
-  const { contextGeneration, currentRequestKey, loadScope } = useScopeLoader({
-    agentId,
-    sessionId,
-    requestKey,
-    setScopeStates,
-    readRequestIds,
-  });
-
-  const handleRetry = useCallback((scope: Scope) => {
-    if (currentRequestKey.current) {
-      void loadScope(scope, currentRequestKey.current, contextGeneration.current);
-    }
-  }, [contextGeneration, currentRequestKey, loadScope]);
-
-  const { handleFileClick, handleLoadMore } = useFileReader({
-    agentId,
-    sessionId,
-    currentRequestKey,
-    readRequestIds,
-    setScopeStates,
-    scopeStates,
-  });
-
-  return {
-    agentId,
-    sessionId,
-    activeScope,
-    setActiveScope,
-    activeView,
-    setActiveView,
-    scopeStates,
-    handleRetry,
-    handleFileClick,
-    handleLoadMore,
-    conversation,
-    transcripts,
-    transcriptRecords,
-    openTranscript,
-    setOpenTranscript,
-    memory,
-    mcp,
-  };
-}
-
-export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const {
+export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
+  const {
     agentId,
     sessionId,
     activeScope,
@@ -665,7 +243,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
         ) : null}
         <Tabs
           value={activeView}
-          onValueChange={(value) => setActiveView(value as View)}
+          onValueChange={(value) => setActiveView(value as ClaudeCodeResourceView)}
           className="min-w-0"
         >
           {/* Named so the visual gate can assert this strip as a *region*
@@ -729,7 +307,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {  const
               the section that has scopes, rather than beside `Conversations` —
               which is the whole of the flattening this change undoes. */}
           <div className="flex shrink-0 items-center border-b px-4 py-2">
-            <Tabs value={activeScope} onValueChange={(value) => setActiveScope(value as Scope)}>
+            <Tabs value={activeScope} onValueChange={(value) => setActiveScope(value as ClaudeCodeConfigScope)}>
               <TabsList>
                 <TabsTrigger value="project">Project</TabsTrigger>
                 <TabsTrigger value="global">Global</TabsTrigger>

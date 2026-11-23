@@ -11,6 +11,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::contracts::image::v1::is_valid_image_digest;
+
 /// The only Agent Workspace contract version this build understands.
 pub const AGENT_WORKSPACE_CONTRACT_VERSION: u32 = 1;
 /// The namespace used when the caller has no Project.
@@ -49,6 +51,9 @@ pub enum AgentWorkspaceStatus {
     Missing,
     /// The path or metadata cannot be used safely.
     Error,
+    /// A Project Existing Location: a declaration the Agent does not own and
+    /// did not observe. It is never deletable and never evidences availability.
+    Unobserved,
 }
 
 /// One Workspace resource as the current Agent observed it.
@@ -74,6 +79,48 @@ pub struct AgentWorkspaceDescriptor {
     pub path: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub detail: Option<String>,
+    /// The ordered immutable Project EROFS lower digests this Workspace's
+    /// durable upper was prepared against (#3797). Empty for a plain
+    /// directory Workspace or a Project Location reference.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub lower_digests: Vec<String>,
+    /// Whether the owning Agent initialized the durable writable Overlay
+    /// `upper`/`work` pair. Always false for a Project Location.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub overlay_storage: bool,
+    /// Measured persistent bytes of the durable writable store, when the
+    /// Agent could measure them. A failed measurement is absent, never zero.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub used_bytes: Option<u64>,
+    /// Session names currently holding a lease or a bound Sandbox execution.
+    /// Sorted and deduplicated; never a host path or a grant.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub consumers: Vec<String>,
+    /// Whether an Overlay Merged View is currently observed mounted.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mounted: bool,
+    /// The Agent's in-memory RW attachment count at observation time.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub lease_count: u32,
+    /// The last durable registry update in Unix seconds. Zero means the
+    /// descriptor did not carry an update time.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub updated_at: u64,
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_zero(value: &u32) -> bool {
+    *value == 0
+}
+
+#[allow(clippy::trivially_copy_pass_by_ref)] // serde's skip_serializing_if signature
+fn is_zero_u64(value: &u64) -> bool {
+    *value == 0
 }
 
 impl AgentWorkspaceDescriptor {
@@ -85,6 +132,23 @@ impl AgentWorkspaceDescriptor {
     pub fn validate(&self) -> Result<(), String> {
         validate_workspace_name(&self.name)?;
         validate_workspace_namespace(&self.namespace)?;
+        for (index, digest) in self.lower_digests.iter().enumerate() {
+            if !is_valid_image_digest(digest) {
+                return Err(format!(
+                    "workspace lower digest `{digest}` is not sha256:<64 lowercase hex>"
+                ));
+            }
+            if self
+                .lower_digests
+                .iter()
+                .take(index)
+                .any(|known| known == digest)
+            {
+                return Err(format!(
+                    "workspace lower digest set contains `{digest}` more than once"
+                ));
+            }
+        }
         match self.kind {
             AgentWorkspaceKind::Managed => {
                 if !is_valid_workspace_id(&self.workspace_id) {
@@ -95,6 +159,11 @@ impl AgentWorkspaceDescriptor {
                 if self.path.is_some() {
                     return Err("a managed workspace must not expose a physical path".to_string());
                 }
+                if self.status == AgentWorkspaceStatus::Unobserved {
+                    return Err(
+                        "a managed workspace cannot report the unobserved status".to_string()
+                    );
+                }
             }
             AgentWorkspaceKind::ProjectLocation => {
                 if self.workspace_id.is_empty() {
@@ -102,6 +171,23 @@ impl AgentWorkspaceDescriptor {
                 }
                 if self.path.as_deref().is_none_or(str::is_empty) {
                     return Err("Project Location must name its declared path".to_string());
+                }
+                if self.status != AgentWorkspaceStatus::Unobserved {
+                    return Err(
+                        "a Project Location is user-owned and can only be unobserved".to_string(),
+                    );
+                }
+                if self.overlay_storage
+                    || self.used_bytes.is_some()
+                    || self.mounted
+                    || self.lease_count != 0
+                    || !self.consumers.is_empty()
+                    || !self.lower_digests.is_empty()
+                {
+                    return Err(
+                        "a Project Location must not claim Agent-owned writable storage or a lease"
+                            .to_string(),
+                    );
                 }
             }
         }
@@ -337,5 +423,86 @@ mod tests {
             "unexpected": true,
         });
         assert!(serde_json::from_value::<ClientWorkspaceDeletePayload>(value).is_err());
+    }
+
+    fn managed_descriptor() -> AgentWorkspaceDescriptor {
+        AgentWorkspaceDescriptor {
+            workspace_id: "ws_12345678-1234-4234-8234-123456789abc".to_string(),
+            name: "fix-terminal".to_string(),
+            namespace: "default".to_string(),
+            kind: AgentWorkspaceKind::Managed,
+            status: AgentWorkspaceStatus::Available,
+            auto_created: false,
+            created_at: 1,
+            last_used_at: 2,
+            updated_at: 3,
+            path: None,
+            detail: None,
+            lower_digests: vec![
+                "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    .to_string(),
+            ],
+            overlay_storage: true,
+            used_bytes: Some(4096),
+            consumers: vec!["a1:s1".to_string()],
+            mounted: true,
+            lease_count: 1,
+        }
+    }
+
+    #[test]
+    fn a_descriptor_keeps_managed_observation_separate_from_a_project_location() {
+        let managed = managed_descriptor();
+        managed.validate().unwrap();
+
+        let mut unobserved_managed = managed.clone();
+        unobserved_managed.status = AgentWorkspaceStatus::Unobserved;
+        assert!(unobserved_managed.validate().is_err());
+
+        let mut location = managed;
+        location.kind = AgentWorkspaceKind::ProjectLocation;
+        location.status = AgentWorkspaceStatus::Unobserved;
+        location.path = Some("/srv/project".to_string());
+        location.lower_digests.clear();
+        location.overlay_storage = false;
+        location.used_bytes = None;
+        location.consumers.clear();
+        location.mounted = false;
+        location.lease_count = 0;
+        location.validate().unwrap();
+
+        let mut claiming = location.clone();
+        claiming.overlay_storage = true;
+        assert!(claiming.validate().is_err());
+
+        let mut duplicate_digest = location.clone();
+        duplicate_digest.lower_digests = vec![
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa".to_string(),
+        ];
+        assert!(duplicate_digest.validate().is_err());
+    }
+
+    #[test]
+    fn a_legacy_managed_descriptor_reads_with_absent_observation_fields() {
+        let value = serde_json::json!({
+            "workspace_id": "ws_12345678-1234-4234-8234-123456789abc",
+            "name": "legacy",
+            "namespace": "default",
+            "kind": "managed",
+            "status": "available",
+            "auto_created": false,
+            "created_at": 1,
+            "last_used_at": 2,
+        });
+        let descriptor: AgentWorkspaceDescriptor = serde_json::from_value(value).unwrap();
+        descriptor.validate().unwrap();
+        assert!(descriptor.lower_digests.is_empty());
+        assert!(!descriptor.overlay_storage);
+        assert_eq!(descriptor.used_bytes, None);
+        assert!(descriptor.consumers.is_empty());
+        assert!(!descriptor.mounted);
+        assert_eq!(descriptor.lease_count, 0);
+        assert_eq!(descriptor.updated_at, 0);
     }
 }

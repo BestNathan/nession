@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { ArrowDown, ArrowUp, Plus, Search, X } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import type { Agent, EnvFileInfo, EnvFileRef } from '@/types';
@@ -280,12 +280,10 @@ export function BindingDraftView({
   };
 
   return (
-    <div
+    <WorkspaceBoundedScrollport
       data-testid="env-binding-draft"
-      className={cn(
-        'flex h-full min-h-0 flex-col overflow-y-auto p-4',
-        workspaceScrollClearanceClass,
-      )}
+      viewportClassName="h-full flex flex-col"
+      className="flex min-h-full flex-col p-4"
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
@@ -356,6 +354,6 @@ export function BindingDraftView({
         <h3 className={cn('mb-2', chromeSansRole('primary'))}>Change preview</h3>
         <PreviewPanel preview={preview} />
       </section>
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }

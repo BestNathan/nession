@@ -21,9 +21,11 @@
 
 use std::time::Duration;
 
+use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_protocol::contracts::session::v1::{
-    AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionKillPayload,
-    SessionKillResponse, SessionListResponse,
+    AgentSessionListPayload, SessionCreatePayload, SessionCreateResponse, SessionInitialMetadata,
+    SessionKillPayload, SessionKillResponse, SessionListResponse, SessionMetadataGetPayload,
+    SessionMetadataPatchPayload, SessionMetadataResponse,
 };
 use nession_protocol::Message;
 use serde_json::Value;
@@ -112,11 +114,85 @@ impl AgentConnection {
         })
     }
 
+    /// `agent.session.metadata.get` — one Session's work context (#4007).
+    pub async fn get_session_metadata(
+        &mut self,
+        name: &str,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        let payload = self
+            .request(
+                proto_msg(
+                    wire::AGENT_SESSION_METADATA_GET,
+                    SessionMetadataGetPayload {
+                        name: name.to_string(),
+                    },
+                ),
+                DEFAULT_REQUEST_TIMEOUT,
+            )
+            .await?;
+        serde_json::from_value(payload).map_err(|source| ClientError::Reply {
+            wire: wire::AGENT_SESSION_METADATA_GET.to_string(),
+            source,
+        })
+    }
+
+    /// `agent.session.metadata.patch` — partial update at the Agent owner.
+    pub async fn patch_session_metadata(
+        &mut self,
+        payload: SessionMetadataPatchPayload,
+    ) -> Result<SessionMetadataResponse, ClientError> {
+        let reply = self
+            .request(
+                proto_msg(wire::AGENT_SESSION_METADATA_PATCH, payload),
+                DEFAULT_REQUEST_TIMEOUT,
+            )
+            .await?;
+        serde_json::from_value(reply).map_err(|source| ClientError::Reply {
+            wire: wire::AGENT_SESSION_METADATA_PATCH.to_string(),
+            source,
+        })
+    }
+
+    /// `agent.mcp.tool.call` — one Extension-contributed Tool call on the
+    /// direct Agent connection (`#3778`).
+    ///
+    /// The Agent validates that the named target is itself and executes
+    /// through the same composed catalog its embedded MCP endpoint serves.
+    pub async fn call_mcp_tool(
+        &mut self,
+        agent_id: &str,
+        tool: &str,
+        arguments: Value,
+    ) -> Result<McpToolCallReply, ClientError> {
+        let payload = self
+            .request(
+                proto_msg(
+                    wire::AGENT_MCP_TOOL_CALL,
+                    McpToolCallPayload {
+                        agent_id: agent_id.to_string(),
+                        tool: tool.to_string(),
+                        arguments,
+                    },
+                ),
+                DEFAULT_REQUEST_TIMEOUT,
+            )
+            .await?;
+        serde_json::from_value(payload).map_err(|source| ClientError::Reply {
+            wire: wire::AGENT_MCP_TOOL_CALL.to_string(),
+            source,
+        })
+    }
+
     /// `agent.session.create` — create a tmux Session on the Agent.
+    ///
+    /// `initial_metadata` is the optional creation-time work context (#4081);
+    /// the Agent validates it before any Session side effect and commits it
+    /// with the create.
     pub async fn create_session(
         &mut self,
         name: &str,
         working_dir: Option<&str>,
+        initial_metadata: Option<SessionInitialMetadata>,
     ) -> Result<SessionCreateResponse, ClientError> {
         let payload = self
             .request(
@@ -139,6 +215,7 @@ impl AgentConnection {
                         // default (#2681).
                         sandbox: None,
                         managed: None,
+                        initial_metadata,
                     },
                 ),
                 CREATE_TIMEOUT,

@@ -6,7 +6,7 @@ import { Info } from 'lucide-react';
 import { getRehypePlugins, getRemarkPlugins, getRemarkRehypeOptions } from '@/shared/markdown';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import {
   markdownDocumentRootClass,
   markdownDocumentViewportClass,
@@ -83,7 +83,7 @@ export function MarkdownPreview({ content, filename, onFallback }: MarkdownPrevi
 
   return (
     <MarkdownErrorBoundary onFallback={handleErrorFallback}>
-      <div className={cn(markdownDocumentViewportClass, workspaceScrollClearanceClass)}>
+      <WorkspaceBoundedScrollport viewportClassName={markdownDocumentViewportClass}>
         {isLargeFile && (
           <div className={cn(markdownNoticeClass, chromeSansRole('metadata'))}>
             <Info className="h-3.5 w-3.5 shrink-0" />
@@ -99,7 +99,7 @@ export function MarkdownPreview({ content, filename, onFallback }: MarkdownPrevi
             {content}
           </ReactMarkdown>
         </div>
-      </div>
+      </WorkspaceBoundedScrollport>
     </MarkdownErrorBoundary>
   );
 }

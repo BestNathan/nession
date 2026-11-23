@@ -1,0 +1,309 @@
+name: Release / Toolchain Single
+# #4160: all tool-specific code runs in uncredentialed jobs, never in publisher.
+on:
+  workflow_call:
+    inputs:
+      tool:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      source_sha:
+        type: string
+        required: true
+      platform:
+        type: string
+        default: all
+      arch:
+        type: string
+        default: all
+permissions:
+  contents: read
+jobs:
+  targets:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.resolve.outputs.matrix }}
+      csv: ${{ steps.resolve.outputs.csv }}
+      full: ${{ steps.resolve.outputs.full }}
+      fingerprint: ${{ steps.resolve.outputs.fingerprint }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: toolchain-catalog
+          persist-credentials: false
+      - id: resolve
+        name: Validate exact recipe and discover supported targets without Registry credentials
+        env:
+          TOOL: ${{ inputs.tool }}
+          VERSION: ${{ inputs.version }}
+          PLATFORM: ${{ inputs.platform }}
+          ARCH: ${{ inputs.arch }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C toolchain-catalog rev-parse HEAD)" = "$SOURCE_SHA"
+          result="$(node scripts/toolchains/catalog-plan.mjs targets "$PWD/toolchain-catalog" "$TOOL" "$VERSION" "$PLATFORM" "$ARCH")"
+          echo "matrix=$(node -e 'console.log(JSON.stringify({include:JSON.parse(process.argv[1]).targets}))' "$result")" >> "$GITHUB_OUTPUT"
+          echo "csv=$(node -e 'console.log(JSON.parse(process.argv[1]).target_csv)' "$result")" >> "$GITHUB_OUTPUT"
+          echo "full=$(node -e 'console.log(JSON.parse(process.argv[1]).all_supported)' "$result")" >> "$GITHUB_OUTPUT"
+          echo "fingerprint=sha256:$(sha256sum "toolchain-catalog/$TOOL/$VERSION/build.sh" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "$result"
+  probe:
+    needs: targets
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      skip: ${{ steps.remote.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.96.0'
+      - uses: Swatinem/rust-cache@v2
+      - id: remote
+        name: Read remote OCI Index + platform closure and compare exact build.sh digest
+        env:
+          TOOLCHAIN_TOOL: ${{ inputs.tool }}
+          TOOLCHAIN_VERSION: ${{ inputs.version }}
+          TOOLCHAIN_TARGETS: ${{ needs.targets.outputs.csv }}
+          TOOLCHAIN_FINGERPRINT: ${{ needs.targets.outputs.fingerprint }}
+          TOOLCHAIN_CATALOG_SHA: ${{ inputs.source_sha }}
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: bash scripts/toolchains/cargo-v2.sh probe
+  prepare:
+    needs: [targets, probe]
+    if: needs.probe.outputs.skip == 'false'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: toolchain-catalog
+          persist-credentials: false
+      - name: Select cf CLI's external Node 24 runtime for uncredentialed native preparation
+        if: inputs.tool == 'cf'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.3'
+      - name: Select Ansible Core's external Python 3.13 runtime for uncredentialed native preparation
+        if: inputs.tool == 'ansible'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install Git HTTPS build prerequisites (uncredentialed native prepare only)
+        if: inputs.tool == 'git' && inputs.version == '2.56.0'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends libcurl4-openssl-dev zlib1g-dev libssl-dev
+          command -v curl-config
+      - name: Build source-pinned payload and execute its own version probe (no GHCR token)
+        env:
+          TOOL: ${{ inputs.tool }}
+          VERSION: ${{ inputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          EXPECTED_FINGERPRINT: ${{ needs.targets.outputs.fingerprint }}
+          ROOT: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          test "$(git -C toolchain-catalog rev-parse HEAD)" = "$SOURCE_SHA"
+          test "sha256:$(sha256sum "toolchain-catalog/$TOOL/$VERSION/build.sh" | cut -d ' ' -f1)" = "$EXPECTED_FINGERPRINT"
+          bash scripts/toolchains/catalog-run.sh prepare "$PWD/toolchain-catalog" "$TOOL" "$VERSION" "$PLATFORM" "$ARCH" "$ROOT/rootfs"
+          bash scripts/toolchains/catalog-run.sh verify "$PWD/toolchain-catalog" "$TOOL" "$VERSION" "$PLATFORM" "$ARCH" "$ROOT/rootfs"
+          mkdir -p "$ROOT/staging/$TARGET"
+          tar --sort=name --mtime=@0 --owner=0 --group=0 --numeric-owner -cf "$ROOT/staging/$TARGET/rootfs.tar" -C "$ROOT/rootfs" .
+          (cd "$ROOT/staging/$TARGET" && sha256sum rootfs.tar > rootfs.tar.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-${{ inputs.tool }}-${{ inputs.version }}-${{ matrix.target }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/staging/
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    needs: [targets, probe, prepare]
+    if: needs.prepare.result == 'success' && needs.targets.outputs.full == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    concurrency:
+      group: toolchain-release-${{ inputs.tool }}-${{ inputs.version }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      actions: read
+      packages: write
+    outputs:
+      digest: ${{ steps.native.outputs.digest }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: toolchain-${{ inputs.tool }}-${{ inputs.version }}-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/downloaded
+          merge-multiple: true
+      - name: Verify pinned latest catalog version and transferred files, without executing tools
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha }}
+          TARGET_CSV: ${{ needs.targets.outputs.csv }}
+          ROOT: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          current="$(git ls-remote https://github.com/BestNathan/nession.git refs/heads/toolchains | cut -f1)"
+          test "$current" = "$SOURCE_SHA" || { echo 'Source superseded by newer orphan HEAD'; exit 1; }
+          for platform in $(echo "$TARGET_CSV" | tr ',' ' '); do
+            target="$(echo "$platform" | tr '/' '-')"
+            dir="$ROOT/downloaded/$target"
+            test -d "$dir"
+            (cd "$dir" && sha256sum --check rootfs.tar.sha256)
+            mkdir -p "$ROOT/prepared/$target"
+            tar -xf "$dir/rootfs.tar" -C "$ROOT/prepared/$target" --no-same-owner
+            test -d "$ROOT/prepared/$target/bin"
+            test -z "$(find "$ROOT/prepared/$target" -type l -print -quit)"
+            test -z "$(find "$ROOT/prepared/$target" ! -type d ! -type f -print -quit)"
+          done
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.96.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Install native EROFS packer/extractor
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends erofs-utils
+      - id: native
+        name: Publish complete native OCI Index to the single GHCR repository
+        env:
+          TOOLCHAIN_ROOTFS: ${{ runner.temp }}/prepared
+          TOOLCHAIN_TOOL: ${{ inputs.tool }}
+          TOOLCHAIN_VERSION: ${{ inputs.version }}
+          TOOLCHAIN_TARGETS: ${{ needs.targets.outputs.csv }}
+          TOOLCHAIN_FINGERPRINT: ${{ needs.targets.outputs.fingerprint }}
+          TOOLCHAIN_CATALOG_SHA: ${{ inputs.source_sha }}
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: bash scripts/toolchains/cargo-v2.sh publish
+  readback:
+    needs: [targets, publish]
+    if: needs.publish.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: '1.96.0'
+      - uses: Swatinem/rust-cache@v2
+      - name: Install unprivileged EROFS extractor
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends erofs-utils
+      - name: Independently read back complete Index/Manifest/Config/EROFS graph by digest
+        env:
+          TOOLCHAIN_READBACK_DIR: ${{ runner.temp }}/readback
+          TOOLCHAIN_TOOL: ${{ inputs.tool }}
+          TOOLCHAIN_VERSION: ${{ inputs.version }}
+          TOOLCHAIN_TARGETS: ${{ needs.targets.outputs.csv }}
+          TOOLCHAIN_FINGERPRINT: ${{ needs.targets.outputs.fingerprint }}
+          TOOLCHAIN_CATALOG_SHA: ${{ inputs.source_sha }}
+          TOOLCHAIN_EXPECTED_DIGEST: ${{ needs.publish.outputs.digest }}
+          GHCR_ACTOR: ${{ github.actor }}
+          GHCR_TOKEN: ${{ github.token }}
+        run: bash scripts/toolchains/cargo-v2.sh readback
+      - name: Preserve extracted tree for independent uncredentialed version probes
+        env:
+          ROOT: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$ROOT/readback-transfer"
+          tar -cf "$ROOT/readback-transfer/extracted.tar" -C "$ROOT/readback" .
+          (cd "$ROOT/readback-transfer" && sha256sum extracted.tar > extracted.tar.sha256)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: toolchain-readback-${{ inputs.tool }}-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/readback-transfer/
+          retention-days: 7
+          if-no-files-found: error
+  verify:
+    needs: [targets, readback]
+    if: needs.readback.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.targets.outputs.matrix) }}
+    runs-on: ${{ matrix.arch == 'arm64' && 'ubuntu-24.04-arm' || 'ubuntu-24.04' }}
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: toolchain-catalog
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: toolchain-readback-${{ inputs.tool }}-${{ inputs.version }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/readback-transfer
+      - name: Select cf CLI's externally supplied Node 24 for remote extracted probes
+        if: inputs.tool == 'cf'
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.3'
+      - name: Select Ansible Core's externally supplied Python 3.13 for remote extracted probes
+        if: inputs.tool == 'ansible'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Verify extracted exact version with no GHCR credentials
+        env:
+          TOOL: ${{ inputs.tool }}
+          VERSION: ${{ inputs.version }}
+          PLATFORM: ${{ matrix.platform }}
+          ARCH: ${{ matrix.arch }}
+          TARGET: ${{ matrix.target }}
+          ROOT: ${{ runner.temp }}
+        run: |
+          set -euo pipefail
+          (cd "$ROOT/readback-transfer" && sha256sum --check extracted.tar.sha256)
+          mkdir -p "$ROOT/extracted"
+          tar -xf "$ROOT/readback-transfer/extracted.tar" -C "$ROOT/extracted" --no-same-owner
+          bash scripts/toolchains/catalog-run.sh verify "$PWD/toolchain-catalog" "$TOOL" "$VERSION" "$PLATFORM" "$ARCH" "$ROOT/extracted/$TARGET"

@@ -8,13 +8,19 @@
 
 mod env_target;
 pub mod nession_agent_create_session;
+pub mod nession_agent_get_session_metadata;
 pub mod nession_agent_kill_session;
 pub mod nession_agent_list_sessions;
+pub mod nession_agent_update_session_metadata;
 pub mod nession_server_env_delete;
 pub mod nession_server_env_get;
 pub mod nession_server_env_list;
 pub mod nession_server_env_write;
 pub mod nession_server_list_agents;
+pub mod nession_server_project_get;
+pub mod nession_server_project_list;
+pub mod nession_server_project_session_create;
+pub mod nession_server_project_session_list;
 pub mod nession_server_session_env_binding_get;
 pub mod nession_server_session_env_binding_reapply;
 pub mod nession_server_session_env_binding_set;
@@ -24,13 +30,19 @@ use std::sync::Arc;
 use crate::registry::{RegistryError, ToolRegistry};
 use crate::tool::ToolHandler;
 
-/// Build the catalog this service advertises.
+/// The baseline Tools every host advertises.
 ///
 /// The order is the advertised order and is stable: Server-owned discovery
-/// first, then the Agent-owned Session operations.
-pub fn registry() -> Result<ToolRegistry, RegistryError> {
-    ToolRegistry::build([
+/// first, then the Agent-owned Session operations. A host composes Extension
+/// contributions on top of this list through [`crate::catalog::McpCatalog`];
+/// this function never sees a provider.
+pub fn baseline_handlers() -> Vec<Arc<dyn ToolHandler>> {
+    vec![
         Arc::new(nession_server_list_agents::NessionServerListAgents) as Arc<dyn ToolHandler>,
+        Arc::new(nession_server_project_list::NessionServerProjectList),
+        Arc::new(nession_server_project_get::NessionServerProjectGet),
+        Arc::new(nession_server_project_session_list::NessionServerProjectSessionList),
+        Arc::new(nession_server_project_session_create::NessionServerProjectSessionCreate),
         Arc::new(nession_server_env_list::NessionServerEnvList),
         Arc::new(nession_server_env_get::NessionServerEnvGet),
         Arc::new(nession_server_env_write::NessionServerEnvWrite),
@@ -41,12 +53,27 @@ pub fn registry() -> Result<ToolRegistry, RegistryError> {
         Arc::new(nession_agent_list_sessions::NessionAgentListSessions),
         Arc::new(nession_agent_create_session::NessionAgentCreateSession),
         Arc::new(nession_agent_kill_session::NessionAgentKillSession),
-    ])
+        Arc::new(nession_agent_get_session_metadata::NessionAgentGetSessionMetadata),
+        Arc::new(nession_agent_update_session_metadata::NessionAgentUpdateSessionMetadata),
+    ]
+}
+
+/// Build the baseline-only catalog.
+///
+/// Hosts that compose Extension contributions build a
+/// [`crate::catalog::McpCatalog`] instead; both paths register the same
+/// baseline Tools in the same order.
+pub fn registry() -> Result<ToolRegistry, RegistryError> {
+    ToolRegistry::build(baseline_handlers())
 }
 
 /// The exact names this service advertises.
 pub const TOOL_NAMES: &[&str] = &[
     "nession_server_list_agents",
+    "nession_server_project_list",
+    "nession_server_project_get",
+    "nession_server_project_session_list",
+    "nession_server_project_session_create",
     "nession_server_env_list",
     "nession_server_env_get",
     "nession_server_env_write",
@@ -57,6 +84,8 @@ pub const TOOL_NAMES: &[&str] = &[
     "nession_agent_list_sessions",
     "nession_agent_create_session",
     "nession_agent_kill_session",
+    "nession_agent_get_session_metadata",
+    "nession_agent_update_session_metadata",
 ];
 
 #[cfg(test)]
@@ -65,6 +94,9 @@ pub(crate) mod test_support {
 
     use async_trait::async_trait;
     use nession_protocol::contracts::agent::v1::WebAgentsListResponse;
+    use nession_protocol::contracts::project::v1::{
+        ProjectGetPayload, ProjectGetResponsePayload, ProjectListResponsePayload,
+    };
     use serde_json::{json, Value};
 
     use crate::backend::{ClusterBackend, NodeBackend};
@@ -78,15 +110,21 @@ pub(crate) mod test_support {
         ClientEnvWriteResponsePayload, EnvFileRef, EnvSource,
     };
     use nession_protocol::contracts::session::v1::{
+        ClientSessionCreatePayload, ClientSessionCreateResponsePayload,
         ClientSessionEnvBindingGetPayload, ClientSessionEnvBindingReapplyPayload,
         ClientSessionEnvBindingResponsePayload, ClientSessionEnvBindingSetPayload,
-        SessionKillResponse,
+        SessionInitialMetadata, SessionKillResponse, SessionMetadataPatchPayload,
+        SessionMetadataResponse, WebSessionsListResponse,
     };
 
     /// What one Tool call asked the backend for.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq)]
     pub enum Recorded {
         ListAgents,
+        ListServerSessions(Option<String>, bool),
+        ProjectList,
+        ProjectGet(String),
+        CreateProjectSession(Value),
         EnvList,
         EnvGet(String, EnvSource, Option<String>),
         EnvWrite(String, EnvSource, Option<String>, String, bool, bool),
@@ -95,19 +133,110 @@ pub(crate) mod test_support {
         BindingSet(String, u64, Vec<EnvFileRef>),
         BindingReapply(String, u64),
         ListSessions(String),
-        CreateSession(String, String, Option<String>),
+        CreateSession(
+            String,
+            String,
+            Option<String>,
+            Option<SessionInitialMetadata>,
+        ),
         KillSession(String, String),
+        GetSessionMetadata(String, String),
+        UpdateSessionMetadata(String, SessionMetadataPatchPayload),
     }
 
     /// A backend pair that records calls and answers a canned reply.
-    #[derive(Default)]
     pub struct Recording {
         pub calls: Mutex<Vec<Recorded>>,
+        /// `agent.session.list`-style reply for the Node seam.
+        pub node_sessions: Mutex<Value>,
+        /// `server.session.list`-style reply for the Cluster seam.
+        pub server_sessions: Mutex<Value>,
+        pub project_list_reply: Mutex<Value>,
+        pub project_get_reply: Mutex<Value>,
+        /// Optional explicit create reply; `None` echoes the request's
+        /// `project_id` as a confirmed association.
+        pub create_project_session_reply: Mutex<Option<Value>>,
+        /// Canned reply for the Agent metadata get/update seams.
+        pub metadata_reply: Mutex<Value>,
+    }
+
+    impl Default for Recording {
+        fn default() -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                node_sessions: Mutex::new(json!({ "sessions": [], "stale_agents": [] })),
+                server_sessions: Mutex::new(json!({ "sessions": [], "stale_agents": [] })),
+                project_list_reply: Mutex::new(json!({ "projects": [] })),
+                project_get_reply: Mutex::new(json!({
+                    "success": true,
+                    "project": project_fixture("project-123e4567-e89b-42d3-a456-426614174000")
+                })),
+                create_project_session_reply: Mutex::new(None),
+                metadata_reply: Mutex::new(json!({
+                    "success": true,
+                    "metadata": { "revision": 0, "tags": [] },
+                    "instance_id": "instance-a"
+                })),
+            }
+        }
+    }
+
+    /// One canonical Project JSON fixture.
+    pub fn project_fixture(project_id: &str) -> Value {
+        json!({
+            "project_id": project_id,
+            "name": "Fixture Project",
+            "description": "a test declaration",
+            "source": { "repository_url": "https://example.com/repo.git", "ref": "main" },
+            "locations": [{ "agent_id": "agent-1", "path": "/srv/project" }],
+            "session_defaults": {
+                "shell": "bash",
+                "env_profile_ids": ["base.env"],
+                "sandbox_policy_ref": "default"
+            },
+            "image_digest": null,
+            "created_at": 1,
+            "updated_at": 2
+        })
     }
 
     impl Recording {
         pub fn calls(&self) -> Vec<Recorded> {
             self.calls.lock().expect("recording lock").clone()
+        }
+
+        pub fn set_node_sessions(&self, sessions: &[Value]) {
+            *self.node_sessions.lock().expect("node sessions") =
+                json!({ "sessions": sessions, "stale_agents": [] });
+        }
+
+        pub fn set_server_sessions(&self, sessions: &[Value]) {
+            *self.server_sessions.lock().expect("server sessions") =
+                json!({ "sessions": sessions, "stale_agents": [] });
+        }
+
+        pub fn set_project_list_reply(&self, reply: Value) {
+            *self.project_list_reply.lock().expect("project list") = reply;
+        }
+
+        pub fn set_project_get_reply(&self, reply: Value) {
+            *self.project_get_reply.lock().expect("project get") = reply;
+        }
+
+        pub fn set_create_project_session_reply(&self, reply: Value) {
+            *self
+                .create_project_session_reply
+                .lock()
+                .expect("create project session") = Some(reply);
+        }
+
+        pub fn set_metadata_reply(&self, reply: Value) {
+            *self.metadata_reply.lock().expect("metadata reply") = reply;
+        }
+
+        fn metadata_reply(&self) -> Result<SessionMetadataResponse, ToolError> {
+            let reply = self.metadata_reply.lock().expect("metadata reply").clone();
+            serde_json::from_value(reply).map_err(|error| ToolError::backend(error.to_string()))
         }
     }
 
@@ -120,6 +249,77 @@ pub(crate) mod test_support {
                 .push(Recorded::ListAgents);
             serde_json::from_value(json!({ "agents": [] }))
                 .map_err(|error| ToolError::backend(error.to_string()))
+        }
+
+        async fn list_sessions(
+            &self,
+            agent_id: Option<&str>,
+            force: bool,
+        ) -> Result<WebSessionsListResponse, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::ListServerSessions(
+                    agent_id.map(str::to_owned),
+                    force,
+                ));
+            let reply = self
+                .server_sessions
+                .lock()
+                .expect("server sessions")
+                .clone();
+            serde_json::from_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        }
+
+        async fn project_list(&self) -> Result<ProjectListResponsePayload, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::ProjectList);
+            let reply = self
+                .project_list_reply
+                .lock()
+                .expect("project list")
+                .clone();
+            serde_json::from_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        }
+
+        async fn project_get(
+            &self,
+            payload: ProjectGetPayload,
+        ) -> Result<ProjectGetResponsePayload, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::ProjectGet(payload.project_id));
+            let reply = self.project_get_reply.lock().expect("project get").clone();
+            serde_json::from_value(reply).map_err(|error| ToolError::backend(error.to_string()))
+        }
+
+        async fn create_project_session(
+            &self,
+            payload: ClientSessionCreatePayload,
+        ) -> Result<ClientSessionCreateResponsePayload, ToolError> {
+            let value = serde_json::to_value(&payload)
+                .map_err(|error| ToolError::backend(error.to_string()))?;
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::CreateProjectSession(value));
+            let explicit = self
+                .create_project_session_reply
+                .lock()
+                .expect("create project session")
+                .clone();
+            let reply = explicit.unwrap_or_else(|| {
+                json!({
+                    "success": true,
+                    "session_id": format!("{}:{}", payload.agent_id, payload.name),
+                    "project_id": payload.project_id,
+                    "warnings": []
+                })
+            });
+            serde_json::from_value(reply).map_err(|error| ToolError::backend(error.to_string()))
         }
 
         async fn env_list(&self) -> Result<ClientEnvListResponsePayload, ToolError> {
@@ -249,8 +449,8 @@ pub(crate) mod test_support {
                 .lock()
                 .expect("recording lock")
                 .push(Recorded::ListSessions(agent_id.to_string()));
-            serde_json::from_value(json!({ "sessions": [], "stale_agents": [] }))
-                .map_err(|error| ToolError::backend(error.to_string()))
+            let sessions = self.node_sessions.lock().expect("node sessions").clone();
+            serde_json::from_value(sessions).map_err(|error| ToolError::backend(error.to_string()))
         }
 
         async fn create_session(
@@ -258,6 +458,7 @@ pub(crate) mod test_support {
             agent_id: &str,
             name: &str,
             working_dir: Option<&str>,
+            initial_metadata: Option<&SessionInitialMetadata>,
         ) -> Result<SessionCreatedOutput, ToolError> {
             self.calls
                 .lock()
@@ -266,9 +467,25 @@ pub(crate) mod test_support {
                     agent_id.to_string(),
                     name.to_string(),
                     working_dir.map(str::to_owned),
+                    initial_metadata.cloned(),
                 ));
-            serde_json::from_value(json!({ "name": name, "warnings": [] }))
-                .map_err(|error| ToolError::backend(error.to_string()))
+            let metadata = initial_metadata.map(|metadata| {
+                json!({
+                    "revision": 1,
+                    "title": metadata.title,
+                    "description": metadata.description,
+                    "tags": metadata.tags,
+                    "created_at": 1,
+                    "updated_at": 1,
+                })
+            });
+            serde_json::from_value(json!({
+                "name": name,
+                "warnings": [],
+                "instance_id": initial_metadata.map(|_| "instance-fixture"),
+                "metadata": metadata,
+            }))
+            .map_err(|error| ToolError::backend(error.to_string()))
         }
 
         async fn kill_session(
@@ -285,6 +502,36 @@ pub(crate) mod test_support {
                 ));
             serde_json::from_value(json!({ "name": name }))
                 .map_err(|error| ToolError::backend(error.to_string()))
+        }
+
+        async fn get_session_metadata(
+            &self,
+            agent_id: &str,
+            name: &str,
+        ) -> Result<SessionMetadataResponse, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::GetSessionMetadata(
+                    agent_id.to_string(),
+                    name.to_string(),
+                ));
+            self.metadata_reply()
+        }
+
+        async fn update_session_metadata(
+            &self,
+            agent_id: &str,
+            request: SessionMetadataPatchPayload,
+        ) -> Result<SessionMetadataResponse, ToolError> {
+            self.calls
+                .lock()
+                .expect("recording lock")
+                .push(Recorded::UpdateSessionMetadata(
+                    agent_id.to_string(),
+                    request,
+                ));
+            self.metadata_reply()
         }
     }
 
@@ -324,7 +571,7 @@ mod tests {
     fn every_registered_tool_advertises_a_documented_output_contract() {
         let catalog = registry().expect("registry");
         let tools = catalog.list();
-        assert_eq!(tools.len(), 11, "the baseline catalog is exactly 11 Tools");
+        assert_eq!(tools.len(), 17, "the catalog is exactly 17 Tools");
         for tool in tools {
             let schema = tool
                 .output_schema
@@ -411,6 +658,28 @@ mod tests {
         let catalog = registry().expect("registry");
         let calls = [
             ("nession_server_list_agents", serde_json::json!({})),
+            ("nession_server_project_list", serde_json::json!({})),
+            (
+                "nession_server_project_get",
+                serde_json::json!({
+                    "project_id": "project-123e4567-e89b-42d3-a456-426614174000"
+                }),
+            ),
+            (
+                "nession_server_project_session_list",
+                serde_json::json!({
+                    "project_id": "project-123e4567-e89b-42d3-a456-426614174000"
+                }),
+            ),
+            (
+                "nession_server_project_session_create",
+                serde_json::json!({
+                    "project_id": "project-123e4567-e89b-42d3-a456-426614174000",
+                    "agent_id": "agent-a",
+                    "name": "dev",
+                    "target": { "kind": "existing", "working_dir": "/srv/project" }
+                }),
+            ),
             ("nession_server_env_list", serde_json::json!({})),
             (
                 "nession_server_env_get",
@@ -452,8 +721,22 @@ mod tests {
                 "nession_agent_kill_session",
                 serde_json::json!({ "agent_id": "agent-a", "name": "dev" }),
             ),
+            (
+                "nession_agent_get_session_metadata",
+                serde_json::json!({ "agent_id": "agent-a", "name": "dev" }),
+            ),
+            (
+                "nession_agent_update_session_metadata",
+                serde_json::json!({
+                    "agent_id": "agent-a",
+                    "name": "dev",
+                    "expected_instance_id": "instance-a",
+                    "expected_revision": 0,
+                    "patch": { "description": "Next step" }
+                }),
+            ),
         ];
-        assert_eq!(calls.len(), 11);
+        assert_eq!(calls.len(), 17);
         for (name, input) in calls {
             let reply = catalog
                 .call(&context(&recorder), name, Some(arguments(input)))
