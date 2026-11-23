@@ -2734,14 +2734,11 @@ where
     'forward: loop {
         let msg = tokio::select! {
             next = client_read.next() => {
-                // Client activity is itself proof of a live browser leg, and
-                // anything we forward is about to land on the Agent socket as
-                // traffic — so the next probe can wait a full interval from
-                // now rather than firing on top of it.
-                probe_ticker.reset();
+                // A browser Ping/Pong acknowledges only its own WebSocket.
+                // It is NOT Agent-leg liveness and must never postpone the
+                // independent Agent probe ticker (#4065).
                 match next {
                     Some(m) => m,
-                    // The client stream ended.
                     None => break,
                 }
             }
@@ -2790,13 +2787,25 @@ where
                 continue;
             }
             ClientFrame::Other => {
+                // WebSocket control frames terminate at the browser/Server
+                // boundary. The Agent has its OWN independent probe channel;
+                // forwarding a browser Pong there, or resetting the probe
+                // ticker for it, can starve a healthy idle Agent of probes.
+                if matches!(&msg, WsFrame::Ping(_) | WsFrame::Pong(_)) {
+                    continue;
+                }
+                // An actual Agent-directed application message can defer the
+                // next probe briefly; browser keepalives never can.
+                probe_ticker.reset();
                 if let Err(e) = agent_write.send(msg).await {
                     error!("Failed to forward client message to agent: {}", e);
                     break;
                 }
                 continue;
             }
-            ClientFrame::TerminalInput => {}
+            ClientFrame::TerminalInput => {
+                probe_ticker.reset();
+            }
         }
 
         // Terminal input outside the window — forward it now (leading edge).
@@ -2827,6 +2836,9 @@ where
                 break;
             }
             match tokio::time::timeout(remaining, client_read.next()).await {
+                // Control-lane Pong/Ping are local to the browser socket,
+                // including when the terminal-input throttle is draining.
+                Ok(Some(Ok(m))) if matches!(&m, WsFrame::Ping(_) | WsFrame::Pong(_)) => continue,
                 Ok(Some(Ok(m))) => match classify_client_frame(&m) {
                     // Coalescable: held, and merged with the rest of the burst
                     // rather than replacing it. Replacing dropped the earlier
