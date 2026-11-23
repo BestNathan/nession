@@ -21,14 +21,44 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type ClientSessionKillPayload = { session_id: string, };
-export type WebSessionKillResponse = { success: boolean, error: string | null, };
+export type ClientSessionKillPayload = { session_id: string, 
+/**
+ * Optional incarnation precondition for a destructive kill (#4302).
+ *
+ * Present: the Server forwards it to the Agent, which refuses a kill
+ * aimed at a same-name replacement of the instance the caller observed.
+ * Absent: the legacy Web/CLI name-addressed kill is unchanged.
+ */
+expected_instance_id?: string | null, };
+export type WebSessionKillResponse = { success: boolean, error: string | null, 
+/**
+ * The actionable classification of a refusal (#4302): `conflict` when a
+ * supplied `expected_instance_id` no longer names the current instance,
+ * `not_found` or `unavailable` for the other guarded failures. Absent on
+ * success and on every legacy name-only refusal, whose wire is unchanged.
+ */
+error_kind?: string | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionKillCall = { session_id: string, };
+export type SessionKillCall = { session_id: string, 
+/**
+ * Optional incarnation precondition for a destructive kill (#4302).
+ *
+ * Present: the Server forwards it to the Agent, which refuses a kill
+ * aimed at a same-name replacement of the instance the caller observed.
+ * Absent: the legacy Web/CLI name-addressed kill is unchanged.
+ */
+expected_instance_id?: string | null, };
 
 /** The payload the provider answers with. */
-export type SessionKillReply = { success: boolean, error: string | null, };
+export type SessionKillReply = { success: boolean, error: string | null, 
+/**
+ * The actionable classification of a refusal (#4302): `conflict` when a
+ * supplied `expected_instance_id` no longer names the current instance,
+ * `not_found` or `unavailable` for the other guarded failures. Absent on
+ * success and on every legacy name-only refusal, whose wire is unchanged.
+ */
+error_kind?: string | null, };
 

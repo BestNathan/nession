@@ -228,13 +228,23 @@ impl AgentConnection {
     }
 
     /// `agent.session.kill` — kill a tmux Session on the Agent.
-    pub async fn kill_session(&mut self, name: &str) -> Result<SessionKillResponse, ClientError> {
+    ///
+    /// `expected_instance_id` is the caller-observed incarnation precondition
+    /// (#4302): `Some` binds the kill to that durable tmux instance and the
+    /// Agent refuses a same-name replacement as a `conflict`; `None` is the
+    /// legacy name-addressed kill.
+    pub async fn kill_session(
+        &mut self,
+        name: &str,
+        expected_instance_id: Option<&str>,
+    ) -> Result<SessionKillResponse, ClientError> {
         let payload = self
             .request(
                 proto_msg(
                     wire::AGENT_SESSION_KILL,
                     SessionKillPayload {
                         name: name.to_string(),
+                        expected_instance_id: expected_instance_id.map(str::to_owned),
                     },
                 ),
                 DEFAULT_REQUEST_TIMEOUT,

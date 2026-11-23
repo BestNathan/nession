@@ -173,6 +173,7 @@ async fn integration_session_create_and_kill() {
 
     let kill = SessionKillPayload {
         name: session_name.to_string(),
+        expected_instance_id: None,
     };
     let req = new_message(msg_types::SESSION_KILL, kill);
     let resp: nession_agent::server::websocket::Message<SessionKillResponse> =
@@ -5391,6 +5392,7 @@ async fn integration_a_killed_session_retires_its_attachment() {
             msg_types::SESSION_KILL,
             nession_agent::server::websocket::SessionKillPayload {
                 name: session_name.clone(),
+                expected_instance_id: None,
             },
         ),
     )
