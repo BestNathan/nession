@@ -4080,6 +4080,52 @@ mod tests {
         );
     }
 
+    /// #4065 regression: the browser leg's own keepalive Pong is not proof
+    /// of an Agent response. Without this test a frequent browser Pong can
+    /// keep resetting the 15s Agent Ping interval forever, while the idle
+    /// Agent reads no probe and is falsely retired at 45s.
+    #[tokio::test]
+    async fn browser_pong_does_not_starve_independent_agent_probe() {
+        let source = futures_util::stream::unfold((), |_| async {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+            Some((
+                Ok::<WsFrame, std::io::Error>(WsFrame::Pong(Vec::new())),
+                (),
+            ))
+        });
+        let mut client_read = Box::pin(source);
+        let mut agent_write = RecordingSink::default();
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_millis(280),
+            forward_client_to_agent(
+                &mut client_read,
+                &mut agent_write,
+                "sess",
+                WIDE_WINDOW,
+                std::time::Duration::from_millis(100),
+                None,
+            ),
+        )
+        .await;
+        assert!(outcome.is_err(), "browser Pong must not end the Relay");
+        let probes = agent_write
+            .sent
+            .iter()
+            .filter(|frame| matches!(frame, WsFrame::Ping(_)))
+            .count();
+        assert!(
+            probes >= 2,
+            "browser Pong starved independent Agent probes: {probes}"
+        );
+        assert!(
+            agent_write
+                .sent
+                .iter()
+                .all(|frame| !matches!(frame, WsFrame::Pong(_))),
+            "a browser Pong cannot be forwarded onto a different Agent WebSocket"
+        );
+    }
+
     /// SC-03 behavioral regression: client activity suppresses probe pings
     /// (#4065).
     ///
