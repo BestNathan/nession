@@ -15,6 +15,7 @@ const PR=4191;
 const FAIL_ACTION='f085d5919b3277e4fb68d49f48f9a311a83ad5032a90ec651aba93392888eb44';
 const NEXT_ACTION='74024299b457f8c0049c191e9750d61bce424608086f169e771486e65fc245ae';
 const REVIEW_ACTION='b95eb42b102c484a9c4613e38a896e456d08c806b09e678f714a1a0f4d2b69ee';
+const INITIAL_REVIEW_ACTION='73e869fffc416a387c9058da0fcfa8804d339341e1f1daf89a9111fc57f63127';
 const WORKFLOWS=Object.freeze({
   fail:[44733719096,'Agent / Development','agent-develop.yml','8b7777f48a577d01961fd7d9e75311f75d6d57a1','failure'],
   worker:[44742578069,'Agent / Development','agent-develop.yml',TARGET_BASE,'success'],
@@ -107,7 +108,7 @@ export function attestQwen4174({targetSha,head,states,runs,artifacts,
     pub[0].attempt===1&&pub[0].outcome==='published'&&
     pub[0].target_sha===PUB_SHA&&
     action(v7,FAIL_ACTION)?.status==='failed'&&
-    action(v7,REVIEW_ACTION)?.status==='pending',
+    action(v7,INITIAL_REVIEW_ACTION)?.status==='pending',
     'trusted Publisher did not publish original PR from successor');
   requireIt(v12.phase==='review'&&v12.target_sha===PUB_SHA&&
     action(v12,REVIEW_ACTION)?.status==='dispatched'&&
@@ -129,7 +130,8 @@ export function attestQwen4174({targetSha,head,states,runs,artifacts,
     receipt.issue===ROOT&&receipt.run_id===WORKFLOWS.worker[0]&&
     receipt.attempt===1&&receipt.source_sha===SOURCE&&
     receipt.workflow_sha===TARGET_BASE&&receipt.version===1&&
-    SHA.test(receipt.checkpoint_commit_sha??'')===false&&
+    receipt.checkpoint_path===
+      'roles/developer/dev-qwen-01/issues/4065/checkpoints/00000001.json'&&
     /^[0-9a-f]{64}$/.test(receipt.ciphertext_sha256??'')&&
     receipt.workflow==='.github/workflows/agent-develop.yml',
     'successor has no immutable native checkpoint receipt');
