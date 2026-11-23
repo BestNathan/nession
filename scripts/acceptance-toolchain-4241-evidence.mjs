@@ -13,6 +13,9 @@ const MAIN_ANCHOR='ff00fbd6b504ca2953293dce9ea4097fce9a3452';
 const SC01_HEAD='729699a7bcbf1af074f1948f8d7491ca7c446324';
 const SC01_PR=4266;
 const SOURCE_ACCEPT_RUN=45105031223;
+const OWNER_ACCEPT_COMMENT=7090587994;
+const OWNER_ACCEPT_ACK=7090599215;
+const OWNER_ACCEPT_RUN=45104919638;
 const SOURCE_ACCEPT_HEAD='ff7c0818ea31142896b42ea5b8058375a8327702';
 const CATALOG_FIRST='82881f5333d4bff1091beee8ce4e6d270aeead60';
 const SOURCE_PRS=Object.freeze({
@@ -107,6 +110,83 @@ function attestRecipe(file,fingerprint,name) {
 // closure Bug. No other Issue gets orphan-source or registry evidence.
 export function shouldCollectToolchain4241(stage,issue) {
   return stage==='post-merge'&&['4241','4297'].includes(String(issue));
+}
+
+// #4297 SC-03: the parent closure receipt alone does not prove that the
+// original Owner /accept crossed the new trusted orphan-source dispatch lane.
+// Bind the immutable Owner comment, bot acknowledgment, trusted main Manual
+// Request job/log, and the *actual* downstream Acceptance Run together.
+// Nothing here is permission to update an Issue; only the normal projector
+// can write a criterion. A reference in a comment or Agent answer alone is
+// never accepted as a dispatch receipt.
+export function attest4297OwnerManualDispatch(comment, ack, manual, jobs, log, acceptance) {
+  const issueUrl='https://api.github.com/repos/'+REPO+'/issues/4241';
+  const command='/accept post-merge '+MAIN_ANCHOR;
+  denied(comment?.id===OWNER_ACCEPT_COMMENT &&
+    comment.issue_url===issueUrl &&
+    comment.body===command &&
+    comment.user?.login==='BestNathan' && comment.user?.type==='User' &&
+    comment.author_association==='OWNER' &&
+    typeof comment.created_at==='string' &&
+    comment.updated_at===comment.created_at,
+    'unverified original Owner /accept source');
+  denied(ack?.id===OWNER_ACCEPT_ACK && ack.issue_url===issueUrl &&
+    ack.user?.login==='github-actions[bot]' && ack.user?.type==='Bot' &&
+    ack.body?.startsWith('Comment command `'+command+'` accepted for Issue #4241.') &&
+    ack.body.includes('https://github.com/'+REPO+'/actions/runs/'+OWNER_ACCEPT_RUN) &&
+    ack.body.includes('<!-- nession-command-comment:'+OWNER_ACCEPT_COMMENT+' -->') &&
+    typeof ack.created_at==='string' &&
+    ack.created_at>=comment.created_at &&
+    ack.updated_at===ack.created_at,
+    'missing or spoofed Owner command router acknowledgment');
+  denied(manual?.id===OWNER_ACCEPT_RUN && manual.run_attempt===1 &&
+    manual.name==='Comment Accept #4241 comment:'+OWNER_ACCEPT_COMMENT &&
+    manual.path==='.github/workflows/acceptance-manual-request.yml' &&
+    manual.event==='workflow_dispatch' && manual.head_branch==='main' &&
+    manual.head_sha===SOURCE_ACCEPT_HEAD &&
+    manual.actor?.login==='github-actions[bot]' &&
+    manual.triggering_actor?.login==='github-actions[bot]' &&
+    manual.repository?.full_name===REPO &&
+    manual.head_repository?.full_name===REPO &&
+    manual.status==='completed' && manual.conclusion==='success' &&
+    typeof manual.created_at==='string' &&
+    manual.created_at>=comment.created_at &&
+    ack.created_at>=manual.created_at,
+    'untrusted Owner Manual Request Run/Attempt/source');
+  const request=exactJob(jobs,manual,'request');
+  denied(['Verify comment source and canonical Acceptance policy',
+    'Reconcile or dispatch existing stage-qualified Agent Acceptance']
+    .every(name=>request.steps?.filter(s=>s.name===name &&
+      s.status==='completed' && s.conclusion==='success').length===1),
+    'Manual Request source/dispatch steps not successful');
+  denied(typeof log==='string' && log.length<131072 &&
+    log.includes('Reconstructed authorized accept request for Issue #4241, comment '+
+      OWNER_ACCEPT_COMMENT),
+    'missing source-authenticated native Owner request log');
+  const lines=log.split(/\r?\n/).map(line=>
+    /^\d{4}-\d{2}-\d{2}T[^ ]+Z (\{.*\})$/.exec(line)?.[1])
+    .filter(line=>line?.startsWith('{"action":'));
+  denied(lines.length===1,'missing or ambiguous native dispatch result');
+  let outcome;
+  try { outcome=JSON.parse(lines[0]); } catch {
+    throw Error('toolchain #4241 readback: malformed native dispatch result');
+  }
+  denied(outcome?.action==='dispatched' &&
+    outcome.reason==='authenticated orphan catalog and publisher evidence' &&
+    Array.isArray(outcome.agent_runs) && outcome.agent_runs.length===1 &&
+    outcome.agent_runs[0]?.stage==='post-merge' &&
+    outcome.agent_runs[0]?.target_ref===MAIN_ANCHOR &&
+    acceptance?.id===SOURCE_ACCEPT_RUN && acceptance.run_attempt===1 &&
+    acceptance.head_sha===SOURCE_ACCEPT_HEAD &&
+    typeof acceptance.created_at==='string' &&
+    acceptance.created_at>=manual.created_at,
+    'native Manual Request did not dispatch original exact-target Acceptance');
+  return {kind:'toolchain_4297_verified_owner_manual_dispatch',
+    issue:4241,comment_id:OWNER_ACCEPT_COMMENT,ack_id:OWNER_ACCEPT_ACK,
+    manual_run:OWNER_ACCEPT_RUN,manual_attempt:1,manual_job:request.id,
+    dispatched_acceptance_run:SOURCE_ACCEPT_RUN,
+    acceptance_target:MAIN_ANCHOR,main_dispatch_sha:SOURCE_ACCEPT_HEAD,
+    authenticated_owner:'BestNathan',maximum_authority:'read_only_evidence'};
 }
 
 // A checked parent Issue is only a locator. The live closure transition,
@@ -274,13 +354,18 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
     'incomplete user-selected distribution matrix');
   let linkedClosure=null;
   if(String(issue)==='4297'){
-    const [parent,events,run,jobs,artifacts,comparison]=await Promise.all([
+    const [parent,events,run,jobs,artifacts,comparison,
+      ownerComment,ownerAck,manual,manualJobs]=await Promise.all([
       read(PREFIX+'/issues/4241'),
       read(PREFIX+'/issues/4241/events?per_page=100'),
       read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/attempts/1'),
       read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/attempts/1/jobs?per_page=100'),
       read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/artifacts?per_page=100'),
       read(PREFIX+'/compare/'+SOURCE_ACCEPT_HEAD+'...'+targetSha),
+      read(PREFIX+'/issues/comments/'+OWNER_ACCEPT_COMMENT),
+      read(PREFIX+'/issues/comments/'+OWNER_ACCEPT_ACK),
+      read(PREFIX+'/actions/runs/'+OWNER_ACCEPT_RUN+'/attempts/1'),
+      read(PREFIX+'/actions/runs/'+OWNER_ACCEPT_RUN+'/attempts/1/jobs?per_page=100'),
     ]);
     denied(Array.isArray(artifacts?.artifacts)&&artifacts.artifacts.length<100,
       'incomplete parent Acceptance artifact listing');
@@ -289,8 +374,13 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
     denied(matches.length===1,'missing/ambiguous original Acceptance artifact');
     const result=await downloadedResult(REPO,matches[0],
       process.env.GH_TOKEN??process.env.GITHUB_TOKEN);
-    linkedClosure=attest4297ParentClosure(parent,events,run,jobs,matches[0],
-      result,ancestor(comparison,SOURCE_ACCEPT_HEAD),{published:accepted});
+    const manualRequest=exactJob(manualJobs,manual,'request');
+    const manualLog=await getLog(PREFIX+'/actions/jobs/'+manualRequest.id+'/logs');
+    const ownerDispatch=attest4297OwnerManualDispatch(ownerComment,ownerAck,
+      manual,manualJobs,manualLog,run);
+    linkedClosure={...attest4297ParentClosure(parent,events,run,jobs,matches[0],
+      result,ancestor(comparison,SOURCE_ACCEPT_HEAD),{published:accepted}),
+      owner_manual_dispatch:ownerDispatch};
   }
   return {kind:'verified_toolchain_4241_readonly',issue:4241,target_sha:targetSha,
     ...(linkedClosure ? {verified_4297_parent_closure:linkedClosure} : {}),
@@ -414,6 +504,72 @@ export function selfTestToolchain4241() {
     [parent,events,run,jobs,artifact,result,true,
       {published:release.published.slice(1)}],
   ])assert.throws(()=>verify(...args),/toolchain #4241 readback/);
+  // The formal SC-03 source is the Owner comment -> bot ack ->
+  // authenticated Manual Request -> actual first-attempt Agent dispatch.
+  // An unrelated/forged comment or a green Manual Job without a real
+  // authorized dispatch must never qualify the parent Issue.
+  const originalTime='2026-11-23T03:15:02Z';
+  const issueUrl='https://api.github.com/repos/'+REPO+'/issues/4241';
+  const command='/accept post-merge '+MAIN_ANCHOR;
+  const ownerComment={id:OWNER_ACCEPT_COMMENT,issue_url:issueUrl,
+    body:command,user:{login:'BestNathan',type:'User'},
+    author_association:'OWNER',created_at:originalTime,updated_at:originalTime};
+  const ackTime='2026-11-23T03:15:49Z';
+  const ownerAck={id:OWNER_ACCEPT_ACK,issue_url:issueUrl,
+    body:'Comment command `'+command+'` accepted for Issue #4241. '+
+      '[Actions run](https://github.com/'+REPO+'/actions/runs/'+OWNER_ACCEPT_RUN+
+      '). This request is not an Acceptance Pass.\n\n'+
+      '<!-- nession-command-comment:'+OWNER_ACCEPT_COMMENT+' -->',
+    user:{login:'github-actions[bot]',type:'Bot'},
+    created_at:ackTime,updated_at:ackTime};
+  const ownerManual={id:OWNER_ACCEPT_RUN,run_attempt:1,
+    name:'Comment Accept #4241 comment:'+OWNER_ACCEPT_COMMENT,
+    path:'.github/workflows/acceptance-manual-request.yml',
+    event:'workflow_dispatch',head_branch:'main',head_sha:SOURCE_ACCEPT_HEAD,
+    actor:{login:'github-actions[bot]'},
+    triggering_actor:{login:'github-actions[bot]'},
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    status:'completed',conclusion:'success',created_at:'2026-11-23T03:15:42Z'};
+  const requestJob={id:27,run_id:OWNER_ACCEPT_RUN,name:'request',
+    status:'completed',conclusion:'success',
+    steps:['Verify comment source and canonical Acceptance policy',
+      'Reconcile or dispatch existing stage-qualified Agent Acceptance']
+      .map(name=>({name,status:'completed',conclusion:'success'}))};
+  const manualJobs={jobs:[requestJob]};
+  const dispatchLog='2026-11-23T03:16:13.0077356Z Reconstructed authorized '+
+    'accept request for Issue #4241, comment '+OWNER_ACCEPT_COMMENT+'\n'+
+    '2026-11-23T03:16:51.8532976Z '+
+    JSON.stringify({action:'dispatched',
+      reason:'authenticated orphan catalog and publisher evidence',
+      agent_runs:[{stage:'post-merge',target_ref:MAIN_ANCHOR}]});
+  const acceptance={...run,created_at:'2026-11-23T03:16:51Z'};
+  const receipt=attest4297OwnerManualDispatch(ownerComment,ownerAck,
+    ownerManual,manualJobs,dispatchLog,acceptance);
+  assert.equal(receipt.dispatched_acceptance_run,SOURCE_ACCEPT_RUN);
+  assert.equal(receipt.manual_run,OWNER_ACCEPT_RUN);
+  for(const fields of [
+    [{...ownerComment,body:'/accept post-merge '+'b'.repeat(40)},ownerAck,
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [{...ownerComment,user:{login:'attacker',type:'User'}},ownerAck,
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [{...ownerComment,updated_at:'2026-11-23T03:15:59Z'},ownerAck,
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [ownerComment,{...ownerAck,body:'forged ack'},
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [ownerComment,ownerAck,{...ownerManual,run_attempt:2},
+      manualJobs,dispatchLog,acceptance],
+    [ownerComment,ownerAck,ownerManual,
+      {jobs:[{...requestJob,conclusion:'failure'}]},dispatchLog,acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog.replace('"action":"dispatched"','"action":"pending"'),acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog+'\n'+dispatchLog.split('\n')[1],acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog.replace(MAIN_ANCHOR,'a'.repeat(40)),acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog,{...acceptance,created_at:'2026-11-23T03:14:00Z'}],
+  ]) assert.throws(()=>attest4297OwnerManualDispatch(...fields),
+    /toolchain #4241 readback/, 'forged, incomplete or stale Owner dispatch is rejected');
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
