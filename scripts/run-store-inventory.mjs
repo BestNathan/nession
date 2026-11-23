@@ -290,8 +290,33 @@ export function checkInventory(manifest,workflows){
       // evidence; Acceptance re-attests completed comment Case Run/Attempt,
       // original pre-checkout human authority, and canonical Case tree.
       // An arbitrary event or ref-selected manual dispatch remains denied.
+      const metricsTrustedReviewerGuard=[
+        "(github.event_name == 'repository_dispatch' &&",
+        "          github.ref == 'refs/heads/main' &&",
+        "          github.event.action == 'nession-agent-review-completed' &&",
+        "          github.actor == 'github-actions[bot]' &&",
+        "          github.event.sender.login == 'github-actions[bot]')",
+      ].join('\n');
+      const metricsTrustedHistoryGuard=[
+        "(github.event_name == 'repository_dispatch' &&",
+        "          github.ref == 'refs/heads/main' &&",
+        "          github.event.action == 'nession-agent-metrics-history-recover' &&",
+        "          github.actor == 'github-actions[bot]' &&",
+        "          github.event.sender.login == 'github-actions[bot]')",
+      ].join('\n');
+      // These are the ONLY two privileged bot-only dispatch types permitted
+      // by the Store inventory. History must be post-CAS, non-recursive and
+      // independently authenticate the real writer Run/Attempt/Store steps.
       const reviewerWake=writer.workflow==='.github/workflows/metrics-agent-telemetry.yml'&&
-        /^  repository_dispatch:\s*\n    types: \[nession-agent-review-completed\]\s*$/m.test(triggers)&&
+        /^  repository_dispatch:\s*\n    types: \[nession-agent-review-completed, nession-agent-metrics-history-recover\]\s*$/m.test(triggers)&&
+        body.includes(metricsTrustedReviewerGuard)&&
+        body.includes(metricsTrustedHistoryGuard)&&
+        body.includes("if: github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')")&&
+        body.includes("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''")&&
+        body.includes('-f event_type=nession-agent-metrics-history-recover')&&
+        body.includes('client_payload[writer_run_id]=${GITHUB_RUN_ID}')&&
+        body.includes('node scripts/agent-telemetry-reconcile.mjs select')&&
+        body.includes("github.repository == 'BestNathan/nession'")&&
         body.includes("github.ref == 'refs/heads/main'")&&
         body.includes("github.event.action == 'nession-agent-review-completed'")&&
         body.includes("github.actor == 'github-actions[bot]'")&&
@@ -681,10 +706,22 @@ function selfTest(){
   const metricsOriginal=sources.get(metricsWake);
   for(const [name,modify] of [
     ['arbitrary repository_dispatch type',x=>x.replace(
-      'types: [nession-agent-review-completed]','types: [any-event]')],
+      'types: [nession-agent-review-completed, nession-agent-metrics-history-recover]','types: [any-event]')],
     ['foreign sender',x=>x.replace(
       "github.event.sender.login == 'github-actions[bot]'",
       "github.event.sender.login == 'attacker'")],
+    ['history forged sender',x=>x.replace(
+      "          github.event.action == 'nession-agent-metrics-history-recover' &&\n          github.actor == 'github-actions[bot]' &&\n          github.event.sender.login == 'github-actions[bot]')",
+      "          github.event.action == 'nession-agent-metrics-history-recover' &&\n          github.actor == 'github-actions[bot]' &&\n          github.event.sender.login == 'attacker')")],
+    ['history changed wake action',x=>x.replace(
+      "-f event_type=nession-agent-metrics-history-recover",
+      "-f event_type=arbitrary-history-wake")],
+    ['history forged writer ID',x=>x.replace(
+      'client_payload[writer_run_id]=${GITHUB_RUN_ID}',
+      'client_payload[writer_run_id]=attacker')],
+    ['history recursive sender',x=>x.replace(
+      "github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''",
+      "github.event_name == 'repository_dispatch' &&\n          steps.persist.outputs.changed != ''")],
     ['unbound source SHA',x=>x.replace('.head_sha == $sha',
       '.head_sha != $sha')],
     ['untrusted source head',x=>x.replace('ref: main',
