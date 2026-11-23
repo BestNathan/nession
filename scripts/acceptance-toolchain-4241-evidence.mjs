@@ -224,6 +224,47 @@ export function attest4297ParentClosure(parent,events,run,jobs,artifact,result,
     acceptance_artifact_digest:artifact.digest,passed_sc:required,
     published:14,tools:13,maximum_authority:'read_only_evidence'};
 }
+// A specialized typed cross-Issue receipt lets the independent Agent evaluate
+// the historical source event at its OWN verified SHA. It is not a fabricated
+// re-execution of #4241 at the later #4297 observer SHA, and never grants Pass.
+export function related4297ToolchainClosure(observation,targetSha) {
+  const p=observation?.verified_4297_parent_closure;
+  denied(SHA.test(targetSha)&&observation?.kind==='verified_toolchain_4241_readonly'&&
+    observation.issue===4241&&observation.target_sha===targetSha&&
+    observation.maximum_authority==='read_only_evidence'&&
+    observation.published?.length===14&&
+    new Set(observation.published.map(x=>x.tool)).size===13&&
+    p?.kind==='toolchain_4297_verified_parent_closure'&&
+    p.parent_issue===4241&&p.source_ancestry_verified===true&&
+    p.owner_comment===SOURCE_OWNER_COMMENT&&
+    p.manual_request_run===SOURCE_REQUEST_RUN&&
+    p.manual_request_target===MAIN_ANCHOR&&
+    p.original_acceptance_main_sha===SOURCE_ACCEPT_HEAD&&
+    p.acceptance_run===SOURCE_ACCEPT_RUN&&p.acceptance_attempt===1&&
+    p.published===14&&p.tools===13,
+    'historical source cannot be reused at unverified observer target');
+  return {
+    kind:'related_issue_authenticated_orphan_toolchain_completion',
+    subject_issue:4297,source_issue:4241,source_sc:'SC-05',
+    source_stage:'post-merge',
+    source_sha:SOURCE_ACCEPT_HEAD,source_requested_ref:MAIN_ANCHOR,
+    target_sha:targetSha,source_ancestry_verified:true,
+    owner_comment:p.owner_comment,manual_request_run:p.manual_request_run,
+    manual_request_job:p.manual_request_job,
+    original_source_acceptance_run:p.acceptance_run,
+    original_source_acceptance_attempt:p.acceptance_attempt,
+    original_source_acceptance_updater_job:p.acceptance_updater_job,
+    source_acceptance_artifact_digest:p.acceptance_artifact_digest,
+    source_issue_closed_at:p.parent_closed_at,
+    source_issue_state:'closed',source_sc_result:'Pass',
+    reverified_oci_release_count:observation.published.length,
+    reverified_oci_platforms:['linux/amd64','linux/arm64'],
+    observer_reverification_target_sha:targetSha,
+    provenance:'Original owner issue_comment + accepted main-owned Manual Request Job + original exact-attempt Agent/Updater + SHA256-bound Acceptance result + bot closure + authenticated source ancestry + independently re-verified 14 OCI EROFS native releases at observer target',
+    limitation:'Historical #4241 source Acceptance ran on its original main SHA; this verifies its completion at an ancestor and does NOT claim a new #4241 execution at target_sha or authorize an SC verdict.',
+    maximum_authority:'read_only_evidence',
+  };
+}
 export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLog}) {
   denied(repo===REPO&&shouldCollectToolchain4241(stage,issue)&&SHA.test(targetSha),
     'wrong repository, Issue, stage or ref');
@@ -486,6 +527,25 @@ export function selfTestToolchain4241() {
     {...sourceRequest,jobs:{jobs:[]}},
   ])assert.throws(()=>attest4297ParentClosure(parent,events,run,jobs,artifact,
     result,true,release,forgery),/toolchain #4241 readback/);
+  const observedSha='d'.repeat(40);
+  const closure=verify(parent,events,run,jobs,artifact,result,true,release);
+  const observed={
+    kind:'verified_toolchain_4241_readonly',issue:4241,target_sha:observedSha,
+    maximum_authority:'read_only_evidence',published:release.published,
+    verified_4297_parent_closure:closure};
+  const related=related4297ToolchainClosure(observed,observedSha);
+  assert.equal(related.source_issue,4241);
+  assert.equal(related.subject_issue,4297);
+  assert.equal(related.owner_comment,SOURCE_OWNER_COMMENT);
+  assert.equal(related.target_sha,observedSha);
+  assert.notEqual(related.source_sha,related.target_sha);
+  assert.throws(()=>related4297ToolchainClosure(observed,'a'.repeat(40)),
+    /unverified observer target/);
+  assert.throws(()=>related4297ToolchainClosure({...observed,
+    verified_4297_parent_closure:{...closure,source_ancestry_verified:false}},
+    observedSha),/unverified observer target/);
+  assert.throws(()=>related4297ToolchainClosure({...observed,published:[]},
+    observedSha),/unverified observer target/);
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
