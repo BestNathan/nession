@@ -357,6 +357,143 @@ function selfTestStagingMergeLink() {
     [delivery, { ...delivery }], sha, 3072, parse).length, 2);
 }
 
+
+// A later independent Agent evaluation can correctly replace the mutable
+// Acceptance Report's latest Run ID. Historical source->wake->Issue update
+// evidence must remain verifiable without editing that canonical Report.
+// #4240 is a real protected Staging delivery, not a fabricated fixture:
+// authenticate every original GitHub Run/Job/Step, immutable Store byte and
+// original successful Issue update before using this documented witness.
+const OBSERVED_WAKE = Object.freeze({
+  issue: 3072, criterion: 'SC-04',
+  sha: '236f04e99a6303ade6f949bf45d56fb444de02f0',
+  pr: 4240, deploy: 44932285256, ingest: 44932367574,
+  waker: 44932421996,
+  index: 'indexes/by-sha/236f04e99a6303ade6f949bf45d56fb444de02f0/deployment/44932285256-1-staging.json',
+});
+
+async function publicJobLog(jobId) {
+  assert.ok(Number.isSafeInteger(jobId) && jobId > 0);
+  const response = await fetch('https://api.github.com' +
+    resource('/actions/jobs/' + jobId + '/logs'), {
+    headers: {
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'nession-case-3072-sc02',
+    },
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!response.ok) throw Error('native Waker job log unavailable: HTTP ' +
+    response.status + ' for job ' + jobId);
+  const log = await response.text();
+  assert.ok(log.length > 0 && log.length < 2000000,
+    'missing/oversized native Waker job log');
+  return log;
+}
+
+async function verifyObservedWake(parseContents, normalizedPath, verifySource) {
+  const witness = OBSERVED_WAKE;
+  // The current Issue state is only a discoverability hint, never the proof:
+  // later valid independent re-evaluations may supersede the Waker run ID.
+  const issue = await get(resource('/issues/' + witness.issue));
+  const row = stagingAgentRows(issue).find(candidate =>
+    candidate.issue === witness.issue &&
+    candidate.criterion === witness.criterion &&
+    candidate.sha === witness.sha && candidate.result === 'Pass');
+  if (!row) return null;
+
+  const [deploy, ingest, waker, indexFile, pulls] = await Promise.all([
+    native(witness.deploy), native(witness.ingest), native(witness.waker),
+    get(normalizedPath(witness.index)),
+    get(resource('/commits/' + witness.sha + '/pulls?per_page=100')),
+  ]);
+  assert.equal(deploy.run.name, 'Deploy / Identity');
+  assert.equal(ingest.run.name, 'Deploy / Identity Ingest');
+  assert.equal(ingest.run.path.split('@')[0],
+    '.github/workflows/deploy-identity-ingest.yml');
+  assert.equal(ingest.run.event, 'workflow_run');
+  assert.equal(ingest.run.head_branch, 'main');
+  assert.equal(ingest.run.conclusion, 'success');
+  const ingestJob = job(ingest.jobs, 'ingest', 'success');
+  for (const step of [
+    'Append compact immutable records and SHA indexes',
+    'Verify immutable Git bytes before uploading Run Store receipts',
+    'Emit source-aligned Staging Acceptance wake',
+  ]) hasStep(ingestJob, step);
+
+  const index = parseContents(indexFile, witness.index);
+  assert.equal(index.target_sha, witness.sha);
+  assert.equal(index.environment_id, 'staging');
+  assert.equal(index.source?.run_id, witness.deploy);
+  assert.equal(index.source?.run_attempt, 1);
+  const record = parseContents(await get(normalizedPath(index.record)),
+    index.record);
+  const attested = verifySource(record, index, deploy.run, {
+    jobs: deploy.jobs,
+  });
+  assert.equal(attested.source_sha, witness.sha);
+  assert.equal(attested.source_run_id, witness.deploy);
+  assert.equal(attested.environment_id, 'staging');
+  assert.equal(attested.workload_readiness.length, 3);
+  assert.ok(attested.workload_readiness.every(w =>
+    w.ready && w.generation === w.observed_generation));
+  assert.ok(Object.values(attested.image_digests).every(d =>
+    /^sha256:[a-f0-9]{64}$/.test(d)));
+
+  assert.equal(waker.run.name, 'Acceptance / Post-Run Waker');
+  assert.equal(waker.run.path.split('@')[0],
+    '.github/workflows/acceptance-postrun-waker.yml');
+  assert.equal(waker.run.event, 'workflow_run');
+  assert.equal(waker.run.head_branch, 'main');
+  assert.equal(waker.run.conclusion, 'success');
+  assert.ok(Date.parse(ingest.run.created_at) <=
+    Date.parse(waker.run.created_at), 'Waker predates deployment ingestion');
+  const selector = job(waker.jobs, 'select-staging', 'success');
+  hasStep(selector, 'Authenticate completed Staging attestation ingestion');
+  hasStep(selector, 'Select pending exact-SHA merged-Staging Agent criteria');
+  const prefix = 'evaluate-staging (' + witness.issue + ')';
+  const evaluator = matchedJob(waker.jobs,
+    n => n.startsWith(prefix + ' /') && n.endsWith('/ Execute acceptance'),
+    'real exact-Issue Staging evaluator', 1);
+  const updater = matchedJob(waker.jobs,
+    n => n.startsWith(prefix + ' /') && n.endsWith('/ Deterministic Issue updater'),
+    'real canonical Issue updater', 1);
+  hasStep(updater, 'Apply Acceptance Report and checkbox projection');
+
+  // GitHub-native original Job logs bind this completed Waker to the actual
+  // deployed SHA and Issue. Job success alone cannot substitute for inputs
+  // on a different Staging source or a no-op wake.
+  const [selectorLog, evaluatorLog, updaterLog] = await Promise.all([
+    publicJobLog(selector.id), publicJobLog(evaluator.id),
+    publicJobLog(updater.id),
+  ]);
+  assert.ok(selectorLog.split(/\r?\n/).some(line =>
+    line.endsWith('Authenticated Staging deploy ingestion for ' +
+      witness.sha)), 'Waker did not authenticate the exact deployed SHA');
+  assert.ok(evaluatorLog.includes('  issue_number: ' + witness.issue) &&
+    evaluatorLog.includes('  target_ref: ' + witness.sha) &&
+    evaluatorLog.includes('  stage: staging'),
+  'native Agent invocation is not bound to the exact Issue/Staging SHA');
+  assert.ok(updaterLog.includes('  issue_number: ' + witness.issue) &&
+    updaterLog.includes('  target_ref: ' + witness.sha) &&
+    updaterLog.includes('updated requirement #' + witness.issue + ':'),
+  'native deterministic updater did not project the exact Issue');
+
+  assert.ok(Array.isArray(pulls) && pulls.length < 100);
+  const { parsePreMergeIssueNumbers } = await import(
+    pathToFileURL(path.join(ROOT, 'scripts/requirement-acceptance.mjs')).href);
+  const linked = issueLinkedStagingMerge(pulls, witness.sha, witness.issue,
+    parsePreMergeIssueNumbers);
+  assert.equal(linked.length, 1, 'no unique protected Issue-linked Staging merge');
+  assert.equal(linked[0].number, witness.pr);
+
+  return { ...row, waker: waker.run.id,
+    wakerAttempt: waker.run.run_attempt, source: deploy.run.id,
+    sourceAttempt: deploy.run.run_attempt, record: index.record,
+    index: witness.index, observedAt: attested.observed_at,
+    pr: linked[0].number, evaluator: evaluator.name, updater: updater.name };
+}
+
 async function main() {
   const checkout = targetSha();
   const { parseContents, normalizedPath, verifySource } = await import(
@@ -415,7 +552,8 @@ async function main() {
   // required negative fixture, never a positive Issue projection.
   selfTestPositiveSelection();
   selfTestStagingMergeLink();
-  const positive = await verifyPositiveWake(parseContents, normalizedPath, verifySource);
+  const positive = await verifyPositiveWake(parseContents, normalizedPath, verifySource) ||
+    await verifyObservedWake(parseContents, normalizedPath, verifySource);
   if (!positive) {
     console.log(JSON.stringify({
       status: 'pending',
