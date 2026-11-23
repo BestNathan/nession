@@ -4124,6 +4124,46 @@ async fn an_agent_registration_with_a_wrong_token_is_rejected() {
     assert_eq!(reply["payload"]["status"], "rejected");
 }
 
+/// The Agent's *control* WebSocket is healthy throughout the artificial
+/// Relay-leg partition. Exercise production heartbeats and poll WS ping/pong;
+/// otherwise a 45s fault-injection test could accidentally expire an unrelated
+/// 30s control registration and call that false failure a half-open detection.
+fn keep_mock_agent_control_healthy(agent: TestWs) {
+    tokio::spawn(async move {
+        let (mut sink, mut stream) = agent.split();
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut ordinal = 0u64;
+        loop {
+            tokio::select! {
+                _ = heartbeat.tick() => {
+                    ordinal += 1;
+                    let frame = serde_json::json!({
+                        "msg_type": "control.heartbeat",
+                        "id": format!("half-open-control-heartbeat-{ordinal}"),
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "agent_id": "a1",
+                            "status": "online",
+                            "session_count": 1,
+                            "active_sessions": 1,
+                        },
+                    });
+                    if sink.send(tokio_tungstenite::tungstenite::Message::Text(
+                        frame.to_string(),
+                    )).await.is_err() {
+                        break;
+                    }
+                }
+                msg = stream.next() => {
+                    if !matches!(msg, Some(Ok(_))) {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+}
+
 /// #4065: the first Relay→Agent TCP/WebSocket stays open after a successful
 /// authenticated attach but deliberately stops reading frames. Unlike a socket
 /// close this never sends FIN/RST or pong, so it exercises the *ongoing* 45s
@@ -4199,6 +4239,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let mut endpoint = start_half_open_agent_endpoint().await?;
     let mut agent = connect_agent_on_port(server, "a1", endpoint.addr.port()).await?;
     send_json(&mut agent, session_update("a1", "dev")).await?;
+    keep_mock_agent_control_healthy(agent);
 
     let mut browser = connect_client(server).await?;
     wait_for_session(&mut browser, "a1:dev").await?;
@@ -4341,6 +4382,7 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
     let mut endpoint = start_mock_agent_endpoint().await?;
     let mut agent = connect_agent_on_port(server, "a1", endpoint.addr.port()).await?;
     send_json(&mut agent, session_update("a1", "dev")).await?;
+    keep_mock_agent_control_healthy(agent);
 
     let mut browser = connect_client(server).await?;
     wait_for_session(&mut browser, "a1:dev").await?;
