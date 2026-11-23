@@ -1342,11 +1342,19 @@ mod native {
             if let Some(path) = std::env::var_os("NESSON_SANDBOX_BRIDGE_BIN") {
                 return PathBuf::from(path);
             }
-            std::env::current_exe()
-                .unwrap()
-                .parent()
-                .unwrap()
-                .join("nession-sandbox-bridge")
+            // The Agent binary dispatches the hidden in-sandbox bridge
+            // subcommand (the production `bridge_executable` convention), and
+            // the Case runner pre-builds it into the test profile directory.
+            // Walk up from the test executable until that binary is found, so
+            // the proof never depends on a separately built bridge artifact.
+            let exe = std::env::current_exe().unwrap();
+            for dir in exe.ancestors().skip(1) {
+                let candidate = dir.join("nession-agent");
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+            exe.parent().unwrap().join("nession-agent")
         }
 
         /// Agent-shaped settings: the verified identity-namespaced cache is the
