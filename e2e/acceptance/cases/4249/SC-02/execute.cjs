@@ -42,7 +42,7 @@ if (!capabilities.backend || !capabilities.erofs) {
       'cargo',
       ['test', '-p', 'nession-agent', '--test', 'toolchain_chain', TEST, '--', '--ignored', '--exact', '--nocapture'],
       110000,
-      { NESSION_SANDBOX_BRIDGE_BIN: path.resolve('target/debug/nession-sandbox-bridge') },
+      { NESSION_SANDBOX_BRIDGE_BIN: path.resolve('target/debug/nession-agent') },
     );
     assertRan(output, [TEST]);
     assert.match(output, /^#4249 SC-02 measured: .*$/m, 'the measured evidence line is required');
