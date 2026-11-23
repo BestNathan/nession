@@ -42,11 +42,16 @@
  *   one, and the front one cannot go alone. So a queue with any chunk older
  *   than the TTL is discarded whole.
  *
- * The single exception to "refuse when full" is a queue that is *empty*: one
- * chunk always fits, whatever its size. A paste is one chunk, and refusing it
- * because the paste is larger than the byte bound would be refusing exactly the
- * case the bound exists to permit (the requirement says as much — bounds must
- * not assume one keystroke per event).
+ * An empty queue is no exception to the byte bound (#4299). A paste is one
+ * chunk, and the bound exists to permit it — up to the budget itself: bounds
+ * must not assume one keystroke per event, so a paste within `maxBytes` is
+ * admitted whole as a single chunk. But a single event whose OWN UTF-8 size
+ * exceeds `maxBytes` is refused even into an empty queue, whole and with a
+ * stated `bound` loss. Admitting it would make the advertised per-Session
+ * pending byte budget unenforceable at exactly the moment it matters most: a
+ * detached client buffering one oversized paste for the reconnect flush.
+ * Refusal never truncates or splits the event — what is refused was never
+ * sent, so nothing is left inconsistent.
  *
  * ## What a drop is
  *
@@ -85,7 +90,10 @@ export interface InputQueueBounds {
 
 /** Why input that the user typed will not be delivered. */
 export type InputDropReason =
-  /** A bound refused it: the queue was already holding this much. */
+  /**
+   * A bound refused it: the queue was already holding this much, or the event
+   * alone exceeds the byte budget (#4299).
+   */
   | 'bound'
   /** It waited longer than the TTL. */
   | 'age'
@@ -247,10 +255,12 @@ export class PendingInputQueue {
     }
     this.expire();
     const bytes = utf8ByteLength(data);
+    // The bounds apply to the first chunk too (#4299): on an empty queue
+    // `this.bytes` is 0, so an event whose own size exceeds `maxBytes` is
+    // refused here rather than admitted past the advertised byte budget.
     const full =
-      this.chunks.length > 0 &&
-      (this.chunks.length + 1 > this.bounds.maxChunks ||
-        this.bytes + bytes > this.bounds.maxBytes);
+      this.chunks.length + 1 > this.bounds.maxChunks ||
+      this.bytes + bytes > this.bounds.maxBytes;
     if (full) {
       this.record('bound', 1);
       return false;
