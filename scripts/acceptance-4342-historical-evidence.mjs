@@ -154,8 +154,15 @@ export function verified4342HistoryCriterion(context,normalized){
     p.recorded_after>=p.published&&p.source_scope_start===START&&
     p.is_full_gap_census===false;
   if(!ok){
-    if(item.result==='Pass')reject('SC-05 Pass without authentic historical recovery');
-    return normalized;
+    // A successful static Agent analysis is not runtime recovery evidence.
+    // Down-project unsupported Pass to Pending rather than aborting the
+    // updater and leaving a stale, previously published false Pass behind.
+    if(item.result!=='Pass')return normalized;
+    return {...normalized,criteria:normalized.criteria.map(entry=>
+      entry.criterion!=='SC-05'?entry:{
+        ...entry,result:'Pending',evidence:[],
+        summary:'No authenticated main-owned historical recovery Artifact and immutable Store readback; static implementation/tests do not satisfy SC-05',
+      })};
   }
   if(item.result==='Fail'||item.result==='N/A')return normalized;
   return {...normalized,criteria:normalized.criteria.map(x=>x.criterion!=='SC-05'?x:{
@@ -307,8 +314,14 @@ function selfTest(){
   assert.equal(verified4342HistoryCriterion(context,pending).criteria[0].result,'Pass');
   assert.equal(verified4342HistoryCriterion({...context,ci_evidence:null},pending)
     .criteria[0].result,'Pending');
-  assert.throws(()=>verified4342HistoryCriterion({...context,ci_evidence:null},{
-    criteria:[{criterion:'SC-05',result:'Pass'}]}),/without authentic historical/);
+  assert.equal(verified4342HistoryCriterion({...context,ci_evidence:null},{
+    criteria:[{criterion:'SC-05',result:'Pass',evidence:[{type:'untrusted',value:'green CI'}]}]})
+    .criteria[0].result,'Pending','unsupported Pass must project to Pending');
+  assert.deepEqual(verified4342HistoryCriterion({...context,ci_evidence:null},{
+    criteria:[{criterion:'SC-05',result:'Pass',evidence:[{type:'untrusted',value:'green CI'}]}]})
+    .criteria[0].evidence,[],'unsupported static evidence cannot survive');
+  assert.equal(verified4342HistoryCriterion({...context,ci_evidence:null},{
+    criteria:[{criterion:'SC-05',result:'Fail'}]}).criteria[0].result,'Fail');
   assert.throws(()=>attest4342History({...args,original:{...original,
     repository:{full_name:'attacker/fork'}}}),/provenance/);
   assert.throws(()=>attest4342History({...args,report:{...report,
