@@ -8,50 +8,40 @@ import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {validateAgentWorkflowTelemetry} from './agent-workflow-telemetry.mjs';
+import {telemetryWorkflowSources,upstreamWorkflowNames} from './workflow-conventions.mjs';
+import {validateTelemetrySourceRun} from './agent-workflow-telemetry-contract.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const MAX_RUNS=100, MAX_ARTIFACTS=100, MAX_BYTES=1024*1024;
-const SOURCES=Object.freeze([
-  {file:'agent-provider-smoke.yml',name:'Agent / Provider Smoke',id:'agent-provider-smoke',
-    events:['push','workflow_dispatch'],branches:['main']},
-  {file:'agent-develop.yml',name:'Agent / Development',id:'agent-develop',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-staging-developer-canary.yml',name:'Agent / Staging Developer Canary',id:'agent-staging-developer-canary',
-    events:['workflow_run'],branches:['main']},
-  {file:'agent-review.yml',name:'Agent / Review',id:'agent-review',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-cursor-resume-seed.yml',name:'Agent / Cursor Resume Seed',id:'agent-cursor-resume-seed',
-    events:['push','workflow_dispatch'],branches:['main']},
-  {file:'agent-cursor-resume-verify.yml',name:'Agent / Cursor Resume Verify',id:'agent-cursor-resume-verify',
-    events:['workflow_run'],branches:['main']},
-  {file:'agent-claude-resume-seed.yml',name:'Agent / Claude Resume Seed',id:'agent-claude-resume-seed',
-    events:['push','workflow_dispatch'],branches:['main']},
-  {file:'agent-claude-resume-verify.yml',name:'Agent / Claude Resume Verify',id:'agent-claude-resume-verify',
-    events:['workflow_run'],branches:['main']},
-  {file:'agent-sc-acceptance.yml',name:'Agent / SC Acceptance',id:'requirement-acceptance',
-    events:['workflow_dispatch'],branches:['main']},
-  {file:'agent-issue-audit.yml',name:'Agent / Issue Audit',id:'issue-audit',
-    events:['issues','workflow_dispatch'],branches:['main']},
-  {file:'acceptance-orchestrator.yml',name:'Acceptance / Orchestrator',id:'requirement-acceptance',
-    events:['pull_request_target','push','issues'],branches:['main','staging']},
-  {file:'acceptance-verified-stage.yml',name:'Acceptance / Verified Issue Stage',id:'requirement-acceptance',
-    events:['issue_comment'],branches:['main']},
-]);
+// All source keys, paths, groups and events come from the canonical Catalog.
+// Provider is prioritized to avoid stranding a post-Store Acceptance wake.
+const SOURCES=Object.freeze(telemetryWorkflowSources()
+  .map(x=>Object.freeze({key:x.key,file:x.file,name:x.name,id:x.group_id,
+    events:x.events,branches:x.branches}))
+  .sort((a,b)=>Number(b.key==='agent-provider-smoke')-
+               Number(a.key==='agent-provider-smoke')));
+
 function fail(message){throw Error('Agent telemetry reconciliation: '+message);}
 function positive(n){return Number.isSafeInteger(n)&&n>0;}
 export function trustedSource(run,source){
   if(!run||typeof run!=='object'||Array.isArray(run))return false;
   if(!positive(run.id)||!positive(run.run_attempt)||!SHA.test(run.head_sha??'')||
      run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
-     run.path!=='.github/workflows/'+source.file||run.name!==source.name||
+     run.path!=='.github/workflows/'+source.file||
      run.status!=='completed'||!['success','failure'].includes(run.conclusion)||
      !source.events.includes(run.event))return false;
   // Agent source workflows with credentials must be pinned to main. The
   // orchestrator may verify a PR head, but its source workflow is trusted main.
   if(source.file!=='acceptance-orchestrator.yml' && run.head_branch!=='main')return false;
   if(run.event==='push'&&!source.branches.includes(run.head_branch))return false;
-  return true;
+  try {
+    const verified=validateTelemetrySourceRun(run,REPO);
+    return verified.source_workflow_key===source.key &&
+      verified.workflow_id===source.id;
+  } catch {
+    return false;
+  }
 }
 export function countArtifactSummaries(value,run=null){
   if(run && (!positive(Number(run.id)) || !positive(Number(run.run_attempt))))
@@ -87,7 +77,12 @@ export function countArtifactSummaries(value,run=null){
 export function indexedSourceSummaries(root){
   const summaryCounts=new Map();
   let inspected=0;
+  // Three Acceptance sources intentionally share one Metrics group; scan its
+  // immutable directory exactly once, not once for each source.
+  const visitedGroups=new Set();
   for(const source of SOURCES){
+    if(visitedGroups.has(source.id))continue;
+    visitedGroups.add(source.id);
     const dir=path.join(root,'raw','workflows',source.id);
     if(!fs.existsSync(dir))continue;
     if(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink())
@@ -115,10 +110,13 @@ export function indexedSourceSummaries(root){
   }
   return new Map([...summaryCounts].map(([key,value])=>[key,value.size]));
 }
-export async function chooseMissing(runsBySource,summaryCounts,artifactCount){
-  // Provider is first so a cancelled ingest cannot strand merged-SHA SC wake.
-  // Oldest eligible first within each bounded source listing avoids starvation.
-  for(const source of SOURCES){
+export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rotation=0){
+  // Round-robin starting source on each scheduled tick, oldest first WITHIN
+  // each source. A permanently backlogged Provider must not starve Audit.
+  if(!Number.isSafeInteger(rotation)||rotation<0)fail('invalid recovery rotation');
+  const offset=rotation%SOURCES.length;
+  const orderedSources=[...SOURCES.slice(offset),...SOURCES.slice(0,offset)];
+  for(const source of orderedSources){
     const runs=runsBySource.get(source.file)??[];
     if(!Array.isArray(runs)||runs.length>MAX_RUNS)fail('unbounded source listing');
     const ordered=runs.filter(run=>trustedSource(run,source))
@@ -157,10 +155,13 @@ async function select(store){
     if(!Array.isArray(response.workflow_runs))fail('malformed GitHub workflow run listing');
     runsBySource.set(source.file,response.workflow_runs);
   }
+  // GitHub run_number is main-owned; rotation is not client/dispatch input.
+  const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
+  if(!positive(runNumber))fail('trusted schedule run_number required for fairness');
   const result=await chooseMissing(runsBySource,summaryCounts,async run=>{
     const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
     return countArtifactSummaries(artifacts,run);
-  });
+  },runNumber%SOURCES.length);
   console.log(JSON.stringify(result??{run_id:null}));
 }
 // The scheduled replay is allowed only through trusted main-selected workflow
@@ -174,9 +175,21 @@ export function validateRecoveryRouting(workflow){
   if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
      !job.includes("github.repository == 'BestNathan/nession'"))
     fail('missing trusted main schedule guard');
+  // GitHub workflow_run.workflows uses static top-level display names *only*
+  // as event subscriptions; compare that list with the Catalog projection.
+  const subscribers=upstreamWorkflowNames(workflow);
+  const expectedNames=SOURCES.map(source=>source.name);
+  if(!subscribers.valid || subscribers.names.length!==expectedNames.length ||
+     new Set(subscribers.names).size!==expectedNames.length ||
+     subscribers.names.some(name=>!expectedNames.includes(name)))
+    fail('Metrics workflow_run subscriptions drifted from Catalog sources');
+  // Display names are never runtime authority; authenticated path+event/ref
+  // policy is checked again by the main-owned provenance script.
+  if(job.includes('github.event.workflow_run.name =='))
+    fail('runtime source display-name authorization is forbidden');
   for(const source of SOURCES){
     if(!trigger.includes('      - '+source.name)||
-       !job.includes("github.event.workflow_run.name == '"+source.name+"'"))
+       !job.includes("github.event.workflow_run.path == '.github/workflows/"+source.file+"'"))
       fail('unclassified or unregistered Agent source: '+source.name);
   }
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
@@ -232,6 +245,13 @@ export function validateRecoveryRouting(workflow){
 function selfTest(){
   const workflow=fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8');
   assert.equal(validateRecoveryRouting(workflow),true);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '      - Agent / Issue Audit',
+    '      - Attacker / Source'
+  )),/subscriptions drifted from Catalog/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '      - Agent / Issue Audit\n',''
+  )),/subscriptions drifted from Catalog/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
   ),/scheduled-only/);
@@ -292,6 +312,11 @@ function selfTest(){
   )),/attempt-scoped/);
 
 
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    "github.event.workflow_run.path == '.github/workflows/agent-issue-audit.yml'",
+    "github.event.workflow_run.name == 'Agent / Issue Audit'"
+  )),/display-name authorization/);
+
   const source=SOURCES[0],sha='a'.repeat(40);
   const run={id:321,run_attempt:1,head_sha:sha,
     repository:{full_name:REPO},head_repository:{full_name:REPO},
@@ -299,6 +324,23 @@ function selfTest(){
     status:'completed',conclusion:'success',event:'push',head_branch:'main',
     created_at:'2026-10-14T00:00:00Z'};
   assert.equal(trustedSource(run,source),true);
+  assert.equal(SOURCES.length,14);
+  assert.equal(new Set(SOURCES.map(s=>s.file)).size,14);
+  assert.equal(SOURCES.filter(s=>s.id==='requirement-acceptance').length,3);
+  assert.equal(SOURCES[0].key,'agent-provider-smoke');
+  const auditSource=SOURCES.find(item=>item.file==='agent-issue-audit.yml');
+  assert.ok(auditSource);
+  for(const [name,event] of [
+    ['Issue Audit #4297','issues'],
+    ['Comment Audit #4230 comment:7090927541','workflow_dispatch'],
+  ]){
+    const auditRun={...run,path:'.github/workflows/'+auditSource.file,
+      name,event};
+    assert.equal(trustedSource(auditRun,auditSource),true);
+    assert.equal(trustedSource({...auditRun,head_repository:{full_name:'attacker/fork'}},auditSource),false);
+    assert.equal(trustedSource({...auditRun,path:'.github/workflows/evil.yml'},auditSource),false);
+    assert.equal(trustedSource({...auditRun,head_branch:'feature'},auditSource),false);
+  }
   for(const malicious of [
     {...run,repository:{full_name:'attacker/fork'}},
     {...run,head_repository:{full_name:'attacker/fork'}},
@@ -337,6 +379,14 @@ function selfTest(){
   assert.throws(()=>countArtifactSummaries(both,{id:321,run_attempt:0}),/invalid source/);
   const runs=new Map([[source.file,[{...run,id:322,created_at:'2026-10-14T01:00:00Z'},run]]]);
   return (async()=>{
+    const nextSource=SOURCES[1];
+    const alternate={...run,id:400,path:'.github/workflows/'+nextSource.file,
+      name:nextSource.name,event:nextSource.events[0]};
+    const rotationRuns=new Map([[source.file,[run]],[nextSource.file,[alternate]]]);
+    assert.equal((await chooseMissing(rotationRuns,new Map(),async()=>1,1)).run_id,400,
+      'round-robin recovery must not permanently prioritize Provider');
+    await assert.rejects(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
+      /invalid recovery rotation/);
     const selected=await chooseMissing(runs,new Map(),async()=>1);
     assert.equal(selected.run_id,321);
     const replay=await chooseMissing(runs,new Map([

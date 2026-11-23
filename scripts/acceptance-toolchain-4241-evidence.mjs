@@ -3,12 +3,20 @@
 // All pins below are independently checked against GitHub REST source/Jobs/logs.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {downloadedResult} from './acceptance-cross-issue-receipt.mjs';
+import {extractSection,parseSuccessCriteria,parseAcceptanceReport} from './requirement-acceptance.mjs';
+import {validateAcceptancePlan} from './acceptance-plan.mjs';
 
 const REPO='BestNathan/nession', PREFIX='/repos/'+REPO;
 const SHA=/^[a-f0-9]{40}$/, DIGEST=/^[a-f0-9]{64}$/;
 const MAIN_ANCHOR='ff00fbd6b504ca2953293dce9ea4097fce9a3452';
 const SC01_HEAD='729699a7bcbf1af074f1948f8d7491ca7c446324';
 const SC01_PR=4266;
+const SOURCE_ACCEPT_RUN=45105031223;
+const OWNER_ACCEPT_COMMENT=7090587994;
+const OWNER_ACCEPT_ACK=7090599215;
+const OWNER_ACCEPT_RUN=45104919638;
+const SOURCE_ACCEPT_HEAD='ff7c0818ea31142896b42ea5b8058375a8327702';
 const CATALOG_FIRST='82881f5333d4bff1091beee8ce4e6d270aeead60';
 const SOURCE_PRS=Object.freeze({
   4242:'d0e9a31036388007ae8a2a6dbe59a01115fca939',
@@ -98,8 +106,167 @@ function attestRecipe(file,fingerprint,name) {
     createHash('sha256').update(script).digest('hex')===fingerprint,
     'tampered recipe script bytes '+name);
 }
+// Reuse the existing fully authenticated release proof for the specific
+// closure Bug. No other Issue gets orphan-source or registry evidence.
 export function shouldCollectToolchain4241(stage,issue) {
-  return stage==='post-merge'&&String(issue)==='4241';
+  return stage==='post-merge'&&['4241','4297'].includes(String(issue));
+}
+
+// #4297 SC-03: the parent closure receipt alone does not prove that the
+// original Owner /accept crossed the new trusted orphan-source dispatch lane.
+// Bind the immutable Owner comment, bot acknowledgment, trusted main Manual
+// Request job/log, and the *actual* downstream Acceptance Run together.
+// Nothing here is permission to update an Issue; only the normal projector
+// can write a criterion. A reference in a comment or Agent answer alone is
+// never accepted as a dispatch receipt.
+export function attest4297OwnerManualDispatch(comment, ack, manual, jobs, log, acceptance) {
+  const issueUrl='https://api.github.com/repos/'+REPO+'/issues/4241';
+  const command='/accept post-merge '+MAIN_ANCHOR;
+  denied(comment?.id===OWNER_ACCEPT_COMMENT &&
+    comment.issue_url===issueUrl &&
+    comment.body===command &&
+    comment.user?.login==='BestNathan' && comment.user?.type==='User' &&
+    comment.author_association==='OWNER' &&
+    typeof comment.created_at==='string' &&
+    comment.updated_at===comment.created_at,
+    'unverified original Owner /accept source');
+  denied(ack?.id===OWNER_ACCEPT_ACK && ack.issue_url===issueUrl &&
+    ack.user?.login==='github-actions[bot]' && ack.user?.type==='Bot' &&
+    ack.body?.startsWith('Comment command `'+command+'` accepted for Issue #4241.') &&
+    ack.body.includes('https://github.com/'+REPO+'/actions/runs/'+OWNER_ACCEPT_RUN) &&
+    ack.body.includes('<!-- nession-command-comment:'+OWNER_ACCEPT_COMMENT+' -->') &&
+    typeof ack.created_at==='string' &&
+    ack.created_at>=comment.created_at &&
+    ack.updated_at===ack.created_at,
+    'missing or spoofed Owner command router acknowledgment');
+  denied(manual?.id===OWNER_ACCEPT_RUN && manual.run_attempt===1 &&
+    manual.name==='Comment Accept #4241 comment:'+OWNER_ACCEPT_COMMENT &&
+    manual.path==='.github/workflows/acceptance-manual-request.yml' &&
+    manual.event==='workflow_dispatch' && manual.head_branch==='main' &&
+    manual.head_sha===SOURCE_ACCEPT_HEAD &&
+    manual.actor?.login==='github-actions[bot]' &&
+    manual.triggering_actor?.login==='github-actions[bot]' &&
+    manual.repository?.full_name===REPO &&
+    manual.head_repository?.full_name===REPO &&
+    manual.status==='completed' && manual.conclusion==='success' &&
+    typeof manual.created_at==='string' &&
+    manual.created_at>=comment.created_at &&
+    ack.created_at>=manual.created_at,
+    'untrusted Owner Manual Request Run/Attempt/source');
+  const request=exactJob(jobs,manual,'request');
+  denied(['Verify comment source and canonical Acceptance policy',
+    'Reconcile or dispatch existing stage-qualified Agent Acceptance']
+    .every(name=>request.steps?.filter(s=>s.name===name &&
+      s.status==='completed' && s.conclusion==='success').length===1),
+    'Manual Request source/dispatch steps not successful');
+  denied(typeof log==='string' && log.length<131072 &&
+    log.includes('Reconstructed authorized accept request for Issue #4241, comment '+
+      OWNER_ACCEPT_COMMENT),
+    'missing source-authenticated native Owner request log');
+  const lines=log.split(/\r?\n/).map(line=>
+    /^\d{4}-\d{2}-\d{2}T[^ ]+Z (\{.*\})$/.exec(line)?.[1])
+    .filter(line=>line?.startsWith('{"action":'));
+  denied(lines.length===1,'missing or ambiguous native dispatch result');
+  let outcome;
+  try { outcome=JSON.parse(lines[0]); } catch {
+    throw Error('toolchain #4241 readback: malformed native dispatch result');
+  }
+  denied(outcome?.action==='dispatched' &&
+    outcome.reason==='authenticated orphan catalog and publisher evidence' &&
+    Array.isArray(outcome.agent_runs) && outcome.agent_runs.length===1 &&
+    outcome.agent_runs[0]?.stage==='post-merge' &&
+    outcome.agent_runs[0]?.target_ref===MAIN_ANCHOR &&
+    acceptance?.id===SOURCE_ACCEPT_RUN && acceptance.run_attempt===1 &&
+    acceptance.head_sha===SOURCE_ACCEPT_HEAD &&
+    typeof acceptance.created_at==='string' &&
+    acceptance.created_at>=manual.created_at,
+    'native Manual Request did not dispatch original exact-target Acceptance');
+  return {kind:'toolchain_4297_verified_owner_manual_dispatch',
+    issue:4241,comment_id:OWNER_ACCEPT_COMMENT,ack_id:OWNER_ACCEPT_ACK,
+    manual_run:OWNER_ACCEPT_RUN,manual_attempt:1,manual_job:request.id,
+    dispatched_acceptance_run:SOURCE_ACCEPT_RUN,
+    acceptance_target:MAIN_ANCHOR,main_dispatch_sha:SOURCE_ACCEPT_HEAD,
+    authenticated_owner:'BestNathan',maximum_authority:'read_only_evidence'};
+}
+
+// A checked parent Issue is only a locator. The live closure transition,
+// original Agent result ZIP, first-attempt jobs and original acceptance SHA
+// must all agree. This attests history; only the canonical Agent may judge
+// the child's SC and only the deterministic updater may mutate its rows.
+export function attest4297ParentClosure(parent,events,run,jobs,artifact,result,
+  sourceReachable,releaseEvidence) {
+  denied(sourceReachable===true&&parent?.number===4241&&
+    parent.state==='closed'&&parent.state_reason==='completed'&&
+    typeof parent.closed_at==='string','parent not formally completed');
+  const criteria=parseSuccessCriteria(extractSection(parent.body,'Success Criteria'));
+  const report=parseAcceptanceReport(extractSection(parent.body,'Acceptance Report'));
+  const plan=validateAcceptancePlan(parent.body,criteria.criteria.keys(),report.rows);
+  denied(!criteria.errors.length&&!report.errors.length&&!plan.errors.length,
+    'invalid parent Acceptance contract');
+  for(const id of ['SC-01','SC-02','SC-03','SC-04','SC-05']){
+    const prefix=id==='SC-01'
+      ? 'run 44980355063; ref '+SC01_HEAD+'; source agent-qwen;'
+      : 'run '+SOURCE_ACCEPT_RUN+'; ref '+MAIN_ANCHOR+'; source agent-qwen;';
+    denied(criteria.criteria.get(id)?.checked===true&&
+      report.rows.get(id)?.result==='Pass'&&
+      String(report.rows.get(id).evidence).startsWith(prefix),
+      'parent source/result mismatch '+id);
+  }
+  denied(Array.isArray(events)&&events.length<100&&
+    events.filter(x=>x.event==='closed').length===1&&
+    !events.some(x=>x.event==='reopened')&&
+    events.some(x=>x.event==='closed'&&x.created_at===parent.closed_at&&
+      x.actor?.login==='github-actions[bot]'),
+    'unverified bot Issue closure');
+  denied(run?.id===SOURCE_ACCEPT_RUN&&run.run_attempt===1&&
+    run.name==='Agent / SC Acceptance'&&
+    run.path==='.github/workflows/agent-sc-acceptance.yml'&&
+    run.event==='workflow_dispatch'&&run.head_branch==='main'&&
+    run.head_sha===SOURCE_ACCEPT_HEAD&&
+    run.repository?.full_name===REPO&&run.head_repository?.full_name===REPO&&
+    run.status==='completed'&&run.conclusion==='success',
+    'unverified parent Acceptance Run/Attempt');
+  const executor=exactJob(jobs,run,'Execute acceptance');
+  const updater=exactJob(jobs,run,'Deterministic Issue updater');
+  for(const [job,names] of [
+    [executor,['Collect trusted GitHub Actions evidence',
+      'Run read-only Acceptance Agent','Upload structured Acceptance Result']],
+    [updater,['Apply Acceptance Report and checkbox projection']],
+  ])denied(job.run_attempt===1&&job.head_sha===SOURCE_ACCEPT_HEAD&&
+    names.every(name=>job.steps?.filter(x=>x.name===name&&
+      x.status==='completed'&&x.conclusion==='success').length===1),
+    'missing canonical Acceptance/Issue updater steps');
+  denied(artifact?.name==='acceptance-result-4241-post-merge-'+
+      SOURCE_ACCEPT_RUN+'-1'&&artifact.expired===false&&
+    /^sha256:[a-f0-9]{64}$/.test(artifact.digest??'')&&
+    Number.isSafeInteger(artifact.id)&&artifact.id>0&&
+    Number.isSafeInteger(artifact.size_in_bytes)&&artifact.size_in_bytes>0&&
+    artifact.size_in_bytes<=131072&&
+    artifact.workflow_run?.id===SOURCE_ACCEPT_RUN&&
+    artifact.workflow_run?.head_sha===SOURCE_ACCEPT_HEAD&&
+    artifact.workflow_run?.repository_id===run.repository?.id,
+    'unverified original Acceptance artifact');
+  const required=['SC-02','SC-03','SC-04','SC-05'];
+  denied(result?.schema_version===1&&result.issue===4241&&
+    result.stage==='post-merge'&&result.run_id===SOURCE_ACCEPT_RUN&&
+    result.target_ref===MAIN_ANCHOR&&result.source==='agent-qwen'&&
+    /^[a-f0-9]{64}$/.test(result.contract_sha256??'')&&
+    Array.isArray(result.selected_criteria)&&
+    required.every(id=>result.selected_criteria.includes(id))&&
+    Array.isArray(result.criteria)&&required.every(id=>
+      result.criteria.filter(x=>x?.criterion===id&&x.result==='Pass').length===1),
+    'original immutable Agent result incomplete or not Pass');
+  denied(releaseEvidence?.published?.length===14&&
+    new Set(releaseEvidence.published.map(x=>x.tool)).size===13,
+    'independent GHCR/EROFS evidence incomplete');
+  return {kind:'toolchain_4297_verified_parent_closure',
+    parent_issue:4241,parent_closed_at:parent.closed_at,
+    closure_actor:'github-actions[bot]',acceptance_run:SOURCE_ACCEPT_RUN,
+    acceptance_attempt:1,acceptance_target:MAIN_ANCHOR,
+    acceptance_executor_job:executor.id,acceptance_updater_job:updater.id,
+    acceptance_artifact_id:artifact.id,
+    acceptance_artifact_digest:artifact.digest,passed_sc:required,
+    published:14,tools:13,maximum_authority:'read_only_evidence'};
 }
 export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLog}) {
   denied(repo===REPO&&shouldCollectToolchain4241(stage,issue)&&SHA.test(targetSha),
@@ -185,7 +352,38 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
   }
   denied(accepted.length===14&&new Set(accepted.map(x=>x.tool)).size===13,
     'incomplete user-selected distribution matrix');
+  let linkedClosure=null;
+  if(String(issue)==='4297'){
+    const [parent,events,run,jobs,artifacts,comparison,
+      ownerComment,ownerAck,manual,manualJobs]=await Promise.all([
+      read(PREFIX+'/issues/4241'),
+      read(PREFIX+'/issues/4241/events?per_page=100'),
+      read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/attempts/1'),
+      read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/attempts/1/jobs?per_page=100'),
+      read(PREFIX+'/actions/runs/'+SOURCE_ACCEPT_RUN+'/artifacts?per_page=100'),
+      read(PREFIX+'/compare/'+SOURCE_ACCEPT_HEAD+'...'+targetSha),
+      read(PREFIX+'/issues/comments/'+OWNER_ACCEPT_COMMENT),
+      read(PREFIX+'/issues/comments/'+OWNER_ACCEPT_ACK),
+      read(PREFIX+'/actions/runs/'+OWNER_ACCEPT_RUN+'/attempts/1'),
+      read(PREFIX+'/actions/runs/'+OWNER_ACCEPT_RUN+'/attempts/1/jobs?per_page=100'),
+    ]);
+    denied(Array.isArray(artifacts?.artifacts)&&artifacts.artifacts.length<100,
+      'incomplete parent Acceptance artifact listing');
+    const matches=artifacts.artifacts.filter(a=>
+      a.name==='acceptance-result-4241-post-merge-'+SOURCE_ACCEPT_RUN+'-1');
+    denied(matches.length===1,'missing/ambiguous original Acceptance artifact');
+    const result=await downloadedResult(REPO,matches[0],
+      process.env.GH_TOKEN??process.env.GITHUB_TOKEN);
+    const manualRequest=exactJob(manualJobs,manual,'request');
+    const manualLog=await getLog(PREFIX+'/actions/jobs/'+manualRequest.id+'/logs');
+    const ownerDispatch=attest4297OwnerManualDispatch(ownerComment,ownerAck,
+      manual,manualJobs,manualLog,run);
+    linkedClosure={...attest4297ParentClosure(parent,events,run,jobs,matches[0],
+      result,ancestor(comparison,SOURCE_ACCEPT_HEAD),{published:accepted}),
+      owner_manual_dispatch:ownerDispatch};
+  }
   return {kind:'verified_toolchain_4241_readonly',issue:4241,target_sha:targetSha,
+    ...(linkedClosure ? {verified_4297_parent_closure:linkedClosure} : {}),
     catalog_head:currentCatalog,main_source:MAIN_ANCHOR,
     historical_sc01:{pr:SC01_PR,head_sha:SC01_HEAD,merge_sha:sc01.merge_commit_sha},
     orphan_prs:[...uniquePrs.values()],published:accepted,
@@ -195,7 +393,9 @@ export async function collectToolchain4241({repo,targetSha,stage,issue,get,getLo
 export function selfTestToolchain4241() {
   assert.equal(shouldCollectToolchain4241('post-merge',4241),true);
   assert.equal(shouldCollectToolchain4241('pr',4241),false);
-  assert.equal(shouldCollectToolchain4241('post-merge',4297),false);
+  assert.equal(shouldCollectToolchain4241('post-merge',4297),true);
+  assert.equal(shouldCollectToolchain4241('pr',4297),false);
+  assert.equal(shouldCollectToolchain4241('post-merge',4298),false);
   const valid={id:17,run_attempt:1};
   assert.equal(exactJob({jobs:[{id:20,run_id:17,name:'publish',
     status:'completed',conclusion:'success'}]},valid,'publish').id,20);
@@ -248,6 +448,128 @@ export function selfTestToolchain4241() {
   attestRecipe(file,fingerprint,'fixture');
   assert.throws(()=>attestRecipe(file,'a'.repeat(64),'fixture'),/tampered/);
   assert.throws(()=>attestRecipe({...file,content:'!!!'},fingerprint,'fixture'),/tampered/);
+  // Source-verified Issue closure cannot be inferred from Release runs alone.
+  const sc=['SC-01','SC-02','SC-03','SC-04','SC-05'];
+  const fence=String.fromCharCode(96).repeat(3);
+  const fixtureBody='## Success Criteria\n'+sc.map(id=>'- [x] '+id+' done').join('\n')+
+    '\n\n## Acceptance Plan\n'+fence+'yaml\nacceptance:\n'+
+    sc.map(id=>'  '+id+':\n    when: '+(id==='SC-01'?'pr':'merged')+'\n'+
+      (id==='SC-01'?'':'    branch: main\n')+'    method: agent').join('\n')+
+    '\n'+fence+'\n\n## Acceptance Report\n'+
+    '| Criterion | Result | Evidence |\n| --- | --- | --- |\n'+
+    sc.map(id=>'| '+id+' | Pass | run '+(id==='SC-01'?44980355063:SOURCE_ACCEPT_RUN)+
+      '; ref '+(id==='SC-01'?SC01_HEAD:MAIN_ANCHOR)+
+      '; source agent-qwen; independent verified result |').join('\n');
+  const closedAt='2026-11-23T03:20:42Z';
+  const parent={number:4241,body:fixtureBody,state:'closed',
+    state_reason:'completed',closed_at:closedAt};
+  const events=[{event:'closed',created_at:closedAt,
+    actor:{login:'github-actions[bot]'}}];
+  const run={id:SOURCE_ACCEPT_RUN,run_attempt:1,name:'Agent / SC Acceptance',
+    path:'.github/workflows/agent-sc-acceptance.yml',event:'workflow_dispatch',
+    head_branch:'main',head_sha:SOURCE_ACCEPT_HEAD,status:'completed',
+    conclusion:'success',repository:{id:19,full_name:REPO},
+    head_repository:{full_name:REPO}};
+  const job=(name,id,steps)=>({name,id,run_id:SOURCE_ACCEPT_RUN,
+    run_attempt:1,head_sha:SOURCE_ACCEPT_HEAD,status:'completed',
+    conclusion:'success',steps:steps.map(name=>({name,status:'completed',
+      conclusion:'success'}))});
+  const execute=job('Execute acceptance',21,[
+    'Collect trusted GitHub Actions evidence','Run read-only Acceptance Agent',
+    'Upload structured Acceptance Result']);
+  const update=job('Deterministic Issue updater',22,
+    ['Apply Acceptance Report and checkbox projection']);
+  const jobs={jobs:[execute,update]};
+  const artifact={id:23,digest:'sha256:'+'a'.repeat(64),
+    name:'acceptance-result-4241-post-merge-'+SOURCE_ACCEPT_RUN+'-1',
+    expired:false,size_in_bytes:900,workflow_run:{id:SOURCE_ACCEPT_RUN,
+      head_sha:SOURCE_ACCEPT_HEAD,repository_id:19}};
+  const result={schema_version:1,issue:4241,stage:'post-merge',
+    run_id:SOURCE_ACCEPT_RUN,target_ref:MAIN_ANCHOR,source:'agent-qwen',
+    contract_sha256:'b'.repeat(64),selected_criteria:sc.slice(1),
+    criteria:sc.slice(1).map(criterion=>({criterion,result:'Pass'}))};
+  const release={published:RELEASES.map(([tool,version])=>({tool,version}))};
+  const verify=(...args)=>attest4297ParentClosure(...args);
+  assert.equal(verify(parent,events,run,jobs,artifact,result,true,release).published,14);
+  for(const args of [
+    [{...parent,state:'open'},events,run,jobs,artifact,result,true,release],
+    [parent,[{...events[0],actor:{login:'BestNathan'}}],
+      run,jobs,artifact,result,true,release],
+    [parent,events,{...run,run_attempt:2},jobs,artifact,result,true,release],
+    [parent,events,run,{jobs:[execute]},artifact,result,true,release],
+    [parent,events,run,jobs,{...artifact,digest:'invalid'},result,true,release],
+    [parent,events,run,jobs,artifact,
+      {...result,criteria:result.criteria.slice(1)},true,release],
+    [parent,events,run,jobs,artifact,result,false,release],
+    [parent,events,run,jobs,artifact,result,true,
+      {published:release.published.slice(1)}],
+  ])assert.throws(()=>verify(...args),/toolchain #4241 readback/);
+  // The formal SC-03 source is the Owner comment -> bot ack ->
+  // authenticated Manual Request -> actual first-attempt Agent dispatch.
+  // An unrelated/forged comment or a green Manual Job without a real
+  // authorized dispatch must never qualify the parent Issue.
+  const originalTime='2026-11-23T03:15:02Z';
+  const issueUrl='https://api.github.com/repos/'+REPO+'/issues/4241';
+  const command='/accept post-merge '+MAIN_ANCHOR;
+  const ownerComment={id:OWNER_ACCEPT_COMMENT,issue_url:issueUrl,
+    body:command,user:{login:'BestNathan',type:'User'},
+    author_association:'OWNER',created_at:originalTime,updated_at:originalTime};
+  const ackTime='2026-11-23T03:15:49Z';
+  const ownerAck={id:OWNER_ACCEPT_ACK,issue_url:issueUrl,
+    body:'Comment command `'+command+'` accepted for Issue #4241. '+
+      '[Actions run](https://github.com/'+REPO+'/actions/runs/'+OWNER_ACCEPT_RUN+
+      '). This request is not an Acceptance Pass.\n\n'+
+      '<!-- nession-command-comment:'+OWNER_ACCEPT_COMMENT+' -->',
+    user:{login:'github-actions[bot]',type:'Bot'},
+    created_at:ackTime,updated_at:ackTime};
+  const ownerManual={id:OWNER_ACCEPT_RUN,run_attempt:1,
+    name:'Comment Accept #4241 comment:'+OWNER_ACCEPT_COMMENT,
+    path:'.github/workflows/acceptance-manual-request.yml',
+    event:'workflow_dispatch',head_branch:'main',head_sha:SOURCE_ACCEPT_HEAD,
+    actor:{login:'github-actions[bot]'},
+    triggering_actor:{login:'github-actions[bot]'},
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    status:'completed',conclusion:'success',created_at:'2026-11-23T03:15:42Z'};
+  const requestJob={id:27,run_id:OWNER_ACCEPT_RUN,name:'request',
+    status:'completed',conclusion:'success',
+    steps:['Verify comment source and canonical Acceptance policy',
+      'Reconcile or dispatch existing stage-qualified Agent Acceptance']
+      .map(name=>({name,status:'completed',conclusion:'success'}))};
+  const manualJobs={jobs:[requestJob]};
+  const dispatchLog='2026-11-23T03:16:13.0077356Z Reconstructed authorized '+
+    'accept request for Issue #4241, comment '+OWNER_ACCEPT_COMMENT+'\n'+
+    '2026-11-23T03:16:51.8532976Z '+
+    JSON.stringify({action:'dispatched',
+      reason:'authenticated orphan catalog and publisher evidence',
+      agent_runs:[{stage:'post-merge',target_ref:MAIN_ANCHOR}]});
+  const acceptance={...run,created_at:'2026-11-23T03:16:51Z'};
+  const receipt=attest4297OwnerManualDispatch(ownerComment,ownerAck,
+    ownerManual,manualJobs,dispatchLog,acceptance);
+  assert.equal(receipt.dispatched_acceptance_run,SOURCE_ACCEPT_RUN);
+  assert.equal(receipt.manual_run,OWNER_ACCEPT_RUN);
+  for(const fields of [
+    [{...ownerComment,body:'/accept post-merge '+'b'.repeat(40)},ownerAck,
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [{...ownerComment,user:{login:'attacker',type:'User'}},ownerAck,
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [{...ownerComment,updated_at:'2026-11-23T03:15:59Z'},ownerAck,
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [ownerComment,{...ownerAck,body:'forged ack'},
+      ownerManual,manualJobs,dispatchLog,acceptance],
+    [ownerComment,ownerAck,{...ownerManual,run_attempt:2},
+      manualJobs,dispatchLog,acceptance],
+    [ownerComment,ownerAck,ownerManual,
+      {jobs:[{...requestJob,conclusion:'failure'}]},dispatchLog,acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog.replace('"action":"dispatched"','"action":"pending"'),acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog+'\n'+dispatchLog.split('\n')[1],acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog.replace(MAIN_ANCHOR,'a'.repeat(40)),acceptance],
+    [ownerComment,ownerAck,ownerManual,manualJobs,
+      dispatchLog,{...acceptance,created_at:'2026-11-23T03:14:00Z'}],
+  ]) assert.throws(()=>attest4297OwnerManualDispatch(...fields),
+    /toolchain #4241 readback/, 'forged, incomplete or stale Owner dispatch is rejected');
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
