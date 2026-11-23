@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "a15d1bcf5eda12488866d38d776574e3497e9b9a",
+  "scenario_revision": "a15d1bcf5eda12488866d38d776574e3497e9b9a",
+  "run_id": 45199228788,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-23T14:57:46.126Z",
+  "finished_at": "2026-11-23T14:57:55.424Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-23T14:57:54.625Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "d79da783c2245d54a8a8f60f0764d47a9d4aa6efc416a2c3bee6d6da1e729d84",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-23T14:57:54.884Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "d79da783c2245d54a8a8f60f0764d47a9d4aa6efc416a2c3bee6d6da1e729d84",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-23T14:57:55.373Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "d79da783c2245d54a8a8f60f0764d47a9d4aa6efc416a2c3bee6d6da1e729d84",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45199228788,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4249-pin-eviction-contract",
+    "target_sha": "a15d1bcf5eda12488866d38d776574e3497e9b9a",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45199228788",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "cbb7a20de481aa22485d992e0510cd21227d006af74fc6e58a3aa647c836c843"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-45199228788-1",
+    "sha256": "cbb7a20de481aa22485d992e0510cd21227d006af74fc6e58a3aa647c836c843",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45199228788",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "a5fc5123dc998f3acf7302702953446a156be48036e12b7dab527c56b7a21997"
+}

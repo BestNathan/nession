@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45199228788,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4249-pin-eviction-contract",
+    "target_sha": "a15d1bcf5eda12488866d38d776574e3497e9b9a",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45199228788",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "87af6062f7fb8c16d53b58a8eff809f95df291b5807f22bbe7d71f6f1178ca1c"
+  },
+  "record": "runs/2026-11-23/45199228788-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "c58b94d679daedea8b9945fa6641085fdbe15a6d68a1ab1e145ee3057856051a"
+}
