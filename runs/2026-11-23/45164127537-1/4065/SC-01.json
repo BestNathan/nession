@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8f120ecd1df550680206c98b677a91ebf53d3694fe96706635a3a32bd7490627",
+  "run_id": 45164127537,
+  "run_attempt": 1,
+  "issue": 4065,
+  "criterion": "SC-01",
+  "criterion_text": "After an authenticated Relay attach, a deliberately half-open Agent leg that neither closes nor responds is detected and retired **within a documented finite bound**; an explicit Relay-end/error reason is observable by the client. A healthy but idle Agent leg remains connected and usable.",
+  "stage": "staging",
+  "target_sha": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6",
+  "contract_sha256": "5edeeea6151a24f439f6de3bb7b707bab209023464d38710fcec9e0f26df02ad",
+  "case_revision": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6",
+  "case_tree_sha": "1718808c5bd9d52691d977f12c55267a7a40fb9d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T11:21:37.525Z",
+  "finished_at": "2026-11-23T11:24:02.875Z",
+  "duration_ms": 145349,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "half-open.cjs",
+      "result": "Pass",
+      "summary": "Authenticated Relay silent Agent-leg partition triggers a bounded, explicit client-visible close and leaves the Session reattachable",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6: real Server Relay over authenticated Agent-facing socket received no pong/terminal data after attach and emitted WebSocket close reason relay-agent-half-open within the bounded idle watchdog (elapsed >=35s); the persisted Session survived and a replacement browser reattached and forwarded exactly one terminal-input frame"
+        }
+      ],
+      "duration_ms": 85001,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "idle-healthy.cjs",
+      "result": "Pass",
+      "summary": "A responsive idle Agent leg survives the full 45s watchdog and resumes terminal input",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6: a separate live Agent with active pong processing remained connected through a 51s idle window beyond the 45s watchdog and forwarded terminal input afterwards"
+        }
+      ],
+      "duration_ms": 54431,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45164127537,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45164127537",
+    "record_path": "runs/2026-11-23/45164127537-1/4065/SC-01.json",
+    "source_result_sha256": "334a39546ded62715703a9b1b39fba9ca75acded299b46a973129f4af3a2cfda"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45164127537-1",
+    "sha256": "334a39546ded62715703a9b1b39fba9ca75acded299b46a973129f4af3a2cfda",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45164127537",
+    "durability": "time-limited; object archival not configured"
+  }
+}

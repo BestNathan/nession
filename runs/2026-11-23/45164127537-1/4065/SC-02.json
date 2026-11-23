@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "992849d837f48551442234d3db47d1f484a8fbe1a8041c2d9b3357f44614ad42",
+  "run_id": 45164127537,
+  "run_attempt": 1,
+  "issue": 4065,
+  "criterion": "SC-02",
+  "criterion_text": "On Agent-leg failure, all connection-owned Relay tasks, outbound writers/subscribers and reader resources finish within a bounded teardown window; stale connection cleanup cannot terminate a replacement session or steal a newer route generation.",
+  "stage": "staging",
+  "target_sha": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6",
+  "contract_sha256": "5edeeea6151a24f439f6de3bb7b707bab209023464d38710fcec9e0f26df02ad",
+  "case_revision": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6",
+  "case_tree_sha": "5c3069150b569fe0f4cb09d0ab27a5a384d3890c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T11:24:02.876Z",
+  "finished_at": "2026-11-23T11:24:56.350Z",
+  "duration_ms": 53474,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real sockets establish bounded Relay retirement, preserved Session and generation-fenced teardown with replacement ownership",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6: silent Agent-leg retirement closed its browser, replacement Relay accepted input once, superseded generation could not unregister its new owner, and abnormal attached-client cleanup left sibling and Session intact"
+        }
+      ],
+      "duration_ms": 47594,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45164127537,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "8aa891aa91b8ae61e76dd8d6434fb934324c67e6",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45164127537",
+    "record_path": "runs/2026-11-23/45164127537-1/4065/SC-02.json",
+    "source_result_sha256": "9ab65a6f7a66ad7af71451df41f0e2854b03e5a3b12fedadd1d05f6747fe7efc"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45164127537-1",
+    "sha256": "9ab65a6f7a66ad7af71451df41f0e2854b03e5a3b12fedadd1d05f6747fe7efc",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45164127537",
+    "durability": "time-limited; object archival not configured"
+  }
+}
