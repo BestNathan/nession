@@ -6,6 +6,8 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { collectHistoricalE2EForPull, collectLinkedIssueE2EEvidence } from './acceptance-e2e-lineage.mjs';
 import { parseIssueE2E } from './issue-e2e-contract.mjs';
 import { collectCrossIssueAcceptance } from './acceptance-cross-issue-receipt.mjs';
+import { collectReplacement4253, shouldCollectReplacement4253,
+  selfTestReplacement4253 } from './acceptance-replacement-4253-readback.mjs';
 import {collectAuthenticatedQwenChain,selfTestQwenChainEvidence}
   from './acceptance-qwen-chain-evidence.mjs';
 import {collectConflictProbe4124,shouldCollectConflictProbe4124,selfTestConflictProbe4124}
@@ -60,6 +62,8 @@ import {collectVerifiedPrQualityCost,selfTestPrQualityCost} from './acceptance-p
 import {collectOriginalQwenReview,selfTestOriginalQwenReview} from './acceptance-qwen-3001-pr-evidence.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectKnowledgePublication,shouldCollectKnowledgePublication,selfTestKnowledgePublication} from './acceptance-knowledge-publisher-evidence.mjs';
+import {collectToolchain4160,shouldCollectToolchain4160,selfTestToolchain4160} from './acceptance-toolchain-4160-evidence.mjs';
+import {collectToolchain4241,shouldCollectToolchain4241,selfTestToolchain4241} from './acceptance-toolchain-4241-evidence.mjs';
 import {collectKnowledgeProposalCleanup,shouldCollectProposalCleanup,selfTestKnowledgeProposalCleanup} from './acceptance-knowledge-proposal-cleanup-evidence.mjs';
 import {collectKnowledgeWriter2358,shouldCollectKnowledgeWriter2358,selfTestKnowledgeWriter2358} from './acceptance-knowledge-writer-2358.mjs';
 import {collectSandbox3145,shouldCollectSandbox3145,selfTestSandbox3145} from './acceptance-knowledge-sandbox-3145.mjs';
@@ -217,7 +221,8 @@ function compactRuns(runs, expectedSha) {
   return retainedRuns(runs, expectedSha).runs.map(compactRun);
 }
 
-export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, verifiedConflictProbe4124 = null }) {
+export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null,
+  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedToolchain4241 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, verifiedConflictProbe4124 = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -271,6 +276,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     authenticated_run_store_five_mode_readback: authenticatedRunStoreFiveModeReadback,
     verified_staging_acr_readback: stagingAcrReadback,
     verified_knowledge_publisher_publication: verifiedKnowledgePublisherPublication,
+    verified_toolchain_4160_readback: verifiedToolchain4160,
+    verified_toolchain_4241_readback: verifiedToolchain4241,
     verified_knowledge_proposal_cleanup: verifiedKnowledgeProposalCleanup,
     verified_knowledge_writer_policy_2358: verifiedKnowledgeWriter2358,
     verified_knowledge_sandbox_pages_3145: verifiedSandbox3145,
@@ -303,6 +310,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     exact_head_e2e_steps: exactHeadE2eSteps,
     related_issue_acceptance_receipts: relatedAcceptance,
     related_bug_completion_evidence: relatedBugCompletion,
+    ...(verifiedReplacement4253
+      ? {verified_independent_replacement_4253:verifiedReplacement4253} : {}),
     verified_historical_case_replays: verifiedHistoricalCaseReplays,
     verified_case_receipts: verifiedCaseReceipts,
     historical_reporter_e2e_rerun: historicalReporterE2eRerun,
@@ -973,16 +982,7 @@ export function computeReuseComparison({targetSha,acceptanceBatchReceipts=[],
 }
 
 async function githubJobLog(path,maxBytes=1048576){
-  const token=process.env.GITHUB_TOKEN??process.env.GH_TOKEN;
-  if(!token)throw Error('historical Case read requires GitHub token');
-  const response=await fetch('https://api.github.com'+path,{
-    headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,
-      'X-GitHub-Api-Version':'2022-11-28'},
-    signal:AbortSignal.timeout(30000)});
-  if(!response.ok)throw Error('GitHub historical Case logs HTTP '+response.status);
-  const body=await response.text();
-  if(body.length>=maxBytes)throw Error('historical Case log too large');
-  return body;
+  return authenticatedGithubRead(path,{format:'text',maxBytes});
 }
 
 // #1866 SC-04: the batch decision is written into the job log by the batch CLI,
@@ -1076,21 +1076,89 @@ export async function collectTargetPushE2eRuns(repo,sha,request=githubGet) {
   return attestTargetPushE2eRuns(payload,sha,repo);
 }
 
-async function githubGet(path) {
-  const token = process.env.GITHUB_TOKEN ?? process.env.GH_TOKEN;
-  if (!token) throw new Error('GITHUB_TOKEN/GH_TOKEN is required');
-  const response = await fetch('https://api.github.com' + path, {
-    headers: {
-      Accept: 'application/vnd.github+json',
-      Authorization: 'Bearer ' + token,
-      'X-GitHub-Api-Version': '2022-11-28',
-      'User-Agent': 'nession-acceptance-ci-evidence',
-    },
-  });
-  if (!response.ok) {
-    throw new Error('GitHub API ' + response.status + ' for ' + path + ': ' + await response.text());
+// #4253: GitHub read transport failures are evidence-unavailable, never
+// acceptance failures or implicit Passes. Retry only network/timeout errors
+// with a hard bound; expose a safe API path and cause code, never credentials.
+// The same owner handles Job-log redirects and ordinary JSON API reads.
+export async function authenticatedGithubRead(apiPath,{
+  format='json',maxBytes=1048576,
+  token=process.env.GITHUB_TOKEN??process.env.GH_TOKEN,
+  fetcher=fetch,sleep=(ms)=>new Promise(resolve=>setTimeout(resolve,ms)),
+}={}){
+  if(!token)throw Error('GITHUB_TOKEN/GH_TOKEN is required');
+  if(!/^\/repos\/BestNathan\/nession\//.test(apiPath))
+    throw Error('GitHub read path outside canonical repository');
+  if(!['json','text'].includes(format))
+    throw Error('unsupported GitHub read format');
+  for(let attempt=1;attempt<=3;attempt++){
+    try{
+      const response=await fetcher('https://api.github.com'+apiPath,{
+        headers:{
+          Accept:'application/vnd.github+json',
+          Authorization:'Bearer '+token,
+          'X-GitHub-Api-Version':'2022-11-28',
+          'User-Agent':'nession-acceptance-ci-evidence',
+        },
+        signal:AbortSignal.timeout(20000),
+      });
+      if(!response.ok){
+        throw Error('GitHub API '+response.status+' for '+apiPath);
+      }
+      if(format==='json')return await response.json();
+      const body=await response.text();
+      if(body.length>=maxBytes)throw Error('historical Case log too large');
+      return body;
+    }catch(error){
+      const transient=error instanceof TypeError ||
+        ['TimeoutError','AbortError'].includes(error?.name);
+      if(!transient)throw error;
+      if(attempt===3){
+        const code=String(error?.cause?.code??error?.code??
+          error?.name??'unknown').slice(0,80);
+        throw Error('GitHub API transport failed at '+apiPath+
+          ' after 3 bounded attempts ('+code+')',{cause:error});
+      }
+      await sleep(250*attempt);
+    }
   }
-  return response.json();
+}
+
+async function githubGet(path) {
+  return authenticatedGithubRead(path);
+}
+
+export async function selfTestAuthenticatedGithubRead(){
+  const apiPath='/repos/BestNathan/nession/issues/4253';
+  let calls=0;
+  const response={ok:true,json:async()=>({verified:true}),
+    text:async()=> 'verified log'};
+  const read=async()=>{calls++;
+    if(calls<3)throw new TypeError('fetch failed',{
+      cause:{code:'ECONNRESET'}});
+    return response;
+  };
+  const options={token:'test-only',fetcher:read,sleep:async()=>{}};
+  assert.deepEqual(await authenticatedGithubRead(apiPath,options),
+    {verified:true});
+  assert.equal(calls,3);
+  assert.equal(await authenticatedGithubRead(apiPath,{
+    ...options,fetcher:async()=>response,format:'text'}),'verified log');
+  await assert.rejects(authenticatedGithubRead(apiPath,{
+    ...options,format:'text',maxBytes:4,fetcher:async()=>response}),
+    /historical Case log too large/);
+  calls=0;
+  await assert.rejects(authenticatedGithubRead(apiPath,{
+    ...options,fetcher:async()=>{calls++;
+      throw new TypeError('fetch failed',{cause:{code:'ETIMEDOUT'}});}}),
+    /GitHub API transport failed at \/repos\/BestNathan\/nession\/issues\/4253 after 3 bounded attempts \(ETIMEDOUT\)/);
+  assert.equal(calls,3);
+  calls=0;
+  await assert.rejects(authenticatedGithubRead(apiPath,{
+    ...options,fetcher:async()=>{calls++;
+      return {ok:false,status:403};}}),/GitHub API 403/);
+  assert.equal(calls,1);
+  await assert.rejects(authenticatedGithubRead('/repos/attacker/fork/issues/1',
+    options),/outside canonical repository/);
 }
 
 // A completed Provider source may be older than MAX_RUNS_PER_SHA and get
@@ -1801,6 +1869,21 @@ async function collectCommand(workspace, outFile) {
           stage:process.env.ACCEPTANCE_STAGE,issue:process.env.ISSUE_NUMBER,
           get:githubGet,getLog:githubJobLog})
       : [];
+  // #4160: fixed-id immutable GHCR, fingerprint reuse, Knowledge+Pages receipt.
+  const verifiedToolchain4160=shouldCollectToolchain4160(
+    process.env.ACCEPTANCE_STAGE,process.env.ISSUE_NUMBER)
+    ? await collectToolchain4160({repo,targetSha:sha,
+        stage:process.env.ACCEPTANCE_STAGE,issue:process.env.ISSUE_NUMBER,
+        get:githubGet,getLog:githubJobLog})
+    : null;
+  // #4297: independently authenticated orphan catalog + main trusted GHCR
+  // receipts. This is evidence only; the model and Issue cannot assert a Pass.
+  const verifiedToolchain4241=shouldCollectToolchain4241(
+    process.env.ACCEPTANCE_STAGE,process.env.ISSUE_NUMBER)
+    ? await collectToolchain4241({repo,targetSha:sha,
+        stage:process.env.ACCEPTANCE_STAGE,issue:process.env.ISSUE_NUMBER,
+        get:githubGet,getLog:githubJobLog})
+    : null;
   // #3773: evidence of the already executed, main-only Knowledge proposal GC
   // must bind exact Run/Attempt/job steps, source log, live refs and ledger.
   const verifiedKnowledgeProposalCleanup =
@@ -2002,9 +2085,20 @@ async function collectCommand(workspace, outFile) {
   let historicalReporterE2eRerun = null;
   let relatedAcceptance = [];
   let relatedBugCompletion = null;
+  let verifiedReplacement4253 = null;
   const issueNumber = String(process.env.ISSUE_NUMBER || '').trim();
   if (/^[1-9][0-9]*$/.test(issueNumber)) {
     const currentIssue = await githubGet('/repos/' + repo + '/issues/' + issueNumber);
+    if (shouldCollectReplacement4253(process.env.ACCEPTANCE_STAGE,
+      issueNumber,sha)) {
+      verifiedReplacement4253=await collectReplacement4253({
+        repo,targetSha:sha,stage:process.env.ACCEPTANCE_STAGE,
+        issue:Number(issueNumber),get:githubGet,getLog:githubJobLog,
+        sourceUnchanged:(anchor,target,ownerPaths)=>spawnSync('git',
+          ['-C',workspace,'diff','--quiet',anchor,target,'--',...ownerPaths],
+          {stdio:'ignore'}).status===0,
+      });
+    }
     stagingBatchIssue = currentIssue;
     const section = String(currentIssue.body ?? '').match(/^## E2E Verification\s*$/m);
     if (section) {
@@ -2102,13 +2196,13 @@ async function collectCommand(workspace, outFile) {
       .concat(ancestryReceipts.flatMap(entry => entry.e2e_selected_run_receipts)),
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ targetSha: sha, directRuns, pulls: selectedPulls,
-    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
+    pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, verifiedReplacement4253, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
     authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, verifiedLiveFullFailurePublication, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, authenticatedIssueAudit3843Readback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
     authenticatedQwenChainFixture,authenticatedQwen3433Recovery,verifiedConflictProbe4124,
     authenticatedRunStoreCasMatrix,
     authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
-    authenticatedRunStoreFiveModeReadback, verifiedKnowledgePublisherPublication, verifiedKnowledgeProposalCleanup, verifiedKnowledgeWriter2358, verifiedSandbox3145,
+    authenticatedRunStoreFiveModeReadback, verifiedKnowledgePublisherPublication, verifiedToolchain4160, verifiedToolchain4241, verifiedKnowledgeProposalCleanup, verifiedKnowledgeWriter2358, verifiedSandbox3145,
     deploymentAttestationReceipts: laneEvidence.deployment_attestation_receipts,
     stagingLaneAdmissionReceipts: laneEvidence.staging_lane_admission_receipts,
     historicalStagingBatchProof });
@@ -2194,8 +2288,11 @@ async function selfTestLaneEvidenceReceipts() {
 }
 
 async function selfTest() {
+  await selfTestAuthenticatedGithubRead();
   selfTestConflictProbe4124();
   selfTestKnowledgePublication();
+  selfTestToolchain4160();
+  selfTestToolchain4241();
   selfTestKnowledgeProposalCleanup();
   selfTestKnowledgeWriter2358();
   selfTestSandbox3145();
@@ -3470,6 +3567,10 @@ async function selfTest() {
   selfTestHistoricalCase();
   selfTestHistoricalRecovery();
   selfTestRegressions();
+  selfTestReplacement4253();
+  assert.equal(normalizeCiEvidence({targetSha:'a'.repeat(40),
+    verifiedReplacement4253:{kind:'authenticated_independent_replacement_acceptance_completion',
+      verdict:'Verified'}}).verified_independent_replacement_4253.verdict,'Verified');
   selfTestCaseReceipts();
   // Full receipts stay L3-gated at post-merge, and a staging SC that names a
   // Full Regression requirement also collects them at its exact target SHA.

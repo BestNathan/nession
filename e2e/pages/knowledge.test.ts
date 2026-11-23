@@ -1,4 +1,4 @@
-import {test,expect} from '@playwright/test';
+import {test,expect,type Route} from '@playwright/test';
 import {startPagesFixture} from '../helpers/pagesStandalone';
 
 // This Pages-only smoke suite is NOT a canonical product E2E ID. It runs
@@ -7,6 +7,20 @@ import {startPagesFixture} from '../helpers/pagesStandalone';
 // or the product Web; the browser reads only the deterministic public fixture.
 const first='topics/engineering/knowledge-provenance.md';
 const second='topics/terminal/terminal-routing.md';
+
+// Expand the same safe public projection to expose real nested-scroll behavior.
+async function serveLongKnowledgeCatalog(route:Route){
+ const response=await route.fetch();
+ const data=await response.json();
+ data.articles=Array.from({length:40},(_,i)=>({
+  ...data.articles[0],
+  path:'topics/engineering/catalog-entry-'+String(i+1).padStart(2,'0')+'.md',
+  title:'Catalog entry '+String(i+1).padStart(2,'0'),
+  description:'Independent scroll fixture '+String(i+1),
+  body:Array.from({length:48},(_,j)=>'## Section '+(j+1)+'\n\nLong source-grounded reading content.').join('\n\n')
+ }));
+ await route.fulfill({json:data});
+}
 
 test.describe('standalone Pages Knowledge Explorer',()=>{
  let site:Awaited<ReturnType<typeof startPagesFixture>>;
@@ -41,6 +55,65 @@ test.describe('standalone Pages Knowledge Explorer',()=>{
   await expect(page.locator('.knowledge-entry')).toHaveCount(0);
   await expect(page.getByText('No matching articles. Try another topic, category or search term.')).toBeVisible();
   expect(errors).toEqual([]);
+ });
+
+ test('desktop long catalog and article reader scroll separately without moving the search header',async({page})=>{
+  await page.setViewportSize({width:1365,height:740});
+  await page.route('**/data/knowledge.json',serveLongKnowledgeCatalog);
+  await page.goto(site.origin+'/#/knowledge');
+  const entries=page.getByRole('region',{name:'Knowledge article list'});
+  const reader=page.getByRole('region',{name:'Knowledge article reader'});
+  const search=page.getByRole('searchbox',{name:'Search Knowledge articles'});
+  const count=page.locator('.knowledge-result-count');
+  await expect(page.locator('.knowledge-entry')).toHaveCount(40);
+  await expect(entries).toHaveCSS('overflow-y','auto');
+  await expect(reader).toHaveCSS('overflow-y','auto');
+  expect(await entries.evaluate(el=>el.scrollHeight>el.clientHeight)).toBe(true);
+  expect(await reader.evaluate(el=>el.scrollHeight>el.clientHeight)).toBe(true);
+
+  await entries.hover();
+  const headerTop=(await search.boundingBox())!.y;
+  const countTop=(await count.boundingBox())!.y;
+  const pageTop=await page.evaluate(()=>window.scrollY);
+  await page.mouse.wheel(0,700);
+  await expect.poll(()=>entries.evaluate(el=>el.scrollTop)).toBeGreaterThan(100);
+  const catalogScroll=await entries.evaluate(el=>el.scrollTop);
+  expect((await search.boundingBox())!.y).toBeCloseTo(headerTop,0);
+  expect((await count.boundingBox())!.y).toBeCloseTo(countTop,0);
+  expect(await page.evaluate(()=>window.scrollY)).toBe(pageTop);
+  expect(await reader.evaluate(el=>el.scrollTop)).toBe(0);
+
+  await reader.hover();
+  await page.mouse.wheel(0,700);
+  await expect.poll(()=>reader.evaluate(el=>el.scrollTop)).toBeGreaterThan(100);
+  expect(await entries.evaluate(el=>el.scrollTop)).toBe(catalogScroll);
+  const target=page.locator('.knowledge-entry').nth(23);
+  await target.scrollIntoViewIfNeeded();
+  const before=await entries.evaluate(el=>el.scrollTop);
+  await target.click();
+  await expect(reader.getByRole('heading',{name:'Catalog entry 24'})).toBeVisible();
+  expect(await entries.evaluate(el=>el.scrollTop)).toBeCloseTo(before,0);
+  expect(await reader.evaluate(el=>el.scrollTop)).toBe(0);
+ });
+
+ test('compact Knowledge long list scrolls internally and still opens and returns from reader',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.route('**/data/knowledge.json',serveLongKnowledgeCatalog);
+  await page.goto(site.origin+'/#/knowledge');
+  const entries=page.getByRole('region',{name:'Knowledge article list'});
+  await expect(entries).toHaveCSS('overflow-y','auto');
+  expect(await entries.evaluate(el=>el.scrollHeight>el.clientHeight)).toBe(true);
+  await entries.focus();
+  await expect(entries).toBeFocused();
+  await entries.evaluate(el=>{el.scrollTop=el.scrollHeight;});
+  await expect(page.locator('.knowledge-entry').last()).toBeInViewport();
+  await page.locator('.knowledge-entry').last().click();
+  await expect(page.getByRole('region',{name:'Knowledge article reader'})).toBeVisible();
+  await expect(page.locator('.knowledge-reader').getByRole('heading',{name:'Catalog entry 40'})).toBeVisible();
+  const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
+  expect(overflow).toBe(false);
+  await page.getByRole('link',{name:'← All articles'}).click();
+  await expect(entries).toBeVisible();
  });
 
  test('deep-link reader, relative article link, pinned sources, history and browser navigation',async({page})=>{

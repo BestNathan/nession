@@ -33,6 +33,7 @@ Possible parts:
 
 | Part | Role |
 |------|------|
+| Activity glyph | Optional, fixed-size capability-reported work state (#3804) |
 | Session display title | Primary work identity: metadata title, else tmux name |
 | Workload hint | Optional hint such as Claude Code, Codex, zsh; never an IA type |
 | Location / Agent hint | Optional execution-context metadata when useful for disambiguation |
@@ -94,7 +95,33 @@ Location/Agent metadata may be:
 
 ## Independent state dimensions
 
-Do not collapse infrastructure connectivity, Session lifecycle, and this-client attachment into one colored dot.
+Do not collapse infrastructure connectivity, Session lifecycle, this-client attachment, and Session activity into one colored dot.
+
+### Session activity (#3804)
+
+Activity is what the Session's work is doing **now**, reported by the
+capability that owns the workload and projected by the Agent. It is a fourth
+independent dimension: it changes no lifecycle, connectivity, attachment or
+recency value, and none of those can stand in for it.
+
+| State | Presentation |
+|-------|--------------|
+| Working | Monochrome arc in the fixed glyph slot; the shape reads without motion, and any spin is reduced-motion safe |
+| Idle | Quiet weak-outline glyph; no text and no colour claim |
+| Unknown | Explicit `?`; absent or unverifiable evidence is never rendered as idle |
+| Needs input | Activity stays `working`; a short `Needs input` line carries the orthogonal attention signal |
+
+- The glyph slot is one fixed size for every state, so the title and row
+  geometry do not move when the level changes.
+- The row's accessible name includes the activity reading; the glyph itself is
+  decorative.
+- A glyph is monochrome (warning colour only for needs-input). It is not a
+  status dot and never encodes connectivity, lifecycle or attachment.
+- An offline or stale Agent renders `unknown` plus the existing reachability
+  copy. A last reported `working` is not claimed as current.
+- Activity does not open a Capability Peek, add a permanent Capsule spinner,
+  or change recency. Sorting/filtering by activity is out of scope until the
+  basic list proves useful.
 
 ### Infrastructure / location reachability
 
@@ -209,6 +236,9 @@ The semantic hierarchy remains the same.
 - [ ] Workload and execution context are optional supporting metadata, not navigation parents.
 - [ ] Redundant healthy metadata can disappear.
 - [ ] Degraded infrastructure/lifecycle/attachment states remain semantically distinct.
+- [ ] Activity renders as a fixed-slot working/idle/unknown glyph with an
+  orthogonal needs-input signal, and is never inferred from the other dimensions
+  or from a quiet terminal.
 - [ ] Capability growth does not cause proportional badge growth in Session rows.
 - [ ] Destructive/secondary actions use progressive disclosure.
 - [ ] The pattern can evolve from Agent labels toward Workspace Location/provider labels without changing its product role.

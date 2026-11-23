@@ -156,6 +156,18 @@ impl ConnectionHandler {
         // returns; a registration that arrives after it starts a new
         // incarnation and cannot be erased by the cleanup above.
         self.agent_registry.unregister(agent_id).await;
+        // The Agent is gone, so its contributed MCP Tools are no longer a
+        // capability anyone can serve (#3778). Removal is explicit, unlike an
+        // offline transition which keeps the Tools listed and refuses at call
+        // time.
+        if let Some(tools) = self.extension_tools.as_ref() {
+            if let Err(error) = tools.set_manifest(agent_id, None) {
+                tracing::warn!(
+                    agent = %agent_id,
+                    "could not clear the deleted Agent's MCP Tool manifest: {error}"
+                );
+            }
+        }
 
         // Broadcast updated lists to all connected web clients.
         self.web_client_registry

@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::reference::{get_object, ObjectKind};
 use crate::oci::annotation::NessionUsage;
 use crate::oci::config::ImageConfig;
@@ -37,7 +37,7 @@ pub struct IndexInspection {
 ///
 /// The stored digest is checked against the exact bytes before parsing; a
 /// catalog row without matching bytes is a failure, not an inspection result.
-pub fn inspect_manifest(store: &BlobStore, manifest_digest: &str) -> Result<ManifestInspection> {
+pub fn inspect_manifest(store: &FsBlobStore, manifest_digest: &str) -> Result<ManifestInspection> {
     let manifest_bytes = store
         .read(manifest_digest)
         .with_context(|| format!("Manifest {manifest_digest} is missing from the CAS"))?;
@@ -112,7 +112,7 @@ pub fn inspect_manifest(store: &BlobStore, manifest_digest: &str) -> Result<Mani
 
 /// Read and validate one Index, then select the requested platform.
 pub fn inspect_index(
-    store: &BlobStore,
+    store: &FsBlobStore,
     index_digest: &str,
     target: &Platform,
 ) -> Result<IndexInspection> {

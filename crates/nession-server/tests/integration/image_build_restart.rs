@@ -14,7 +14,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::sync::Arc;
 use std::time::Duration;
 
-use nession_erofs::{BlobStore, ErofsBuilder, ProcessGitRunner, ProcessMkfsRunner};
+use nession_erofs::{ErofsBuilder, FsBlobStore, ProcessGitRunner, ProcessMkfsRunner};
 use nession_protocol::contracts::image::v1::{ImageBuildStatus, ImageSource};
 use nession_server::db::Database;
 use nession_server::image::{
@@ -53,6 +53,7 @@ fn options(dir: &std::path::Path) -> ImageManagerOptions {
     ImageManagerOptions {
         max_concurrent_builds: 1,
         build_root: dir.join("builds"),
+        source_root: Some(dir.to_path_buf()),
         build_stage_timeout: Some(Duration::from_secs(120)),
         build_log_max_bytes: DEFAULT_BUILD_LOG_MAX_BYTES,
         build_retention_secs: DEFAULT_BUILD_RETENTION_SECS,
@@ -63,7 +64,7 @@ fn builder(dir: &std::path::Path, mkfs: std::path::PathBuf) -> anyhow::Result<Ar
     Ok(Arc::new(ErofsBuilder::new(
         Arc::new(ProcessGitRunner::default()),
         Arc::new(ProcessMkfsRunner { binary: mkfs }),
-        BlobStore::new(dir.join("blobs"))?,
+        FsBlobStore::new(dir.join("blobs"))?,
         dir.join("builds"),
     )?))
 }
@@ -76,7 +77,7 @@ async fn manager(
     Ok(Arc::new(ImageManager::new(
         db,
         builder(dir, mkfs)?,
-        BlobStore::new(dir.join("blobs"))?,
+        FsBlobStore::new(dir.join("blobs"))?,
         options(dir),
     )?))
 }
@@ -173,7 +174,7 @@ async fn a_restarted_server_reruns_packaging_from_the_validated_snapshot() -> an
         "{succeeded:?}"
     );
     let digest = succeeded.digest.expect("succeeded build has a digest");
-    let blobs = BlobStore::new(dir.path().join("blobs"))?;
+    let blobs = FsBlobStore::new(dir.path().join("blobs"))?;
     blobs.verify(&digest)?;
     let image = std::fs::read(blobs.path_for(&digest)?)?;
     assert_eq!(

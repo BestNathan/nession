@@ -19,7 +19,7 @@ use serde_json::Value;
 
 use super::client::RegistryClient;
 use super::{validate_remote_repository, RegistryError, RegistryResult, RemoteReference};
-use crate::blob::store::BlobStore;
+use crate::blob::store::FsBlobStore;
 use crate::catalog::tag;
 use crate::digest::{digest_of_bytes, is_valid_digest, verify_file};
 use crate::oci::layout::{OCI_BLOB_DIR, OCI_INDEX_FILE, OCI_LAYOUT_FILE, OCI_LAYOUT_VERSION};
@@ -81,7 +81,7 @@ struct PushCounts {
 /// every Config/layer/child Manifest upload succeeded.
 pub async fn push_image(
     client: &RegistryClient,
-    store: &BlobStore,
+    store: &FsBlobStore,
     repository: &str,
     reference: &RemoteReference,
     source_digest: &str,
@@ -121,7 +121,7 @@ pub async fn push_image(
 /// Resolve one local catalog tag and push its Manifest/Index graph.
 pub async fn push_tag(
     client: &RegistryClient,
-    store: &BlobStore,
+    store: &FsBlobStore,
     conn: &DatabaseConnection,
     local_repository: &str,
     local_tag: &str,
@@ -136,7 +136,7 @@ pub async fn push_tag(
             "local tag {local_repository}:{local_tag}"
         )));
     };
-    let reference = RemoteReference::parse(remote_tag)?;
+    let reference = RemoteReference::parse(remote_tag).map_err(RegistryError::InvalidReference)?;
     if !matches!(reference, RemoteReference::Tag(_)) {
         return Err(RegistryError::InvalidReference(
             "push_tag requires a tag reference".to_string(),
@@ -147,7 +147,7 @@ pub async fn push_tag(
 
 async fn push_object(
     client: &RegistryClient,
-    store: &BlobStore,
+    store: &FsBlobStore,
     repository: &str,
     digest: &str,
     reference: Option<&RemoteReference>,
@@ -214,7 +214,7 @@ async fn push_object(
 
 async fn push_manifest_object(
     client: &RegistryClient,
-    store: &BlobStore,
+    store: &FsBlobStore,
     repository: &str,
     digest: &str,
     bytes: Vec<u8>,
@@ -247,7 +247,7 @@ async fn push_manifest_object(
 
 async fn ensure_blob(
     client: &RegistryClient,
-    store: &BlobStore,
+    store: &FsBlobStore,
     repository: &str,
     descriptor: &Descriptor,
     counts: &mut PushCounts,
@@ -281,7 +281,10 @@ async fn ensure_blob(
     Ok(())
 }
 
-fn read_verified_object(store: &BlobStore, digest: &str) -> RegistryResult<(Vec<u8>, ObjectForm)> {
+fn read_verified_object(
+    store: &FsBlobStore,
+    digest: &str,
+) -> RegistryResult<(Vec<u8>, ObjectForm)> {
     let bytes = store.read(digest).map_err(|error| {
         RegistryError::Local(format!("local object {digest} is missing: {error:#}"))
     })?;
@@ -329,7 +332,7 @@ fn read_verified_object(store: &BlobStore, digest: &str) -> RegistryResult<(Vec<
 /// and `index.json` are newly produced layout metadata. No registry credential
 /// is involved.
 pub fn export_layout(
-    store: &BlobStore,
+    store: &FsBlobStore,
     source_digest: &str,
     root: &Path,
 ) -> RegistryResult<LayoutExport> {
@@ -388,7 +391,7 @@ pub fn export_layout(
 }
 
 fn collect_closure(
-    store: &BlobStore,
+    store: &FsBlobStore,
     digest: &str,
     objects: &mut Vec<(String, String, u64)>,
     seen: &mut HashSet<String>,
@@ -456,7 +459,7 @@ fn collect_closure(
 }
 
 fn verify_leaf(
-    store: &BlobStore,
+    store: &FsBlobStore,
     descriptor: &Descriptor,
     expected_media_type: &str,
 ) -> RegistryResult<()> {
@@ -479,7 +482,7 @@ fn verify_leaf(
 }
 
 fn copy_verified(
-    store: &BlobStore,
+    store: &FsBlobStore,
     digest: &str,
     expected_size: u64,
     root: &Path,
@@ -591,7 +594,7 @@ mod tests {
         layer: Descriptor,
     }
 
-    fn fixture(store: &BlobStore, architecture: &str, payload: &[u8]) -> Fixture {
+    fn fixture(store: &FsBlobStore, architecture: &str, payload: &[u8]) -> Fixture {
         let layer = layer(store, payload);
         let (manifest, config) = manifest_and_config(store, &layer, architecture, None, None);
         Fixture {
@@ -610,7 +613,10 @@ mod tests {
         }
     }
 
-    fn index_document(store: &BlobStore, fixtures: &[(&str, &Fixture)]) -> crate::oci::RawDocument {
+    fn index_document(
+        store: &FsBlobStore,
+        fixtures: &[(&str, &Fixture)],
+    ) -> crate::oci::RawDocument {
         let index = Index {
             schema_version: 2,
             media_type: Some(MEDIA_TYPE_INDEX.to_string()),
@@ -641,7 +647,7 @@ mod tests {
     #[tokio::test]
     async fn push_preserves_digest_identities_and_reuses_remote_blobs() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let fixture = fixture(&store, "amd64", b"push payload");
         let registry = MockRegistry::start().await;
         let client = registry.client();
@@ -698,7 +704,7 @@ mod tests {
     #[tokio::test]
     async fn push_refuses_a_tampered_local_object_before_uploading() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let fixture = fixture(&store, "amd64", b"tamper target");
         let manifest_path = store
             .path_for(fixture.manifest.digest())
@@ -723,7 +729,7 @@ mod tests {
     #[tokio::test]
     async fn interrupted_upload_does_not_publish_a_remote_tag() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let fixture = fixture(&store, "amd64", b"upload interruption");
         let registry = MockRegistry::start().await;
         registry.fail_finish_upload(true);
@@ -748,7 +754,7 @@ mod tests {
     #[tokio::test]
     async fn index_push_uploads_children_before_the_index_tag() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let amd64 = fixture(&store, "amd64", b"index amd64");
         let arm64 = fixture(&store, "arm64", b"index arm64");
         let index = index_document(&store, &[("amd64", &amd64), ("arm64", &arm64)]);
@@ -805,7 +811,7 @@ mod tests {
     #[tokio::test]
     async fn private_registry_push_requests_a_scoped_push_token() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let fixture = fixture(&store, "amd64", b"private push payload");
         let registry = MockRegistry::start().await;
         registry.seed_private_repository("team/private");
@@ -841,7 +847,7 @@ mod tests {
     #[tokio::test]
     async fn push_tag_resolves_the_local_catalog_tag() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let conn = memory_connection().await;
         crate::catalog::sqlite::migrate(&conn)
             .await
@@ -889,7 +895,7 @@ mod tests {
     #[tokio::test]
     async fn export_layout_writes_exact_verified_bytes() {
         let directory = tempdir().expect("temp dir");
-        let store = BlobStore::new(directory.path().join("store")).expect("store");
+        let store = FsBlobStore::new(directory.path().join("store")).expect("store");
         let fixture = fixture(&store, "amd64", b"layout payload");
         let layout_root = directory.path().join("layout");
         let exported =

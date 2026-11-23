@@ -7,7 +7,7 @@ use super::{
     HandlerAction, ProtocolMessage,
 };
 use nession_erofs::oci::descriptor::Platform;
-use nession_protocol::contracts::image::v1::normalize_image_digest;
+use nession_protocol::contracts::image::v1::{normalize_image_digest, ImageSource};
 use nession_protocol::contracts::session::v1::{
     ClientManagedCreate, EnvSelectionMode, ManagedImageGrant, ManagedImageObjectGrant,
     ManagedImageRole, ManagedSessionImages,
@@ -41,6 +41,47 @@ struct ManagedImageGrantIdentity {
     objects: Vec<ManagedImageObjectGrant>,
 }
 
+/// Canonical Git repository identity for comparing a Project declaration with
+/// the source a pinned image was built from.
+fn normalized_git_url(url: &str) -> String {
+    let trimmed = url.trim().trim_end_matches('/');
+    let without_git = trimmed.strip_suffix(".git").unwrap_or(trimmed);
+    without_git.trim_end_matches('/').to_ascii_lowercase()
+}
+
+fn is_full_commit(reference: &str) -> bool {
+    reference.len() == 40 && reference.bytes().all(|byte| byte.is_ascii_hexdigit())
+}
+
+/// Whether a Project's declared Git Source still names the source of its
+/// pinned Project image (#3794 SC-03).
+///
+/// A non-Git image source cannot prove or disprove the Project declaration,
+/// so it is not refused here. A full commit `ref` is matched against the
+/// image's resolved `source_sha`; any other ref must equal the ref the build
+/// recorded. A mismatch means the declaration changed after the pin.
+fn project_source_matches_image(
+    project_source: &nession_protocol::contracts::project::v1::ProjectSource,
+    image_source: &ImageSource,
+    image_source_sha: Option<&str>,
+) -> bool {
+    let ImageSource::GitHub {
+        repository_url,
+        reference,
+    } = image_source
+    else {
+        return true;
+    };
+    if normalized_git_url(&project_source.repository_url) != normalized_git_url(repository_url) {
+        return false;
+    }
+    let project_ref = project_source.reference.trim();
+    if is_full_commit(project_ref) {
+        return image_source_sha.is_some_and(|sha| sha.eq_ignore_ascii_case(project_ref));
+    }
+    project_ref == reference.trim()
+}
+
 impl ConnectionHandler {
     /// Handle `server.session.create` — create a new session on a target agent.
     pub(super) async fn handle_client_session_create(
@@ -58,6 +99,8 @@ impl ConnectionHandler {
             warnings: Vec::new(),
             project_id: None,
             sandbox: None,
+            instance_id: None,
+            metadata: None,
         };
 
         if !self.authenticated_client {
@@ -93,6 +136,7 @@ impl ConnectionHandler {
             sandbox,
             project_id,
             managed,
+            initial_metadata,
         }) = serde_json::from_value::<ClientSessionCreatePayload>(msg.payload)
         else {
             return Ok(session_create_reply(
@@ -107,6 +151,22 @@ impl ConnectionHandler {
                 refusal("agent_id and name are required"),
             ));
         }
+        // The one shared metadata contract validates the initial work context
+        // before anything is staged or sent to an Agent (#4081). The Agent
+        // validates again at its own boundary; this refusal is the earlier,
+        // cleaner answer for a Server client.
+        let initial_metadata = match initial_metadata {
+            Some(metadata) => match metadata.normalized() {
+                Ok(_) => Some(metadata),
+                Err(error) => {
+                    return Ok(session_create_reply(
+                        &msg.id,
+                        refusal(&format!("invalid: {error}")),
+                    ));
+                }
+            },
+            None => None,
+        };
         let agent_id = agent_id.as_str();
 
         // A Project is a declaration; the Session owns its realized
@@ -360,6 +420,9 @@ impl ConnectionHandler {
                     },
                     "sandbox": sandbox,
                     "managed": managed_context.as_ref().map(|context| &context.images),
+                    // Initial Session work context (#4081). The Agent owns the
+                    // commit; this is the same field on the direct projection.
+                    "initial_metadata": initial_metadata,
                 }),
             )
             .await;
@@ -404,6 +467,11 @@ impl ConnectionHandler {
                         created_at: chrono::Utc::now(),
                         last_activity: chrono::Utc::now(),
                         instance_id: None,
+                        // The Agent's first inventory reports the summary.
+                        metadata: None,
+                        activity: None,
+                        activity_epoch: None,
+                        activity_generation: 0,
                     };
                     self.session_registry
                         .insert_session_if_absent(session_info)
@@ -505,6 +573,22 @@ impl ConnectionHandler {
                     >(value.clone())
                     .ok()
                 });
+                // The Agent's committed initial work context and the durable
+                // identity it belongs to (#4081). A successful create reports
+                // both; a refusal reports neither.
+                let instance_id = response
+                    .get("instance_id")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string);
+                let metadata = response
+                    .get("metadata")
+                    .filter(|value| !value.is_null())
+                    .and_then(|value| {
+                        serde_json::from_value::<
+                            nession_protocol::contracts::session::v1::SessionMetadata,
+                        >(value.clone())
+                        .ok()
+                    });
 
                 Ok(session_create_reply(
                     &msg.id,
@@ -515,6 +599,8 @@ impl ConnectionHandler {
                         warnings,
                         project_id,
                         sandbox: sandbox_report,
+                        instance_id,
+                        metadata,
                     },
                 ))
             }
@@ -693,13 +779,30 @@ impl ConnectionHandler {
         let workspace_digest = normalize_image_digest(&workspace_digest)
             .map_err(|error| format!("Project Source image: {}", error.message()))?;
         // The legacy source commit remains available for a digest-addressed
-        // EROFS row; a catalog Manifest identity may have no legacy row.
-        let workspace_source_sha = self
+        // EROFS row; a catalog Manifest identity may have no legacy row. The
+        // same descriptor is the staleness boundary for the Project's Git
+        // Source: a create never silently consumes an image built from a
+        // different declaration (#3794 SC-03).
+        let workspace_descriptor = self
             .image_manager
             .get(Some(&workspace_digest), None)
             .await
-            .ok()
-            .and_then(|descriptor| descriptor.source_sha);
+            .ok();
+        if let (Some(project_source), Some(descriptor)) =
+            (project.source.as_ref(), workspace_descriptor.as_ref())
+        {
+            if !project_source_matches_image(
+                project_source,
+                &descriptor.source,
+                descriptor.source_sha.as_deref(),
+            ) {
+                return Err(format!(
+                    "Project '{project_id}' Git Source changed since its pinned image was built; re-pin the Project image before creating a Managed Session"
+                ));
+            }
+        }
+        let workspace_source_sha =
+            workspace_descriptor.and_then(|descriptor| descriptor.source_sha);
 
         let base_digest = normalize_image_digest(&request.base_digest)
             .map_err(|error| format!("Base Runtime image: {}", error.message()))?;

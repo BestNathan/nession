@@ -6,6 +6,10 @@ import {
   imagesApi,
   type ImageBuildDescriptor,
   type ImageDescriptor,
+  type ImageLibraryEntry,
+  type ImageLibraryLayer,
+  type ImageLibraryRepresentation,
+  type ImageReferenceImpact,
 } from '@/capabilities/images';
 
 const CREATED_AT = 1_762_300_000;
@@ -21,6 +25,9 @@ function digestFor(index: number): string {
   const hex = index.toString(16).padStart(4, '0');
   return `sha256:${hex}${'abcdef0123456789'.repeat(4).slice(0, 60)}`.slice(0, 71);
 }
+
+/** The pinned Project Source image the canonical fixture Project owns (#3794). */
+export const FIXTURE_PROJECT_SOURCE_DIGEST = digestFor(1);
 
 function fixtureImages(): ImageDescriptor[] {
   return Array.from({ length: 235 }, (_, index) => {
@@ -104,18 +111,82 @@ function build(
   };
 }
 
-export type FixtureImagesScenario = 'canonical' | 'empty' | 'error' | 'buildfail' | 'lifecycle';
+export type FixtureImagesScenario =
+  | 'canonical'
+  | 'empty'
+  | 'error'
+  | 'buildfail'
+  | 'lifecycle'
+  | 'picker'
+  | 'buildhistory';
+
+interface FixtureLibraryMeta {
+  repository: string;
+  tags: string[];
+  manifest_digest: string;
+  media_type: string;
+  kind: string;
+  image_kind: string | null;
+  mount_default: string | null;
+  platform: string;
+  representation: ImageLibraryRepresentation;
+  layers: ImageLibraryLayer[];
+  closure: string[];
+  impact: ImageReferenceImpact;
+}
 
 interface FixtureState {
   scenario: FixtureImagesScenario;
   images: ImageDescriptor[];
   builds: ImageBuildDescriptor[];
   nextBuild: number;
+  library: Map<string, FixtureLibraryMeta>;
+}
+
+function libraryMeta(
+  image: ImageDescriptor,
+  overrides: Partial<FixtureLibraryMeta> = {},
+): FixtureLibraryMeta {
+  const manifest = overrides.manifest_digest ?? digestFor(990);
+  const layer = {
+    digest: image.digest ?? digestFor(991),
+    media_type: 'application/vnd.nession.erofs.layer.v1',
+    size_bytes: image.size_bytes,
+    role: 'layer',
+  };
+  return {
+    repository: 'nession/fixtures',
+    tags: [],
+    manifest_digest: manifest,
+    media_type: 'application/vnd.oci.image.manifest.v1+json',
+    kind: 'manifest',
+    image_kind: null,
+    mount_default: null,
+    platform: 'linux/amd64',
+    representation: 'single_layer',
+    layers: [layer],
+    closure: [layer.digest],
+    impact: {
+      manifest_digest: manifest,
+      project_pins: 0,
+      session_pins: 0,
+      other_tags: [],
+      leases: 0,
+      compose_references: 0,
+      unknown: false,
+    },
+    ...overrides,
+  };
 }
 
 function scenario(search: string): FixtureImagesScenario {
   const value = new URLSearchParams(search).get('images');
-  return value === 'empty' || value === 'error' || value === 'buildfail' || value === 'lifecycle'
+  return value === 'empty'
+    || value === 'error'
+    || value === 'buildfail'
+    || value === 'lifecycle'
+    || value === 'picker'
+    || value === 'buildhistory'
     ? value
     : 'canonical';
 }
@@ -125,6 +196,81 @@ const GITHUB = {
   repository_url: 'https://github.com/BestNathan/nession',
   ref: 'main',
 };
+
+/**
+ * A history large enough to cross the first page, with every adapter and
+ * lifecycle state plus one record whose earlier attempt diagnostics survived
+ * a retry (#3798).
+ */
+function historyBuilds(): ImageBuildDescriptor[] {
+  const attempts = build(
+    'build-fixture-attempts',
+    { ...GITHUB, ref: 'release' },
+    { status: 'failed' },
+    {
+      alias: 'history-attempts',
+      attempt: 2,
+      source_sha: 'a'.repeat(40),
+      attempts: [
+        {
+          attempt: 1,
+          status: 'failed',
+          stage: 'packaging',
+          diagnostic: 'mkfs.erofs failed: first attempt ran out of space',
+          error: 'mkfs.erofs failed: first attempt ran out of space',
+          started_at: CREATED_AT,
+          finished_at: CREATED_AT + 10,
+        },
+        {
+          attempt: 2,
+          status: 'failed',
+          stage: 'packaging',
+          diagnostic: 'mkfs.erofs failed: second attempt hit the same limit',
+          error: 'mkfs.erofs failed: second attempt hit the same limit',
+          started_at: CREATED_AT + 20,
+          finished_at: CREATED_AT + 30,
+        },
+      ],
+    },
+  );
+  const succeeded = Array.from({ length: 39 }, (_, index) =>
+    build(
+      `build-fixture-history-succeeded-${index}`,
+      GITHUB,
+      { status: 'succeeded' },
+      {
+        alias: index === 0 ? 'nightly' : null,
+        digest: digestFor(1200 + index),
+        progress: { files: 214, bytes: 2_400_000, elapsed_ms: 4200 },
+      },
+    ),
+  );
+  const failed = Array.from({ length: 10 }, (_, index) =>
+    build(
+      `build-fixture-history-failed-${index}`,
+      { kind: 'local_directory', path: `/srv/nession/history/${index}` },
+      { status: 'failed' },
+    ),
+  );
+  const canceled = Array.from({ length: 10 }, (_, index) =>
+    build(
+      `build-fixture-history-canceled-${index}`,
+      {
+        kind: 'compose',
+        representation: 'flattened',
+        sources: [
+          {
+            repository: 'nession/fixtures',
+            ref: 'fixture-build-latest',
+            destination: '',
+          },
+        ],
+      },
+      { status: 'canceled' },
+    ),
+  );
+  return [attempts, ...succeeded, ...failed, ...canceled];
+}
 
 function initialBuilds(): ImageBuildDescriptor[] {
   return [
@@ -152,17 +298,84 @@ function stateFor(selected: FixtureImagesScenario): FixtureState {
   if (selected === 'lifecycle') {
     images.push(fixtureImage(1, 'fixture-build-latest', 'ready'));
   }
+  const library = new Map<string, FixtureLibraryMeta>();
+  if (selected === 'picker') {
+    library.set(
+      images[0].image_id,
+      libraryMeta(images[0], {
+        image_kind: 'base_runtime',
+        platform: 'linux/amd64',
+      }),
+    );
+    library.set(
+      images[1].image_id,
+      libraryMeta(images[1], {
+        image_kind: 'tool',
+        mount_default: '/opt/node',
+        platform: 'linux/amd64',
+      }),
+    );
+    library.set(
+      images[2].image_id,
+      libraryMeta(images[2], {
+        image_kind: 'tool',
+        platform: 'linux/arm64',
+      }),
+    );
+    library.set(
+      images[3].image_id,
+      libraryMeta(images[3], {
+        image_kind: 'tool',
+        representation: 'referenced',
+      }),
+    );
+    library.set(
+      images[4].image_id,
+      libraryMeta(images[4], {
+        image_kind: 'directory',
+        platform: 'linux/amd64',
+      }),
+    );
+  }
+  if (selected === 'lifecycle') {
+    const managed = images[images.length - 1];
+    library.set(
+      managed.image_id,
+      libraryMeta(managed, {
+        tags: ['fixture-build-latest'],
+        impact: {
+          manifest_digest: digestFor(990),
+          project_pins: 1,
+          session_pins: 0,
+          other_tags: [],
+          leases: 1,
+          compose_references: 0,
+          unknown: false,
+        },
+      }),
+    );
+  }
   const state: FixtureState = {
     scenario: selected,
     images,
-    builds: selected === 'lifecycle' ? initialBuilds() : [],
+    builds:
+      selected === 'lifecycle'
+        ? initialBuilds()
+        : selected === 'buildhistory'
+          ? historyBuilds()
+          : [],
     nextBuild: 1,
+    library,
   };
   states.set(selected, state);
   return state;
 }
 
-function matches(image: ImageDescriptor, query: string): boolean {
+function matches(
+  image: ImageDescriptor,
+  query: string,
+  tags: readonly string[] = [],
+): boolean {
   if (!query) {
     return true;
   }
@@ -171,6 +384,7 @@ function matches(image: ImageDescriptor, query: string): boolean {
     image.image_id.toLowerCase().includes(target)
     || (image.alias ?? '').toLowerCase().includes(target)
     || image.aliases.some((alias) => alias.toLowerCase().includes(target))
+    || tags.some((tag) => tag.toLowerCase().includes(target))
     || (image.digest ?? '').toLowerCase().includes(target)
     || sourceText(image.source).toLowerCase().includes(target)
   );
@@ -235,11 +449,220 @@ function completeBuild(
   emit(done);
 }
 
+function libraryMetaForRepository(
+  state: FixtureState,
+  repository: string,
+): FixtureLibraryMeta | null {
+  for (const meta of state.library.values()) {
+    if (meta.repository === repository) {
+      return meta;
+    }
+  }
+  return null;
+}
+
+function libraryMetaForTag(
+  state: FixtureState,
+  repository: string,
+  tag: string,
+): FixtureLibraryMeta | null {
+  for (const meta of state.library.values()) {
+    if (meta.repository === repository && meta.tags.includes(tag)) {
+      return meta;
+    }
+  }
+  return null;
+}
+
+function libraryImpact(meta: FixtureLibraryMeta, tag: string | null): ImageReferenceImpact {
+  return {
+    ...meta.impact,
+    other_tags: meta.tags.filter((candidate) => candidate !== tag),
+  };
+}
+
+function libraryEntries(state: FixtureState, query: string, repository: string): ImageLibraryEntry[] {
+  return state.images
+    .filter((image) =>
+      matches(image, query, state.library.get(image.image_id)?.tags ?? []),
+    )
+    .map((image) => {
+      const meta = state.library.get(image.image_id);
+      if (!meta) {
+        return {
+          image,
+          repository: '',
+          tags: [],
+          manifest_digest: null,
+          media_type: null,
+          kind: null,
+          image_kind: null,
+          mount_default: null,
+          platform: null,
+          representation: 'unknown' as const,
+          layers: [],
+          closure: [],
+        };
+      }
+      return {
+        image,
+        repository: meta.repository,
+        tags: [...meta.tags],
+        manifest_digest: meta.manifest_digest,
+        media_type: meta.media_type,
+        kind: meta.kind,
+        image_kind: meta.image_kind,
+        mount_default: meta.mount_default,
+        platform: meta.platform,
+        representation: meta.representation,
+        layers: [...meta.layers],
+        closure: [...meta.closure],
+        impact: { ...libraryImpact(meta, null), other_tags: [] },
+      };
+    })
+    .filter((entry) => repository === '' || entry.repository === repository);
+}
+
+function requestLibrary(
+  state: FixtureState,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> | null {
+
+  if (type === 'server.image.library.list') {
+    const offset = Number(payload.offset ?? 0);
+    const limit = Number(payload.limit ?? 50);
+    const query = String(payload.query ?? '');
+    const repository = String(payload.repository ?? '');
+    const entries = libraryEntries(state, query, repository);
+    const page = entries.slice(offset, offset + limit);
+    return Promise.resolve({
+      success: true,
+      entries: page,
+      total: entries.length,
+      ...(offset + page.length < entries.length ? { next_offset: offset + page.length } : {}),
+    });
+  }
+  if (type === 'server.image.impact.get') {
+    const repository = String(payload.repository ?? '');
+    const tag = String(payload.tag ?? '');
+    const meta = libraryMetaForTag(state, repository, tag);
+    return Promise.resolve(
+      meta
+        ? { success: true, impact: libraryImpact(meta, tag) }
+        : { success: false, error: 'Tag not found', error_kind: 'not_found' },
+    );
+  }
+  return null;
+}
+
+function requestTagSet(
+  state: FixtureState,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const repository = String(payload.repository ?? '');
+  const tag = String(payload.tag ?? '');
+  const digest = String(payload.digest ?? '');
+  const expected = typeof payload.expected_digest === 'string' ? payload.expected_digest : null;
+  const meta = libraryMetaForRepository(state, repository);
+  if (!meta) {
+    return Promise.resolve({ success: false, error: 'repository not found', error_kind: 'not_found' });
+  }
+  if (expected === null) {
+    if (meta.tags.includes(tag)) {
+      return Promise.resolve({
+        success: false,
+        error: `tag ${repository}:${tag} already exists`,
+        error_kind: 'conflict',
+        current_digest: meta.manifest_digest,
+      });
+    }
+    meta.tags = [...meta.tags, tag].sort();
+    return Promise.resolve({
+      success: true,
+      update: { repository, tag, digest, previous: null },
+    });
+  }
+  if (!meta.tags.includes(tag)) {
+    return Promise.resolve({ success: false, error: 'Tag not found', error_kind: 'not_found' });
+  }
+  if (expected !== meta.manifest_digest || digest !== meta.manifest_digest) {
+    return Promise.resolve({
+      success: false,
+      error: `tag conflict for ${repository}:${tag}: expected ${expected}`,
+      error_kind: 'conflict',
+      current_digest: meta.manifest_digest,
+    });
+  }
+  return Promise.resolve({
+    success: true,
+    update: { repository, tag, digest, previous: expected },
+  });
+}
+
+function requestTagRemove(
+  state: FixtureState,
+  payload: Record<string, unknown>,
+): Promise<unknown> {
+  const repository = String(payload.repository ?? '');
+  const tag = String(payload.tag ?? '');
+  const expected = String(payload.expected_digest ?? '');
+  const accept = payload.accept_reference_impact === true;
+  const meta = libraryMetaForTag(state, repository, tag);
+  if (!meta) {
+    return Promise.resolve({ success: false, error: 'Tag not found', error_kind: 'not_found' });
+  }
+  if (meta.manifest_digest !== expected) {
+    return Promise.resolve({
+      success: false,
+      error: `tag conflict for ${repository}:${tag}: expected ${expected}`,
+      error_kind: 'conflict',
+      current_digest: meta.manifest_digest,
+    });
+  }
+  const impact = libraryImpact(meta, tag);
+  const referenced =
+    impact.project_pins > 0
+    || impact.session_pins > 0
+    || impact.leases > 0
+    || impact.compose_references > 0;
+  if (impact.unknown || (referenced && !accept)) {
+    return Promise.resolve({
+      success: false,
+      error: impact.unknown
+        ? 'Reference impact is unknown; refusing to unlink'
+        : 'Tag removal has references; review and confirm the reference impact',
+      error_kind: impact.unknown ? 'impact_unknown' : 'impact_required',
+      impact,
+    });
+  }
+  meta.tags = meta.tags.filter((candidate) => candidate !== tag);
+  return Promise.resolve({ success: true, removed: true, impact });
+}
+
+function requestTagMutation(
+  state: FixtureState,
+  type: string,
+  payload: Record<string, unknown>,
+): Promise<unknown> | null {
+  if (type === 'server.image.tag.set') {
+    return requestTagSet(state, payload);
+  }
+  if (type === 'server.image.tag.remove') {
+    return requestTagRemove(state, payload);
+  }
+  return null;
+}
+
 function requestRegistry(
   state: FixtureState,
   type: string,
   payload: Record<string, unknown>,
 ): Promise<unknown> | null {
+  const handled = requestLibrary(state, type, payload) ?? requestTagMutation(state, type, payload);
+  if (handled) {
+    return handled;
+  }
   if (type === 'server.image.list') {
     if (state.scenario === 'error') {
       return Promise.resolve({
@@ -290,7 +713,7 @@ function requestBuildInventory(
     );
   }
   if (type === 'server.image.build.cancel' || type === 'server.image.build.retry') {
-    return Promise.resolve(buildActionReply(state, type, String(payload.build_id ?? ''), emit));
+    return Promise.resolve(buildActionReply(state, type, payload, emit));
   }
   return null;
 }
@@ -302,14 +725,47 @@ function buildReadReply(state: FixtureState, buildId: string): unknown {
     : { success: false, error: 'build not found', error_kind: 'not_found' };
 }
 
+function buildSourceText(buildValue: ImageBuildDescriptor): string {
+  const source = buildValue.source;
+  switch (source.kind) {
+    case 'github':
+      return `${source.repository_url} ${source.ref}`;
+    case 'local_directory':
+      return source.path;
+    case 'compose':
+      return source.sources.map((entry) => `${entry.repository} ${entry.ref}`).join(' ');
+  }
+}
+
 function buildListReply(state: FixtureState, payload: Record<string, unknown>): unknown {
   const offset = Number(payload.offset ?? 0);
   const limit = Number(payload.limit ?? 50);
-  const page = state.builds.slice(offset, offset + limit);
+  const statuses = Array.isArray(payload.statuses) ? payload.statuses : [];
+  const sources = Array.isArray(payload.sources) ? payload.sources : [];
+  const query = String(payload.query ?? '').trim();
+  const filtered = state.builds.filter((buildValue) => {
+    if (statuses.length > 0 && !statuses.includes(buildValue.status)) {
+      return false;
+    }
+    if (sources.length > 0 && !sources.includes(buildValue.source.kind)) {
+      return false;
+    }
+    if (query.length === 0) {
+      return true;
+    }
+    return (
+      buildValue.build_id.includes(query)
+      || buildValue.image_id.includes(query)
+      || (buildValue.alias ?? '').includes(query)
+      || (buildValue.digest ?? '').includes(query)
+      || buildSourceText(buildValue).includes(query)
+    );
+  });
+  const page = filtered.slice(offset, offset + limit);
   return {
     builds: page,
-    total: state.builds.length,
-    ...(offset + page.length < state.builds.length
+    total: filtered.length,
+    ...(offset + page.length < filtered.length
       ? { next_offset: offset + page.length }
       : {}),
   };
@@ -318,20 +774,40 @@ function buildListReply(state: FixtureState, payload: Record<string, unknown>): 
 function buildActionReply(
   state: FixtureState,
   type: string,
-  buildId: string,
+  payload: Record<string, unknown>,
   emit: Emit,
 ): unknown {
+  const buildId = String(payload.build_id ?? '');
+  const expected = payload.attempt;
   const position = state.builds.findIndex((candidate) => candidate.build_id === buildId);
   if (position < 0) {
     return { success: false, error: 'build not found', error_kind: 'not_found' };
   }
   const previous = state.builds[position];
+  if (typeof expected === 'number' && expected !== previous.attempt) {
+    return {
+      success: false,
+      error: `build ${buildId} is at attempt ${previous.attempt}; the requested attempt ${expected} is stale`,
+      error_kind: 'conflict',
+    };
+  }
+  const finishedAttempt = {
+    attempt: previous.attempt,
+    status: previous.status,
+    stage: previous.stage ?? null,
+    diagnostic: previous.diagnostic ?? null,
+    error: previous.error ?? null,
+    started_at: previous.created_at,
+    finished_at: previous.updated_at,
+  };
+  const attempts = [...(previous.attempts ?? []), finishedAttempt];
   if (type === 'server.image.build.cancel') {
     const canceled: ImageBuildDescriptor = {
       ...previous,
       status: 'canceled',
       stage: null,
       error: null,
+      attempts,
       updated_at: previous.updated_at + 5,
     };
     state.builds[position] = canceled;
@@ -344,6 +820,8 @@ function buildActionReply(
     status: 'running',
     stage: 'packaging',
     error: null,
+    diagnostic: null,
+    attempts,
     digest: null,
     size_bytes: 0,
     updated_at: previous.updated_at + 5,

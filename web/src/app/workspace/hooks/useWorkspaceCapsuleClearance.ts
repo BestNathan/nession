@@ -1,31 +1,59 @@
 import { useLayoutEffect, type RefObject } from 'react';
-import { WORKSPACE_CONTENT_BOTTOM_INSET } from '@/shared/lib/workspaceScrollClearance';
+import {
+  WORKSPACE_ACTIONS_BOTTOM_INSET,
+  WORKSPACE_BOUNDED_SCROLL_MARKER,
+  WORKSPACE_CONTENT_BOTTOM_INSET,
+  WORKSPACE_SCROLL_BOTTOM_INSET,
+} from '@/shared/lib/workspaceScrollClearance';
+import {
+  APP_VIEWPORT_ENVIRONMENT_ATTRIBUTE,
+  APP_VIEWPORT_SNAPSHOT_EVENT,
+  type AppViewportSnapshot,
+} from '@/platform/viewport/appViewport';
 
 /** The tool bar's contract with this hook — the element the zone draws itself into. */
 const TOOL_BAR_SELECTOR = '[data-testid="workspace-tool-bar"]';
 
 /**
- * Publishes {@link WORKSPACE_CONTENT_BOTTOM_INSET} on the Workspace shell from
- * the actual Capsule Zone geometry (#1347 SC-12).
+ * The element that actually scrolls, published by the App host contract
+ * (#4115): either the Host-owned page scrollport or a declared bounded region.
+ * Web has no such marker; its band is measured against the shell itself.
+ */
+const APP_WORKSPACE_SURFACE_SELECTOR = '[data-workspace-app-surface]';
+
+/**
+ * Publishes the Workspace's Capsule clearances on the shell from the actual
+ * Zone geometry (#1347 SC-12, #4115).
  *
- * This is the Workspace's half of the mechanism `useCapsuleDockClearance`
- * provides for the Terminal, and the differences between the two are the
- * surfaces' own:
+ * Three numbers, one measurement:
  *
- * - The Terminal spends the value *in layout* (the viewport shrinks and xterm
- *   re-fits), so the terminal's hook must measure the composer and ignore a
- *   floating projection (#826). The Workspace spends it as *trailing scroll
- *   padding*, so the honest number is the whole floating band — the tool bar's
- *   top to the shell's bottom — and an emerging capsule growing it is correct:
- *   scroll clearance costs no rows, it just moves the end of the scroll.
- * - The Workspace's bar is conditional (`showDock || showSurfaceAction`), so a
- *   missing bar publishes `0px` rather than keeping a stale measurement. The
- *   variable is removed on cleanup for the same reason: a shell that goes away
- *   must not leave a number behind for a container that now has nothing over it.
+ * - **content band** — the shell's bottom to the floating bar's top. Safe area
+ *   is already inside it: the bar is positioned with
+ *   `max(shell-inset, safe-area)`, so its top cannot sit below that offset.
+ * - **scroll inset** — the *scrolling viewport's* bottom to the same bar top.
+ *   On App that viewport may be a Host scrollport or a declared bounded
+ *   region; a Host-owned Bottom Actions row below the scrollport makes this
+ *   zero, which is exactly the point: the scroll end must not reserve a blank
+ *   tail for space that is already outside it.
+ * - **per-scrollport inset** — the same value is written on every element
+ *   carrying the bounded marker, measured from *that* element's own visible
+ *   bottom. Split surfaces (a list above a warnings footer, an editor above a
+ *   feedback pane) therefore do not share one number. The marked element is
+ *   the owning viewport even when an inner renderer currently carries the
+ *   scroll (CodeMirror, a virtualized body); an owner already above the bar
+ *   naturally measures zero (#4222 SC-02).
+ * - **actions inset** — the full band, spent by the Host-owned actions slot so
+ *   its controls sit above the Capsule at every overlay height.
  *
- * The observer set covers the three ways the number moves: the shell resizes,
- * the bar resizes (the capsule's own content changes), and the bar mounts or
- * unmounts (capabilities change, a pushed depth hides the dock).
+ * When no bar is drawn the anchor is the shell's bottom minus the App viewport
+ * snapshot's safe-area bottom: the clear end of the surface is still the safe
+ * area, and it is counted once rather than added to a measured band.
+ *
+ * The observers cover every input that moves a number: the shell resizes, the
+ * bar resizes or mounts/unmounts, the scrolling surface resizes or is replaced,
+ * and the App viewport publishes a new safe area (orientation, fixture input).
+ * The event is the App environment's; Web has no environment and falls back to
+ * the window resize it always had.
  */
 export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | null>): void {
   useLayoutEffect(() => {
@@ -34,27 +62,105 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
       return;
     }
 
-    let observedBar: HTMLElement | null = null;
+    const observed = new Set<HTMLElement>();
+    // The last value written to each individually measured scrollport, so a
+    // steady layout does not thrash inline styles on every observer tick.
+    const measuredInsets = new Map<HTMLElement, number>();
+    let safeAreaBottom = 0;
+
+    const observe = (element: HTMLElement | null) => {
+      if (!element || observed.has(element)) {
+        return;
+      }
+      observed.add(element);
+      resizeObserver.observe(element);
+    };
+
+    const forget = (element: HTMLElement) => {
+      if (!observed.delete(element)) {
+        return;
+      }
+      resizeObserver.unobserve(element);
+      if (measuredInsets.delete(element)) {
+        element.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+      }
+    };
 
     const update = () => {
       const bar = shell.querySelector(TOOL_BAR_SELECTOR);
       const barElement = bar instanceof HTMLElement ? bar : null;
-      if (barElement !== observedBar) {
-        if (observedBar) {
-          resizeObserver.unobserve(observedBar);
-        }
-        // Recorded before observing: an observer that invokes its callback
-        // synchronously would otherwise re-enter with the stale value and
-        // re-observe the same element forever.
-        observedBar = barElement;
-        if (barElement) {
-          resizeObserver.observe(barElement);
+      const surface = shell.querySelector(APP_WORKSPACE_SURFACE_SELECTOR);
+      const surfaceElement = surface instanceof HTMLElement ? surface : null;
+
+      // Every declared bounded scrollport in this Workspace (#4222 SC-02).
+      // Each one is measured against the same live Capsule top, but from its
+      // own visible bottom: sibling scrollers that end at different
+      // coordinates (a split reader, a list beside a detail pane) each get the
+      // clearance that belongs to them instead of inheriting one number
+      // derived from the outer surface.
+      const scrollports = new Set<HTMLElement>(
+        Array.from(
+          shell.querySelectorAll<HTMLElement>(
+            `[class~="${WORKSPACE_BOUNDED_SCROLL_MARKER}"]`,
+          ),
+        ),
+      );
+
+      // Drop observations for elements whose marker/lifecycle left the shell.
+      for (const element of Array.from(observed)) {
+        const stillNeeded =
+          element === barElement || element === surfaceElement || scrollports.has(element);
+        if (!stillNeeded || !element.isConnected) {
+          forget(element);
         }
       }
-      const inset = barElement
-        ? Math.max(0, shell.getBoundingClientRect().bottom - barElement.getBoundingClientRect().top)
-        : 0;
-      shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, `${inset}px`);
+
+      observe(barElement);
+      observe(surfaceElement);
+
+      const shellRect = shell.getBoundingClientRect();
+      // The clear end of the surface: the floating bar's top, or the safe area
+      // when nothing floats. Safe area never moves into the band twice.
+      const floatingTop = barElement
+        ? barElement.getBoundingClientRect().top
+        : shellRect.bottom - safeAreaBottom;
+      const contentBand = Math.max(0, shellRect.bottom - floatingTop);
+      // The scroll extent belongs to the element that really scrolls. Without
+      // an App surface marker (Web) the shell is that element.
+      const scrollingBottom = surfaceElement
+        ? surfaceElement.getBoundingClientRect().bottom
+        : shellRect.bottom;
+      const scrollInset = Math.max(0, scrollingBottom - floatingTop);
+
+      shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, `${contentBand}px`);
+      shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, `${scrollInset}px`);
+      shell.style.setProperty(WORKSPACE_ACTIONS_BOTTOM_INSET, `${contentBand}px`);
+
+      // Measured per element, not inherited from the shell. The owning
+      // *element* is the scrolling viewport even when an inner renderer (the
+      // CodeMirror host, a virtualized body) currently carries the scroll:
+      // requiring the outer element's own `scrollHeight` to exceed its
+      // `clientHeight` would zero the inset for exactly those adapters. A
+      // constrained element already above the bar yields zero naturally.
+      //
+      // An element may extend past the shell's visible bottom — a renderer
+      // inside a scroll area, or a content-height host. Clamp its visible
+      // bottom to the shell: measuring the off-screen content edge would
+      // inflate its padding and change the scroll relation, while the shell
+      // band is exactly what such a nested renderer previously inherited.
+      for (const element of scrollports) {
+        observe(element);
+        const visibleBottom = Math.min(
+          element.getBoundingClientRect().bottom,
+          shellRect.bottom,
+        );
+        const inset = Math.max(0, visibleBottom - floatingTop);
+        if (measuredInsets.get(element) === inset) {
+          continue;
+        }
+        element.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, `${inset}px`);
+        measuredInsets.set(element, inset);
+      }
     };
 
     const resizeObserver = new ResizeObserver(update);
@@ -62,12 +168,36 @@ export function useWorkspaceCapsuleClearance(shellRef: RefObject<HTMLElement | n
 
     resizeObserver.observe(shell);
     mutationObserver.observe(shell, { childList: true, subtree: true });
+
+    // The App's single viewport reader publishes safe-area changes as one
+    // shell-local snapshot (#3523); consuming it keeps this hook from opening a
+    // second `visualViewport` interpretation.
+    const environment = shell.closest(`[${APP_VIEWPORT_ENVIRONMENT_ATTRIBUTE}]`);
+    const onSnapshot = (event: Event) => {
+      const snapshot = (event as CustomEvent<AppViewportSnapshot>).detail;
+      const next = snapshot?.safeArea?.bottom ?? 0;
+      if (next !== safeAreaBottom) {
+        safeAreaBottom = next;
+        update();
+      }
+    };
+    environment?.addEventListener(APP_VIEWPORT_SNAPSHOT_EVENT, onSnapshot);
+    window.addEventListener('resize', update);
+
     update();
 
     return () => {
       resizeObserver.disconnect();
       mutationObserver.disconnect();
+      for (const element of measuredInsets.keys()) {
+        element.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+      }
+      measuredInsets.clear();
+      environment?.removeEventListener(APP_VIEWPORT_SNAPSHOT_EVENT, onSnapshot);
+      window.removeEventListener('resize', update);
       shell.style.removeProperty(WORKSPACE_CONTENT_BOTTOM_INSET);
+      shell.style.removeProperty(WORKSPACE_SCROLL_BOTTOM_INSET);
+      shell.style.removeProperty(WORKSPACE_ACTIONS_BOTTOM_INSET);
     };
   }, [shellRef]);
 }

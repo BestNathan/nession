@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { EDGE_BAND_PX, EDGE_PLATFORM_GUARD_PX } from '../../gesture';
+import {
+  EDGE_BAND_PX,
+  EDGE_PLATFORM_GUARD_PX,
+  SWIPE_INNER_MAX_REVEAL_PX,
+  SWIPE_INNER_TRAVEL_LIMIT_PX,
+  SWIPE_MAX_REVEAL_FRACTION,
+  SWIPE_REVEAL_LIMIT_FRACTION,
+  resistedTravel,
+} from '../../gesture';
 import {
   SwipeGesture,
   type SwipeGestureOptions,
@@ -228,12 +236,89 @@ describe('SwipeGesture — release-only commit and frozen destination', () => {
     expect(end.outcome).toBe('snapback');
   });
 
-  it('caps the preview at 80% of the shell width', () => {
+  it('follows the finger up to the preferred 80% and resists beyond it', () => {
     const engine = harness();
-    start(engine, EDGE_PLATFORM_GUARD_PX + 10);
-    move(engine, 390);
+    const startX = EDGE_PLATFORM_GUARD_PX + 2;
+    const preferred = WIDE_PHONE.right * SWIPE_MAX_REVEAL_FRACTION;
+    const limit = WIDE_PHONE.right * SWIPE_REVEAL_LIMIT_FRACTION;
 
-    expect(engine.snapshot().offset).toBe(320);
+    start(engine, startX);
+    move(engine, startX + preferred);
+    expect(engine.snapshot().offset).toBeCloseTo(preferred, 5);
+
+    // Past the former hard cap the preview keeps moving, but less than the
+    // finger and never past the absolute bound (#4185).
+    move(engine, startX + preferred + 60);
+    const pastCap = engine.snapshot().offset;
+    expect(pastCap).toBeGreaterThan(preferred);
+    expect(pastCap).toBeLessThan(limit);
+
+    move(engine, startX + preferred + 240);
+    const farPast = engine.snapshot().offset;
+    expect(farPast).toBeGreaterThan(pastCap);
+    expect(farPast).toBeLessThan(limit);
+  });
+});
+
+describe('SwipeGesture — continuous resistance beyond the preferred reveal (#4185)', () => {
+  it('keeps the direct gain below the preferred point and is continuous there', () => {
+    expect(resistedTravel(80, 100, 140)).toBe(80);
+    expect(resistedTravel(100, 100, 140)).toBe(100);
+    // No step at the boundary: a hair past it moves the preview a hair.
+    expect(resistedTravel(100.01, 100, 140)).toBeCloseTo(100.01, 5);
+  });
+
+  it('responds to every additional pixel, with diminishing gain and a hard bound', () => {
+    const preferred = 100;
+    const limit = 140;
+    let previous = resistedTravel(preferred, preferred, limit);
+    for (const travel of [110, 130, 170, 260, 600]) {
+      const current = resistedTravel(travel, preferred, limit);
+      expect(current).toBeGreaterThan(previous);
+      expect(current).toBeLessThan(limit);
+      previous = current;
+    }
+  });
+
+  it('passes travel through when the shell cannot be measured', () => {
+    expect(resistedTravel(500, Number.POSITIVE_INFINITY, Number.POSITIVE_INFINITY)).toBe(500);
+  });
+
+  it('bounds an inner Pop preview and still keeps its owner on snapback', () => {
+    const engine = harness({
+      getInnerStack: () => ({ pop: 'Files', forward: null }),
+    });
+    engine.setMayPage(false);
+
+    start(engine, 100);
+    move(engine, 100 + SWIPE_INNER_MAX_REVEAL_PX);
+    expect(engine.snapshot().offset).toBeCloseTo(SWIPE_INNER_MAX_REVEAL_PX, 5);
+
+    move(engine, 100 + SWIPE_INNER_MAX_REVEAL_PX + 90);
+    expect(engine.snapshot().offset).toBeGreaterThan(SWIPE_INNER_MAX_REVEAL_PX);
+    expect(engine.snapshot().offset).toBeLessThan(SWIPE_INNER_TRAVEL_LIMIT_PX);
+
+    // Reverse below the commit threshold, then release. The gesture is
+    // rejected, but the result still names the inner owner so its frame can
+    // animate home in place.
+    move(engine, 130);
+    engine.advance(1000);
+    const end = engine.end(touch(130));
+    expect(end.outcome).toBe('snapback');
+    expect(end.destinationIndex).toBeNull();
+    expect(end.innerAction).toBe('pop');
+  });
+
+  it('returns a dragged-through page preview to rest on cancel', () => {
+    const engine = harness();
+    start(engine, EDGE_PLATFORM_GUARD_PX + 2);
+    move(engine, 1000);
+    expect(engine.snapshot().offset).toBeGreaterThan(0);
+
+    const cancelled = engine.cancel('native-touchcancel');
+    expect(cancelled.offset).toBe(0);
+    expect(cancelled.phase).toBe('idle');
+    expect(cancelled.reason).toBe('native-touchcancel');
   });
 });
 

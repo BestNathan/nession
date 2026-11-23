@@ -24,6 +24,8 @@ export class MockWebSocket {
   static instances: MockWebSocket[] = [];
 
   binaryType = '';
+  /** Bytes the browser has queued but not yet written to the network. */
+  bufferedAmount = 0;
   onopen: (() => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;

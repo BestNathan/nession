@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { useWorkspaceClearancePx } from '@/platform/explorer/hooks/useWorkspaceClearancePx';
-import { WORKSPACE_CONTENT_BOTTOM_INSET } from '@/shared/lib/workspaceScrollClearance';
+import { WORKSPACE_SCROLL_BOTTOM_INSET } from '@/shared/lib/workspaceScrollClearance';
 
 /**
  * The Workspace shell's real shape for this hook: the published inset is an
@@ -30,7 +30,7 @@ describe('useWorkspaceClearancePx', () => {
 
   it('reads the published inset the Workspace shell carries', () => {
     const { shell, container } = workspaceDom();
-    shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, '68px');
+    shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, '68px');
 
     const { result } = renderHook(() => useWorkspaceClearancePx({ current: container }));
 
@@ -53,18 +53,18 @@ describe('useWorkspaceClearancePx', () => {
     const { result } = renderHook(() => useWorkspaceClearancePx({ current: container }));
     expect(result.current).toBe(0);
 
-    shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, '64px');
+    shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, '64px');
 
     await waitFor(() => expect(result.current).toBe(64));
   });
 
   it('returns to zero when the bar leaves and the inset collapses', async () => {
     const { shell, container } = workspaceDom();
-    shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, '64px');
+    shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, '64px');
     const { result } = renderHook(() => useWorkspaceClearancePx({ current: container }));
     expect(result.current).toBe(64);
 
-    shell.style.setProperty(WORKSPACE_CONTENT_BOTTOM_INSET, '0px');
+    shell.style.setProperty(WORKSPACE_SCROLL_BOTTOM_INSET, '0px');
 
     await waitFor(() => expect(result.current).toBe(0));
   });

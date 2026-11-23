@@ -21,13 +21,13 @@ export const VERSION = 1;
 
 // ── Shapes ──
 
-export type SessionProjectBindingUpdatePayload = { session_id: string, project_id?: string | null, expected_revision?: number | null, };
+export type SessionProjectBindingUpdatePayload = { session_id: string, project_id?: string | null, expected_revision?: number | null, expected_instance_id?: string | null, };
 export type SessionProjectBindingResponse = { success: boolean, project_id?: string | null, revision?: number | null, error?: string | null, error_kind?: string | null, };
 
 // ── Operations ──
 
 /** The payload a caller sends. */
-export type SessionProjectBindingUpdateCall = { session_id: string, project_id?: string | null, expected_revision?: number | null, };
+export type SessionProjectBindingUpdateCall = { session_id: string, project_id?: string | null, expected_revision?: number | null, expected_instance_id?: string | null, };
 
 /** The payload the provider answers with. */
 export type SessionProjectBindingReply = { success: boolean, project_id?: string | null, revision?: number | null, error?: string | null, error_kind?: string | null, };

@@ -290,7 +290,34 @@ pub fn prepare(
     match result {
         Ok(prepared) => Ok(prepared),
         Err(error) => {
-            let _ = std::fs::remove_dir_all(&execution_dir);
+            // A failed composition step may have persisted a durable rollback
+            // identity before exposing a physical mount. Cleaning through that
+            // record keeps a failed unmount retryable after a restart; only an
+            // unrecorded failure may remove the execution directory directly.
+            match crate::exec::read_record(settings, &execution_id) {
+                Ok(Some(record)) => {
+                    let mut report = crate::exec::CleanupReport::default();
+                    if let Err(cleanup) =
+                        crate::exec::cleanup_record(settings, &record, &mut report)
+                    {
+                        tracing::warn!(
+                            execution = %execution_id,
+                            "could not clean a failed Sandbox preparation; the durable record \
+                             stays for retry: {cleanup:#}"
+                        );
+                    }
+                }
+                Ok(None) => {
+                    let _ = std::fs::remove_dir_all(&execution_dir);
+                }
+                Err(record_error) => {
+                    tracing::warn!(
+                        execution = %execution_id,
+                        "could not read the failed Sandbox preparation record; leaving its \
+                         execution directory in place: {record_error:#}"
+                    );
+                }
+            }
             if let Some(runtime_dir) = runtime_dir {
                 let _ = std::fs::remove_dir_all(runtime_dir);
             }
@@ -470,9 +497,14 @@ fn prepare_inner(
     visible_probes.sort();
     visible_probes.dedup();
 
+    let host_root_composition = compiled
+        .filesystem
+        .as_ref()
+        .and_then(|filesystem| filesystem.composition.as_ref())
+        .is_some_and(|composition| composition.base.is_none());
     let mut hidden_probes = Vec::new();
     let mut not_socket_probes = Vec::new();
-    if compiled.filesystem.is_some() {
+    if compiled.filesystem.is_some() && !host_root_composition {
         hidden_probes.extend(
             forbidden
                 .directories
@@ -579,6 +611,7 @@ fn prepare_inner(
                 }
             })
         }),
+        recovery_pending: false,
         shared_mounts: mounted
             .as_ref()
             .map(erofs::MountedComposition::shared_mounts)

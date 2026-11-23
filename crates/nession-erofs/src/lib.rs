@@ -29,6 +29,9 @@
 pub mod blob;
 pub mod oci;
 
+#[cfg(feature = "store")]
+pub mod contracts;
+
 #[cfg(all(test, unix))]
 pub(crate) mod testing;
 
@@ -48,7 +51,7 @@ pub mod cache;
 #[cfg(feature = "distribution")]
 pub mod distribution;
 
-#[cfg(feature = "registry")]
+#[cfg(any(feature = "registry", feature = "registry-service"))]
 pub mod registry;
 
 #[cfg(all(feature = "mount", target_os = "linux"))]
@@ -63,7 +66,7 @@ pub use blob::digest::{
 #[cfg(feature = "store")]
 pub use blob::store;
 #[cfg(feature = "store")]
-pub use blob::store::{BlobDigest, BlobStore, StoreUsage};
+pub use blob::store::{BlobDigest, FsBlobStore, StoreUsage};
 #[cfg(feature = "sources")]
 pub use build::archive::{
     fetch_and_extract, ArchiveFetcher, ArchiveFormat, ArchiveLimits, ArchiveReceipt, ArchiveSource,
@@ -103,7 +106,17 @@ pub use build::{
     TreeStats,
 };
 #[cfg(feature = "cache")]
+pub use cache::repository::CacheRepositoryStore;
+#[cfg(feature = "cache")]
+pub use cache::store::CacheBlobStore;
+#[cfg(feature = "cache")]
 pub use cache::{CachedImage, DownloadGrant, ErofsCache, PinGuard};
+#[cfg(all(feature = "catalog", feature = "registry-service"))]
+pub use catalog::CatalogRepositoryPublisher;
+#[cfg(feature = "catalog")]
+pub use catalog::CatalogRepositoryStore;
+#[cfg(feature = "store")]
+pub use contracts::{BlobStore, RepositoryManifest, RepositoryStore};
 #[cfg(feature = "build")]
 pub use git::{GitCommandRunner, GitSnapshot, GitTarget, ProcessGitRunner};
 #[cfg(all(feature = "mount", target_os = "linux"))]

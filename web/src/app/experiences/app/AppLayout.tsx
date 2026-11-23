@@ -10,7 +10,10 @@ import type { Surface } from '@/app/patterns/SessionHeader';
 import type { CapabilityId } from '@/product/capability';
 import type { FileOps } from '@/capabilities/files';
 import type { Agent, Session } from '@/types';
-import type { CapabilityFocus } from '@/app/workspace/workspaceContext';
+import type {
+  CapabilityFocus,
+  WorkspaceStackReport,
+} from '@/app/workspace/workspaceContext';
 
 /**
  * `collapsible` is dropped here rather than passed through as `false`: the App
@@ -96,6 +99,10 @@ export function AppLayout(props: {
   // panel unmounts — the Workspace layer is unmounted whenever it is closed,
   // and a stale `true` would silence the Terminal's own gesture.
   const [workspaceDetailPushed, setWorkspaceDetailPushed] = useState(false);
+  // The inner stack destinations a claimed contact may operate (#3971). Held
+  // here because `AppLayers` is the single gesture coordinator and the
+  // Workspace panel is the component that knows what its stack can do.
+  const [workspaceStack, setWorkspaceStack] = useState<WorkspaceStackReport | null>(null);
   const [incomingFileFocus, setIncomingFileFocus] = useState<CapabilityFocus | undefined>();
 
   // One read/coordinate owner for the whole App Experience (#3523). The frame
@@ -124,6 +131,7 @@ export function AppLayout(props: {
         layer={layer}
         onLayerChange={onLayerChange}
         workspaceDetailPushed={workspaceDetailPushed}
+        workspaceStack={workspaceStack}
         sessions={
           projectDetail ?? (
             <div className="flex h-full min-h-0 flex-col">
@@ -167,6 +175,7 @@ export function AppLayout(props: {
               showTerminal={false}
               experience="app"
               onWorkspaceDepthChange={setWorkspaceDetailPushed}
+              onWorkspaceStackChange={setWorkspaceStack}
               incomingFocus={incomingFileFocus}
               onIncomingFocusApplied={() => setIncomingFileFocus(undefined)}
             />

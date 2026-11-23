@@ -200,65 +200,65 @@ impl MountPlan {
     /// created.
     pub fn compile(composition: &CompiledComposition, settings: &SandboxSettings) -> Result<Self> {
         let mut entries = Vec::new();
-        let base_source = if composition.base_writable {
-            MountSource::Overlay(OverlaySource {
-                workspace: None,
-                lowers: vec![ErofsSource::from(&composition.base)],
-            })
-        } else {
-            MountSource::Erofs(ErofsSource::from(&composition.base))
-        };
-        entries.push(MountPlanEntry {
-            role: MountRole::Base,
-            source: base_source,
-            target: Path::new("/").to_path_buf(),
-        });
-        let Some(workspace) = &composition.workspace else {
-            return Err(SandboxError::InvalidPolicy(
-                "filesystem.composition requires a workspace view".to_string(),
-            ));
-        };
-        let workspace_entry = if workspace.has_lowers() {
-            if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
-                return Err(SandboxError::InvalidPolicy(
-                    "a Project Location workspace cannot carry a Project EROFS lower".to_string(),
-                ));
-            }
-            let manager = settings.overlay_manager.as_ref().ok_or_else(|| {
-                SandboxError::UnsupportedPolicy(
-                    "the workspace Overlay requires the Agent's shared Workspace Overlay \
+        if let Some(base) = &composition.base {
+            let base_source = if composition.base_writable {
+                MountSource::Overlay(OverlaySource {
+                    workspace: None,
+                    lowers: vec![ErofsSource::from(base)],
+                })
+            } else {
+                MountSource::Erofs(ErofsSource::from(base))
+            };
+            entries.push(MountPlanEntry {
+                role: MountRole::Base,
+                source: base_source,
+                target: Path::new("/").to_path_buf(),
+            });
+        }
+        if let Some(workspace) = &composition.workspace {
+            let workspace_entry = if workspace.has_lowers() {
+                if workspace.ownership == SandboxWorkspaceOwnership::ProjectLocation {
+                    return Err(SandboxError::InvalidPolicy(
+                        "a Project Location workspace cannot carry a Project EROFS lower"
+                            .to_string(),
+                    ));
+                }
+                let manager = settings.overlay_manager.as_ref().ok_or_else(|| {
+                    SandboxError::UnsupportedPolicy(
+                        "the workspace Overlay requires the Agent's shared Workspace Overlay \
                      manager"
-                        .to_string(),
-                )
-            })?;
-            let key = manager
-                .resolve_workspace(&workspace.write)
-                .map_err(|error| {
-                    SandboxError::InvalidPolicy(format!(
-                        "the workspace write directory {} is not an authorized Overlay \
-                         workspace: {error:#}",
-                        workspace.write.display()
-                    ))
+                            .to_string(),
+                    )
                 })?;
-            MountPlanEntry {
-                role: MountRole::Workspace,
-                source: MountSource::Overlay(OverlaySource {
-                    workspace: Some(key),
-                    lowers: workspace.lowers.iter().map(ErofsSource::from).collect(),
-                }),
-                target: Path::new("/workspace").to_path_buf(),
-            }
-        } else {
-            MountPlanEntry {
-                role: MountRole::Workspace,
-                source: MountSource::Bind {
-                    directory: workspace.write.clone(),
-                    ownership: workspace.ownership,
-                },
-                target: Path::new("/workspace").to_path_buf(),
-            }
-        };
-        entries.push(workspace_entry);
+                let key = manager
+                    .resolve_workspace(&workspace.write)
+                    .map_err(|error| {
+                        SandboxError::InvalidPolicy(format!(
+                            "the workspace write directory {} is not an authorized Overlay \
+                         workspace: {error:#}",
+                            workspace.write.display()
+                        ))
+                    })?;
+                MountPlanEntry {
+                    role: MountRole::Workspace,
+                    source: MountSource::Overlay(OverlaySource {
+                        workspace: Some(key),
+                        lowers: workspace.lowers.iter().map(ErofsSource::from).collect(),
+                    }),
+                    target: Path::new("/workspace").to_path_buf(),
+                }
+            } else {
+                MountPlanEntry {
+                    role: MountRole::Workspace,
+                    source: MountSource::Bind {
+                        directory: workspace.write.clone(),
+                        ownership: workspace.ownership,
+                    },
+                    target: Path::new("/workspace").to_path_buf(),
+                }
+            };
+            entries.push(workspace_entry);
+        }
         for toolchain in &composition.toolchains {
             entries.push(MountPlanEntry {
                 role: MountRole::Toolchain,
@@ -276,8 +276,10 @@ impl MountPlan {
     }
 
     /// Deterministic shape validation: no duplicate targets, no nested
-    /// non-root targets, exactly one Base at `/`, one Workspace at
-    /// `/workspace`, and only typed, absolute prepared sources.
+    /// non-root targets, at most one Base at `/`, at most one Workspace at
+    /// `/workspace`, and only typed, absolute prepared sources. A Base image
+    /// root requires the Workspace view; a Host-root plan may carry only
+    /// toolchains and/or a Workspace (#3792).
     fn validate(&self) -> Result<()> {
         if self.entries.len() > MAX_MOUNT_VIEWS {
             return Err(SandboxError::InvalidPolicy(format!(
@@ -362,9 +364,19 @@ impl MountPlan {
                 }
             }
         }
-        if bases != 1 || workspaces != 1 {
+        if bases > 1 || workspaces > 1 {
             return Err(SandboxError::InvalidPolicy(
-                "a Sandbox mount plan requires exactly one Base and one Workspace view".to_string(),
+                "a Sandbox mount plan carries at most one Base and one Workspace view".to_string(),
+            ));
+        }
+        if bases == 1 && workspaces != 1 {
+            return Err(SandboxError::InvalidPolicy(
+                "an image-root Sandbox mount plan requires one Workspace view".to_string(),
+            ));
+        }
+        if bases == 0 && workspaces == 0 && self.entries.is_empty() {
+            return Err(SandboxError::InvalidPolicy(
+                "a Sandbox mount plan requires at least one prepared view".to_string(),
             ));
         }
         let non_root: Vec<&PathBuf> = targets
@@ -549,7 +561,7 @@ mod tests {
         toolchains: Vec<CompiledImage>,
     ) -> CompiledComposition {
         CompiledComposition {
-            base: image('a', "/images/base.erofs", "/"),
+            base: Some(image('a', "/images/base.erofs", "/")),
             base_writable: false,
             workspace: Some(workspace.unwrap_or(CompiledWorkspace {
                 lowers: Vec::new(),
@@ -590,6 +602,69 @@ mod tests {
         };
         assert_eq!(directory, Path::new("/tmp/nession-workspace"));
         assert_eq!(plan.entries()[2].target, PathBuf::from("/opt/toolchain"));
+    }
+
+    #[test]
+    fn a_host_root_plan_has_no_base_and_binds_toolchains_and_a_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let composition = CompiledComposition {
+            base: None,
+            base_writable: false,
+            workspace: Some(CompiledWorkspace {
+                lowers: Vec::new(),
+                write: root.path().join("workspace"),
+                ownership: SandboxWorkspaceOwnership::Agent,
+            }),
+            toolchains: vec![image('b', "/images/tool.erofs", "/opt/tool")],
+        };
+        let plan = MountPlan::compile(&composition, &settings(root.path())).unwrap();
+        let roles: Vec<MountRole> = plan.entries().iter().map(|entry| entry.role).collect();
+        assert_eq!(roles, vec![MountRole::Workspace, MountRole::Toolchain]);
+        assert!(plan
+            .entries()
+            .iter()
+            .all(|entry| entry.role != MountRole::Base));
+        assert_eq!(plan.entries()[0].target, PathBuf::from("/workspace"));
+        assert_eq!(plan.entries()[0].source_kind(), MountSourceKind::Bind);
+        assert_eq!(plan.entries()[1].target, PathBuf::from("/opt/tool"));
+        plan.check_capabilities(&MountCapabilities {
+            erofs_ro: true,
+            workspace_overlay: false,
+            transient_overlay: false,
+            bind: true,
+        })
+        .expect("Host root needs EROFS read-only and Bind only");
+    }
+
+    #[test]
+    fn a_host_root_plan_can_carry_toolchains_without_a_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let composition = CompiledComposition {
+            base: None,
+            base_writable: false,
+            workspace: None,
+            toolchains: vec![image('b', "/images/tool.erofs", "/opt/tool")],
+        };
+        let plan = MountPlan::compile(&composition, &settings(root.path())).unwrap();
+        assert_eq!(plan.entries().len(), 1);
+        assert_eq!(plan.entries()[0].role, MountRole::Toolchain);
+    }
+
+    #[test]
+    fn an_image_root_plan_still_requires_a_workspace() {
+        let root = tempfile::tempdir().unwrap();
+        let composition = CompiledComposition {
+            base: Some(image('a', "/images/base.erofs", "/")),
+            base_writable: false,
+            workspace: None,
+            toolchains: Vec::new(),
+        };
+        let error = MountPlan::compile(&composition, &settings(root.path())).unwrap_err();
+        assert!(
+            format!("{error}").contains("exactly one Base and one Workspace")
+                || format!("{error}").contains("one Workspace view"),
+            "{error}"
+        );
     }
 
     #[test]

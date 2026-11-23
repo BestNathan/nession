@@ -66,7 +66,19 @@ addresses: Array<AgentAddress>,
  * The manifest is derived from the providers an agent actually composed, so
  * it cannot advertise a contract no handler serves.
  */
-protocol_manifest?: ProtocolManifest | null, };
+protocol_manifest?: ProtocolManifest | null, 
+/**
+ * The Extension-contributed MCP Tools this Agent advertises (`#3778`).
+ *
+ * Derived from the same composed catalog the Agent's embedded MCP
+ * endpoint serves, so it cannot advertise a Tool the Agent cannot execute.
+ * Optional: an Agent with no Extension contributions — and every Agent
+ * predating this field — registers exactly as before. The Server validates
+ * the names and typed output schemas before advertising them; the
+ * manifest rides the registration round trip so a tool is never listed
+ * before its owner's availability is known.
+ */
+mcp_tool_manifest?: McpToolManifest | null, };
 export type AgentRegisterResponsePayload = { 
 /**
  * "accepted" or "rejected".
@@ -150,6 +162,36 @@ protocols: { [key in ProtocolId]: ContractSupport },
  * resolution is unchanged when it moves.
  */
 software_version?: string | null, };
+export type McpToolManifest = { 
+/**
+ * The manifest contract version the sender used.
+ */
+manifest_version: number, 
+/**
+ * Contributed Tools in composition order.
+ */
+tools: Array<McpToolDescriptor>, };
+export type McpToolDescriptor = { 
+/**
+ * The exact MCP Tool name, unique across the whole advertised catalog.
+ */
+name: string, 
+/**
+ * The Extension that owns this Tool's semantics.
+ */
+provider: string, 
+/**
+ * What the Tool answers and which owner it belongs to.
+ */
+description: string, 
+/**
+ * The Tool's typed argument schema, verbatim.
+ */
+input_schema: unknown, 
+/**
+ * The Tool's typed success-output schema, verbatim.
+ */
+output_schema: unknown, };
 export type NetworkType = "lan" | "vpn" | "tunnel" | "public" | "custom";
 export type ContractSupport = { versions: Array<ContractVersion>, 
 /**
@@ -218,7 +260,19 @@ addresses: Array<AgentAddress>,
  * The manifest is derived from the providers an agent actually composed, so
  * it cannot advertise a contract no handler serves.
  */
-protocol_manifest?: ProtocolManifest | null, };
+protocol_manifest?: ProtocolManifest | null, 
+/**
+ * The Extension-contributed MCP Tools this Agent advertises (`#3778`).
+ *
+ * Derived from the same composed catalog the Agent's embedded MCP
+ * endpoint serves, so it cannot advertise a Tool the Agent cannot execute.
+ * Optional: an Agent with no Extension contributions — and every Agent
+ * predating this field — registers exactly as before. The Server validates
+ * the names and typed output schemas before advertising them; the
+ * manifest rides the registration round trip so a tool is never listed
+ * before its owner's availability is known.
+ */
+mcp_tool_manifest?: McpToolManifest | null, };
 
 /** The payload the provider answers with. */
 export type AgentRegisterReply = { 

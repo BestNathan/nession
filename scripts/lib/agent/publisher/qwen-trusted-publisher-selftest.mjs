@@ -206,6 +206,3 @@ try{
 console.log('Qwen Developer v2: exact Worker/Artifact/PR composition, collision-free append and negative replay/source fixtures passed');
 
 console.log('Qwen main Publisher: independently bound Ingest Run, exact Worker/Checkpoint receipt and all unsafe event/replay denials pass');
-
-// #3885: only GET-only original PR reconciliation may advance an attested Store.
-await import('./qwen-publisher-reconcile-selftest.mjs');

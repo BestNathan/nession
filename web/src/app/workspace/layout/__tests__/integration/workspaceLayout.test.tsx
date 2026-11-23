@@ -2,6 +2,8 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import {
+  AppWorkspaceBoundedRegion,
+  AppWorkspaceScrollRegion,
   WORKSPACE_LAYOUT,
   WorkspaceMasterDetail,
   WorkspaceScrollRegion,
@@ -34,7 +36,36 @@ describe('Workspace layout recipes (#3194)', () => {
     const scroll = screen.getByTestId('scroll');
     expect(scroll).toHaveAttribute('data-workspace-scroll-owner', 'true');
     expect(scroll.className).toContain('overflow-y-auto');
-    expect(scroll.className).toContain('--nession-local-workspace-content-bottom-inset');
+    expect(scroll.className).toContain('--nession-local-workspace-scroll-bottom-inset');
+  });
+
+  it('gives the App host one default page scroll owner (#4115)', () => {
+    render(
+      <AppWorkspaceScrollRegion data-testid="app-scroll">
+        <p>content</p>
+      </AppWorkspaceScrollRegion>,
+    );
+
+    const scroll = screen.getByTestId('app-scroll');
+    expect(scroll).toHaveAttribute('data-workspace-scroll-owner', 'true');
+    expect(scroll).toHaveAttribute('data-workspace-app-surface', 'document');
+    expect(scroll.className).toContain('overflow-y-auto');
+    expect(scroll.className).toContain('--nession-local-workspace-scroll-bottom-inset');
+    expect(screen.getByTestId('app-workspace-scroll-content').className).toContain('min-h-full');
+  });
+
+  it('declares a bounded surface without making it the page scroll owner (#4115)', () => {
+    render(
+      <AppWorkspaceBoundedRegion data-testid="app-bounded">
+        <p>content</p>
+      </AppWorkspaceBoundedRegion>,
+    );
+
+    const bounded = screen.getByTestId('app-bounded');
+    expect(bounded).toHaveAttribute('data-workspace-app-surface', 'bounded');
+    expect(bounded).toHaveAttribute('data-workspace-app-bounded', 'true');
+    expect(bounded).not.toHaveAttribute('data-workspace-scroll-owner');
+    expect(bounded.className).toContain('overflow-hidden');
   });
 
   it('keeps the recipe marker names stable for the design Gate and browser Case', () => {

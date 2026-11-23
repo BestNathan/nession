@@ -69,6 +69,17 @@ fn table_at(proc_root: &Path) -> std::io::Result<HashMap<u32, ProcessFacts>> {
     Ok(out)
 }
 
+/// Read one process's own and terminal-foreground process groups.
+///
+/// `/proc/<pid>/stat` fields 5 and 8 (`pgrp`, `tpgid`). A process with no
+/// controlling terminal reports a non-positive `tpgid`; that is not a prompt
+/// observation and is returned as `None`.
+pub(super) fn process_groups(pid: u32) -> Option<(u32, u32)> {
+    let stat = read_stat(&Path::new(PROC_ROOT).join(pid.to_string()).join("stat"))?;
+    let foreground = u32::try_from(stat.tpgid).ok()?;
+    (stat.pgid > 0 && foreground > 0).then_some((stat.pgid, foreground))
+}
+
 /// Read the command and I/O counters for one member.
 pub(super) fn details(pid: u32) -> ProcessDetails {
     let proc = PathBuf::from(PROC_ROOT).join(pid.to_string());
@@ -237,6 +248,9 @@ struct Stat {
     pgid: u32,
     sid: u32,
     tty_nr: i64,
+    /// The terminal's foreground process group for this process (`tpgid`).
+    /// Negative/zero when it has no controlling terminal.
+    tpgid: i32,
     utime_ticks: u64,
     stime_ticks: u64,
     threads: u32,
@@ -261,6 +275,7 @@ fn read_stat(path: &Path) -> Option<Stat> {
         pgid: fields.get(2)?.parse().ok()?,
         sid: fields.get(3)?.parse().ok()?,
         tty_nr: fields.get(4)?.parse().ok()?,
+        tpgid: fields.get(5)?.parse().ok()?,
         utime_ticks: fields.get(11)?.parse().ok()?,
         stime_ticks: fields.get(12)?.parse().ok()?,
         threads: fields.get(17)?.parse().ok()?,

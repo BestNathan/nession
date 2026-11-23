@@ -17,6 +17,12 @@ for(const [task,resuming] of [['implement',false],['implement',true],['repair',t
   assert.ok(argv.includes('--strict-mcp-config'),'keep strict MCP config');
   assert.ok(argv.includes('--restricted'),'keep restricted tools');
   assert.ok(argv.includes('--disallowedTools'),'keep MCP tool denial');
+  for (const flag of ['--tools','--allowedTools']) {
+    const i=argv.indexOf(flag);
+    assert.ok(i>=0,'native tool flag missing: '+flag);
+    assert.deepEqual(argv[i+1].split(','),['Edit','Glob','Grep','Read'],
+      'native Qwen may not receive file-creating Write tool');
+  }
   assert.ok(argv.includes(resuming?'--resume':'--session-id'),
     'native Session identity/Resume mode must remain explicit');
 }
@@ -82,7 +88,8 @@ const issue={number:2274,state:'open',title:'Fix tracked application source',
   body:'Accept a bounded patch after reading code'};
 const prompt=qwenDeveloperPrompt(issue,admission);
 assert.match(prompt,/Fix tracked application source/);
-assert.match(prompt,/Read\/Grep\/Glob\/Edit\/Write/);
+assert.match(prompt,/Read\/Grep\/Glob\/Edit tools/);
+assert.match(prompt,/Write tool is disabled/);
 assert.match(prompt,/Grep\/Glob are read-only discovery/);
 assert.match(prompt,/No Bash, shell, MCP/);
 assert.match(prompt,/do not perform broad repository exploration/);
@@ -191,7 +198,6 @@ for(const bad of [
     'changes_requested','approved')}]},
   {comments:[{...comment,id:0}]},
   {verdict:{...verdict,summary:'tampered Reviewer body'}},
-  {verdict:{...verdict,outcome:'approved'}},
   {verdict:null},
   {readReceipt:()=>({...receipt,result:{...result,target_sha:'f'.repeat(40)}})},
   {readCommitState:()=>({...state,transitions:[{...latest,
@@ -200,6 +206,14 @@ for(const bad of [
   assert.throws(()=>attestQwenRepairIssueReview({...context,...bad}),
     /Qwen Reviewer Issue context|untrusted authenticated|untrusted original Reviewer findings source/);
 }
+// An approved verdict with unresolved findings fails at the shared canonical
+// Reviewer validator; approval without findings still conflicts with signed Store.
+assert.throws(()=>attestQwenRepairIssueReview({
+  ...context,verdict:{...verdict,outcome:'approved'},
+}),/approved verdict must not contain findings/);
+assert.throws(()=>attestQwenRepairIssueReview({
+  ...context,verdict:{...verdict,outcome:'approved',findings:[]},
+}),/untrusted original Reviewer findings source/);
 console.log('Qwen Reviewer Issue-thread repair: signed Store transition, exact bot projection, native prompt synchronization and forgery denials pass');
 
 console.log('Qwen isolated Developer: signed Run admission, absent Store credentials, exact issue context and defensive prompt passed');

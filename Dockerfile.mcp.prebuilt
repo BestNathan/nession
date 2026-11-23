@@ -37,7 +37,11 @@ LABEL org.opencontainers.image.title="Nession MCP" \
 # e_machine is at byte offset 18: 0x003e is x86-64, 0x00b7 is AArch64.
 ARG TARGETARCH
 COPY --from=mcp-bin /nession-mcp /usr/local/bin/nession-mcp
+# CI passes the binary through an Actions artifact, which does not preserve
+# the Unix executable bit (the same reason the Server/Agent images chmod their
+# copied binary). Restore it before the fail-closed probe.
 RUN set -eux; \
+    chmod +x /usr/local/bin/nession-mcp; \
     test -x /usr/local/bin/nession-mcp; \
     machine="$(od -An -t x1 -j 18 -N 2 /usr/local/bin/nession-mcp | tr -d ' \n')"; \
     case "${TARGETARCH}" in \

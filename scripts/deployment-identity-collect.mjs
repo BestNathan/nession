@@ -274,8 +274,21 @@ export function formatDeploymentAttestationReceipt(receipt) {
 }
 
 export function parseDeploymentAttestationReceipt(text) {
-  const lines = String(text ?? '').split(/\r?\n/)
-    .filter((line) => line.includes(DEPLOYMENT_ATTESTATION_LOG_PREFIX));
+  // GitHub Actions echoes the step's `run:` script into the job log. The
+  // Deploy / Identity attest step extracts its own receipt with
+  // `grep '^DEPLOYMENT_ATTESTATION_V1 '`, so the echoed command line also
+  // contains the prefix inside quotes. Only a line whose payload after the
+  // prefix begins with the receipt JSON object is an emitted receipt; a
+  // script-source echo is not evidence and must not turn one real receipt
+  // into an ambiguous/malformed pair.
+  const receiptLine = (line) => {
+    const at = line.indexOf(DEPLOYMENT_ATTESTATION_LOG_PREFIX);
+    if (at < 0) return false;
+    return /^\s*\{/.test(line
+      .slice(at + DEPLOYMENT_ATTESTATION_LOG_PREFIX.length)
+      .replace(/\u001b\[[0-9;]*m/g, ''));
+  };
+  const lines = String(text ?? '').split(/\r?\n/).filter(receiptLine);
   if (lines.length !== 1) fail('missing or ambiguous deployment attestation receipt');
   const line = lines[0];
   const raw = line
@@ -585,6 +598,46 @@ function selfTest() {
   assert.equal(positive.workloads[0].image_id,
     'ghcr.io/bestnathan/nession@sha256:' + '1'.repeat(64));
 
+  // The bounded log receipt carries the canonical identity the Acceptance
+  // collector attests; it must reject anything the canonical attestation
+  // itself could not have produced.
+  const receipt = deploymentAttestationReceipt(positive);
+  assert.equal(receipt.schema_version, 1);
+  assert.equal(receipt.kind, 'nession_deployment_attestation_receipt');
+  assert.equal(receipt.environment_id, positive.environment_id);
+  assert.equal(receipt.source_sha, positive.source_sha);
+  assert.equal(receipt.images.length, ROLES.length);
+  assert.equal(
+    formatDeploymentAttestationReceipt(positive).startsWith(DEPLOYMENT_ATTESTATION_LOG_PREFIX), true);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, source_sha: 'main' }), /source SHA/);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, status: 'Stale' }), /Attested/);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, images: positive.images.slice(0, 2) }),
+    /every image role/);
+  assert.throws(() => deploymentAttestationReceipt({ ...positive, cluster_context: 'ci\nforged' }),
+    /single line/);
+  // The collector parses the line back from a job log; exactly one receipt is
+  // admissible and a forged shape is rejected.
+  const line = formatDeploymentAttestationReceipt(positive);
+  // GitHub Actions echoes the attest step's `run:` script. The echoed
+  // `grep '^DEPLOYMENT_ATTESTATION_V1 '` line contains the prefix but is not
+  // an emitted receipt (#4259).
+  const echoedScript = "          grep '^DEPLOYMENT_ATTESTATION_V1 ' \\";
+  assert.deepEqual(parseDeploymentAttestationReceipt('step log\n' + line + '\nnext'), receipt);
+  assert.deepEqual(parseDeploymentAttestationReceipt('\u001b[36;1m' + line + '\u001b[0m'), receipt);
+  assert.deepEqual(parseDeploymentAttestationReceipt(echoedScript + '\n' + line), receipt);
+  assert.throws(() => parseDeploymentAttestationReceipt(echoedScript), /missing or ambiguous/);
+  assert.throws(() => parseDeploymentAttestationReceipt('no receipt'), /missing or ambiguous/);
+  assert.throws(() => parseDeploymentAttestationReceipt(echoedScript + '\n' + line + '\n' + line),
+    /missing or ambiguous/);
+  assert.throws(() => parseDeploymentAttestationReceipt(echoedScript + '\n' +
+    DEPLOYMENT_ATTESTATION_LOG_PREFIX + '{'), /invalid deployment attestation receipt JSON/);
+  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX + '{'),
+    /invalid deployment attestation receipt JSON/);
+  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
+    JSON.stringify({ ...receipt, kind: 'other' })), /invalid deployment attestation receipt kind/);
+  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
+    JSON.stringify({ ...receipt, source_sha: 'main' })), /source SHA/);
+
   // #3964: Kubernetes/containerd may normalize the *display* status.image
   // to a digest reference. The trusted Deployment spec + exact container
   // name and immutable imageID still prove the real workload identity.
@@ -627,16 +680,19 @@ function selfTest() {
     pods: mirrorFixtures.pods,
   });
   assert.equal(mirrorObservation.workloads.length, 3);
-  const wrongTagFixtures = kubernetesFixtures();
-  wrongTagFixtures.pods.items[0].status.containerStatuses[0].image =
-    'mirror.example.com/nession:agent-0000000';
+  // #4304: the observer binds the immutable imageID digest reported by the ready
+  // role container, not the mutable image tag (a mirror tag rewrite is covered by
+  // mirrorFixtures above). A pod that reports no matching role container status
+  // cannot attest the deployment image and must fail closed.
+  const noRoleStatusFixtures = kubernetesFixtures();
+  noRoleStatusFixtures.pods.items[0].status.containerStatuses[0].name = 'unrelated-sidecar';
   assert.throws(() => observationFromKubernetes({
     overlay: parseEnvironmentOverlay(OVERLAY_PATH, OVERLAY_TEXT),
     environmentId: 'staging',
     clusterContext: 'home-k8s',
     observedAt: '2026-10-24T16:00:00Z',
-    deployments: wrongTagFixtures.deployments,
-    pods: wrongTagFixtures.pods,
+    deployments: noRoleStatusFixtures.deployments,
+    pods: noRoleStatusFixtures.pods,
   }), /no ready pod reports the agent deployment image/);
 
   // #2523: lanes share one namespace, so a sibling whose name extends this
@@ -729,36 +785,6 @@ function selfTest() {
     p.items[3].status.containerStatuses[0].imageID = 'ghcr.io/bestnathan/nession@sha256:' + 'f'.repeat(64);
   } }, /pods disagree on the running imageID/);
 
-  // The bounded log receipt carries the canonical identity the Acceptance
-  // collector attests; it must reject anything the canonical attestation
-  // itself could not have produced.
-  const receipt = deploymentAttestationReceipt(positive);
-  assert.equal(receipt.schema_version, 1);
-  assert.equal(receipt.kind, 'nession_deployment_attestation_receipt');
-  assert.equal(receipt.environment_id, positive.environment_id);
-  assert.equal(receipt.source_sha, positive.source_sha);
-  assert.equal(receipt.images.length, ROLES.length);
-  assert.equal(
-    formatDeploymentAttestationReceipt(positive).startsWith(DEPLOYMENT_ATTESTATION_LOG_PREFIX), true);
-  assert.throws(() => deploymentAttestationReceipt({ ...positive, source_sha: 'main' }), /source SHA/);
-  assert.throws(() => deploymentAttestationReceipt({ ...positive, status: 'Stale' }), /Attested/);
-  assert.throws(() => deploymentAttestationReceipt({ ...positive, images: positive.images.slice(0, 2) }),
-    /every image role/);
-  assert.throws(() => deploymentAttestationReceipt({ ...positive, cluster_context: 'ci\nforged' }),
-    /single line/);
-  // The collector parses the line back from a job log; exactly one receipt is
-  // admissible and a forged shape is rejected.
-  const line = formatDeploymentAttestationReceipt(positive);
-  assert.deepEqual(parseDeploymentAttestationReceipt('step log\n' + line + '\nnext'), receipt);
-  assert.deepEqual(parseDeploymentAttestationReceipt('\u001b[36;1m' + line + '\u001b[0m'), receipt);
-  assert.throws(() => parseDeploymentAttestationReceipt('no receipt'), /missing or ambiguous/);
-  assert.throws(() => parseDeploymentAttestationReceipt(line + '\n' + line), /missing or ambiguous/);
-  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX + '{'),
-    /invalid deployment attestation receipt JSON/);
-  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
-    JSON.stringify({ ...receipt, kind: 'other' })), /invalid deployment attestation receipt kind/);
-  assert.throws(() => parseDeploymentAttestationReceipt(DEPLOYMENT_ATTESTATION_LOG_PREFIX +
-    JSON.stringify({ ...receipt, source_sha: 'main' })), /source SHA/);
 
   // Only finite-lived readiness conditions qualify for a bounded rerun.
   for (const transient of [

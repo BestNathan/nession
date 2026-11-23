@@ -19,10 +19,12 @@ use nession_protocol::contracts::agent::v1::{AgentListReply, AgentRenameReply};
 use nession_protocol::contracts::env::v1::{
     ClientEnvDeletePayload, ClientEnvGetPayload, ClientEnvWritePayload, EnvSource,
 };
+use nession_protocol::contracts::project::v1::ProjectGetPayload;
 use nession_protocol::contracts::session::v1::{
-    ClientSessionAttachReply, ClientSessionEnvBindingGetPayload,
+    ClientSessionAttachReply, ClientSessionCreatePayload, ClientSessionEnvBindingGetPayload,
     ClientSessionEnvBindingReapplyPayload, ClientSessionEnvBindingSetPayload,
-    ServerSessionListReply, SessionEnvBindingRefusalKind,
+    ServerSessionListReply, SessionEnvBindingRefusalKind, SessionMetadataPatch,
+    WebSessionMetadataPatchPayload,
 };
 use nession_server::db::Database;
 use nession_server::server::WebSocketServer;
@@ -111,6 +113,109 @@ async fn a_real_server_answers_the_session_list() {
             )
         }
     }
+}
+
+#[tokio::test]
+async fn a_real_server_answers_the_typed_metadata_units() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    // This Server has no registered Agent, so it refuses by target before
+    // routing. The typed call and the typed refusal both survive the boundary.
+    let read = client.get_session_metadata("agent-1:work").await.unwrap();
+    assert!(!read.success);
+    assert_eq!(read.error_kind.as_deref(), Some("not_found"));
+    assert!(read.instance_id.is_none());
+
+    let patched = client
+        .patch_session_metadata(WebSessionMetadataPatchPayload {
+            session_id: "agent-1:work".to_string(),
+            expected_instance_id: "instance-a".to_string(),
+            expected_revision: 0,
+            patch: SessionMetadataPatch {
+                description: Some(Some("Next step".to_string())),
+                ..SessionMetadataPatch::default()
+            },
+        })
+        .await
+        .unwrap();
+    assert!(!patched.success);
+    assert_eq!(patched.error_kind.as_deref(), Some("not_found"));
+}
+
+#[tokio::test]
+async fn a_real_server_answers_the_project_list() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let reply = client.project_list().await.unwrap();
+    assert!(
+        reply.projects.is_empty(),
+        "this server has no Project declarations"
+    );
+    assert_eq!(reply.error, None, "an empty list is a successful read");
+}
+
+#[tokio::test]
+async fn a_real_server_reports_an_unknown_project() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let reply = client
+        .project_get(ProjectGetPayload {
+            project_id: "project-123e4567-e89b-42d3-a456-426614174000".to_string(),
+        })
+        .await
+        .unwrap();
+    assert!(!reply.success);
+    assert_eq!(reply.error_kind.as_deref(), Some("not_found"));
+    assert_eq!(reply.error.as_deref(), Some("Project not found"));
+}
+
+/// A Project-context create travels as the whole typed request, not as a
+/// hand-built JSON object that could silently drop a field.
+#[tokio::test]
+async fn a_real_server_receives_the_typed_project_session_create() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let reply = client
+        .create_session_payload(ClientSessionCreatePayload {
+            agent_id: "missing-agent".to_string(),
+            name: "dev".to_string(),
+            working_dir: Some("/srv/project".to_string()),
+            env_files: Vec::new(),
+            env_selection_mode: None,
+            sandbox: None,
+            project_id: Some("project-123e4567-e89b-42d3-a456-426614174000".to_string()),
+            managed: None,
+            initial_metadata: None,
+        })
+        .await
+        .unwrap();
+    assert!(!reply.success);
+    assert!(
+        reply
+            .error
+            .as_deref()
+            .is_some_and(|error| error.contains("not found")),
+        "{reply:?}"
+    );
+}
+
+/// The Extension-tool units travel through the same typed client boundary.
+#[tokio::test]
+async fn a_real_server_answers_the_extension_tool_units() {
+    let (_dir, mut client) = client_for("token").await.unwrap();
+
+    let listed = client.list_mcp_tools().await.unwrap();
+    assert!(
+        listed.manifest.tools.is_empty(),
+        "no Agent has contributed a manifest to this Server"
+    );
+
+    let reply = client
+        .call_mcp_tool("missing-agent", "fixture_echo", serde_json::json!({}))
+        .await
+        .unwrap();
+    assert!(!reply.success);
+    assert!(reply.error.is_some(), "an unroutable call is a refusal");
 }
 
 /// A wrong token is refused, and the **Server's own sentence** is what travels.

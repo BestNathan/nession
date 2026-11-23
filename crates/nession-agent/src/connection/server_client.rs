@@ -39,6 +39,7 @@ use anyhow::{Context, Result};
 use futures_util::{SinkExt, StreamExt};
 use nession_common::extension::ExtensionUnitPolicy;
 use nession_common::SecretString;
+use nession_mcp::{McpCatalog, ToolContext};
 use nession_protocol::contracts::agent::v1::{
     AgentAddress, AgentAddressUpdatePayload, AgentHeartbeatPayload, AgentMetadata,
     AgentRegisterPayload, AgentStatus, HeartbeatMetadata,
@@ -47,12 +48,14 @@ use nession_protocol::contracts::env::v1::{
     AgentSessionEnvBindingReportEntry, AgentSessionEnvBindingReportPayload,
     ServerSessionEnvBindingGetPayload, ServerSessionEnvBindingSetPayload,
 };
+use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply, McpToolManifest};
 use nession_protocol::contracts::session::v1::{
-    AgentGitInvalidatedPayload, AgentSessionUpdatePayload, AgentTerminalResizePayload,
-    ServerSessionCreatePayload, ServerSessionProcessesPayload, ServerSessionSandboxContextPayload,
-    ServerSessionSandboxEnterPayload, ServerSessionSandboxFocusPayload,
+    AgentGitInvalidatedPayload, AgentSessionActivityPayload, AgentSessionUpdatePayload,
+    AgentTerminalResizePayload, ServerSessionCreatePayload, ServerSessionProcessesPayload,
+    ServerSessionSandboxContextPayload, ServerSessionSandboxEnterPayload,
+    ServerSessionSandboxFocusPayload, ServerSessionSandboxImagePreparePayload,
     ServerSessionSandboxPreflightPayload, ServerSessionSandboxReturnPayload,
-    SessionMetadataUpdatePayload,
+    SessionMetadataPatchPayload, SessionMetadataUpdatePayload,
 };
 use nession_protocol::contracts::workspace::v1::{
     AgentWorkspaceDescriptor, AgentWorkspaceKind, AgentWorkspaceStatus,
@@ -81,9 +84,11 @@ use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
 use crate::env::EnvStore;
 use crate::extension::ExtensionRegistry;
 use crate::protocol::core_routes;
-use crate::session::metadata::{error_kind_and_detail, SessionMetadataStore};
+use crate::session::metadata::{
+    attach_session_summaries, error_kind_and_detail, SessionMetadataStore,
+};
 use crate::tmux::env::profiles_from_snapshots;
-use crate::tmux::manager::{SessionBindingInput, SessionManager};
+use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use nession_runtime::lane::KeyedLane;
 
 /// Type alias for the WebSocket stream.
@@ -100,6 +105,16 @@ const MAX_RECONNECT_DELAY: Duration = Duration::from_secs(30);
 
 /// Initial delay for exponential backoff (1 second).
 const INITIAL_RECONNECT_DELAY: Duration = Duration::from_secs(1);
+
+/// Total budget for one Server connection attempt (#4072): dial, WS upgrade,
+/// registration acceptance and the post-accept Environment Binding report.
+///
+/// One bound over the whole attempt rather than a deadline per phase: a Server
+/// that upgrades but never answers must not hold the supervisor, and a caller
+/// waiting on the first-start outcome must still get one. A timeout is a
+/// transient failure, so the existing backoff retries it; an explicit refusal
+/// remains permanent.
+const DEFAULT_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// How many command responses may be waiting for the socket at once (#961).
 ///
@@ -133,6 +148,9 @@ pub mod msg_types {
     pub const CONTROL_PING: &str = "control.ping";
     pub const CONTROL_PONG: &str = "control.pong";
     pub const AGENT_SESSION_UPDATE: &str = "server.agent.session-update";
+    /// One-way Activity level for one Session (#3804). A separate unit from the
+    /// session update because it must not stamp the Server's recency.
+    pub const AGENT_SESSION_ACTIVITY: &str = "server.agent.session-activity";
     /// One-way: the Agent reports every live Session's observed Environment
     /// Binding after registration, so the Server's observed cache can be
     /// rebuilt from the runtime that owns it (#170).
@@ -168,6 +186,8 @@ pub struct RegisterResponsePayload {
 pub struct ServerClient {
     /// Server URL (e.g., "wss://server.example.com:8443").
     server_url: String,
+    /// Total budget for one attempt (see [`DEFAULT_CONNECT_ATTEMPT_TIMEOUT`]).
+    connect_attempt_timeout: Duration,
     /// Authentication token for the server.
     auth_token: String,
     /// Agent identifier.
@@ -190,6 +210,15 @@ pub struct ServerClient {
     default_working_dir: String,
     /// Registry for dispatching the units the composed providers declare.
     extension_registry: Option<Arc<ExtensionRegistry>>,
+    /// The Extension-contributed MCP Tools this Agent advertises (`#3778`).
+    /// Sent on every registration; `None` when no Extension contributes one.
+    mcp_tool_manifest: Option<McpToolManifest>,
+    /// The composed catalog and the context its Tool handlers receive. The
+    /// Server relays `agent.mcp.tool.call` here; the Agent validates the named
+    /// target and executes through exactly the catalog its own MCP endpoint
+    /// serves.
+    mcp_catalog: Option<Arc<McpCatalog>>,
+    mcp_tool_context: Option<Arc<ToolContext>>,
     /// The Agent's durable inbound token (#3440). Sent to the Server on every
     /// registration so attach can hand it to an authenticated client; never
     /// put in a URL, log or public view.
@@ -216,6 +245,10 @@ pub struct ServerClient {
     /// Set for the lifetime of [`Self::supervise`] so session mutations can
     /// push a snapshot without waiting for [`SessionWatcher`]'s poll interval.
     session_publish: Arc<Mutex<Option<ServerClientHandle>>>,
+    /// The post-create preparation hook composed by `runtime.rs` (`#4073`).
+    /// Shared with the P2P listener so a direct and a relayed create prepare
+    /// identically; `None` in direct constructions (tests).
+    session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
 /// Handle to a running [`ServerClient`] for sending messages and shutdown.
@@ -244,6 +277,14 @@ pub struct ServerClientHandle {
 }
 
 impl ServerClientHandle {
+    /// The Agent id this connection reports under.
+    ///
+    /// Read-only: an outbound payload names its Agent from this value rather
+    /// than a second copy that could drift from the registered identity.
+    pub fn agent_id(&self) -> &str {
+        &self.agent_id
+    }
+
     /// Mark that a full session sync is needed (called by supervisor on reconnect).
     pub fn mark_sync_needed(&self) {
         self.sync_intent.mark();
@@ -347,6 +388,21 @@ impl ServerClientHandle {
             ));
         }
         self.outbox.send_session_update(session_name, frame(&msg)?)
+    }
+
+    /// Queue one Session's Activity level (#3804).
+    ///
+    /// A level, not a history: the Server keeps only the latest accepted value.
+    /// One frame per Session is pending at a time, under an Activity-specific
+    /// outbox key so it never supersedes the Session inventory frame.
+    pub fn send_session_activity(
+        &self,
+        session_name: &str,
+        payload: AgentSessionActivityPayload,
+    ) -> Result<()> {
+        let msg = new_message(msg_types::AGENT_SESSION_ACTIVITY, payload);
+        self.outbox
+            .send_session_activity(session_name, frame(&msg)?)
     }
 
     /// Queue an address-update message for delivery to the server.
@@ -541,6 +597,7 @@ impl ServerClient {
             .unwrap_or_else(|_| std::path::PathBuf::from(".nession/agent/envs"));
         Self {
             server_url: server_url.into(),
+            connect_attempt_timeout: DEFAULT_CONNECT_ATTEMPT_TIMEOUT,
             auth_token: auth_token.into(),
             agent_id: agent_id.into(),
             hostname: hostname.into(),
@@ -551,6 +608,9 @@ impl ServerClient {
             display_name,
             default_working_dir,
             extension_registry,
+            mcp_tool_manifest: None,
+            mcp_catalog: None,
+            mcp_tool_context: None,
             metadata,
             session_metadata: Arc::new(SessionMetadataStore::new(Arc::clone(&tmux))),
             tmux,
@@ -558,7 +618,20 @@ impl ServerClient {
             mutations,
             env_store: EnvStore::new(env_root),
             session_publish: Arc::new(Mutex::new(None)),
+            session_created: None,
         }
+    }
+
+    /// Attach the post-create preparation hook (`#4073`).
+    ///
+    /// The runtime composes one hook and hands the same value to the P2P
+    /// listener, so a Server-relayed create and a direct create cannot diverge.
+    pub fn with_session_created_hook(
+        mut self,
+        hook: crate::session_created::SharedSessionCreatedHook,
+    ) -> Self {
+        self.session_created = Some(hook);
+        self
     }
 
     /// Use the process-wide metadata store instead of the local construction.
@@ -568,6 +641,29 @@ impl ServerClient {
     /// to both.
     pub fn with_session_metadata(mut self, store: Arc<SessionMetadataStore>) -> Self {
         self.session_metadata = store;
+        self
+    }
+
+    /// Override the total connect-attempt budget (#4072). Tests use a short
+    /// bound; production keeps [`DEFAULT_CONNECT_ATTEMPT_TIMEOUT`].
+    #[cfg(test)]
+    pub(crate) fn with_connect_attempt_timeout(mut self, timeout: Duration) -> Self {
+        self.connect_attempt_timeout = timeout;
+        self
+    }
+
+    /// Advertise and serve the Extension-contributed MCP Tools this Agent
+    /// composed (`#3778`).
+    ///
+    /// The manifest is derived from the same catalog the embedded MCP endpoint
+    /// serves, so the Agent cannot advertise a Tool it cannot execute. The
+    /// catalog and context are also what the Server-relayed
+    /// `agent.mcp.tool.call` route executes through.
+    pub fn with_mcp_tools(mut self, catalog: Arc<McpCatalog>, context: Arc<ToolContext>) -> Self {
+        let manifest = catalog.manifest();
+        self.mcp_tool_manifest = (!manifest.tools.is_empty()).then_some(manifest);
+        self.mcp_catalog = Some(catalog);
+        self.mcp_tool_context = Some(context);
         self
     }
 
@@ -664,7 +760,37 @@ impl ServerClient {
                 return;
             }
 
-            match this.connect_once().await {
+            // One bounded, cancellable attempt covers dial, WS upgrade,
+            // registration acceptance and the post-accept report (#4072).
+            //
+            // - A shutdown during any pending phase drops the attempt (and its
+            //   socket) immediately instead of waiting for the remote peer.
+            // - A timeout is a transient failure and takes the existing backoff
+            //   path below, so a silent Server never blocks the first-start
+            //   outcome or the supervisor.
+            // - An explicit refusal is an `Err` from `connect_once` and is still
+            //   distinguished from a timeout by its own error type.
+            let attempt = tokio::select! {
+                biased;
+                _ = shutdown_rx.recv() => {
+                    info!("Server client shutting down during connect attempt");
+                    this.set_session_publish_handle(None);
+                    return;
+                }
+                result = tokio::time::timeout(
+                    this.connect_attempt_timeout,
+                    this.connect_once(),
+                ) => result,
+            };
+            let attempt = match attempt {
+                Ok(result) => result,
+                Err(_) => Err(anyhow::anyhow!(
+                    "server connection attempt timed out after {:?}",
+                    this.connect_attempt_timeout
+                )),
+            };
+
+            match attempt {
                 Ok((sink, stream, interval)) => {
                     info!("Connected to server successfully");
                     reconnect_delay = INITIAL_RECONNECT_DELAY;
@@ -777,6 +903,7 @@ impl ServerClient {
                 .extension_registry
                 .as_ref()
                 .map(|registry| registry.manifest().clone()),
+            mcp_tool_manifest: self.mcp_tool_manifest.clone(),
         };
         let msg = new_message(msg_types::AGENT_REGISTER, payload);
         let json = serde_json::to_string(&msg)?;
@@ -1307,7 +1434,9 @@ impl ServerClient {
 mod tests {
     use super::*;
     use crate::test_support::TestSession;
+    use std::sync::atomic::AtomicUsize;
     use tokio::net::TcpListener;
+    use tokio::sync::oneshot;
     use tokio_tungstenite::accept_async;
 
     /// Start a mock WebSocket server that accepts connections and echoes messages.
@@ -1617,6 +1746,336 @@ mod tests {
 
         handle.shutdown().await.ok();
         server_handle.abort();
+    }
+
+    /// A `ServerClient` pointed at `server_url`, with no connection started.
+    fn test_client(server_url: String, agent_id: &str) -> ServerClient {
+        ServerClient::new(
+            server_url,
+            "test-token",
+            agent_id,
+            "test-host",
+            "127.0.0.1",
+            8080,
+            None,
+            vec![],
+            None,
+            metadata_for_tests(),
+            Arc::new(SessionManager::new()),
+            "/tmp".to_string(),
+            None,
+            SecretString::new("test-agent-token-000000"),
+            crate::execution::mutation_scheduler(),
+        )
+    }
+
+    /// A Server that completes the WS upgrade but never acknowledges
+    /// registration must not hold the attempt or the first-start outcome
+    /// (#4072 SC-01).
+    #[tokio::test]
+    async fn connect_attempt_registration_stall_settles_within_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let _ws = accept_async(stream).await.expect("ws upgrade");
+            let _ = accepted_tx.send(());
+            // Hold the upgraded socket open without ever answering.
+            let _ = release_rx.await;
+        });
+
+        let client = test_client(format!("ws://{addr}"), "stalled-agent")
+            .with_connect_attempt_timeout(Duration::from_millis(200));
+
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), client.connect_and_run())
+            .await
+            .expect("connect_and_run must settle instead of hanging");
+        let (handle, interval) = outcome.expect("a silent Server is transient, not a refusal");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "settled before the documented deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "settled far past the deadline: {elapsed:?}"
+        );
+        assert_eq!(interval, None);
+        assert!(!handle.is_connected());
+
+        accepted_rx.await.expect("the upgrade must have completed");
+        handle.shutdown().await.ok();
+        release_tx.send(()).ok();
+        let _ = server.await;
+    }
+
+    /// A TCP peer that accepts but never answers the HTTP Upgrade exercises
+    /// the same total deadline before registration even starts (#4072 SC-01).
+    #[tokio::test]
+    async fn connect_attempt_upgrade_stall_settles_within_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let (accepted_tx, accepted_rx) = oneshot::channel();
+        let (release_tx, release_rx) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let _ = accepted_tx.send(());
+            // Never read or answer the Upgrade request.
+            let _ = release_rx.await;
+            drop(stream);
+        });
+
+        let client = test_client(format!("ws://{addr}"), "no-upgrade-agent")
+            .with_connect_attempt_timeout(Duration::from_millis(200));
+
+        let started = std::time::Instant::now();
+        let outcome = tokio::time::timeout(Duration::from_secs(3), client.connect_and_run())
+            .await
+            .expect("connect_and_run must settle instead of hanging");
+        let (handle, interval) = outcome.expect("a stalled upgrade is transient");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed >= Duration::from_millis(200),
+            "settled before the documented deadline: {elapsed:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(3),
+            "settled far past the deadline: {elapsed:?}"
+        );
+        assert_eq!(interval, None);
+
+        accepted_rx
+            .await
+            .expect("the TCP connection must have opened");
+        handle.shutdown().await.ok();
+        release_tx.send(()).ok();
+        let _ = server.await;
+    }
+
+    /// Shutdown during a pending reconnect registration must cancel that
+    /// attempt immediately, not wait for the remote peer or the deadline
+    /// (#4072 SC-02).
+    #[tokio::test]
+    async fn connect_attempt_shutdown_cancels_pending_registration() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let (second_open_tx, second_open_rx) = oneshot::channel();
+        let (second_closed_tx, second_closed_rx) = oneshot::channel();
+
+        let count = Arc::clone(&accepted);
+        let server = tokio::spawn(async move {
+            // First connection: register, then drop it to force a reconnect.
+            let (stream, _) = listener.accept().await.expect("accept first");
+            count.fetch_add(1, Ordering::SeqCst);
+            let ws = accept_async(stream).await.expect("first ws");
+            let (mut sink, mut stream) = ws.split();
+            let response = serde_json::json!({
+                "msg_type": "server.agent.register",
+                "id": "test-id",
+                "timestamp": 1,
+                "payload": { "status": "accepted", "message": "ok" }
+            });
+            let _ = sink.send(WsMessage::Text(response.to_string())).await;
+            let _ = stream.next().await; // the agent's register frame
+            drop(sink);
+            drop(stream);
+
+            // Second connection: complete the upgrade, then stay silent.
+            let (stream, _) = listener.accept().await.expect("accept second");
+            count.fetch_add(1, Ordering::SeqCst);
+            let mut ws = accept_async(stream).await.expect("second ws");
+            let _ = second_open_tx.send(());
+            while let Some(Ok(_)) = ws.next().await {}
+            let _ = second_closed_tx.send(());
+        });
+
+        // A long deadline: only the shutdown can explain a prompt end.
+        let client = test_client(format!("ws://{addr}"), "shutdown-agent")
+            .with_connect_attempt_timeout(Duration::from_secs(30));
+        let (handle, _) = client
+            .connect_and_run()
+            .await
+            .expect("first connect must succeed");
+
+        tokio::time::timeout(Duration::from_secs(5), second_open_rx)
+            .await
+            .expect("the supervisor should start its reconnect attempt")
+            .expect("server task dropped without opening the second socket");
+
+        let started = std::time::Instant::now();
+        handle.shutdown().await.expect("shutdown signal");
+        tokio::time::timeout(Duration::from_secs(2), second_closed_rx)
+            .await
+            .expect("shutdown must cancel the pending attempt, not wait for the deadline")
+            .expect("the mock server did not observe the cancelled socket closing");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "shutdown took {:?}",
+            started.elapsed()
+        );
+
+        // A cancelled attempt is not immediately retried.
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            2,
+            "a cancelled attempt must not be retried"
+        );
+        server.abort();
+    }
+
+    /// A silent Server is retried; the replacement Server then registers and
+    /// normal heartbeat delivery resumes (#4072 SC-03).
+    #[tokio::test]
+    async fn connect_attempt_silent_server_is_retried_then_registers() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let (frame_tx, mut frame_rx) = mpsc::channel::<serde_json::Value>(16);
+        let server = tokio::spawn(async move {
+            // First connection: complete the upgrade, never answer.
+            let (stream, _) = listener.accept().await.expect("accept silent");
+            let mut silent = accept_async(stream).await.expect("silent ws");
+            while let Some(Ok(_)) = silent.next().await {}
+
+            // Second connection: the replacement Server registers normally.
+            let (stream, _) = listener.accept().await.expect("accept responsive");
+            let ws = accept_async(stream).await.expect("responsive ws");
+            let (mut sink, mut stream) = ws.split();
+            while let Some(Ok(message)) = stream.next().await {
+                let WsMessage::Text(text) = message else {
+                    continue;
+                };
+                let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
+                    continue;
+                };
+                if parsed["msg_type"] == "server.agent.register" {
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.register",
+                        "id": "test-id",
+                        "timestamp": 1,
+                        "payload": { "status": "accepted", "message": "ok" }
+                    });
+                    let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                }
+                let _ = frame_tx.send(parsed).await;
+            }
+        });
+
+        let client = test_client(format!("ws://{addr}"), "recovering-agent")
+            .with_connect_attempt_timeout(Duration::from_millis(200));
+        let started = std::time::Instant::now();
+        let (handle, interval) =
+            tokio::time::timeout(Duration::from_secs(5), client.connect_and_run())
+                .await
+                .expect("first-start outcome must settle")
+                .expect("a silent Server is transient");
+        assert!(
+            started.elapsed() < Duration::from_secs(2),
+            "the first outcome took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(interval, None);
+
+        // The replacement Server receives a fresh registration.
+        let registration = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let frame = frame_rx.recv().await.expect("server frame channel closed");
+                if frame["msg_type"] == "server.agent.register" {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("the agent must re-register with the responsive Server");
+        assert_eq!(registration["payload"]["agent_id"], "recovering-agent");
+
+        // Normal heartbeat delivery resumes on the recovered connection. Its
+        // arrival also proves the connection is live: the outbox is drained
+        // only by `run_connection`.
+        handle
+            .send_heartbeat(AgentStatus::Online, 0, 0, 1, [0.0; 3])
+            .expect("heartbeat publish");
+        let heartbeat = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let frame = frame_rx.recv().await.expect("server frame channel closed");
+                if frame["msg_type"] == "control.heartbeat" {
+                    break frame;
+                }
+            }
+        })
+        .await
+        .expect("a heartbeat must reach the recovered Server");
+        assert_eq!(heartbeat["payload"]["agent_id"], "recovering-agent");
+        assert!(handle.is_connected());
+
+        handle.shutdown().await.ok();
+        server.abort();
+    }
+
+    /// An explicit registration refusal is the peer's permanent answer: it
+    /// reaches the caller and is never retried (#4072 SC-03).
+    #[tokio::test]
+    async fn connect_attempt_explicit_refusal_stays_permanent() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let addr = listener.local_addr().expect("local_addr");
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let count = Arc::clone(&accepted);
+        let server = tokio::spawn(async move {
+            loop {
+                let Ok((stream, _)) = listener.accept().await else {
+                    break;
+                };
+                count.fetch_add(1, Ordering::SeqCst);
+                let ws = accept_async(stream).await.expect("ws");
+                let (mut sink, mut stream) = ws.split();
+                let response = serde_json::json!({
+                    "msg_type": "server.agent.register",
+                    "id": "test-id",
+                    "timestamp": 1,
+                    "payload": {
+                        "status": "rejected",
+                        "message": "agent must be upgraded"
+                    }
+                });
+                let _ = sink.send(WsMessage::Text(response.to_string())).await;
+                // Keep both halves alive long enough for the agent to read the
+                // refusal; continue accepting so a wrongful retry is visible.
+                tokio::spawn(async move {
+                    let _ = tokio::time::timeout(Duration::from_secs(5), async {
+                        while let Some(Ok(_)) = stream.next().await {}
+                    })
+                    .await;
+                    drop(sink);
+                });
+            }
+        });
+
+        let client = test_client(format!("ws://{addr}"), "refused-agent")
+            .with_connect_attempt_timeout(Duration::from_secs(5));
+        let result = tokio::time::timeout(Duration::from_secs(3), client.connect_and_run())
+            .await
+            .expect("a refusal must settle promptly");
+        let error = match result {
+            Ok(_) => panic!("a refusal must reach the caller, not be swallowed"),
+            Err(error) => error,
+        };
+        assert!(
+            error.to_string().contains("agent must be upgraded"),
+            "unexpected error: {error}"
+        );
+
+        // No retry: the refusal is permanent, so the supervisor must have stopped.
+        tokio::time::sleep(Duration::from_millis(1_500)).await;
+        assert_eq!(
+            accepted.load(Ordering::SeqCst),
+            1,
+            "an explicit refusal must never be retried"
+        );
+        server.abort();
     }
 
     #[tokio::test]
@@ -3950,8 +4409,15 @@ fn workspace_descriptor(
         auto_created: workspace.auto_created,
         created_at: workspace.created_at,
         last_used_at: workspace.last_used_at,
+        updated_at: workspace.updated_at,
         path: None,
         detail: workspace.detail,
+        lower_digests: workspace.lower_digests,
+        overlay_storage: workspace.overlay_storage,
+        used_bytes: workspace.used_bytes,
+        consumers: workspace.consumers,
+        mounted: workspace.mounted,
+        lease_count: workspace.lease_count,
     }
 }
 
@@ -3984,7 +4450,9 @@ core_routes!(agent, msg, responses;
                     // receives.
                     let request_id = str_field(&msg.payload, "request_id");
                     let response = match agent.tmux.list_sessions().await {
-                        Ok(sessions) => serde_json::json!({
+                        Ok(mut sessions) => {
+                            attach_session_summaries(&agent.session_metadata, &mut sessions).await;
+                            serde_json::json!({
                             "msg_type": "server.agent.command-response",
                             "id": uuid::Uuid::new_v4().to_string(),
                             "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
@@ -3996,7 +4464,8 @@ core_routes!(agent, msg, responses;
                                 "stale_agents": [],
                                 "error": null,
                             }
-                        }),
+                        })
+                        },
                         Err(e) => serde_json::json!({
                             "msg_type": "server.agent.command-response",
                             "id": uuid::Uuid::new_v4().to_string(),
@@ -4024,6 +4493,39 @@ core_routes!(agent, msg, responses;
                         };
                     let request_id = payload.request_id.clone();
                     let name = payload.name.clone();
+                    // Initial metadata is validated before any Session side
+                    // effect (#4081), through the one shared contract
+                    // validator the update surfaces also use.
+                    let initial_metadata = match payload.initial_metadata.as_ref() {
+                        Some(metadata) => match metadata.normalized() {
+                            Ok(metadata) => Some(metadata),
+                            Err(error) => {
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": request_id,
+                                        "command": "session.create",
+                                        "success": false,
+                                        "error": format!("invalid: {error}"),
+                                        "session_name": null,
+                                        "warnings": [],
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        },
+                        None => None,
+                    };
+                    let initial =
+                        initial_metadata
+                            .as_ref()
+                            .map(|metadata| InitialSessionMetadata {
+                                store: agent.session_metadata.as_ref(),
+                                metadata,
+                            });
                     // A caller that only knows resolved snapshots still gets
                     // the one binding model: the refs are read from the
                     // snapshots, not invented.
@@ -4101,7 +4603,15 @@ core_routes!(agent, msg, responses;
                     let revision = payload
                         .binding_revision
                         .unwrap_or(if profiles.is_empty() { 0 } else { 1 });
-                    let (success, error, session_name, warnings, sandbox_report) = match agent
+                    let (
+                        success,
+                        error,
+                        session_name,
+                        mut warnings,
+                        sandbox_report,
+                        instance_id,
+                        metadata,
+                    ) = match agent
                         .tmux
                         .create_session_with_options(
                             &name,
@@ -4114,6 +4624,7 @@ core_routes!(agent, msg, responses;
                                 snapshots: &payload.env_snapshots,
                             }),
                             payload.sandbox.as_ref(),
+                            initial.as_ref(),
                         )
                         .await
                     {
@@ -4137,10 +4648,37 @@ core_routes!(agent, msg, responses;
                                 Some(name.clone()),
                                 outcome.warnings,
                                 outcome.sandbox,
+                                outcome.instance_id,
+                                outcome.metadata,
                             )
                         }
-                        Err(e) => (false, Some(format!("{e:#}")), None, Vec::new(), None),
+                        Err(e) => (
+                            false,
+                            Some(format!("{e:#}")),
+                            None,
+                            Vec::new(),
+                            None,
+                            None,
+                            None,
+                        ),
                     };
+
+                    // #4073: creation-time preparation for the Session that now
+                    // exists, including Project-created ones whose environment
+                    // binding was just applied. Failure is a warning; the
+                    // capability's enter-time check re-resolves and refuses
+                    // before it would launch into an unverified trust dialog.
+                    if success {
+                        if let (Some(hook), Some(name)) =
+                            (agent.session_created.as_ref(), session_name.as_deref())
+                        {
+                            if let Some(warning) =
+                                hook.session_created(&agent.agent_id, name).await
+                            {
+                                warnings.push(warning);
+                            }
+                        }
+                    }
 
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
@@ -4154,6 +4692,8 @@ core_routes!(agent, msg, responses;
                             "session_name": session_name,
                             "warnings": warnings,
                             "sandbox": sandbox_report,
+                            "instance_id": instance_id,
+                            "metadata": metadata,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4372,17 +4912,18 @@ core_routes!(agent, msg, responses;
     "agent.session.metadata.get" => "agent.session.metadata.get" => 1 => Key(session_by_name(&msg.payload)) => {
                     let request_id = str_field(&msg.payload, "request_id");
                     let name = str_field(&msg.payload, "name");
-                    let (success, error, error_kind, metadata) =
-                        match agent.session_metadata.get(&name).await {
-                            Ok(metadata) => (
+                    let (success, error, error_kind, metadata, instance_id) =
+                        match agent.session_metadata.read_current(&name).await {
+                            Ok(snapshot) => (
                                 true,
                                 None,
                                 None,
-                                serde_json::to_value(metadata).ok(),
+                                serde_json::to_value(&snapshot.metadata).ok(),
+                                Some(snapshot.instance_id),
                             ),
                             Err(failure) => {
                                 let (kind, detail) = error_kind_and_detail(&failure);
-                                (false, Some(detail), Some(kind.to_string()), None)
+                                (false, Some(detail), Some(kind.to_string()), None, None)
                             }
                         };
                     let response = serde_json::json!({
@@ -4396,6 +4937,7 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "error_kind": error_kind,
                             "metadata": metadata,
+                            "instance_id": instance_id,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4410,10 +4952,11 @@ core_routes!(agent, msg, responses;
                                 return Ok(());
                             }
                         };
-                    let (success, error, error_kind, metadata) = match agent
+                    let (success, error, error_kind, metadata, instance_id) = match agent
                         .session_metadata
-                        .update(
+                        .update_guarded(
                             &payload.name,
+                            payload.expected_instance_id.as_deref(),
                             payload.title.as_deref(),
                             payload.description.as_deref(),
                             &payload.tags,
@@ -4421,15 +4964,16 @@ core_routes!(agent, msg, responses;
                         )
                         .await
                     {
-                        Ok(metadata) => (
+                        Ok(snapshot) => (
                             true,
                             None,
                             None,
-                            serde_json::to_value(metadata).ok(),
+                            serde_json::to_value(&snapshot.metadata).ok(),
+                            Some(snapshot.instance_id),
                         ),
                         Err(failure) => {
                             let (kind, detail) = error_kind_and_detail(&failure);
-                            (false, Some(detail), Some(kind.to_string()), None)
+                            (false, Some(detail), Some(kind.to_string()), None, None)
                         }
                     };
                     let response = serde_json::json!({
@@ -4443,6 +4987,55 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "error_kind": error_kind,
                             "metadata": metadata,
+                            "instance_id": instance_id,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.metadata.patch" => "agent.session.metadata.patch" => 1 => Key(session_by_name(&msg.payload)) => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let payload: SessionMetadataPatchPayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.metadata.patch payload: {e}");
+                                return Ok(());
+                            }
+                        };
+                    let (success, error, error_kind, metadata, instance_id) = match agent
+                        .session_metadata
+                        .patch(
+                            &payload.name,
+                            &payload.expected_instance_id,
+                            payload.expected_revision,
+                            &payload.patch,
+                        )
+                        .await
+                    {
+                        Ok(snapshot) => (
+                            true,
+                            None,
+                            None,
+                            serde_json::to_value(&snapshot.metadata).ok(),
+                            Some(snapshot.instance_id),
+                        ),
+                        Err(failure) => {
+                            let (kind, detail) = error_kind_and_detail(&failure);
+                            (false, Some(detail), Some(kind.to_string()), None, None)
+                        }
+                    };
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.metadata.patch",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "metadata": metadata,
+                            "instance_id": instance_id,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -4667,6 +5260,125 @@ core_routes!(agent, msg, responses;
                             "error": error,
                             "cache_statuses": cache_statuses,
                             "cache_observations": cache_observations,
+                        }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    "agent.session.sandbox.image-prepare" => "agent.session.sandbox.image-prepare" => 1 => Key(sandbox_session_by_name(&msg.payload)) => {
+                    let payload: ServerSessionSandboxImagePreparePayload =
+                        match serde_json::from_value(msg.payload.clone()) {
+                            Ok(payload) => payload,
+                            Err(e) => {
+                                warn!("Invalid agent.session.sandbox.image-prepare payload: {e}");
+                                let response = serde_json::json!({
+                                    "msg_type": "server.agent.command-response",
+                                    "id": uuid::Uuid::new_v4().to_string(),
+                                    "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                                    "payload": {
+                                        "request_id": str_field(&msg.payload, "request_id"),
+                                        "command": "session.sandbox.image-prepare",
+                                        "success": false,
+                                        "error": format!("invalid payload: {e}"),
+                                        "error_kind": "invalid",
+                                    }
+                                });
+                                responses.send(WsMessage::Text(response.to_string())).await?;
+                                return Ok(());
+                            }
+                        };
+                    let request_id = payload.request_id.clone();
+                    let (success, error, error_kind, observation, observations) = async {
+                        // The Server resolved the Session to this Agent. Prove
+                        // the named Session is still one this Agent owns before
+                        // touching the cache: a stale name is unavailable, not
+                        // an invitation to prepare bytes for a vanished owner.
+                        match agent.tmux.list_sessions().await {
+                            Ok(sessions)
+                                if sessions
+                                    .iter()
+                                    .any(|session| session.name == payload.session_name) => {}
+                            Ok(_) => {
+                                return (
+                                    false,
+                                    Some("the named Session is not on this Agent".to_string()),
+                                    Some("unavailable"),
+                                    None,
+                                    Vec::new(),
+                                );
+                            }
+                            Err(e) => {
+                                return (
+                                    false,
+                                    Some(format!("cannot list this Agent's Sessions: {e:#}")),
+                                    Some("unavailable"),
+                                    None,
+                                    Vec::new(),
+                                );
+                            }
+                        }
+                        if payload.grant.digest != payload.digest {
+                            return (
+                                false,
+                                Some(
+                                    "the authorized grant does not name the requested image identity"
+                                        .to_string(),
+                                ),
+                                Some("invalid"),
+                                None,
+                                Vec::new(),
+                            );
+                        }
+                        let Some(cache) = agent
+                            .tmux
+                            .sandbox_runtime()
+                            .and_then(|runtime| runtime.erofs_cache())
+                        else {
+                            return (
+                                false,
+                                Some("this Agent has no EROFS cache configured".to_string()),
+                                Some("unavailable"),
+                                None,
+                                Vec::new(),
+                            );
+                        };
+                        match crate::erofs_cache::prepare_grant_image(
+                            &cache,
+                            &payload.grant,
+                            payload.intent,
+                            &agent.server_url,
+                            &agent.auth_token,
+                        )
+                        .await
+                        {
+                            Ok(prepared) => (
+                                true,
+                                None,
+                                None,
+                                Some(prepared.observation),
+                                prepared.observations,
+                            ),
+                            Err(e) => (
+                                false,
+                                Some(format!("{e:#}")),
+                                Some("failed"),
+                                None,
+                                Vec::new(),
+                            ),
+                        }
+                    }
+                    .await;
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": {
+                            "request_id": request_id,
+                            "command": "session.sandbox.image-prepare",
+                            "success": success,
+                            "error": error,
+                            "error_kind": error_kind,
+                            "observation": observation,
+                            "observations": observations,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
@@ -5011,7 +5723,10 @@ core_routes!(agent, msg, responses;
                     // fields; the server derives status from `attached_clients`
                     // so the rule lives in exactly one place.
                     let (sessions, list_error) = match agent.tmux.list_sessions().await {
-                        Ok(sessions) => (sessions, None),
+                        Ok(mut sessions) => {
+                            attach_session_summaries(&agent.session_metadata, &mut sessions).await;
+                            (sessions, None)
+                        }
                         Err(e) => {
                             warn!("tmux list-sessions failed: {:#}", e);
                             // A listing failure is not "no sessions": reporting
@@ -5037,6 +5752,7 @@ core_routes!(agent, msg, responses;
                                 "foreground_command": s.foreground_command,
                                 "working_dir": s.working_dir,
                                 "instance_id": s.instance_id,
+                                "metadata": s.metadata,
                             })
                         })
                         .collect();
@@ -5052,6 +5768,94 @@ core_routes!(agent, msg, responses;
                             "error": list_error,
                             "sessions": sessions_json,
                         }
+                    });
+                    responses.send(WsMessage::Text(response.to_string())).await?;
+    }
+    // One authorized call of an Extension-contributed MCP Tool (#3778). The
+    // Server has already authenticated the caller and checked this Agent's
+    // advertised manifest; the Agent still proves the named target is itself
+    // and executes through exactly the catalog its own MCP endpoint serves.
+    //
+    // Read-only lane admission for P1: contributed Tools have no per-Tool
+    // policy declaration yet. #3779's control Tools add the owner-specific
+    // session routing key when they introduce mutation contributions.
+    "agent.mcp.tool.call" => "agent.mcp.tool.call" => 1 => Query => {
+                    let request_id = str_field(&msg.payload, "request_id");
+                    let reply = match (agent.mcp_catalog.as_ref(), agent.mcp_tool_context.as_ref()) {
+                        (Some(catalog), Some(context)) => {
+                            match serde_json::from_value::<McpToolCallPayload>(msg.payload.clone()) {
+                                Ok(call) if call.agent_id == agent.agent_id => {
+                                    let snapshot = catalog.snapshot();
+                                    if !snapshot
+                                        .contributions()
+                                        .iter()
+                                        .any(|tool| tool.name == call.tool)
+                                    {
+                                        McpToolCallReply::failure(
+                                            "not_found",
+                                            format!(
+                                                "this Agent does not advertise contributed Tool `{}`",
+                                                call.tool
+                                            ),
+                                        )
+                                    } else {
+                                        match call.arguments.as_object().cloned() {
+                                            Some(arguments) => {
+                                                match snapshot
+                                                    .call(context, &call.tool, Some(arguments))
+                                                    .await
+                                                {
+                                                    Ok(value) => McpToolCallReply::success(value),
+                                                    Err(error) => McpToolCallReply::failure(
+                                                        error.kind.as_str(),
+                                                        error.message,
+                                                    ),
+                                                }
+                                            }
+                                            None => McpToolCallReply::failure(
+                                                "invalid_argument",
+                                                "`arguments` must be an object",
+                                            ),
+                                        }
+                                    }
+                                }
+                                Ok(call) => McpToolCallReply::failure(
+                                    "invalid_argument",
+                                    format!(
+                                        "this Agent is '{}', not '{}'",
+                                        agent.agent_id, call.agent_id
+                                    ),
+                                ),
+                                Err(error) => McpToolCallReply::failure(
+                                    "invalid_argument",
+                                    format!("the call does not match its contract: {error}"),
+                                ),
+                            }
+                        }
+                        _ => McpToolCallReply::failure(
+                            "unavailable",
+                            "this Agent has no composed contribution catalog",
+                        ),
+                    };
+                    let mut payload = match serde_json::to_value(&reply) {
+                        Ok(payload) => payload,
+                        Err(_) => serde_json::json!({
+                            "success": false,
+                            "error": {
+                                "kind": "backend",
+                                "message": "the Tool reply could not be serialized",
+                            },
+                        }),
+                    };
+                    if let Some(object) = payload.as_object_mut() {
+                        object.insert("request_id".to_string(), serde_json::json!(request_id));
+                        object.insert("command".to_string(), serde_json::json!("mcp.tool.call"));
+                    }
+                    let response = serde_json::json!({
+                        "msg_type": "server.agent.command-response",
+                        "id": uuid::Uuid::new_v4().to_string(),
+                        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+                        "payload": payload,
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
     }

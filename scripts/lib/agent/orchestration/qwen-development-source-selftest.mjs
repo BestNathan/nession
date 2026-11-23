@@ -136,7 +136,8 @@ try{
   for(const tools of [[],['Edit'],['Read']])
     assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{events:native(tools)}),
       /restricted native Read\/Edit/);
-  for(const tools of [['Read','Bash','Edit'],['Read','mcp__exec','Edit']])
+  for(const tools of [['Read','Bash','Edit'],['Read','mcp__exec','Edit'],
+    ['Read','Write'],['Read','Edit','Write']])
     assert.throws(()=>collectQwenDevelopmentPatch(snapshot,{events:native(tools)}),
       /unapproved native Developer tool/);
   assert.throws(()=>prepareQwenDevelopmentSource(request),

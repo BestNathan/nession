@@ -6,6 +6,7 @@ import {
 } from '@/generated/protocol/core/server-session-processes/v1';
 import {
   WIRE as SESSION_CREATE_WIRE,
+  type ClientManagedCreate,
   type EnvSelectionMode,
 } from '@/generated/protocol/core/server-session-create/v1';
 import { WIRE as SESSION_KILL_WIRE } from '@/generated/protocol/core/server-session-kill/v1';
@@ -237,6 +238,11 @@ export class SessionsPlugin implements TransportPlugin {
        * Absent keeps the legacy inherit-on-empty behavior.
        */
       envSelectionMode?: EnvSelectionMode;
+      /**
+       * Managed EROFS creation (#3794). The Server resolves and authorizes
+       * every named digest; the Web never sends a host path or a grant.
+       */
+      managed?: ClientManagedCreate;
     } = {},
   ): Promise<CreateSessionResponse> {
     return this.requireConnection().request<CreateSessionResponse>(SESSION_CREATE_WIRE, {
@@ -248,6 +254,7 @@ export class SessionsPlugin implements TransportPlugin {
       ...(options.envSelectionMode
         ? { env_selection_mode: options.envSelectionMode }
         : {}),
+      ...(options.managed ? { managed: options.managed } : {}),
     });
   }
 
@@ -255,20 +262,25 @@ export class SessionsPlugin implements TransportPlugin {
    * Associate, change or remove one Session's Project membership (#3082).
    *
    * Membership is metadata only: the server never changes cwd, ENV, mounts or
-   * the running process. `expectedRevision` is the last revision the caller
-   * observed; omit it for a last-writer-wins first association.
+   * the running process. `expected.revision` is the last revision the caller
+   * observed and `expected.instanceId` the incarnation it read; both come from
+   * the Session read model (#4234). Omit either only for a legacy Server that
+   * does not report the token.
    */
   async setProjectBinding(
     sessionId: string,
     projectId: string | null,
-    expectedRevision?: number,
+    expected: { revision?: number; instanceId?: string | null } = {},
   ): Promise<SessionProjectBindingResponse> {
     return this.requireConnection().request<SessionProjectBindingResponse>(
       SESSION_PROJECT_SET_WIRE,
       {
         session_id: sessionId,
         project_id: projectId,
-        ...(expectedRevision === undefined ? {} : { expected_revision: expectedRevision }),
+        ...(expected.revision === undefined
+          ? {}
+          : { expected_revision: expected.revision }),
+        ...(expected.instanceId ? { expected_instance_id: expected.instanceId } : {}),
       },
     );
   }

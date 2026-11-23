@@ -7,8 +7,8 @@ use super::repository;
 use super::sqlite;
 use crate::digest::is_valid_digest;
 
-/// Maximum tag length.
-pub const MAX_TAG_LENGTH: usize = 128;
+/// The shared Tag grammar is owned by the #4087 contracts.
+pub use crate::contracts::{validate_tag, MAX_TAG_LENGTH};
 
 /// What the caller expects the Tag to point at before this update.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -26,31 +26,6 @@ pub struct TagUpdate {
     pub tag: String,
     pub previous: Option<String>,
     pub digest: String,
-}
-
-/// Validate a Tag: `[a-z0-9][a-z0-9._-]{0,127}` (the existing alias rule).
-pub fn validate_tag(tag: &str) -> Result<()> {
-    if tag.is_empty() || tag.len() > MAX_TAG_LENGTH {
-        anyhow::bail!("tag must be 1..={MAX_TAG_LENGTH} bytes");
-    }
-    let mut characters = tag.chars();
-    let Some(first) = characters.next() else {
-        anyhow::bail!("tag must not be empty");
-    };
-    if !first.is_ascii_lowercase() && !first.is_ascii_digit() {
-        anyhow::bail!("tag {tag:?} must start with a lowercase letter or digit");
-    }
-    for character in characters {
-        if !(character.is_ascii_lowercase()
-            || character.is_ascii_digit()
-            || character == '.'
-            || character == '_'
-            || character == '-')
-        {
-            anyhow::bail!("tag {tag:?} contains an unsupported character");
-        }
-    }
-    Ok(())
 }
 
 /// Atomically create or move a Tag with an expected-previous check.
@@ -181,6 +156,23 @@ pub async fn delete_tag_if_matches(
     )
     .await?;
     Ok(deleted > 0)
+}
+
+/// One repository's Tag names in stable order (#4087 RepositoryStore).
+pub async fn list_tags(conn: &impl ConnectionTrait, repository_name: &str) -> Result<Vec<String>> {
+    repository::validate_repository_name(repository_name)?;
+    let rows = sqlite::query_all(
+        conn,
+        "SELECT tag FROM catalog_tags WHERE repository = ? ORDER BY tag",
+        vec![repository_name.into()],
+    )
+    .await?;
+    rows.iter()
+        .map(|row| {
+            row.try_get("", "tag")
+                .map_err(|error| anyhow::anyhow!("catalog tag row is invalid: {error}"))
+        })
+        .collect()
 }
 
 /// All Tag targets, used as GC roots.

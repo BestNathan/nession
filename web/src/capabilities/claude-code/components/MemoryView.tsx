@@ -8,7 +8,7 @@ import {
   chromeMonoRole,
   chromeSansRole,
 } from '@/shared/typography/chromeRoles';
-import { workspaceScrollClearanceClass } from '@/shared/lib/workspaceScrollClearance';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import type { MemoryState } from '../hooks/useMemory';
 import { resolveMemoryLink, type MemoryLinkResolution } from '../model/memoryLink';
 import { useMemoryFragmentScroll } from '../hooks/useMemoryFragmentScroll';
@@ -28,18 +28,33 @@ import { formatSize } from '../format';
  * rendering any of them as an empty file list would claim something the
  * provider did not say.
  */
+export type MemoryLayout = 'master-detail' | 'push';
+
+/**
+ * Which half a push layout is showing.
+ *
+ * The App puts the list and one file on separate depths, so its shell header
+ * owns the one Back between them (#3829). Master-detail ignores this: both
+ * halves are already on screen and the list's selection is the disclosure.
+ */
+export type MemoryPane = 'list' | 'detail';
+
 export function MemoryView({
   memory,
   onOpenFile,
   onLoadMore,
   onRetry,
   onRetryRead,
+  layout = 'master-detail',
+  pane = 'list',
 }: {
   memory: MemoryState;
   onOpenFile: (path: string) => void;
   onLoadMore: () => void;
   onRetry: () => void;
   onRetryRead: () => void;
+  layout?: MemoryLayout;
+  pane?: MemoryPane;
 }) {
   const response = memory.response;
 
@@ -102,7 +117,84 @@ export function MemoryView({
       onOpenFile={onOpenFile}
       onLoadMore={onLoadMore}
       onRetryRead={onRetryRead}
+      layout={layout}
+      pane={pane}
     />
+  );
+}
+
+/** The repository and effective directory the answer came from. */
+function MemorySource({
+  response,
+}: {
+  response: NonNullable<MemoryState['response']>;
+}) {
+  return (
+    <div className="shrink-0 border-b px-4 py-2">
+      <p className={chromeLabelRole()}>Auto Memory</p>
+      <p
+        className={cn('truncate text-muted-foreground', chromeMonoRole('code'))}
+        title={response.memory_directory ?? undefined}
+        data-testid="claude-code-memory-source"
+      >
+        {response.repository_root}
+        {response.repository_kind === 'project_root' ? ' (not a Git repository)' : ''}
+      </p>
+    </div>
+  );
+}
+
+/**
+ * The files in the memory directory.
+ *
+ * `touch` is the App's 44px row floor; Web keeps its denser pointer row.
+ */
+function MemoryFileRows({
+  memory,
+  response,
+  onOpenFile,
+  touch,
+}: {
+  memory: MemoryState;
+  response: NonNullable<MemoryState['response']>;
+  onOpenFile: (path: string) => void;
+  touch: boolean;
+}) {
+  return (
+    <>
+      {memory.files.length === 0 ? (
+        <p className={cn('p-2 text-muted-foreground', chromeSansRole('secondary'))}>
+          This memory directory has no Markdown files yet.
+        </p>
+      ) : (
+        <div className="space-y-0.5">
+          {memory.files.map((file) => (
+            <button
+              key={file.path}
+              type="button"
+              aria-label={file.path}
+              aria-current={memory.selectedPath === file.path ? 'true' : undefined}
+              onClick={() => onOpenFile(file.path)}
+              className={cn(
+                'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
+                touch && 'min-h-11',
+                chromeSansRole('secondary'),
+                'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
+                memory.selectedPath === file.path && 'bg-accent text-accent-foreground',
+              )}
+            >
+              <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              <span className="truncate">{file.path}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {response.truncated ? (
+        <p className={cn('p-2 text-muted-foreground', chromeSansRole('metadata'))}>
+          More files exist than this view lists.
+        </p>
+      ) : null}
+    </>
   );
 }
 
@@ -112,66 +204,68 @@ function MemoryReady({
   onOpenFile,
   onLoadMore,
   onRetryRead,
+  layout,
+  pane,
 }: {
   memory: MemoryState;
   response: NonNullable<MemoryState['response']>;
   onOpenFile: (path: string) => void;
   onLoadMore: () => void;
   onRetryRead: () => void;
+  layout: MemoryLayout;
+  pane: MemoryPane;
 }) {
+  if (layout === 'push') {
+    return (
+      <div
+        data-testid="claude-code-memory"
+        className="flex min-h-0 flex-1 flex-col"
+        data-state="ready"
+        data-pane={pane}
+      >
+        {pane === 'detail' ? (
+          <main className="flex min-h-0 flex-1 flex-col">
+            <MemoryContent
+              memory={memory}
+              onOpenFile={onOpenFile}
+              onLoadMore={onLoadMore}
+              onRetryRead={onRetryRead}
+            />
+          </main>
+        ) : (
+          <>
+            <MemorySource response={response} />
+            <WorkspaceBoundedScrollport className="p-2" data-testid="claude-code-memory-list">
+              <MemoryFileRows
+                memory={memory}
+                response={response}
+                onOpenFile={onOpenFile}
+                touch
+              />
+            </WorkspaceBoundedScrollport>
+          </>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div data-testid="claude-code-memory" className="flex min-h-0 flex-1 flex-col" data-state="ready">
-      <div className="shrink-0 border-b px-4 py-2">
-        <p className={chromeLabelRole()}>Auto Memory</p>
-        <p
-          className={cn('truncate text-muted-foreground', chromeMonoRole('code'))}
-          title={response.memory_directory ?? undefined}
-          data-testid="claude-code-memory-source"
-        >
-          {response.repository_root}
-          {response.repository_kind === 'project_root' ? ' (not a Git repository)' : ''}
-        </p>
-      </div>
+      <MemorySource response={response} />
       <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
-        <aside
-          className={cn(
-            'max-h-48 shrink-0 overflow-y-auto border-b p-2 md:max-h-none md:min-h-0 md:border-b-0 md:border-r',
-            workspaceScrollClearanceClass,
-          )}
+        <WorkspaceBoundedScrollport
+          viewportClassName="max-h-48 flex-none border-b md:max-h-none md:border-b-0 md:border-r"
+          className="p-2"
+          role="complementary"
           data-testid="claude-code-memory-list"
         >
-          {memory.files.length === 0 ? (
-            <p className={cn('p-2 text-muted-foreground', chromeSansRole('secondary'))}>
-              This memory directory has no Markdown files yet.
-            </p>
-          ) : (
-            <div className="space-y-0.5">
-              {memory.files.map((file) => (
-                <button
-                  key={file.path}
-                  type="button"
-                  aria-label={file.path}
-                  aria-current={memory.selectedPath === file.path ? 'true' : undefined}
-                  onClick={() => onOpenFile(file.path)}
-                  className={cn(
-                    'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
-                    chromeSansRole('secondary'),
-                    'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
-                    memory.selectedPath === file.path && 'bg-accent text-accent-foreground',
-                  )}
-                >
-                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  <span className="truncate">{file.path}</span>
-                </button>
-              ))}
-            </div>
-          )}
-          {response.truncated ? (
-            <p className={cn('p-2 text-muted-foreground', chromeSansRole('metadata'))}>
-              More files exist than this view lists.
-            </p>
-          ) : null}
-        </aside>
+          <MemoryFileRows
+            memory={memory}
+            response={response}
+            onOpenFile={onOpenFile}
+            touch={false}
+          />
+        </WorkspaceBoundedScrollport>
         <main className="flex min-h-0 flex-col">
           <MemoryContent
             memory={memory}
@@ -403,10 +497,10 @@ function MemoryDocument({
   onRetryRead: () => void;
 }) {
   return (
-    <div
+    <WorkspaceBoundedScrollport
       ref={contentRef}
       data-testid="claude-code-memory-content"
-      className={cn('min-h-0 flex-1 overflow-y-auto py-4', workspaceScrollClearanceClass)}
+      className="py-4"
     >
       {notice ? (
         <p
@@ -460,7 +554,7 @@ function MemoryDocument({
       ) : memory.readLoading ? null : (
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>(empty)</p>
       )}
-    </div>
+    </WorkspaceBoundedScrollport>
   );
 }
 

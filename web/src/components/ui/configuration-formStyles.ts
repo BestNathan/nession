@@ -10,4 +10,4 @@
  * components (react-refresh).
  */
 export const formRowClass =
-  'flex min-w-0 flex-col gap-2 rounded-[var(--nession-radius-surface)] bg-muted/40 p-3';
+  'flex min-w-0 flex-col gap-[var(--nession-rhythm-inline)] rounded-[var(--nession-radius-surface)] bg-muted/40 p-[var(--nession-shell-space-3)]';

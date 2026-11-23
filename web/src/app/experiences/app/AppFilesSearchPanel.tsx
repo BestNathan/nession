@@ -5,6 +5,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import type { FileEntry } from '@/capabilities/files';
 import type { AppFilesSearchStatus } from './useAppFilesSearch';
 import { cn } from '@/shared/lib/utils';
+import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { bodyAppClass, primaryAppClass, secondaryAppClass } from '@/app/experiences/app/appTypography';
 import { chromeLabelRole, chromeMonoRole } from '@/shared/typography/chromeRoles';
 
@@ -14,6 +15,8 @@ export interface AppFilesSearchPanelProps {
   status: AppFilesSearchStatus;
   error: string | null;
   results: FileEntry[];
+  /** True when the scan stopped before covering the whole Workspace. */
+  incomplete: boolean;
   onSelectFile: (entry: FileEntry) => void;
   onRetry: () => void;
 }
@@ -24,6 +27,7 @@ export function AppFilesSearchPanel({
   status,
   error,
   results,
+  incomplete,
   onSelectFile,
   onRetry,
 }: AppFilesSearchPanelProps) {
@@ -43,16 +47,27 @@ export function AppFilesSearchPanel({
           aria-label="Search files"
         />
       </div>
-      {/* Bottom padding is the larger of the panel's own spacing and the
-          capsule clearance: the search depth is a Workspace depth like any
-          other, and its last hit must be able to scroll above the capsule
-          (owner decision 2026-10-03). */}
-      <div className="min-h-0 flex-1 overflow-y-auto px-[var(--nession-shell-space-3)] pb-[max(var(--nession-shell-space-3),var(--nession-local-workspace-content-bottom-inset,0px))]">
+      {/* The search depth is a bounded surface inside Files (#4115): its hit
+          list is the internal scroll owner and spends the host's measured
+          trailing inset, so the last hit can scroll above the Capsule without
+          the panel computing that geometry itself. */}
+      <WorkspaceBoundedScrollport
+        className="px-[var(--nession-shell-space-3)]"
+        data-testid="files-search-scroll"
+      >
         <p className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', chromeLabelRole())}>
           Files
         </p>
+        {status === 'ready' && incomplete ? (
+          <p
+            className={cn('pb-[var(--nession-shell-space-2)] text-muted-foreground', secondaryAppClass)}
+            data-testid="files-search-incomplete"
+          >
+            Showing partial results — this Workspace was not scanned completely.
+          </p>
+        ) : null}
         {status === 'loading' ? (
-          <div className="flex flex-col gap-2">
+          <div className="flex flex-col gap-2" data-testid="files-search-loading">
             {Array.from({ length: 5 }, (_, i) => (
               <Skeleton key={i} className="h-14 w-full rounded-[var(--nession-shell-session-row-radius)]" />
             ))}
@@ -67,8 +82,13 @@ export function AppFilesSearchPanel({
           </div>
         ) : null}
         {status === 'ready' && query.trim().length > 0 && results.length === 0 ? (
-          <p className={cn('text-muted-foreground', secondaryAppClass)}>
-            {`No files match "${query.trim()}".`}
+          <p
+            className={cn('text-muted-foreground', secondaryAppClass)}
+            data-testid="files-search-empty"
+          >
+            {incomplete
+              ? `No files match "${query.trim()}" in the scanned part of this Workspace.`
+              : `No files match "${query.trim()}".`}
           </p>
         ) : null}
         {status === 'ready' ? (
@@ -92,7 +112,7 @@ export function AppFilesSearchPanel({
             ))}
           </ul>
         ) : null}
-      </div>
+      </WorkspaceBoundedScrollport>
     </div>
   );
 }

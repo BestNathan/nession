@@ -131,6 +131,41 @@
       "value": "16px"
     }
   },
+  "rhythm": {
+    "$description": "Cross-Experience spatial relationship metrics (#4050). Existing pixel baselines are intentionally unchanged; a named recipe owns where each spacing token applies. Do not use these as an arbitrary spacing scale or override renderer-owned geometry.",
+    "sectionStack": {
+      "$description": "The stable distance between peer content regions in ResourceDetail and ConfigurationForm; preserve their existing 20px gap.",
+      "value": "20px"
+    },
+    "sectionContent": {
+      "$description": "The heading/body gap inside a content section or detail header; preserve existing 8px.",
+      "value": "8px"
+    },
+    "textStack": {
+      "$description": "The tight title/metadata or related short-text stack; preserve existing 4px.",
+      "value": "4px"
+    },
+    "inline": {
+      "$description": "Inline peers such as status/title chips, facts, operation actions and icon/Label content; preserve existing 8px.",
+      "value": "8px"
+    },
+    "fieldStack": {
+      "$description": "The label/control/help/error flow in shared FormField; preserve established 6px compact form rhythm.",
+      "value": "6px"
+    },
+    "factStack": {
+      "$description": "Compact vertical fact label to value distance in DetailFact; preserves existing gap-0.5 (2px) without a raw utility.",
+      "value": "2px"
+    },
+    "errorInsetX": {
+      "$description": "Horizontal inset of OperationError; preserves established 10px px-2.5 without inheriting unrelated host geometry.",
+      "value": "10px"
+    },
+    "errorInsetY": {
+      "$description": "Vertical inset of OperationError; preserves established 6px py-1.5 without treating a field sibling gap as padding.",
+      "value": "6px"
+    }
+  },
   "touchTarget": {
     "min": {
       "value": 44

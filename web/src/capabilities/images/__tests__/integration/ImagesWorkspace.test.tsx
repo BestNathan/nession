@@ -4,7 +4,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 import { createMockPluginSurface, type MockPluginSurface } from '@/test/mockPluginSurface';
 import { ImagesWorkspace } from '../../components/ImagesWorkspace';
-import { imagesApi, type ImageDescriptor } from '../../ImagesPlugin';
+import {
+  imagesApi,
+  type ImageDescriptor,
+  type ImageLibraryEntry,
+} from '../../ImagesPlugin';
 
 function image(index: number): ImageDescriptor {
   return {
@@ -23,6 +27,39 @@ function image(index: number): ImageDescriptor {
     aliases: [`image-${index}`],
     created_at: 100 + index,
     updated_at: 200 + index,
+  };
+}
+
+function libraryEntry(index: number): ImageLibraryEntry {
+  const descriptor = image(index);
+  const manifest = `sha256:${(900 + index).toString(16).padStart(64, '0')}`;
+  return {
+    image: descriptor,
+    repository: 'nession/fixtures',
+    tags: [`image-${index}`],
+    manifest_digest: manifest,
+    media_type: 'application/vnd.oci.image.manifest.v1+json',
+    kind: 'manifest',
+    platform: 'linux/amd64',
+    representation: 'single_layer',
+    layers: [
+      {
+        digest: descriptor.digest ?? '',
+        media_type: 'application/vnd.nession.erofs.layer.v1',
+        size_bytes: descriptor.size_bytes,
+        role: 'layer',
+      },
+    ],
+    closure: descriptor.digest ? [descriptor.digest] : [],
+    impact: {
+      manifest_digest: manifest,
+      project_pins: 0,
+      session_pins: 0,
+      other_tags: [],
+      leases: 0,
+      compose_references: 0,
+      unknown: false,
+    },
   };
 }
 
@@ -70,7 +107,7 @@ function resolveEmptyBuilds(surface: MockPluginSurface): void {
 }
 
 function imageListRequest(surface: MockPluginSurface) {
-  return surface.requests.find((request) => request.type === 'server.image.list');
+  return surface.requests.find((request) => request.type === 'server.image.library.list');
 }
 
 describe('Images Workspace capability', () => {
@@ -90,9 +127,10 @@ describe('Images Workspace capability', () => {
     render(<ImagesWorkspace ctx={context()} />);
     resolveEmptyBuilds(surface);
     const request = imageListRequest(surface);
-    expect(request?.payload).toEqual({ offset: 0, limit: 50, query: '' });
-    surface.resolveNext('server.image.list', {
-      images: [image(1), image(2)],
+    expect(request?.payload).toEqual({ offset: 0, limit: 50, query: '', repository: '' });
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(1), libraryEntry(2)],
       total: 235,
       next_offset: 50,
     });
@@ -107,8 +145,9 @@ describe('Images Workspace capability', () => {
   it('pages forward and searches through the Server registry', async () => {
     render(<ImagesWorkspace ctx={context()} />);
     resolveEmptyBuilds(surface);
-    surface.resolveNext('server.image.list', {
-      images: [image(1)],
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(1)],
       total: 235,
       next_offset: 50,
     });
@@ -116,10 +155,16 @@ describe('Images Workspace capability', () => {
     await waitFor(() => expect(screen.getByTestId('images-next')).toBeEnabled());
     await userEvent.click(screen.getByTestId('images-next'));
     await waitFor(() =>
-      expect(imageListRequest(surface)?.payload).toEqual({ offset: 50, limit: 50, query: '' }),
+      expect(imageListRequest(surface)?.payload).toEqual({
+        offset: 50,
+        limit: 50,
+        query: '',
+        repository: '',
+      }),
     );
-    surface.resolveNext('server.image.list', {
-      images: [image(51)],
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(51)],
       total: 235,
       next_offset: 100,
     });
@@ -132,10 +177,12 @@ describe('Images Workspace capability', () => {
         offset: 0,
         limit: 50,
         query: 'node',
+        repository: '',
       });
     });
-    surface.resolveNext('server.image.list', {
-      images: [image(2)],
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(2)],
       total: 1,
     });
     await screen.findByText('image-2');
@@ -146,7 +193,11 @@ describe('Images Workspace capability', () => {
     render(<ImagesWorkspace ctx={context()} />);
     await waitFor(() => expect(surface.requests).toHaveLength(2));
     resolveEmptyBuilds(surface);
-    surface.resolveNext('server.image.list', { images: [], total: 0 });
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
     await screen.findByTestId('images-empty');
     expect(screen.getByTestId('images-page-label')).toHaveTextContent('0 images');
   });
@@ -155,8 +206,9 @@ describe('Images Workspace capability', () => {
     render(<ImagesWorkspace ctx={context()} />);
     await waitFor(() => expect(surface.requests).toHaveLength(2));
     resolveEmptyBuilds(surface);
-    surface.resolveNext('server.image.list', {
-      images: [],
+    surface.resolveNext('server.image.library.list', {
+      success: false,
+      entries: [],
       total: 0,
       error: 'Registry unavailable',
     });
@@ -167,8 +219,9 @@ describe('Images Workspace capability', () => {
   it('expands one Library row inline at a time without pushing history', async () => {
     render(<ImagesWorkspace ctx={context('app')} />);
     resolveEmptyBuilds(surface);
-    surface.resolveNext('server.image.list', {
-      images: [image(1), image(2)],
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(1), libraryEntry(2)],
       total: 2,
     });
     await screen.findByText('image-1');
@@ -190,7 +243,11 @@ describe('Images Workspace capability', () => {
 
   it('observes a running durable build, cancels it and offers retry', async () => {
     render(<ImagesWorkspace ctx={context()} />);
-    surface.resolveNext('server.image.list', { images: [], total: 0 });
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
     surface.resolveNext('server.image.build.list', {
       builds: [runningBuild()],
       total: 1,
@@ -209,7 +266,10 @@ describe('Images Workspace capability', () => {
     const cancel = surface.requests.find(
       (request) => request.type === 'server.image.build.cancel',
     );
-    expect(cancel?.payload).toEqual({ build_id: runningBuild().build_id });
+    expect(cancel?.payload).toEqual({
+      build_id: runningBuild().build_id,
+      attempt: 1,
+    });
     surface.resolveNext('server.image.build.cancel', {
       success: true,
       build: { ...runningBuild(), status: 'canceled', stage: null },
@@ -220,10 +280,338 @@ describe('Images Workspace capability', () => {
     expect(screen.getByTestId('image-build-retry')).toBeInTheDocument();
   });
 
-  it('re-reads the durable build inventory after a reconnect', async () => {
+  it('pages, filters and keeps the selected build outside the current page or filter', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
+    surface.resolveNext('server.image.build.list', {
+      builds: [runningBuild()],
+      total: 120,
+    });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-row');
+    expect(screen.getByTestId('image-builds-page-label')).toHaveTextContent('1–1 of 120');
+
+    await userEvent.click(screen.getByTestId('image-build-select'));
+    expect(screen.getByTestId('image-build-detail')).toBeInTheDocument();
+    expect(screen.getByTestId('image-build-detail-attempt')).toHaveTextContent('1 · Building');
+
+    await userEvent.click(screen.getByTestId('image-builds-status-failed'));
+    const filteredRequests = surface.requests.filter(
+      (request) => request.type === 'server.image.build.list',
+    );
+    const filtered = filteredRequests[filteredRequests.length - 1];
+    expect(filtered?.payload).toMatchObject({
+      offset: 0,
+      limit: 50,
+      statuses: ['failed'],
+      sources: [],
+      query: '',
+    });
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    await waitFor(() =>
+      expect(screen.getByTestId('image-build-selection-retained')).toBeInTheDocument(),
+    );
+    // The retained record is not presented as a fresh Server page; the empty
+    // filtered result is truthful.
+    expect(screen.getByTestId('images-builds-empty')).toHaveTextContent(
+      'No build matches this search or filter.',
+    );
+
+    await userEvent.click(screen.getByTestId('image-builds-source-github'));
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+    fireEvent.change(screen.getByTestId('image-builds-search'), {
+      target: { value: 'nightly' },
+    });
+    await waitFor(() => {
+      const searchedRequests = surface.requests.filter(
+        (request) => request.type === 'server.image.build.list',
+      );
+      const searched = searchedRequests[searchedRequests.length - 1];
+      expect(searched?.payload).toMatchObject({ offset: 0, query: 'nightly' });
+    });
+    surface.resolveNext('server.image.build.list', { builds: [runningBuild()], total: 120 });
+    await waitFor(() =>
+      expect(screen.getByTestId('image-builds-page-label')).toHaveTextContent('1–1 of 120'),
+    );
+    await userEvent.click(screen.getByTestId('image-builds-next'));
+    const pagedRequests = surface.requests.filter(
+      (request) => request.type === 'server.image.build.list',
+    );
+    const paged = pagedRequests[pagedRequests.length - 1];
+    expect(paged?.payload).toMatchObject({ offset: 50, query: 'nightly' });
+  });
+
+  it('rejects a stale retry attempt and re-reads the durable record', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
+    const failed = {
+      ...runningBuild(),
+      status: 'failed' as const,
+      stage: null,
+      error: 'mkfs.erofs failed: earlier attempt',
+      attempts: [
+        {
+          attempt: 1,
+          status: 'failed',
+          stage: 'packaging',
+          diagnostic: 'mkfs.erofs failed: earlier attempt',
+          error: 'mkfs.erofs failed: earlier attempt',
+          started_at: 1,
+          finished_at: 2,
+        },
+      ],
+    };
+    surface.resolveNext('server.image.build.list', { builds: [failed], total: 1 });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-row');
+    await userEvent.click(screen.getByTestId('image-build-select'));
+    expect(screen.getByTestId('image-build-attempt-diagnostic')).toHaveTextContent(
+      'mkfs.erofs failed: earlier attempt',
+    );
+
+    await userEvent.click(screen.getByTestId('image-build-retry'));
+    const retry = surface.requests.find(
+      (request) => request.type === 'server.image.build.retry',
+    );
+    expect(retry?.payload).toEqual({ build_id: failed.build_id, attempt: 1 });
+    surface.resolveNext('server.image.build.retry', {
+      success: false,
+      error: 'build is at attempt 2; the requested attempt 1 is stale',
+      error_kind: 'conflict',
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId('image-builds-action-error')).toHaveTextContent(
+        'the requested attempt 1 is stale',
+      ),
+    );
+    // A refused action re-reads the authoritative page instead of inventing a
+    // new attempt locally.
+    await waitFor(() =>
+      expect(
+        surface.requests.filter(
+          (request) => request.type === 'server.image.build.list',
+        ).length,
+      ).toBe(1),
+    );
+    surface.resolveNext('server.image.build.list', { builds: [failed], total: 1 });
+  });
+
+  it('refuses an invalid Build source without submitting a Server job', async () => {
     render(<ImagesWorkspace ctx={context()} />);
     resolveEmptyBuilds(surface);
     surface.resolveNext('server.image.list', { images: [], total: 0 });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-form');
+
+    fireEvent.change(screen.getByTestId('image-build-repository'), {
+      target: { value: 'https://gitlab.com/owner/repo' },
+    });
+    fireEvent.change(screen.getByTestId('image-build-ref'), { target: { value: '' } });
+    await userEvent.click(screen.getByTestId('image-build-submit'));
+
+    await screen.findByTestId('image-build-error-repository-url');
+    expect(screen.getByTestId('image-build-error-ref')).toBeInTheDocument();
+    expect(
+      surface.requests.filter((request) => request.type === 'server.image.build.submit'),
+    ).toHaveLength(0);
+    // The draft is preserved rather than silently reset.
+    expect(screen.getByTestId('image-build-repository')).toHaveValue(
+      'https://gitlab.com/owner/repo',
+    );
+  });
+
+  it('submits a canonical GitHub source with an alias', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    resolveEmptyBuilds(surface);
+    surface.resolveNext('server.image.list', { images: [], total: 0 });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-form');
+
+    fireEvent.change(screen.getByTestId('image-build-repository'), {
+      target: { value: ' https://github.com/BestNathan/nession.git ' },
+    });
+    fireEvent.change(screen.getByTestId('image-build-ref'), { target: { value: 'main' } });
+    fireEvent.change(screen.getByTestId('image-build-alias'), {
+      target: { value: 'nightly' },
+    });
+    await userEvent.click(screen.getByTestId('image-build-submit'));
+
+    await waitFor(() => {
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.build.submit'),
+      ).toBe(true);
+    });
+    const submit = surface.requests.find(
+      (request) => request.type === 'server.image.build.submit',
+    );
+    expect(submit?.payload).toEqual({
+      source: {
+        kind: 'github',
+        repository_url: 'https://github.com/BestNathan/nession',
+        ref: 'main',
+      },
+      alias: 'nightly',
+    });
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: runningBuild(),
+    });
+    await waitFor(() =>
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.build.list'),
+      ).toBe(true),
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+  });
+
+  it('offers only supported adapters and validates a Directory path', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    resolveEmptyBuilds(surface);
+    surface.resolveNext('server.image.list', { images: [], total: 0 });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-form');
+
+    expect(screen.getByTestId('image-build-source-github')).toBeInTheDocument();
+    expect(screen.getByTestId('image-build-source-local_directory')).toBeInTheDocument();
+    expect(screen.getByTestId('image-build-source-compose')).toBeInTheDocument();
+    expect(screen.queryByTestId('image-build-source-archive')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('image-build-source-oci')).not.toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId('image-build-source-local_directory'));
+    fireEvent.change(screen.getByTestId('image-build-path'), {
+      target: { value: 'relative/path' },
+    });
+    await userEvent.click(screen.getByTestId('image-build-submit'));
+    await screen.findByTestId('image-build-error-path');
+    expect(
+      surface.requests.filter((request) => request.type === 'server.image.build.submit'),
+    ).toHaveLength(0);
+
+    fireEvent.change(screen.getByTestId('image-build-path'), {
+      target: { value: '/srv/nession/sources/base' },
+    });
+    await userEvent.click(screen.getByTestId('image-build-submit'));
+    await waitFor(() => {
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.build.submit'),
+      ).toBe(true);
+    });
+    const submit = surface.requests.find(
+      (request) => request.type === 'server.image.build.submit',
+    );
+    expect(submit?.payload).toEqual({
+      source: { kind: 'local_directory', path: '/srv/nession/sources/base' },
+    });
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: runningBuild(),
+    });
+    await waitFor(() =>
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.build.list'),
+      ).toBe(true),
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+  });
+
+  it('composes flat and referenced sources with distinct validation', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    resolveEmptyBuilds(surface);
+    surface.resolveNext('server.image.list', { images: [], total: 0 });
+    await userEvent.click(screen.getByTestId('images-section-builds'));
+    await screen.findByTestId('image-build-form');
+
+    await userEvent.click(screen.getByTestId('image-build-source-compose'));
+    fireEvent.change(screen.getByTestId('image-build-compose-repository'), {
+      target: { value: 'base' },
+    });
+    fireEvent.change(screen.getByTestId('image-build-compose-ref'), {
+      target: { value: 'latest' },
+    });
+    fireEvent.change(screen.getByTestId('image-build-compose-destination'), {
+      target: { value: '' },
+    });
+    await userEvent.click(screen.getByTestId('image-build-compose-add'));
+    const repositories = screen.getAllByTestId('image-build-compose-repository');
+    fireEvent.change(repositories[1]!, { target: { value: 'tools' } });
+    const references = screen.getAllByTestId('image-build-compose-ref');
+    fireEvent.change(references[1]!, { target: { value: 'v1' } });
+    const destinations = screen.getAllByTestId('image-build-compose-destination');
+    fireEvent.change(destinations[1]!, { target: { value: '/opt/tools' } });
+
+    await userEvent.click(screen.getByTestId('image-build-submit'));
+    await waitFor(() => {
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.build.submit'),
+      ).toBe(true);
+    });
+    const submit = surface.requests.find(
+      (request) => request.type === 'server.image.build.submit',
+    );
+    expect(submit?.payload).toEqual({
+      source: {
+        kind: 'compose',
+        representation: 'flattened',
+        sources: [
+          { repository: 'base', ref: 'latest', destination: '' },
+          { repository: 'tools', ref: 'v1', destination: '/opt/tools' },
+        ],
+      },
+    });
+    surface.resolveNext('server.image.build.submit', {
+      success: true,
+      build: runningBuild(),
+    });
+    await waitFor(() =>
+      expect(
+        surface.requests.some((request) => request.type === 'server.image.build.list'),
+      ).toBe(true),
+    );
+    surface.resolveNext('server.image.build.list', { builds: [], total: 0 });
+
+    // A successful submit resets the draft. Build the referenced shape
+    // explicitly: choosing it clears destinations rather than submitting a
+    // shape the Server refuses.
+    await userEvent.click(screen.getByTestId('image-build-source-compose'));
+    const fillRow = (index: number, repository: string, reference: string) => {
+      fireEvent.change(screen.getAllByTestId('image-build-compose-repository')[index]!, {
+        target: { value: repository },
+      });
+      fireEvent.change(screen.getAllByTestId('image-build-compose-ref')[index]!, {
+        target: { value: reference },
+      });
+    };
+    fillRow(0, 'base', 'latest');
+    fireEvent.change(screen.getByTestId('image-build-compose-destination'), {
+      target: { value: '/opt/base' },
+    });
+    await userEvent.click(screen.getByTestId('image-build-representation-referenced'));
+    expect(screen.queryByTestId('image-build-compose-destination')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('image-build-compose-add'));
+    fillRow(1, 'base', 'latest');
+    await userEvent.click(screen.getByTestId('image-build-submit'));
+    await screen.findByTestId('image-build-error-compose');
+    expect(
+      surface.requests.filter((request) => request.type === 'server.image.build.submit'),
+    ).toHaveLength(0);
+  });
+
+  it('re-reads the durable build inventory after a reconnect', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    resolveEmptyBuilds(surface);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [],
+      total: 0,
+    });
     await screen.findByTestId('images-empty');
     await userEvent.click(screen.getByTestId('images-section-builds'));
     surface.setConnectionState('reconnecting');
@@ -240,5 +628,99 @@ describe('Images Workspace capability', () => {
       total: 1,
     });
     await screen.findByTestId('image-build-row');
+  });
+
+  it('creates a Tag and surfaces a CAS conflict with the current digest', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    resolveEmptyBuilds(surface);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(1)],
+      total: 1,
+    });
+    await screen.findByText('image-1');
+    await userEvent.click(screen.getAllByTestId('image-row')[0]);
+    await userEvent.click(screen.getByTestId('images-tag-create'));
+    fireEvent.change(screen.getByTestId('images-tag-name'), {
+      target: { value: 'stable' },
+    });
+    await userEvent.click(screen.getByTestId('images-tag-confirm'));
+
+    const request = surface.requests.find(
+      (candidate) => candidate.type === 'server.image.tag.set',
+    );
+    expect(request?.payload).toEqual({
+      repository: 'nession/fixtures',
+      tag: 'stable',
+      digest: libraryEntry(1).manifest_digest,
+    });
+    surface.resolveNext('server.image.tag.set', {
+      success: false,
+      error: 'tag conflict for nession/fixtures:stable',
+      error_kind: 'conflict',
+      current_digest: 'sha256:abcdef',
+    });
+    const conflict = await screen.findByTestId('images-tag-conflict');
+    expect(conflict).toHaveTextContent('sha256:abcdef');
+    expect(conflict).toHaveTextContent('review the operation again');
+  });
+
+  it('requires a reference-impact review before unlinking a Tag', async () => {
+    render(<ImagesWorkspace ctx={context()} />);
+    resolveEmptyBuilds(surface);
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [libraryEntry(1)],
+      total: 1,
+    });
+    await screen.findByText('image-1');
+    await userEvent.click(screen.getAllByTestId('image-row')[0]);
+    await userEvent.click(screen.getByTestId('images-tag-remove-image-1'));
+
+    const impactRequest = surface.requests.find(
+      (candidate) => candidate.type === 'server.image.impact.get',
+    );
+    expect(impactRequest?.payload).toEqual({
+      repository: 'nession/fixtures',
+      tag: 'image-1',
+    });
+    const impact = {
+      ...libraryEntry(1).impact,
+      project_pins: 1,
+      leases: 1,
+    };
+    surface.resolveNext('server.image.impact.get', { success: true, impact });
+    await screen.findByTestId('images-tag-impact-confirm');
+    expect(screen.getByTestId('images-tag-confirm')).toBeDisabled();
+    await userEvent.click(screen.getByTestId('images-tag-impact-confirm'));
+    expect(screen.getByTestId('images-tag-confirm')).toBeEnabled();
+    await userEvent.click(screen.getByTestId('images-tag-confirm'));
+
+    const remove = surface.requests.find(
+      (candidate) => candidate.type === 'server.image.tag.remove',
+    );
+    expect(remove?.payload).toEqual({
+      repository: 'nession/fixtures',
+      tag: 'image-1',
+      expected_digest: libraryEntry(1).manifest_digest,
+      accept_reference_impact: true,
+    });
+    surface.resolveNext('server.image.tag.remove', {
+      success: true,
+      removed: true,
+      impact,
+    });
+    await waitFor(() =>
+      expect(
+        surface.requests.some((candidate) => candidate.type === 'server.image.library.list'),
+      ).toBe(true),
+    );
+    surface.resolveNext('server.image.library.list', {
+      success: true,
+      entries: [{ ...libraryEntry(1), tags: [] }],
+      total: 1,
+    });
+    await waitFor(() => expect(screen.queryByTestId('images-tag-operation')).toBeNull());
+    await waitFor(() => expect(screen.queryByTestId('images-tag')).toBeNull());
   });
 });

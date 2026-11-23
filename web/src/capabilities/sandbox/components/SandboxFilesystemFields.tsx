@@ -25,6 +25,7 @@ import { SandboxStringListEditor } from './SandboxStringListEditor';
 export interface SandboxFilesystemFieldsProps {
   context: SandboxCurrentContext;
   sessionId: string | null;
+  targetPlatform: string | null;
   draft: SandboxDraftState;
   workingDir: string;
   workingDirError: string | undefined;
@@ -43,6 +44,7 @@ export interface SandboxFilesystemFieldsProps {
 export function SandboxFilesystemFields({
   context,
   sessionId,
+  targetPlatform,
   draft,
   workingDir,
   workingDirError,
@@ -59,6 +61,8 @@ export function SandboxFilesystemFields({
     <>
       <SandboxFilesystemRootfs
         context={context}
+        sessionId={sessionId}
+        targetPlatform={targetPlatform}
         rootfs={rootfs}
         observation={
           rootfs?.kind === 'image' ? observations.get(rootfs.digest) : undefined
@@ -66,6 +70,8 @@ export function SandboxFilesystemFields({
         onChange={(next) => draft.setFilesystemRootfs(next)}
       />
       <SandboxFilesystemMounts
+        sessionId={sessionId}
+        targetPlatform={targetPlatform}
         mounts={mounts}
         observations={observations}
         onAdd={(mount) => draft.addMount(mount)}
@@ -75,7 +81,6 @@ export function SandboxFilesystemFields({
       <SandboxFilesystemWorkspaceSection
         sessionId={sessionId}
         workspace={filesystem?.workspace ?? undefined}
-        rootfsIsImage={rootfs?.kind === 'image'}
         workingDir={workingDir}
         workingDirError={workingDirError}
         onWorkingDirChange={onWorkingDirChange}
@@ -83,7 +88,7 @@ export function SandboxFilesystemFields({
       />
       <FormSection
         title="Access"
-        description="V1 identity-path mapping on this Agent. One absolute host path per line; overlapping read and write trees are refused. Access is replaced by an image RootFS and cannot be combined with one."
+        description="V1 identity-path mapping on this Agent. One absolute host path per line; overlapping read and write trees are refused. Access is replaced by a prepared composition (an image RootFS, or a Local RootFS carrying mounts/workspace) and cannot be combined with one."
         testId="sandbox-filesystem-access"
       >
         <SandboxImplementationStatus

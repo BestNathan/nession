@@ -93,6 +93,10 @@ export function validateReviewDetails(parsed){
   });
   if(parsed.outcome==='changes_requested'&&findings.length===0)
     fail('changes_requested requires at least one finding');
+  // A model cannot approve a change while also reporting unresolved defects.
+  // Both the Worker and trusted Reviewer Verdict Ingest use this validator.
+  if(parsed.outcome==='approved'&&findings.length!==0)
+    fail('approved verdict must not contain findings');
   return Object.freeze({
     outcome:parsed.outcome,summary,findings:Object.freeze(findings),
   });

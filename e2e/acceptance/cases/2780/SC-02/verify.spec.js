@@ -35,7 +35,7 @@ test('SC-02: pushed detail ownership and its dirty guard survive capability swit
   await returnSwipe(page);
   await expect(page.getByTestId('app-layer-root')).toHaveAttribute('data-layer', 'workspace');
   await expect(page.getByTestId('app-page-header')).toContainText('App.tsx');
-  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to Files');
+  await expect(page.getByTestId('app-page-back')).toHaveAccessibleName('Back to src');
 
   // Its visible Back still guards dirty edits; cancelling keeps the edit and
   // the depth, and the shell still cannot take it.

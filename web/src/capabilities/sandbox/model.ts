@@ -13,6 +13,7 @@ import type {
   SandboxPreflightResult,
 } from '@/generated/protocol/core/server-session-sandbox-context/v1';
 import type { CapabilityId } from '@/product/capability';
+import type { AgentWorkspaceDescriptor } from './WorkspacePlugin';
 
 /** A transition refusal rendered by the composer/confirmation. */
 export interface SandboxActionError {
@@ -451,6 +452,68 @@ export function workspaceLabel(workspace: SandboxFilesystemWorkspace | undefined
 /** A stable signature over the draft alone; the declaration is part of it. */
 export function sandboxDraftSignature(draft: SandboxPolicyDraft): string {
   return draftSignature(draft);
+}
+
+/** How one Workspace resource is owned (#3797). */
+export function workspaceKindLabel(
+  workspace: Pick<AgentWorkspaceDescriptor, 'kind'>,
+): string {
+  return workspace.kind === 'project_location'
+    ? 'Project Location · user-owned'
+    : 'Agent-managed';
+}
+
+/** The observed lifecycle word for one Workspace resource (#3797). */
+export function workspaceStatusLabel(
+  status: AgentWorkspaceDescriptor['status'],
+): string {
+  switch (status) {
+    case 'available':
+      return 'Available';
+    case 'in_use':
+      return 'In use';
+    case 'missing':
+      return 'Missing';
+    case 'error':
+      return 'Error';
+    case 'unobserved':
+      return 'User-owned · not observed';
+  }
+}
+
+/** Measured persistent bytes, or an explicit absence. */
+export function workspaceUsageLabel(usedBytes: number | null | undefined): string {
+  if (usedBytes === null || usedBytes === undefined) {
+    return 'Not measured';
+  }
+  return `${new Intl.NumberFormat().format(usedBytes)} bytes`;
+}
+
+/**
+ * Why a delete action is unavailable, or `null` when it may be attempted.
+ *
+ * A Project Location is never deletable. Any state other than a confirmed
+ * `available` observation is refused before the Agent is asked: an error or
+ * missing observation is not evidence that deletion is safe.
+ */
+export function workspaceDeleteBlockReason(
+  workspace: AgentWorkspaceDescriptor,
+): string | null {
+  if (workspace.kind === 'project_location') {
+    return 'Project Existing Locations are user-owned and never deleted here';
+  }
+  switch (workspace.status) {
+    case 'available':
+      return null;
+    case 'in_use':
+      return 'The Workspace is leased by a live execution';
+    case 'missing':
+      return 'The durable Workspace directory is missing';
+    case 'error':
+      return 'The Workspace observation failed; deletion is not proven safe';
+    case 'unobserved':
+      return 'The Workspace was not observed';
+  }
 }
 
 /** The Agent's measured cache phase, in user-facing words. */
