@@ -1517,6 +1517,42 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
   await expect.poll(async () => countInBuffer(page, 'INJECT-PROBE'), { timeout: 30_000 })
     .toBeGreaterThan(0);
 
+  // #4303: the degraded notice is intentionally transient — step 4 below asserts
+  // the repair clears it. On a fast localhost repair the halt and its proven
+  // capture can land within one poll interval, so a present-tense toHaveCount
+  // races the repair and misses a notice that genuinely appeared. Run 45073609641
+  // proved this: the 6.65s trace DOM snapshot shows `history-degraded` present and
+  // the original renderer already replaced, yet the first poll at 6.81s saw 0 and
+  // every later poll saw 0 because the repair had cleared it. Record every value
+  // the surface publishes from before the overflow instead, so the observation is
+  // deterministic regardless of how quickly the repair clears it. A MutationObserver
+  // queues one record per attribute change, so even a value set and cleared before
+  // the next frame is captured. The below-bound companion test is the negative fixture.
+  await page.evaluate(() => {
+    const w = window as unknown as {
+      __overflowNoticeHistory?: string[];
+      __overflowNoticeObserver?: MutationObserver;
+    };
+    w.__overflowNoticeHistory = [];
+    const record = (value: string | null) => {
+      if (value) { w.__overflowNoticeHistory!.push(value); }
+    };
+    record(document.querySelector('[data-terminal-notices]')
+      ?.getAttribute('data-terminal-notices') ?? null);
+    w.__overflowNoticeObserver = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.attributeName === 'data-terminal-notices') {
+          record((mutation.target as Element).getAttribute('data-terminal-notices'));
+        }
+      }
+    });
+    w.__overflowNoticeObserver.observe(document.documentElement, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-terminal-notices'],
+    });
+  });
+
   // Now the overflow. Every one of these is a real `agent.terminal.output`
   // notification, and all 4 200 are enqueued in one task — before xterm's
   // parser (which only runs after the task) can apply any — so the writer's
@@ -1530,8 +1566,15 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
   // 1. The halt is stated. gapDetected stays set until a proven capture is
   //    parsed, so this also proves the writer actually overflowed. #2658
   //    exposes the statement as surface state, not as an automatic notice.
-  await expect(page.locator('[data-terminal-notices~="history-degraded"]'))
-    .toHaveCount(1, { timeout: 60_000 });
+  //    #4303: assert against the recorded history rather than a transient
+  //    present value the repair may already have cleared — a green run still
+  //    cannot be one where the fault never fired, because the recorder would
+  //    then hold no `history-degraded` value at all.
+  await expect.poll(async () => page.evaluate(() => {
+    const w = window as unknown as { __overflowNoticeHistory?: string[] };
+    return (w.__overflowNoticeHistory ?? [])
+      .some((value) => value.split(/\s+/).includes('history-degraded'));
+  }), { timeout: 60_000 }).toBe(true);
 
   // 2. The renderer that halted is gone.
   await expect(page.locator('.xterm[data-e2e-overflow-instance="original"]'))
@@ -1582,6 +1625,83 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
       .poll(async () => countInBuffer(page, 'OVERFLOW-2196-STABLE'), { timeout: 10_000 })
       .toBeGreaterThan(0);
   }).toPass({ timeout: 60_000 });
+});
+
+// #4303 negative fixture: a burst that stays INSIDE the writer's 4 096-event
+// bound must not halt and must not replace the renderer. This is the deterministic
+// negative of the overflow test above — it proves the replacement assertion is
+// observing the overflow fault specifically, not firing on any attach or reconnect.
+// 200 one-byte frames are two orders of magnitude below the bound, so the writer
+// drains them normally. The durable, overflow-specific fact is the renderer
+// replacement (only a halted writer triggers it); a plain reconnect re-attaches and
+// applies a bootstrap without replacing the xterm. The degraded notice is deliberately
+// NOT asserted absent here: it is shared with reconnect gap detection, a separate
+// mechanism, so asserting its absence would couple this negative to unrelated
+// reconnect timing rather than to the writer bound under test.
+test('a below-bound writer burst keeps the original renderer (#4303)', async ({ page }, testInfo) => {
+  test.skip(!process.env.CI, 'real stack available in CI only');
+  test.setTimeout(300_000);
+
+  await page.addInitScript(() => {
+    const NativeWebSocket = window.WebSocket;
+    const sockets: WebSocket[] = [];
+    (window as unknown as { __overflowSockets?: WebSocket[] }).__overflowSockets = sockets;
+    window.WebSocket = class extends NativeWebSocket {
+      constructor(url: string | URL, protocols?: string | string[]) {
+        super(url, protocols);
+        sockets.push(this);
+      }
+    } as typeof WebSocket;
+  });
+
+  const sessionName = `e2e-consistency-belowbound-${testInfo.retry}-${Date.now()}`;
+  await page.goto(
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+  );
+  await waitForShell(page);
+  await createSession(page, sessionName);
+  await attachToSession(page, sessionName, 'P2P');
+  await waitForInteractiveShell(page);
+
+  // The renderer that must survive a below-bound burst.
+  await page.locator('.xterm').evaluate((node) => {
+    node.setAttribute('data-e2e-belowbound-instance', 'original');
+  });
+
+  const injected = await page.evaluate(
+    ({ name, count, body }: { name: string; count: number; body: string }) => {
+      const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
+        .__overflowSockets ?? []).filter((s) => s.url.includes(':19091/') && s.readyState === 1);
+      if (sockets.length === 0) {
+        return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
+          .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
+      }
+      const payload = btoa(body);
+      for (let i = 0; i < count; i += 1) {
+        for (const socket of sockets) {
+          socket.dispatchEvent(new MessageEvent('message', {
+            data: JSON.stringify({
+              id: `belowbound-inject-${i}`,
+              msg_type: 'agent.terminal.output',
+              timestamp: Date.now(),
+              payload: { session_name: name, data: payload },
+            }),
+          }));
+        }
+      }
+      return { ok: true, count, sockets: sockets.length };
+    },
+    { name: sessionName, count: 200, body: 'B' },
+  );
+  expect(injected.ok, `below-bound dispatch (${JSON.stringify(injected)})`).toBe(true);
+
+  // The burst routed and the terminal is live, without crossing the bound.
+  await submitTerminalCommand(page, `printf 'BELOWBOUND-%s-AFTER\\n' 4303`);
+  await expect.poll(async () => countInBuffer(page, 'BELOWBOUND-4303-AFTER'), { timeout: 30_000 })
+    .toBeGreaterThan(0);
+
+  // The fault did not fire: the original renderer was never replaced.
+  await expect(page.locator('.xterm[data-e2e-belowbound-instance="original"]')).toHaveCount(1);
 });
 
 // #1926 SC-05: ANSI bursts. The plain numbered bursts prove stream identity;
