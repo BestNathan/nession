@@ -41,6 +41,8 @@ export interface MockPluginSurface extends PluginSurface {
   /** Reject the first pending request whose type matches (any when omitted). */
   rejectNext(type?: string, error?: Error): boolean;
   setConnectionState(next: ConnectionState): void;
+  /** Move the double onto a new physical socket generation (#3990). */
+  setPhysicalGeneration(generation: number): void;
 }
 
 interface Waiter {
@@ -67,6 +69,7 @@ export class MockPluginSurfaceImpl implements MockPluginSurface {
   readonly protocols = new ProtocolDirectory();
 
   private state: ConnectionState;
+  private generation = 0;
   private readonly handlers = new Map<string, Set<(payload: unknown, raw: SocketMessage) => void>>();
   private readonly binaryHandlers = new Set<(data: ArrayBuffer) => void>();
   private readonly stateListeners = new Set<(state: ConnectionState) => void>();
@@ -79,6 +82,19 @@ export class MockPluginSurfaceImpl implements MockPluginSurface {
 
   get connectionState(): ConnectionState {
     return this.state;
+  }
+
+  /**
+   * The physical socket this double stands for. Starts at generation 0 and
+   * only moves when a test says so, mirroring the real transport where a new
+   * number means a different socket.
+   */
+  get physicalGeneration(): number {
+    return this.generation;
+  }
+
+  setPhysicalGeneration(generation: number): void {
+    this.generation = generation;
   }
 
   send(type: string, payload: Record<string, unknown>): void {
