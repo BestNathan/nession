@@ -12,7 +12,7 @@ use std::time::Duration;
 use super::cmd::{self, TmuxCmd};
 use super::env::{EffectiveOverlay, EnvManager, ShellAdapter};
 use super::ops::{TmuxDep, TmuxOps};
-use crate::session::metadata::SessionMetadataStore;
+use crate::session::metadata::{classify_tmux_error, require_instance, SessionMetadataStore};
 
 /// The environment that tells a Claude Code integration which Nession session it
 /// is in, and where to report what it is doing (`#1005`).
@@ -1593,6 +1593,38 @@ impl SessionManager {
     /// Apply the Agent's resolved size to a Session's pane.
     pub(crate) async fn apply_session_size(&self, name: &str, cols: u16, rows: u16) -> Result<()> {
         self.sdk_ops().resize_window(name, cols, rows).await
+    }
+
+    /// Terminate a Session only while it is still the incarnation the caller
+    /// observed (#4302).
+    ///
+    /// `expected_instance_id` present: the name's current durable tmux instance
+    /// is read and compared **before** any termination or resource cleanup, so
+    /// a stale caller whose Session A was replaced by a same-name B is refused
+    /// as a `conflict:` and B keeps running with its identity and resources.
+    /// The check and the kill run inside the caller's keyed Session mutation
+    /// lane — the same lane a same-name create is serialized on — so no
+    /// Nession mutation of this name can interleave between them.
+    ///
+    /// Absent: the legacy name-addressed kill, byte-for-byte unchanged.
+    ///
+    /// Errors carry the Session domain's stable prefixes (`conflict:`,
+    /// `not_found:`, `unavailable:`) so every transport adapter classifies them
+    /// through the one shared
+    /// [`error_kind_and_detail`](crate::session::metadata::error_kind_and_detail).
+    pub async fn kill_session_guarded(
+        &self,
+        name: &str,
+        expected_instance_id: Option<&str>,
+    ) -> Result<()> {
+        if let Some(expected) = expected_instance_id {
+            let current = self
+                .session_instance_id(name)
+                .await
+                .map_err(|error| classify_tmux_error(&format!("{error:#}")))?;
+            require_instance(&current, expected)?;
+        }
+        self.kill_session(name).await
     }
 
     pub async fn kill_session(&self, name: &str) -> Result<()> {
@@ -3619,5 +3651,171 @@ esac"#,
             .await
             .expect("the binding is observable");
         assert_eq!(observed.applied_revision, 1);
+    }
+}
+
+/// #4302: a destructive kill bound to the caller-observed incarnation.
+///
+/// Real tmux on the private socket: the A→B replacement is an actual kill and
+/// recreate of one name, so the identity fence is proven against the durable
+/// `@nession_instance_id` option, not a mock of it.
+#[cfg(test)]
+mod guarded_kill_tests {
+    use super::*;
+    use crate::session::metadata::error_kind_and_detail;
+    use crate::test_support::TestSession;
+
+    async fn tmux_available() -> bool {
+        cmd::global()
+            .tokio()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .await
+            .is_ok()
+    }
+
+    fn manager() -> Arc<SessionManager> {
+        let state = tempfile::tempdir().unwrap();
+        // The binding state must outlive this manager for the test; the temp
+        // directory is intentionally leaked for the duration of the process.
+        Arc::new(
+            SessionManager::new()
+                .with_env_state_dir(Box::leak(Box::new(state)).path().to_path_buf()),
+        )
+    }
+
+    async fn create_incarnation(mgr: &SessionManager, name: &str) -> String {
+        let outcome = mgr
+            .create_session_with_options(name, 80, 24, "/tmp", None, None, None)
+            .await
+            .expect("the fixture Session is created");
+        outcome
+            .instance_id
+            .expect("a create reports its durable instance identity")
+    }
+
+    async fn live(mgr: &SessionManager, name: &str) -> bool {
+        mgr.list_sessions()
+            .await
+            .expect("tmux answers the list")
+            .iter()
+            .any(|session| session.name == name)
+    }
+
+    /// SC-01: with A observed and same-name B live, a kill carrying A is a
+    /// `conflict` and B keeps running with its identity and resources.
+    #[tokio::test]
+    async fn a_stale_expected_instance_never_kills_the_replacement() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        let session = TestSession::new("guarded-kill-aba");
+        let name = session.name();
+
+        let a = create_incarnation(&mgr, name).await;
+        mgr.kill_session(name).await.expect("A is terminated");
+        let b = create_incarnation(&mgr, name).await;
+        assert_ne!(a, b, "a recreate starts a fresh incarnation");
+        mgr.apply_session_binding(name, 1, &[], &[])
+            .await
+            .expect("B owns a durable binding record");
+
+        let error = mgr
+            .kill_session_guarded(name, Some(&a))
+            .await
+            .expect_err("a kill aimed at A must not terminate B");
+        let (kind, detail) = error_kind_and_detail(&error);
+        assert_eq!(
+            kind, "conflict",
+            "the refusal is a stale-incarnation conflict: {detail}"
+        );
+
+        assert!(live(&mgr, name).await, "B is still running");
+        assert_eq!(
+            mgr.session_instance_id(name).await.unwrap(),
+            b,
+            "B keeps its own identity"
+        );
+        assert!(
+            mgr.env().observe(name).await.is_some(),
+            "B's binding record was not cleared by the refused kill"
+        );
+        mgr.kill_session(name).await.ok();
+    }
+
+    /// SC-02: a matching precondition kills exactly once; the settled name is
+    /// then `not_found`, never a second termination.
+    #[tokio::test]
+    async fn a_matching_expected_instance_kills_exactly_once() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        // A bystander keeps the tmux server alive after the target dies, so
+        // the second kill hears "can't find session" from a running server
+        // rather than a connection error from one that exited with its last
+        // Session — the reachable `not_found` state, not an outage.
+        let bystander = TestSession::new("guarded-kill-match-bystander");
+        create_incarnation(&mgr, bystander.name()).await;
+        let session = TestSession::new("guarded-kill-match");
+        let name = session.name();
+        let id = create_incarnation(&mgr, name).await;
+
+        mgr.kill_session_guarded(name, Some(&id))
+            .await
+            .expect("the matching incarnation is killed");
+        assert!(!live(&mgr, name).await);
+
+        let error = mgr
+            .kill_session_guarded(name, Some(&id))
+            .await
+            .expect_err("the name no longer names a Session");
+        let (kind, detail) = error_kind_and_detail(&error);
+        assert_eq!(kind, "not_found", "{detail}");
+    }
+
+    /// Legacy compatibility: an absent precondition is the name-addressed kill
+    /// every pre-#4302 consumer gets, unchanged.
+    #[tokio::test]
+    async fn an_absent_precondition_preserves_the_legacy_name_kill() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        let session = TestSession::new("guarded-kill-legacy");
+        let name = session.name();
+        let _id = create_incarnation(&mgr, name).await;
+
+        mgr.kill_session_guarded(name, None)
+            .await
+            .expect("the legacy kill still terminates the current Session");
+        assert!(!live(&mgr, name).await);
+    }
+
+    /// A guarded kill of a name that never existed is `not_found`, not a
+    /// success and not an unclassified tmux failure.
+    #[tokio::test]
+    async fn a_guarded_kill_of_a_missing_session_is_not_found() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        // The server must be running for "no such Session" to be a question
+        // tmux can answer; an exited server is an outage, not a `not_found`.
+        let bystander = TestSession::new("guarded-kill-missing-bystander");
+        create_incarnation(&mgr, bystander.name()).await;
+        let session = TestSession::new("guarded-kill-missing");
+        let error = mgr
+            .kill_session_guarded(session.name(), Some("2f0a6c1e-0d43-4a6e-9f7c-3c1d2e4b5a60"))
+            .await
+            .expect_err("there is no Session to kill");
+        let (kind, detail) = error_kind_and_detail(&error);
+        assert_eq!(kind, "not_found", "{detail}");
     }
 }

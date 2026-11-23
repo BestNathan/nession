@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use nession_common::config::ServerConfig;
 use nession_mcp::backend::{ClusterBackend, NodeBackend};
-use nession_mcp::error::ToolError;
+use nession_mcp::error::{ToolError, ToolErrorKind};
 use nession_mcp::pending_mutation::PendingMutation;
 use nession_mcp::tools::nession_agent_create_session::SessionCreatedOutput;
 use nession_mcp::tools::nession_agent_list_sessions::SessionListOutput;
@@ -502,11 +502,13 @@ impl NodeBackend for ServerNodeBackend {
         &self,
         agent_id: &str,
         name: &str,
+        expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
         self.require_online(agent_id).await?;
         let handler = self.handler.clone();
         let target = agent_id.to_string();
         let session_name = name.to_string();
+        let expected = expected_instance_id.to_string();
         let response = self
             .run_keyed(
                 ResourceKey::Session(format!("{agent_id}:{name}")),
@@ -515,7 +517,12 @@ impl NodeBackend for ServerNodeBackend {
                         .agent_command_with_timeout(
                             &target,
                             "agent.session.kill",
-                            json!({ "name": session_name }),
+                            // The precondition rides the canonical command; the
+                            // Agent enforces it in its keyed mutation lane (#4302).
+                            json!({
+                                "name": session_name,
+                                "expected_instance_id": expected,
+                            }),
                             std::time::Duration::from_secs(35),
                         )
                         .await
@@ -528,7 +535,12 @@ impl NodeBackend for ServerNodeBackend {
                 .get("error")
                 .and_then(Value::as_str)
                 .unwrap_or("the Agent refused the kill");
-            return Err(ToolError::backend(message.to_string()));
+            // The Agent's guarded refusal classifies itself; an unclassified
+            // failure keeps the legacy backend mapping.
+            return Err(match response.get("error_kind").and_then(Value::as_str) {
+                Some(kind) => ToolError::new(ToolErrorKind::from_wire(kind), message.to_string()),
+                None => ToolError::backend(message.to_string()),
+            });
         }
         Ok(SessionKillResponse {
             name: name.to_string(),
