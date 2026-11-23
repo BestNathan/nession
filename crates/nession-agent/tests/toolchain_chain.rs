@@ -1555,7 +1555,7 @@ mod native {
         let prepared = sandbox_images::prepare(
             Some(cache.as_ref()),
             std::slice::from_ref(&grant),
-            &server_base,
+            &ws_origin(&server_base),
             SERVER_TOKEN,
             &state_dir,
             None,
@@ -1762,7 +1762,7 @@ mod native {
         let prepared = sandbox_images::prepare(
             Some(restarted.as_ref()),
             std::slice::from_ref(&grant),
-            &server_base,
+            &ws_origin(&server_base),
             SERVER_TOKEN,
             &state_dir,
             None,
