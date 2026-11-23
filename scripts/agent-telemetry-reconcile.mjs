@@ -423,7 +423,7 @@ function selfTest(){
     /untrusted or recursive Metrics history bot wake|empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
-  ),/scheduled-only/);
+  ),/main-owned/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("github.event_name == 'schedule' && github.ref == 'refs/heads/main'",
       "github.event_name == 'schedule'")
