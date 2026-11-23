@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7f7a9687bbbdf7b62f788c8b9db96a5a3715c4483e99cc43ccc9711eac029568",
+  "run_id": 45158676162,
+  "run_attempt": 1,
+  "issue": 4065,
+  "criterion": "SC-03",
+  "criterion_text": "A browser with valid credentials can subsequently reattach/reconcile the same persisted Session via the existing recovery path, with no duplicate input, false cursor sync, or silent permanent freeze; an intentionally slow but responsive Agent is not spuriously disconnected.",
+  "stage": "staging",
+  "target_sha": "60343356cbde860eb7dafbdcdb04ea26401730e9",
+  "contract_sha256": "5edeeea6151a24f439f6de3bb7b707bab209023464d38710fcec9e0f26df02ad",
+  "case_revision": "60343356cbde860eb7dafbdcdb04ea26401730e9",
+  "case_tree_sha": "8d58b6a7785c0ad3f767aecf5aac8dd1678b96a2",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T10:50:21.354Z",
+  "finished_at": "2026-11-23T10:51:38.986Z",
+  "duration_ms": 77632,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Reattach/reconcile preserves one terminal input with generation-bound route/ACK proof, while responsive Agents are not spuriously declared half-open",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "60343356cbde860eb7dafbdcdb04ea26401730e9: credentialed browser reattached same Session to a new Agent-side socket and sent one terminal-input frame without duplication; slow-but-responsive frames stay below the watchdog; idle probes are actually sent; subscriber route proof cannot be forged, and output ACK reaches the current Agent owner"
+        }
+      ],
+      "duration_ms": 71770,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45158676162,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "60343356cbde860eb7dafbdcdb04ea26401730e9",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45158676162",
+    "record_path": "runs/2026-11-23/45158676162-1/4065/SC-03.json",
+    "source_result_sha256": "8c7d43ed23929bf4033fa57321792d8603eadb8f3f84dae28372373abba630d1"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45158676162-1",
+    "sha256": "8c7d43ed23929bf4033fa57321792d8603eadb8f3f84dae28372373abba630d1",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45158676162",
+    "durability": "time-limited; object archival not configured"
+  }
+}
