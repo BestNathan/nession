@@ -1401,23 +1401,39 @@ mod native {
             pub(super) pane_pid: u32,
         }
 
+        /// The Host-root Sandbox view masks `/tmp` and `/opt` with private
+        /// tmpfs, so any host directory an execution must see (working
+        /// directory, read-only sentinel) has to live outside those roots.
+        /// The checkout root stays visible through the read-only host bind.
+        pub(super) fn checkout_root() -> PathBuf {
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .unwrap()
+                .parent()
+                .unwrap()
+                .to_path_buf()
+        }
+
+        pub(super) fn host_workdir() -> TempDir {
+            tempfile::Builder::new()
+                .prefix("nession-4249-host-")
+                .tempdir_in(checkout_root())
+                .unwrap()
+        }
+
         /// Spawn the exact trusted launcher the Agent hands to `tmux new-session`
         /// (direct isolated execution; no tmux server is involved in this proof).
         pub(super) fn launch(
             settings: &SandboxSettings,
             policy: SandboxPolicy,
             inner: &str,
+            working_dir: &Path,
         ) -> Running {
             let request = LaunchRequest {
                 policy,
                 session_name: format!("toolchain-4249-{}", std::process::id()),
                 instance_id: "instance-4249".to_string(),
-                working_dir: settings
-                    .state_dir
-                    .parent()
-                    .unwrap()
-                    .to_string_lossy()
-                    .into_owned(),
+                working_dir: working_dir.to_string_lossy().into_owned(),
                 inner_command: vec!["/bin/sh".to_string(), "-c".to_string(), inner.to_string()],
                 tmux_socket: None,
             };
@@ -1533,6 +1549,7 @@ mod native {
     #[ignore = "requires the real GHCR artifact, erofs-utils and /dev/fuse; executed by the #4249 SC-02 staging acceptance Case"]
     async fn sc02_real_ghcr_gh_toolchain_imports_mounts_and_executes_in_sandbox() {
         let dir = TempDir::new().unwrap();
+        let host_dir = host_workdir();
         let (store, conn, outcome) = pinned_server_import(dir.path()).await;
         let docs = cas_docs(&store, &outcome);
         let (server_base, server_handle, _reads) =
@@ -1581,10 +1598,11 @@ mod native {
         );
 
         // Host-root execution: `gh version` resolves through the composed
-        // PATH prepend on the verified shared EROFS mount. A sentinel file on
-        // the host root proves the read-only bind never mutates Host bytes,
-        // and the toolchain mount itself refuses writes.
-        let sentinel = dir.path().join("host-sentinel.txt");
+        // PATH prepend on the verified shared EROFS mount. A sentinel file in
+        // a host directory outside the masked roots proves the read-only bind
+        // never mutates Host bytes, and the toolchain mount itself refuses
+        // writes.
+        let sentinel = host_dir.path().join("host-sentinel.txt");
         std::fs::write(&sentinel, "host-original-4249\n").unwrap();
         let settings = agent_settings(
             dir.path(),
@@ -1604,7 +1622,7 @@ mod native {
              cat {sentinel}",
             sentinel = sentinel.display(),
         );
-        let mut running = launch(&settings, policy, &inner);
+        let mut running = launch(&settings, policy, &inner, host_dir.path());
         verify_or_report(
             &mut running,
             "the Host-root launch barrier must verify before gh runs",
@@ -1724,6 +1742,7 @@ mod native {
     #[ignore = "requires the real GHCR artifact, erofs-utils and /dev/fuse; executed by the #4249 SC-03 staging acceptance Case"]
     async fn sc03_real_ghcr_pinned_artifact_restart_warm_cache_and_authorized_fallback() {
         let dir = TempDir::new().unwrap();
+        let host_dir = host_workdir();
         let (store, conn, outcome) = pinned_server_import(dir.path()).await;
         let docs = cas_docs(&store, &outcome);
         let (server_base, server_handle, server_blob_reads) =
@@ -1794,7 +1813,7 @@ mod native {
         );
         std::fs::create_dir_all(&settings_one.state_dir).unwrap();
         let policy = host_root_policy(&prepared.composition);
-        let mut first = launch(&settings_one, policy.clone(), "gh version");
+        let mut first = launch(&settings_one, policy.clone(), "gh version", host_dir.path());
         verify_or_report(&mut first, "first execution barrier");
         let (status, stdout, stderr) = wait_for_exit(&mut first);
         assert!(
@@ -1845,7 +1864,7 @@ mod native {
             Some(shared.generation.as_str())
         );
 
-        let mut second = launch(&settings_two, policy, "gh version");
+        let mut second = launch(&settings_two, policy, "gh version", host_dir.path());
         verify_or_report(&mut second, "second execution barrier on the adopted mount");
         let (status, stdout, stderr) = wait_for_exit(&mut second);
         assert!(
