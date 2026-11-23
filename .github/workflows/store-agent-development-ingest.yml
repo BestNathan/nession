@@ -142,8 +142,6 @@ jobs:
          github.event.comment.user.login == 'BestNathan' &&
          startsWith(github.event.comment.body,
            '/nession ingest-qwen issue=3001 worker_run=')) ||
-        # #4174 exact replay-only Store Ingest wake for verified signed
-        # #4065 Repair 44928066276/1; no new Qwen Developer task.
         (github.event_name == 'issue_comment' &&
          github.ref == 'refs/heads/main' &&
          github.actor == 'BestNathan' &&
