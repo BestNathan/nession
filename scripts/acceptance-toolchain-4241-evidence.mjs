@@ -487,6 +487,43 @@ export function selfTestToolchain4241() {
     [parent,events,run,jobs,artifact,result,true,
       {published:release.published.slice(1)}],
   ])assert.throws(()=>verify(...args),/toolchain #4241 readback/);
+  const implementing={number:4308,state:'closed',merged_at:'2026-11-23T03:14:52Z',
+    merge_commit_sha:SOURCE_ACCEPT_HEAD,body:'Implements #4297\nRefs #4297',
+    head:{repo:sameRepo},base:{repo:sameRepo,ref:'main'}};
+  const implementingCommit={sha:SOURCE_ACCEPT_HEAD,
+    parents:[{sha:'a'.repeat(40)},{sha:'b'.repeat(40)}]};
+  const ownerComment={id:7090587994,created_at:'2026-11-23T03:15:02Z',
+    user:{login:'BestNathan',type:'User'},author_association:'OWNER',
+    issue_url:'https://api.github.com/repos/'+REPO+'/issues/4241',
+    body:'/accept post-merge '+MAIN_ANCHOR};
+  const manualRun={id:45104919638,run_attempt:1,
+    name:'Comment Accept #4241 comment:7090587994',
+    path:'.github/workflows/acceptance-manual-request.yml',
+    event:'workflow_dispatch',head_branch:'main',head_sha:SOURCE_ACCEPT_HEAD,
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    status:'completed',conclusion:'success',
+    created_at:'2026-11-23T03:15:42Z'};
+  const timedRun={...run,created_at:'2026-11-23T03:16:51Z',
+    updated_at:'2026-11-23T03:20:46Z'};
+  const timeline=(...args)=>attest4297OwnerTimeline(...args);
+  assert.equal(timeline(implementing,implementingCommit,[implementing],
+    ownerComment,manualRun,timedRun,parent,true).implementation_pr,4308);
+  for(const args of [
+    [{...implementing,merged_at:'2026-11-23T03:21:00Z'},
+      implementingCommit,[implementing],ownerComment,manualRun,timedRun,parent,true],
+    [implementing,{...implementingCommit,parents:[{sha:'a'.repeat(40)}]},
+      [implementing],ownerComment,manualRun,timedRun,parent,true],
+    [implementing,implementingCommit,[],ownerComment,manualRun,timedRun,parent,true],
+    [implementing,implementingCommit,[implementing],
+      {...ownerComment,user:{login:'github-actions[bot]',type:'Bot'}},
+      manualRun,timedRun,parent,true],
+    [implementing,implementingCommit,[implementing],ownerComment,
+      {...manualRun,head_sha:'c'.repeat(40)},timedRun,parent,true],
+    [implementing,implementingCommit,[implementing],ownerComment,
+      manualRun,{...timedRun,created_at:'2026-11-23T03:15:00Z'},parent,true],
+    [implementing,implementingCommit,[implementing],ownerComment,
+      manualRun,timedRun,parent,false],
+  ])assert.throws(()=>timeline(...args),/toolchain #4241 readback/);
   assert.equal(RELEASES.length,14);
   console.log('toolchain #4241: trusted catalog/Run/Index/JOB negative fixtures passed');
   return true;
