@@ -847,6 +847,29 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
   return updated;
 }
 
+// Only the canonical, currently OPEN Issue can accept a projected result.
+// Unknown states are an API/contract error, not a silent success.
+function isOpenAcceptanceIssue(issue) {
+  const state = String(issue?.state ?? '').toUpperCase();
+  if (state === 'OPEN') return true;
+  if (state === 'CLOSED') return false;
+  throw new Error('unexpected Issue state at Acceptance write boundary: ' + (state || '(missing)'));
+}
+
+// Keep the final read adjacent to the sole Issue mutation. This is purposely
+// separate from prepare's Open check: verification can outlive Issue closure.
+// Reject body drift too; gh issue edit replaces the WHOLE body, not just SC rows.
+function commitOpenAcceptanceIssue(initial, readCurrent, write) {
+  if (!isOpenAcceptanceIssue(initial)) return false;
+  const current = readCurrent();
+  if (!isOpenAcceptanceIssue(current)) return false;
+  if (current.number !== initial.number || current.body !== initial.body) {
+    throw new Error('Issue changed during Acceptance verification; refusing stale body overwrite');
+  }
+  write();
+  return true;
+}
+
 function fetchIssue(issueNumber) {
   if (!Number.isSafeInteger(Number(issueNumber)) || Number(issueNumber) <= 0) throw new Error('issue number must be a positive integer');
   const repo = process.env.GITHUB_REPOSITORY;
@@ -1018,6 +1041,12 @@ function isSupersededRunError(error) {
 
 function applyCommand(issueNumber, resultFile) {
   const issue = fetchIssue(issueNumber);
+  // A prepared Acceptance result is not authority to rewrite an Issue that
+  // the native lifecycle has already closed while this Run was in flight.
+  if (!isOpenAcceptanceIssue(issue)) {
+    console.log('requirement #' + issueNumber + ' is closed; skipping stale Acceptance update');
+    return;
+  }
   if (!isAcceptanceIssue(issue)) throw new Error('issue #' + issueNumber + ' must be labeled bug or requirement');
   const normalized = JSON.parse(fs.readFileSync(resultFile, 'utf8'));
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
@@ -1127,11 +1156,20 @@ function applyCommand(issueNumber, resultFile) {
     console.log('requirement #' + issueNumber + ' already matches acceptance run ' + normalized.run_id);
     return;
   }
-  execFileSync(
-    'gh',
-    ['issue', 'edit', String(issueNumber), '--repo', process.env.GITHUB_REPOSITORY, '--body-file', '-'],
-    { input: updated, encoding: 'utf8', env: process.env }
-  );
+  // Quality/source readback may take minutes. Re-fetch at the LAST write
+  // boundary: a successful closed-Issue reconciliation supersedes this pending
+  // Run. A changed body also cannot be replaced by a stale whole-body edit.
+  const applied = commitOpenAcceptanceIssue(issue,
+    () => fetchIssue(issueNumber),
+    () => execFileSync(
+      'gh',
+      ['issue', 'edit', String(issueNumber), '--repo', process.env.GITHUB_REPOSITORY, '--body-file', '-'],
+      { input: updated, encoding: 'utf8', env: process.env }
+    ));
+  if (!applied) {
+    console.log('requirement #' + issueNumber + ' closed during Acceptance verification; no Issue edit');
+    return;
+  }
   const counts = normalized.criteria.reduce((acc, item) => {
     acc[item.result] = (acc[item.result] ?? 0) + 1;
     return acc;
@@ -1166,7 +1204,44 @@ function fixtureBody() {
   ].join('\n');
 }
 
+function selfTestClosedIssueGuard() {
+  const open = { number: 4297, state: 'OPEN', body: 'accepted evidence' };
+  const closed = { ...open, state: 'CLOSED' };
+  assert.equal(isOpenAcceptanceIssue(open), true);
+  assert.equal(isOpenAcceptanceIssue(closed), false);
+  assert.throws(() => isOpenAcceptanceIssue({ ...open, state: 'UNKNOWN' }),
+    /unexpected Issue state/);
+  let reads = 0;
+  let writes = 0;
+  const readOpen = () => { reads++; return open; };
+  const write = () => { writes++; };
+  assert.equal(commitOpenAcceptanceIssue(closed, readOpen, write), false,
+    'a closed Issue at entry must not even re-read or write');
+  assert.equal(reads, 0);
+  assert.equal(writes, 0);
+  assert.equal(commitOpenAcceptanceIssue(open, () => {
+    reads++;
+    return closed;
+  }, write), false, 'closure during source verification must not write');
+  assert.equal(writes, 0);
+  assert.throws(() => commitOpenAcceptanceIssue(open, () =>
+    ({ ...open, body: 'newer SC evidence' }), write),
+  /refusing stale body overwrite/, 'concurrent report updates must not be overwritten');
+  assert.equal(writes, 0);
+  assert.throws(() => commitOpenAcceptanceIssue(open, () =>
+    ({ ...open, number: 4241 }), write),
+  /refusing stale body overwrite/, 'an unrelated Issue snapshot must never authorize an edit');
+  assert.equal(writes, 0);
+  assert.equal(commitOpenAcceptanceIssue(open, readOpen, write), true,
+    'an unchanged open Issue must still use the native updater');
+  assert.equal(writes, 1);
+  assert.equal(commitOpenAcceptanceIssue(closed, readOpen, write), false,
+    'late replay after closure remains a no-op');
+  assert.equal(writes, 1);
+}
+
 function selfTest() {
+  selfTestClosedIssueGuard();
   assert.equal(selfTestPrCiTriad(), true);
   // #4231: the aggregate Quality receipt is visible to the model only for an
   // explicitly activated PR criterion; unactivated/staging views omit it.
