@@ -683,6 +683,37 @@ impl Database {
         Ok(())
     }
 
+    /// Insert an env file only if `name` is absent, as a single atomic
+    /// statement. Returns `true` when this call created the row, `false` when a
+    /// row already existed (the existing row is left byte-for-byte untouched).
+    ///
+    /// Unlike [`Database::upsert_env_file`], the existence condition and the
+    /// insert are one `INSERT ... ON CONFLICT(name) DO NOTHING`, so two
+    /// concurrent create-only writers cannot both observe "absent" and both
+    /// succeed: exactly one insert affects a row, the rest conflict (#4300).
+    /// `exec_without_returning` reports `rows_affected` (1 inserted, 0
+    /// conflicted) rather than a last-insert-id, which SQLite does not reset on
+    /// a `DO NOTHING` conflict.
+    pub async fn insert_env_file_if_absent(&self, name: &str, content: &str) -> Result<bool> {
+        let now = chrono::Utc::now().timestamp();
+        let model = env_files::ActiveModel {
+            name: Set(name.to_owned()),
+            content: Set(content.to_owned()),
+            created_at: Set(now),
+            updated_at: Set(now),
+        };
+        let rows_affected = env_files::Entity::insert(model)
+            .on_conflict(
+                OnConflict::column(env_files::Column::Name)
+                    .do_nothing()
+                    .to_owned(),
+            )
+            .exec_without_returning(&self.conn)
+            .await
+            .context("failed to insert env file")?;
+        Ok(rows_affected == 1)
+    }
+
     /// Delete an env file by name (idempotent).
     pub async fn delete_env_file(&self, name: &str) -> Result<()> {
         env_files::Entity::delete_by_id(name.to_owned())
@@ -2135,6 +2166,125 @@ mod tests {
 
         db.delete_env_file("test.env").await.unwrap();
         assert!(db.list_env_files().await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn env_file_insert_if_absent_sequential_control() {
+        let db = new_db().await;
+
+        // Absent name: the first create-only insert wins and sets timestamps.
+        assert!(db
+            .insert_env_file_if_absent("ctl.env", "OWNER=A\n")
+            .await
+            .unwrap());
+        let created = db.get_env_file("ctl.env").await.unwrap().unwrap();
+        assert_eq!(created.content, "OWNER=A\n");
+
+        // Existing name: a second create-only insert refuses without any
+        // mutation — content and both timestamps are preserved byte-for-byte.
+        assert!(!db
+            .insert_env_file_if_absent("ctl.env", "OWNER=B\n")
+            .await
+            .unwrap());
+        let after = db.get_env_file("ctl.env").await.unwrap().unwrap();
+        assert_eq!(after.content, "OWNER=A\n");
+        assert_eq!(after.created_at, created.created_at);
+        assert_eq!(after.updated_at, created.updated_at);
+
+        // Explicit overwrite (the upsert path) still replaces content and keeps
+        // created_at stable.
+        db.upsert_env_file("ctl.env", "OWNER=C\n").await.unwrap();
+        let overwritten = db.get_env_file("ctl.env").await.unwrap().unwrap();
+        assert_eq!(overwritten.content, "OWNER=C\n");
+        assert_eq!(overwritten.created_at, created.created_at);
+
+        // read/list/delete behavior is unchanged.
+        assert_eq!(db.list_env_files().await.unwrap().len(), 1);
+        db.delete_env_file("ctl.env").await.unwrap();
+        assert!(db.get_env_file("ctl.env").await.unwrap().is_none());
+        // After deletion the name is absent again, so create-only succeeds.
+        assert!(db
+            .insert_env_file_if_absent("ctl.env", "OWNER=D\n")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
+    async fn env_file_create_only_adversarial_interleaving() {
+        // The exact #4300 schedule, replayed deterministically (no reliance on
+        // task scheduling): both creators complete their existence read as
+        // absent before either writes.
+        let db = new_db().await;
+
+        // Writer A and writer B both observe "absent".
+        assert!(db.get_env_file("race.env").await.unwrap().is_none());
+        assert!(db.get_env_file("race.env").await.unwrap().is_none());
+
+        // The OLD create-only composition (read-then-upsert) loses A's content
+        // under this interleaving: B's upsert silently updates A's row.
+        db.upsert_env_file("race.env", "OWNER=A\n").await.unwrap();
+        db.upsert_env_file("race.env", "OWNER=B\n").await.unwrap();
+        assert_eq!(
+            db.get_env_file("race.env").await.unwrap().unwrap().content,
+            "OWNER=B\n"
+        );
+
+        // The NEW atomic primitive preserves the first creator under the same
+        // interleaving: A inserts, B conflicts and is refused without mutation.
+        db.delete_env_file("race.env").await.unwrap();
+        assert!(db.get_env_file("race.env").await.unwrap().is_none());
+        assert!(db.get_env_file("race.env").await.unwrap().is_none());
+        assert!(db
+            .insert_env_file_if_absent("race.env", "OWNER=A\n")
+            .await
+            .unwrap());
+        assert!(!db
+            .insert_env_file_if_absent("race.env", "OWNER=B\n")
+            .await
+            .unwrap());
+        assert_eq!(
+            db.get_env_file("race.env").await.unwrap().unwrap().content,
+            "OWNER=A\n"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn env_file_insert_if_absent_atomic_under_concurrent_writers() {
+        // Several real SQLite connections onto one WAL file, so the writer lock
+        // is genuine between them (as between separate Server processes).
+        // Connections are opened sequentially first so migrations are applied
+        // once; only the create-only inserts race, barrier-synchronized.
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("race.db");
+        let path = path.to_str().unwrap();
+        const WRITERS: usize = 8;
+        let mut dbs = Vec::new();
+        for _ in 0..WRITERS {
+            dbs.push(std::sync::Arc::new(Database::new(path).await.unwrap()));
+        }
+
+        let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(WRITERS));
+        let mut handles = Vec::new();
+        for (i, db) in dbs.iter().enumerate() {
+            let db = std::sync::Arc::clone(db);
+            let barrier = std::sync::Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                barrier.wait().await;
+                db.insert_env_file_if_absent("race.env", &format!("OWNER={i}\n"))
+                    .await
+                    .unwrap()
+            }));
+        }
+        let mut winners = Vec::new();
+        for (i, handle) in handles.into_iter().enumerate() {
+            if handle.await.unwrap() {
+                winners.push(i);
+            }
+        }
+        assert_eq!(winners.len(), 1, "exactly one concurrent creator may win");
+        let row = dbs[0].get_env_file("race.env").await.unwrap().unwrap();
+        assert_eq!(row.content, format!("OWNER={}\n", winners[0]));
+        assert_eq!(dbs[0].list_env_files().await.unwrap().len(), 1);
     }
 
     // ── Quick commands ────────────────────────────────────────────────
