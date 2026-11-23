@@ -1196,6 +1196,76 @@ describe('ConnectionManager', () => {
     });
 
     /**
+     * #4299: the detached path is where an oversized FIRST chunk used to slip
+     * through — `send()` buffers while `!isAttached()`, and the empty-queue
+     * exception admitted one event larger than the whole byte budget. The
+     * refusal must happen at admission, reach `onInputDrop` exactly once, and
+     * leave nothing for the reconnect flush to offer. The mutation is guarding
+     * the queue's bounds behind `chunks.length > 0` again: the paste is
+     * buffered silently, no drop fires, and the flush below puts 1 MiB + 1
+     * bytes on the wire.
+     */
+    it('refuses an oversized detached paste and reports one bound drop (#4299)', () => {
+      const harness = makeAgentApi();
+      const onInputDrop = vi.fn();
+      let attachedNow = false;
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api,
+        isAttached: () => attachedNow, onInputDrop,
+      });
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.send('x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes + 1));
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      expect(onInputDrop).toHaveBeenCalledTimes(1);
+      expect(onInputDrop).toHaveBeenCalledWith(expect.objectContaining({
+        reason: 'bound', chunks: 1,
+      }));
+
+      // Reconnect: nothing was buffered, so the flush has nothing to offer.
+      attachedNow = true;
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      expect(onInputDrop).toHaveBeenCalledTimes(1);
+
+      // The queue still serves ordinary input after the refusal.
+      cm.send('ok\r');
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', 'ok\r', {
+        inputEpoch: 7, seqStart: 1, seqEnd: 1,
+      });
+      cm.dispose();
+    });
+
+    /**
+     * #4299's positive half on the detached path: a paste of exactly the byte
+     * budget is inside the policy, buffered while detached and delivered whole
+     * on reconnect — the fix must refuse only what is PAST the bound.
+     */
+    it('buffers an exact-bound detached paste and delivers it on reconnect (#4299)', () => {
+      const harness = makeAgentApi();
+      const onInputDrop = vi.fn();
+      let attachedNow = false;
+      const cm = new ConnectionManager({
+        mode: 'p2p', sessionName: 'test', sessionId: 'a:test', agentApi: harness.api,
+        isAttached: () => attachedNow, onInputDrop,
+      });
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      const paste = 'x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes);
+      cm.send(paste);
+      expect(harness.api.sendInput).not.toHaveBeenCalled();
+      expect(onInputDrop).not.toHaveBeenCalled();
+
+      attachedNow = true;
+      cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+      cm.flushInputBuffer();
+      expect(harness.api.sendInput).toHaveBeenCalledWith('test', paste, {
+        inputEpoch: 7, seqStart: 1, seqEnd: 1,
+      });
+      expect(onInputDrop).not.toHaveBeenCalled();
+      cm.dispose();
+    });
+
+    /**
      * The measurement the byte bound is set from (#1307 SC-14).
      *
      * A paste is one chunk, so the byte bound is the only thing that can refuse
@@ -1210,8 +1280,8 @@ describe('ConnectionManager', () => {
      */
     it('admits a paste the size real ones measure at, alongside pending input', () => {
       const { harness, cm } = seeded({ appliedThrough: 0 });
-      // One keystroke already pending, so the empty-queue exception does not
-      // apply — this is the case the bound actually governs.
+      // One keystroke already pending, so this is the cumulative case the
+      // bound governs rather than a first chunk alone against the budget.
       cm.send('x');
       expect(harness.api.sendInput).toHaveBeenCalledTimes(1);
 
@@ -1841,6 +1911,43 @@ describe('ConnectionManager', () => {
         expect(onInputDrop).toHaveBeenCalledWith(expect.objectContaining({
           reason: 'age', chunks: 1,
         }));
+        cm.dispose();
+      });
+
+      /**
+       * #4299 on the relay: both transports consume the same queue policy, so
+       * an oversized FIRST chunk is refused at admission here too — one bound
+       * drop, nothing retained for the reconnect flush, and ordinary input
+       * still flows afterwards. The mutation is the same empty-queue guard in
+       * `PendingInputQueue.accept`: the relay buffers the oversized paste
+       * silently and delivers it on the flush below.
+       */
+      it('refuses an oversized detached paste on the relay with one bound drop (#4299)', () => {
+        const ws = makeMockWs();
+        const onInputDrop = vi.fn();
+        let attachedNow = false;
+        const cm = new ConnectionManager({
+          mode: 'relay', sessionName: 'test', sessionId: 'a:test', serverConnection: ws,
+          isAttached: () => attachedNow, onInputDrop,
+        });
+        cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+        cm.send('x'.repeat(INPUT_QUEUE_BOUNDS.maxBytes + 1));
+        expect(ws.sendRelayInput).not.toHaveBeenCalled();
+        expect(onInputDrop).toHaveBeenCalledTimes(1);
+        expect(onInputDrop).toHaveBeenCalledWith(expect.objectContaining({
+          reason: 'bound', chunks: 1,
+        }));
+
+        attachedNow = true;
+        cm.seedInputCursor({ inputEpoch: 7, appliedThrough: 0, controlGeneration: 2 });
+        cm.flushInputBuffer();
+        expect(ws.sendRelayInput).not.toHaveBeenCalled();
+        expect(onInputDrop).toHaveBeenCalledTimes(1);
+
+        cm.send('ok\r');
+        expect(ws.sendRelayInput).toHaveBeenCalledWith('test', 'ok\r', {
+          inputEpoch: 7, seqStart: 1, seqEnd: 1,
+        });
         cm.dispose();
       });
 
