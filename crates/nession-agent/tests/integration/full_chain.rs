@@ -652,9 +652,10 @@ async fn test_session_lifecycle() {
     let sessions = parsed["payload"]["sessions"].as_array().unwrap();
     assert!(sessions.iter().any(|s| s["name"] == session_name.as_str()));
 
-    // Kill the session.
+    // Kill the session (legacy name-addressed wire).
     let kill = SessionKillPayload {
         name: session_name.to_string(),
+        expected_instance_id: None,
     };
     let req = new_message(agent_msg_types::SESSION_KILL, kill);
     let json = serde_json::to_string(&req).unwrap();

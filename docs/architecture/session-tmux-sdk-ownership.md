@@ -200,6 +200,9 @@ same `agent.terminal.*` handlers as a direct P2P attach.
   peers is removed and its backend closed. `TmuxSession::close` terminates the
   **attachment client**, not the tmux Session; `SessionManager::kill_session`
   is the Session-termination authority and now also retires the attachment.
+  `SessionManager::kill_session_guarded` (#4302) is the same authority with an
+  incarnation precondition: it refuses a stale `expected_instance_id` before
+  any termination or cleanup, inside the caller's keyed Session mutation lane.
 - Input and resize authorize the **subscription** the requesting connection
   attached under, keyed by `(client_id, peer_token)`; a frame cannot claim
   another tab's subscription id. The legacy `control_generation: None`

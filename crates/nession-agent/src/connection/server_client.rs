@@ -4888,13 +4888,28 @@ core_routes!(agent, msg, responses;
                         .and_then(|v| v.as_str())
                         .unwrap_or("")
                         .to_string();
+                    // #4302: the optional incarnation precondition the Server
+                    // forwards for a guarded (AI/MCP) kill. Absent preserves
+                    // the legacy name-addressed command exactly.
+                    let expected = msg
+                        .payload
+                        .get("expected_instance_id")
+                        .and_then(|v| v.as_str());
 
                     info!("Server requested session kill: name={}", name);
 
-                    let (success, error) = match agent.tmux.kill_session(&name).await {
-                        Ok(()) => (true, None),
-                        Err(e) => (false, Some(e.to_string())),
-                    };
+                    let (success, error, error_kind) =
+                        match agent.tmux.kill_session_guarded(&name, expected).await {
+                            Ok(()) => (true, None, None),
+                            Err(e) => {
+                                if expected.is_some() {
+                                    let (kind, detail) = error_kind_and_detail(&e);
+                                    (false, Some(detail), Some(kind.to_string()))
+                                } else {
+                                    (false, Some(e.to_string()), None)
+                                }
+                            }
+                        };
 
                     let response = serde_json::json!({
                         "msg_type": "server.agent.command-response",
@@ -4905,6 +4920,7 @@ core_routes!(agent, msg, responses;
                             "command": "session.kill",
                             "success": success,
                             "error": error,
+                            "error_kind": error_kind,
                         }
                     });
                     responses.send(WsMessage::Text(response.to_string())).await?;
