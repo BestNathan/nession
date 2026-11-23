@@ -2,7 +2,8 @@
 
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
-import { basename, join } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { telemetryWorkflowSources } from './workflow-conventions.mjs';
 
 const AGENT_SIGNALS = [
@@ -291,14 +292,18 @@ function selfTest() {
   console.log('agent-workflow-telemetry-contract self-test: 11 cases passed');
 }
 
-const command = process.argv[2] ?? 'check';
-if (command === 'self-test' || command === '--self-test') selfTest();
-else if (command === 'check') checkRepository();
-else if (command === 'provenance') {
-  const file = process.argv[3];
-  if (!file) throw new Error('usage: agent-workflow-telemetry-contract.mjs provenance RUN_JSON');
-  const result = validateTelemetrySourceRun(JSON.parse(readFileSync(file, 'utf8')));
-  process.stdout.write(JSON.stringify(result) + '\n');
-} else {
-  throw new Error('usage: agent-workflow-telemetry-contract.mjs <check|self-test|provenance RUN_JSON>');
+// Reconcile imports the same authoritative validator as a library. Do not
+// run this script's CLI while another source owns process.argv.
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const command = process.argv[2] ?? 'check';
+  if (command === 'self-test' || command === '--self-test') selfTest();
+  else if (command === 'check') checkRepository();
+  else if (command === 'provenance') {
+    const file = process.argv[3];
+    if (!file) throw new Error('usage: agent-workflow-telemetry-contract.mjs provenance RUN_JSON');
+    const result = validateTelemetrySourceRun(JSON.parse(readFileSync(file, 'utf8')));
+    process.stdout.write(JSON.stringify(result) + '\n');
+  } else {
+    throw new Error('usage: agent-workflow-telemetry-contract.mjs <check|self-test|provenance RUN_JSON>');
+  }
 }
