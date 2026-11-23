@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2a4fde90b310320027a27d7edabc8c2b50468117f0e11991788d94ed332abeb9",
+  "run_id": 45287744683,
+  "run_attempt": 1,
+  "issue": 4354,
+  "criterion": "SC-03",
+  "criterion_text": ": Authorized Staging Deploy / Identity run attests the same pinned deployed source with matching UI/Agent/Server digests, source Run/Job/SHA evidence and trusted readback; downstream deployed Acceptance is separately verified.",
+  "stage": "post-merge",
+  "target_sha": "6461d0ec9705fadbe000cfd39f359a793545a8c4",
+  "contract_sha256": "8959154b6a3266d5547e427a5bc572a24e90bcc074e8e9639830dbb2cbbe18eb",
+  "case_revision": "6461d0ec9705fadbe000cfd39f359a793545a8c4",
+  "case_tree_sha": "b44adcfac4a4e8f0198813bc91e83cfac2dc2e85",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T23:22:27.400Z",
+  "finished_at": "2026-11-23T23:22:33.672Z",
+  "duration_ms": 6272,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "source-aligned deployment evidence not yet readable",
+      "evidence": [],
+      "duration_ms": 166,
+      "exit_code": 0
+    }
+  ],
+  "deployment": {
+    "environment_id": "staging",
+    "deployed_source_sha": "6461d0ec9705fadbe000cfd39f359a793545a8c4",
+    "attestation_execution_id": "a4657eaa52c4f232516c4a7ecd0df1607d3de0859625905202b73b36d55b38b3",
+    "gitops_revision": "fe1aee0a46b638fba3d74d8304d1dac9c9c74675",
+    "image_digests": {
+      "agent": "sha256:2077672c16cf0249b30f0282fe88ce165f236ff8babf9883f8718faa82306ac6",
+      "server": "sha256:ac20e5c1e54dfef7a44812a3f551cb5f53ff4af0147d36eb16844755bd9b6e90",
+      "ui": "sha256:4f3310a039a46f18acd1ce6116c56a1143bf2633babeba3c0b4ae081fc244e83"
+    }
+  },
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45287744683,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "01ac37b39cd058bd160308d910acd24be2d16057",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45287744683",
+    "record_path": "runs/2026-11-23/45287744683-1/4354/SC-03.json",
+    "source_result_sha256": "198a55c0974d023e355b61046d4f4def4e11c7a4bd20461297be6f469e2f8a03"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45287744683-1",
+    "sha256": "198a55c0974d023e355b61046d4f4def4e11c7a4bd20461297be6f469e2f8a03",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45287744683",
+    "durability": "time-limited; object archival not configured"
+  }
+}
