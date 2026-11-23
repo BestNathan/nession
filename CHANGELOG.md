@@ -892,3 +892,10 @@
 - Categories: architecture, ci, erofs, release, security, toolchain, workflows
 - Reason: Record authenticated #4241 completion of 13 tool types / 14 dual-architecture EROFS OCI versions, immutable GHCR Index digests, independent extracted-native Run receipts, and resolved Git publisher failures
 - Source: https://github.com/BestNathan/nession/issues/4241
+
+## 2026-11-23T15:45:00Z | update | Nession native Toolchain OCI release to GHCR
+- Path: topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md
+- Topic: workflows
+- Categories: architecture, ci, erofs, release, security, toolchain, workflows
+- Reason: Record #4249 source-bound end-to-end consumption proof of the pinned gh-2.105.0 GHCR Index through Server Catalog, Session grant, verified Agent EROFS cache, Host-root Sandbox composition and isolated gh execution, with authenticated staging Case Run 45206980580 SC-02/SC-03 Pass receipts at dcb2b5785dd43bdd68b76485fa699b130548940b
+- Source: https://github.com/BestNathan/nession/issues/4249

@@ -402,7 +402,7 @@
       },
       {
         "title": "Nession native Toolchain OCI release to GHCR",
-        "description": "Verified single-tool orphan build.sh catalog, SHA256 fingerprint-gated automatic release, native EROFS OCI Index and unified GHCR readback",
+        "description": "Verified single-tool orphan build.sh catalog, SHA256 fingerprint-gated automatic release, native EROFS OCI Index, unified GHCR readback and the source-bound Agent Sandbox consumption proof",
         "path": "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md",
         "status": "verified",
         "categories": [
@@ -414,7 +414,7 @@
           "toolchain",
           "workflows"
         ],
-        "updated_at": "2026-11-22T15:48:07Z"
+        "updated_at": "2026-11-23T15:45:00Z"
       },
       {
         "title": "Nession public Pages source publication and orphan-branch signals",
