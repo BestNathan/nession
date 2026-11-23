@@ -317,7 +317,7 @@ function selfTest(){
   // #4230: exercise real Node stdout/stderr pipes, not a mock reporter.
   // Reconcile output must remain one strict JSON document after a retried
   // status GET; an old stdout diagnostic must be rejected by its JSON reader.
-  const fixtureJson=JSON.stringify([{outcome:'BLOCKED',reason:'MISSING_EXACT_HEAD_PR_CHECK'}])+'\\n';
+  const fixtureJson=JSON.stringify([{outcome:'BLOCKED',reason:'MISSING_EXACT_HEAD_PR_CHECK'}])+'\n';
   const emitter=JSON.stringify(new URL('./staging-convergence-automerge.mjs',import.meta.url).href);
   const script='import {reportQualificationStatusReadback} from '+emitter+
     ';reportQualificationStatusReadback(2);process.stdout.write('+JSON.stringify(fixtureJson)+');';
