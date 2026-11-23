@@ -127,6 +127,50 @@ async function flushMicrotasks(): Promise<void> {
   await Promise.resolve();
 }
 
+/**
+ * A Promise whose settlement the test controls, so an in-flight
+ * `requestFreshAttach` can be held across an attach-context rotation and then
+ * resolved/rejected in a chosen order (#4290). No timer waits are needed.
+ */
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+} {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** The `auth_token` of every `client.auth` sent, in send order, across sockets. */
+function authTokens(): unknown[] {
+  return sentFrames()
+    .filter((frame) => frame.msg_type === 'client.auth')
+    .map((frame) => (frame.payload as { auth_token?: unknown } | undefined)?.auth_token);
+}
+
+/** Open the latest socket and answer its `client.auth` with a refusal. */
+function rejectAuth(): void {
+  lastWs().readyState = 1;
+  lastWs().onopen?.(new Event('open'));
+  answerPending('client.auth', 'ok', { status: 'failed', message: 'bad token' });
+}
+
+/** Open the latest socket and answer its `client.auth` with success. */
+function acceptAuth(): void {
+  lastWs().readyState = 1;
+  lastWs().onopen?.(new Event('open'));
+  answerPending('client.auth', 'ok', {
+    status: 'success',
+    message: 'ok',
+    client_id: 'unit-client',
+  });
+}
+
 function makeAttachInfo(): AttachInfo {
   return {
     mode: 'p2p',
@@ -912,6 +956,239 @@ describe('SessionRuntime', () => {
     const auth = sentFrames().filter((frame) => frame.msg_type === 'client.auth');
     expect(auth[auth.length - 1].payload).toMatchObject({ auth_token: 'fresh-token' });
     rt.dispose();
+  });
+
+  it('fences a superseded token refresh: a stale response never replaces the newer attach token (#4290 SC-01)', async () => {
+    vi.useFakeTimers();
+    try {
+      const staleA = deferred<AttachInfo>();
+      const requestFreshAttach = vi.fn()
+        .mockImplementationOnce(() => staleA.promise)
+        .mockResolvedValue({ ...makeAttachInfo(), agent_token: 'T1' });
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+      rt.setTransportReady(true);
+
+      // The Agent refuses T0, so refresh A starts through requestFreshAttach and
+      // is held pending.
+      rejectAuth();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+      expect(requestFreshAttach).toHaveBeenCalledWith('agent:s1');
+
+      // A newer attach context for the SAME public Session rotates the token to
+      // T1; updateContext invalidates the cached token and fences A.
+      rt.updateContext({ attachInfo: { ...makeAttachInfo(), agent_token: 'T1' } });
+
+      // The old request A resolves late with the stale T0.
+      staleA.resolve({ ...makeAttachInfo(), agent_token: 'tok' });
+      await drainHandshake();
+
+      // The rejection's scheduled reconnect now dials. It must present the
+      // newer T1, never the stale T0 the superseded response carried.
+      const before = wsInstances.length;
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(wsInstances.length).toBe(before + 1);
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      const tokens = authTokens();
+      expect(tokens[tokens.length - 1]).toBe('T1');
+
+      // T1 is accepted and the Session continues without another refetch.
+      acceptAuth();
+      await drainHandshake();
+      expect(rt.connectionState).toBe('connected');
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a superseded refresh cannot drive an obsolete forced reconnect (#4290 SC-02)', async () => {
+    vi.useFakeTimers();
+    try {
+      const staleA = deferred<AttachInfo>();
+      const requestFreshAttach = vi.fn()
+        .mockImplementationOnce(() => staleA.promise)
+        .mockResolvedValue({ ...makeAttachInfo(), agent_token: 'T1' });
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+      rt.setTransportReady(true);
+      rejectAuth();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+
+      // The Server authenticated-ready wake (#3358) shares the in-flight A.
+      rt.resumeAfterServerAuthenticated();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+
+      // A newer attach context T1 supersedes A's generation.
+      rt.updateContext({ attachInfo: { ...makeAttachInfo(), agent_token: 'T1' } });
+
+      const before = wsInstances.length;
+      staleA.resolve({ ...makeAttachInfo(), agent_token: 'tok' });
+      await drainHandshake();
+
+      // A superseded refresh returns false, so refreshAgentTokenAndReconnect
+      // must NOT rebuild the transport with the obsolete credential.
+      expect(wsInstances.length).toBe(before);
+
+      // The rejection's own scheduled reconnect still recovers, presenting T1.
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(wsInstances.length).toBe(before + 1);
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      const tokens = authTokens();
+      expect(tokens[tokens.length - 1]).toBe('T1');
+      acceptAuth();
+      await drainHandshake();
+      expect(rt.connectionState).toBe('connected');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a superseded refresh cannot clear a newer refresh single-flight ownership (#4290 SC-02)', async () => {
+    vi.useFakeTimers();
+    try {
+      const staleA = deferred<AttachInfo>();
+      const freshB = deferred<AttachInfo>();
+      const requestFreshAttach = vi.fn()
+        .mockImplementationOnce(() => staleA.promise)
+        .mockImplementationOnce(() => freshB.promise);
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+      rt.setTransportReady(true);
+      rejectAuth();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(1);
+
+      // Rotate to T1; A is superseded but still running.
+      rt.updateContext({ attachInfo: { ...makeAttachInfo(), agent_token: 'T1' } });
+
+      // A fresh dial presents T1 and is refused too, starting refresh B, which
+      // now owns the single-flight pointer.
+      rt.updateContext({ routeIntentEpoch: 1 });
+      rejectAuth();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+
+      // The stale A resolves late with T0.
+      staleA.resolve({ ...makeAttachInfo(), agent_token: 'tok' });
+      await drainHandshake();
+
+      // B must still own the pointer: the next refused dial presents the
+      // current T1 (not A's stale T0) and starts no third overlapping refresh.
+      rt.updateContext({ routeIntentEpoch: 2 });
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      const tokens = authTokens();
+      expect(tokens[tokens.length - 1]).toBe('T1');
+      answerPending('client.auth', 'ok', { status: 'failed', message: 'bad token' });
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+
+      // B resolves with the valid fresh T2 and recovery presents it.
+      freshB.resolve({ ...makeAttachInfo(), agent_token: 'T2' });
+      await drainHandshake();
+      rt.updateContext({ routeIntentEpoch: 3 });
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      const recovered = authTokens();
+      expect(recovered[recovered.length - 1]).toBe('T2');
+      acceptAuth();
+      await drainHandshake();
+      expect(rt.connectionState).toBe('connected');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reverse completion: a late stale refresh cannot overwrite a newer published token (#4290)', async () => {
+    vi.useFakeTimers();
+    try {
+      const staleA = deferred<AttachInfo>();
+      const freshB = deferred<AttachInfo>();
+      const requestFreshAttach = vi.fn()
+        .mockImplementationOnce(() => staleA.promise)
+        .mockImplementationOnce(() => freshB.promise);
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+      rt.setTransportReady(true);
+      rejectAuth();
+      await drainHandshake();
+      rt.updateContext({ attachInfo: { ...makeAttachInfo(), agent_token: 'T1' } });
+      rt.updateContext({ routeIntentEpoch: 1 });
+      rejectAuth();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+
+      // The current episode B resolves FIRST with the valid T2.
+      freshB.resolve({ ...makeAttachInfo(), agent_token: 'T2' });
+      await drainHandshake();
+      // Then the superseded A resolves LATE with the stale T0.
+      staleA.resolve({ ...makeAttachInfo(), agent_token: 'tok' });
+      await drainHandshake();
+
+      // The next dial still presents T2 — A's late result is fenced.
+      rt.updateContext({ routeIntentEpoch: 2 });
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      const tokens = authTokens();
+      expect(tokens[tokens.length - 1]).toBe('T2');
+      acceptAuth();
+      await drainHandshake();
+      expect(rt.connectionState).toBe('connected');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('failure path: a superseded refresh that rejects cannot clear a newer refresh ownership (#4290)', async () => {
+    vi.useFakeTimers();
+    try {
+      const staleA = deferred<AttachInfo>();
+      const freshB = deferred<AttachInfo>();
+      const requestFreshAttach = vi.fn()
+        .mockImplementationOnce(() => staleA.promise)
+        .mockImplementationOnce(() => freshB.promise)
+        .mockResolvedValue({ ...makeAttachInfo(), agent_token: 'T2' });
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+      rt.setTransportReady(true);
+      rejectAuth();
+      await drainHandshake();
+      rt.updateContext({ attachInfo: { ...makeAttachInfo(), agent_token: 'T1' } });
+      rt.updateContext({ routeIntentEpoch: 1 });
+      rejectAuth();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+
+      // The superseded A FAILS after the rotation (Server unavailable).
+      staleA.reject(new Error('server unavailable'));
+      await drainHandshake();
+
+      // B still owns the pointer: the authenticated-ready wake re-arms recovery
+      // through B rather than starting a new overlapping request.
+      rt.resumeAfterServerAuthenticated();
+      await drainHandshake();
+      expect(requestFreshAttach).toHaveBeenCalledTimes(2);
+
+      // B resolves with the valid fresh token and recovery presents it.
+      freshB.resolve({ ...makeAttachInfo(), agent_token: 'T2' });
+      await drainHandshake();
+      rt.updateContext({ routeIntentEpoch: 2 });
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      const tokens = authTokens();
+      expect(tokens[tokens.length - 1]).toBe('T2');
+      acceptAuth();
+      await drainHandshake();
+      expect(rt.connectionState).toBe('connected');
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('builds no agent API when the plan carries no addresses (#1430)', () => {

@@ -263,6 +263,12 @@ jobs:
             node scripts/acceptance-ci-evidence.mjs collect \
               "${GITHUB_WORKSPACE}/workspace" \
               "${RUNNER_TEMP}/acceptance-ci-evidence.json"
+            # #4342: main-only, read-only, exact Run/Artifact/Metrics Store proof.
+            # No PR-head code, source-selected writer, or alternate verdict owner.
+            if [[ "${ISSUE_NUMBER}" == "4342" && "${ACCEPTANCE_STAGE}" == "post-merge" ]]; then
+              node scripts/acceptance-4342-metrics-evidence.mjs collect \
+                "${RUNNER_TEMP}/acceptance-ci-evidence.json" "${TARGET_REF}"
+            fi
           fi
 
       - name: Prepare stage-specific immutable acceptance context
