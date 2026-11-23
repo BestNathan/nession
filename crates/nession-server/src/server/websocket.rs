@@ -1177,17 +1177,17 @@ async fn handle_ws_stream(
                             // client to guess why its Relay disappeared.
                             // A saturated outbound queue cannot keep teardown
                             // open: the close is best-effort and time limited.
-                            let close = WsFrame::Close(Some(
-                                nession_runtime::frame::WsCloseFrame {
+                            let close =
+                                WsFrame::Close(Some(nession_runtime::frame::WsCloseFrame {
                                     code: 1011,
                                     reason: "relay-agent-half-open".to_string(),
-                                },
-                            ));
+                                }));
                             if !matches!(
                                 tokio::time::timeout(
                                     std::time::Duration::from_secs(2),
                                     sender.send_reply(close),
-                                ).await,
+                                )
+                                .await,
                                 Ok(Ok(()))
                             ) {
                                 warn!(
@@ -4189,10 +4189,10 @@ mod tests {
         let items: Vec<Result<WsFrame, std::io::Error>> = frames.into_iter().map(Ok).collect();
 
         // Wrap the stream in a delay to simulate slow response.
-        let mut agent_read = futures_util::stream::once(async {
+        let mut agent_read = Box::pin(futures_util::stream::once(async {
             tokio::time::sleep(std::time::Duration::from_millis(80)).await;
             items.into_iter().next().unwrap()
-        });
+        }));
 
         let (sender, mut rx) = crate::server::outbound::WsMessageSender::new();
         let idle_timeout = std::time::Duration::from_millis(100);
