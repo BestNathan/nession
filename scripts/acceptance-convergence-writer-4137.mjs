@@ -160,6 +160,16 @@ export function enforceConvergenceWriter4059(context,normalized) {
     ...(valid?{authenticated_convergence_writer_4059:proof}:{})};
 }
 
+// Independently enforce the same receipt shape in the deterministic Issue
+// writer. The model or downloaded result cannot inject a green-only verdict.
+export function mayProjectConvergenceWriter4059(result) {
+  if(result?.issue!==4059||result?.stage!=='post-merge'||
+     !result?.criteria?.some(x=>x.criterion==='SC-02'&&x.result==='Pass'))
+    return true;
+  return validConvergenceWriterReceipt(
+    result.authenticated_convergence_writer_4059,result.target_ref);
+}
+
 // This routine makes read-only source-bound REST observations. The source Run
 // is only a lookup candidate; authorization comes from independent Run, Step,
 // structured Controller result, PR ancestry, CI and protected merge witnesses.
@@ -248,6 +258,18 @@ export function selfTestConvergenceWriter4137() {
   }
   assert.equal(enforceConvergenceWriter4059({...context,issue:{number:4140}},
     claimed).criteria[0].result,'Pass','other Issues unchanged');
+  assert.equal(mayProjectConvergenceWriter4059({
+    issue:4059,stage:'post-merge',target_ref:sha,criteria:evidence.criteria,
+    authenticated_convergence_writer_4059:good}),true);
+  assert.equal(mayProjectConvergenceWriter4059({
+    issue:4059,stage:'post-merge',target_ref:sha,criteria:evidence.criteria}),false);
+  assert.equal(mayProjectConvergenceWriter4059({
+    issue:4059,stage:'post-merge',target_ref:'f'.repeat(40),
+    criteria:evidence.criteria,authenticated_convergence_writer_4059:good}),false);
+  assert.equal(mayProjectConvergenceWriter4059({
+    issue:4059,stage:'post-merge',target_ref:sha,
+    criteria:[{criterion:'SC-02',result:'Pending'}]}),true);
+
   assert.equal(enforceConvergenceWriter4059(context,{criteria:[{
     criterion:'SC-02',result:'Fail',evidence:[],summary:'observed denial'
   }]}).criteria[0].result,'Fail','real failures remain failures');
