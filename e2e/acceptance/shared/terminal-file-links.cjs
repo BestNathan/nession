@@ -50,6 +50,59 @@ function seedTerminalFiles(home) {
   fs.writeFileSync(path.join(home, 'folder.py', 'inside.txt'), 'inside\n');
 }
 
+async function terminalNotices(page) {
+  return page.evaluate(() => {
+    const el = document.querySelector('[data-terminal-notices]');
+    return el ? (el.getAttribute('data-terminal-notices') || '') : '';
+  });
+}
+
+async function terminalStreamState(page) {
+  return page.evaluate(() => {
+    const el = document.querySelector('[data-terminal-stream-state]');
+    return el ? (el.getAttribute('data-terminal-stream-state') || '') : '';
+  });
+}
+
+// #4303: a command typed into a P2P link that drops mid-send is lost — the product
+// states this as an `input-drop` notice and deliberately does not replay input under
+// a new generation (#1307 SC-09). A marker poll that only waits for output then spins
+// to timeout on a command that never ran (run 45073609641, terminal-io #3414: the
+// stream went synchronized → unavailable → degraded-live with `input-drop`, and the
+// shell-ready marker never appeared). Wait for the marker OR the documented input-drop
+// fact; on a drop, wait for the link to synchronize and re-issue the command sequence
+// once. The recovery is conditioned on the observed input-drop, not a blind retry, and
+// a command that genuinely produces no marker still fails the poll, so the negative
+// path (and the downstream #3414 path assertions) are preserved.
+async function expectMarkerWithRecovery(page, expect, check, resend, timeoutMs = 30_000) {
+  const start = Date.now();
+  let dropSeen = false;
+  await expect.poll(async () => {
+    if (await check()) return 'marker';
+    if ((await terminalNotices(page)).split(/\s+/).includes('input-drop')) {
+      dropSeen = true;
+      return 'drop';
+    }
+    return 'pending';
+  }, { timeout: timeoutMs, intervals: [100] }).not.toBe('pending');
+
+  if (!dropSeen) return;
+
+  // Wait for the link to be attached and usable again, not for full output-history
+  // proof: a reconnect with a screen-only tmux capture settles at `degraded-live`
+  // (live output flows, history unproven), and input is accepted once attached
+  // regardless of that proof. `synchronized` may never arrive, so requiring it would
+  // time out on a link that is actually ready to take the re-sent command.
+  const remaining = Math.max(timeoutMs - (Date.now() - start), 5_000);
+  await expect.poll(
+    async () => (await terminalStreamState(page)) !== 'unavailable',
+    { timeout: remaining },
+  ).toBe(true);
+  await waitForQuiet(page, expect);
+  await resend();
+  await expect.poll(check, { timeout: remaining }).toBe(true);
+}
+
 async function openShell(page, expect, runtime, prefix, mode = 'P2P') {
   // No prompt pattern: the local acceptance runner uses the host's shell, whose
   // prompt is not the CI runner's. Quiet-before-input lets zsh finish its
@@ -113,10 +166,15 @@ async function openAppShell(page, expect, runtime, prefix) {
   await command(page, 'unsetopt SET_TITLE 2>/dev/null || true');
   await waitForQuiet(page, expect);
   await command(page, "printf '%s\\n' '__3187_SHELL_READY__'");
-  await expect.poll(
+  await expectMarkerWithRecovery(
+    page, expect,
     async () => (await readBuffer(page)).includes('__3187_SHELL_READY__'),
-    { timeout: 30_000 },
-  ).toBe(true);
+    async () => {
+      await command(page, 'unsetopt SET_TITLE 2>/dev/null || true');
+      await waitForQuiet(page, expect);
+      await command(page, "printf '%s\\n' '__3187_SHELL_READY__'");
+    },
+  );
   await waitForQuiet(page, expect);
   return name;
 }
@@ -164,10 +222,14 @@ async function runLine(page, expect, text) {
   const marker = '__3187_DONE_' + commandCounter + '__';
   await command(page, text);
   await command(page, "printf '%s\\n' '" + marker + "'");
-  await expect.poll(
-    async () => countInBuffer(page, marker),
-    { timeout: 30_000 },
-  ).toBeGreaterThanOrEqual(2);
+  await expectMarkerWithRecovery(
+    page, expect,
+    async () => (await countInBuffer(page, marker)) >= 2,
+    async () => {
+      await command(page, text);
+      await command(page, "printf '%s\\n' '" + marker + "'");
+    },
+  );
   await waitForQuiet(page, expect);
 }
 
@@ -186,10 +248,14 @@ async function printReference(page, expect, reference) {
   // produced output line contains the token contiguously.
   await command(page, "printf ' %s\\n' '" + reference + "'");
   await command(page, "printf '%s\\n' '" + marker + "'");
-  await expect.poll(
-    async () => countInBuffer(page, marker),
-    { timeout: 30_000 },
-  ).toBeGreaterThanOrEqual(2);
+  await expectMarkerWithRecovery(
+    page, expect,
+    async () => (await countInBuffer(page, marker)) >= 2,
+    async () => {
+      await command(page, "printf ' %s\\n' '" + reference + "'");
+      await command(page, "printf '%s\\n' '" + marker + "'");
+    },
+  );
   await waitForQuiet(page, expect);
 }
 
@@ -409,6 +475,7 @@ module.exports = {
   activateReference,
   expectEditorAt,
   expectFilesSurface,
+  expectMarkerWithRecovery,
   markEditor,
   markTerminal,
   openAppShell,
