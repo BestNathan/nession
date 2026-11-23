@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f3914701a8d51a85ab34f0076c78624ad93b07af722b09e5eff0b84a3a6d5148",
+  "run_id": 45139776192,
+  "run_attempt": 1,
+  "issue": 3990,
+  "criterion": "SC-02",
+  "criterion_text": "A controlled reconnect with changed/removed Agent manifests cannot dispatch a capability request using the old generation's version; after fresh list arrival, the supported operation resolves and executes normally or reports a truthful incompatibility.",
+  "stage": "staging",
+  "target_sha": "87533c0560f0d742b0279ddbf4e421f031bb45ea",
+  "contract_sha256": "975d0916d64f03b066015f8d125d60ec6748f5536c5a3c2900fab536ec7bc128",
+  "case_revision": "87533c0560f0d742b0279ddbf4e421f031bb45ea",
+  "case_tree_sha": "665dd800c0a5f1a5b90cb3a05179292cfdb6a150",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-23T08:38:05.839Z",
+  "finished_at": "2026-11-23T08:38:14.398Z",
+  "duration_ms": 8559,
+  "verifiers": [
+    {
+      "type": "protocol",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the Git consumer dispatches only a version resolved from the current physical connection’s Agent snapshot",
+      "evidence": [
+        {
+          "type": "protocol",
+          "value": "exact SHA 87533c0560f0d742b0279ddbf4e421f031bb45ea: after reconnect and before the new list, gitStatus refused with \"`a1` is not in the protocol directory yet\" and no frame reached the replacement socket; a replacement list advertising git.status v1 then refused with the named no-common-version message; a replacement list advertising v2 sent contract_version=2 and resolved the response"
+        }
+      ],
+      "duration_ms": 2458,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45139776192,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "09499daebf1a503e597dc87f59326568ae13452f",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "87533c0560f0d742b0279ddbf4e421f031bb45ea",
+        "stage": "staging",
+        "issue": 3990,
+        "criterion": "SC-02",
+        "job_id": 137574634084,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45139776192",
+    "record_path": "runs/2026-11-23/45139776192-1/3990/SC-02.json",
+    "source_result_sha256": "53b780adceaf492305b1c2d850c5cc9115178bcf83eee229c5ffc0a1d0476b98"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45139776192-1",
+    "sha256": "53b780adceaf492305b1c2d850c5cc9115178bcf83eee229c5ffc0a1d0476b98",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45139776192",
+    "durability": "time-limited; object archival not configured"
+  }
+}
