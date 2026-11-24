@@ -379,7 +379,7 @@ export function validateRecoveryRouting(workflow){
     fail('trusted reconciliation or immutable Store Gate omitted');
   if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover')")||
      !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'")||
-     !job.includes("if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
+     !job.includes("if: ((github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')) && steps.event_artifacts.outputs.count != '' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
      job.includes("steps.event_artifacts.outputs.count == '0'")||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
     fail('empty telemetry events must skip history and scheduled recovery; retain source precedence');
@@ -400,6 +400,11 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
+  // Only Reviewer dispatch accepts sender-selected source metadata; a history
+  // wake selects a source independently, and an empty history scan is a no-op.
+  if(!job.includes('EVENT_DISPATCH_ACTION: ${{ github.event.action }}')||
+     !job.includes("if [[ \"$GITHUB_EVENT_NAME\" == repository_dispatch &&\n                \"$EVENT_DISPATCH_ACTION\" == nession-agent-review-completed ]]; then"))
+    fail('Reviewer-specific dispatch guard must exclude historical recovery');
   const reviewerGuard=[
     "(github.event_name == 'repository_dispatch' &&",
     "          github.ref == 'refs/heads/main' &&",
@@ -450,6 +455,10 @@ export function validateRecoveryRouting(workflow){
 function selfTest(){
   const workflow=fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8');
   assert.equal(validateRecoveryRouting(workflow),true);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '"$EVENT_DISPATCH_ACTION" == nession-agent-review-completed ]]; then',
+    '"$EVENT_DISPATCH_ACTION" == nession-agent-metrics-history-recover ]]; then'
+  )),/Reviewer-specific dispatch guard/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '      - Agent / Issue Audit',
     '      - Attacker / Source'
@@ -556,7 +565,7 @@ function selfTest(){
   )),/empty telemetry events/);
   // Empty telemetry must not proceed through source resolution after preflight.
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
+    "if: ((github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')) && steps.event_artifacts.outputs.count != '' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
     "if: github.event_name == 'workflow_run' || steps.reconcile.outputs.run_id != ''"
   )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(

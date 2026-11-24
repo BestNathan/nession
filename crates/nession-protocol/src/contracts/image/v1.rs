@@ -37,7 +37,12 @@ pub const IMAGE_FIXED_UUID: &str = "11111111-1111-4111-8111-111111111111";
 /// implementation.
 pub const IMAGE_COMPRESSION: &str = "none";
 
-/// The HTTP path prefix a scoped blob grant addresses.
+/// The proprietary compatibility HTTP path prefix a scoped blob grant addresses.
+///
+/// Since the #4250 cutover a Tag-reachable catalog image is granted through the
+/// standard OCI Distribution `/v2/<repo>/…` routes instead; this prefix remains
+/// only for the bounded compatibility window (untagged builds and digest-only
+/// legacy rows) and is retired once those consumers are migrated or gated.
 pub const IMAGE_BLOB_PATH_PREFIX: &str = "/images/blobs/";
 
 /// Maximum number of source Images one Compose build accepts.
