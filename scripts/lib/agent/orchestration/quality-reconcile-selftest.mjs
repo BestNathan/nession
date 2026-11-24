@@ -103,7 +103,7 @@ const root=fs.mkdtempSync(path.join(os.tmpdir(),'nession-quality-reconcile-test-
 try{
   writeIssueWorkflowState(root,state,0);
   const original=fs.readFileSync(path.join(root,issueStatePath(issue,1)),'utf8');
-  assert.equal(stageQualityReconciliation(root,verified).length,3);
+  assert.equal(stageQualityReconciliation(root,verified).length,4);
   const actual=readIssueWorkflowState(root,issue);
   assert.equal(actual.version,3);
   assert.equal(actual.state.phase,'acceptance');
@@ -111,3 +111,5 @@ try{
   assert.throws(()=>stageQualityReconciliation(root,verified),/stale state CAS/);
 }finally{fs.rmSync(root,{recursive:true,force:true});}
 console.log('Quality reconciliation: two arrival orders, exact PR/Run/Attempt and immutable CAS fixtures passed');
+
+await import('./acceptance-reconcile-selftest.mjs');

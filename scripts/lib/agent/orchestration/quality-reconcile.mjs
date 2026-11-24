@@ -7,9 +7,11 @@ import os from 'node:os';
 import path from 'node:path';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {createHash} from 'node:crypto';
 import {acceptTaskResult,recordDispatch,validateDevelopmentState} from './outbox.mjs';
 import {readIssueWorkflowState,writeIssueWorkflowState,issueStatePath} from './state-store.mjs';
-import {validateAuthenticatedAgentReceipt} from './result-artifact.mjs';
+import {validateAuthenticatedAgentReceipt,createGitHubResultArtifactReader} from './result-artifact.mjs';
+import {planAcceptanceReconciliation} from './acceptance-reconcile.mjs';
 import {collectPrRequiredQualityAsync,validPrRequiredQualityReceipt} from '../../../acceptance-pr-web-quality-receipt.mjs';
 import {auditStagedRunStore} from '../../../run-store-integrity.mjs';
 import {publish} from '../../../run-store-cas-push.mjs';
@@ -18,12 +20,12 @@ const REPO='BestNathan/nession', WORKFLOW='.github/workflows/ci-quality.yml';
 const SHA=/^[a-f0-9]{40}$/, positive=n=>Number.isSafeInteger(n)&&n>0;
 const pending=reason=>({status:'pending',reason});
 function fail(reason){throw Error('trusted quality reconcile: '+reason);}
-function prMatches(pr,number,sha){
+export function prMatches(pr,number,sha){
   return pr?.number===number&&pr.state==='open'&&pr.head?.sha===sha&&
     pr.head?.repo?.full_name===REPO&&pr.base?.repo?.full_name===REPO&&
     ['main','staging'].includes(pr.base?.ref)&&typeof pr.head.ref==='string';
 }
-function associated(run,pr){
+export function associated(run,pr){
   return run?.head_sha===pr.head.sha&&run.head_branch===pr.head.ref&&
     Array.isArray(run.pull_requests)&&run.pull_requests.some(p=>
       p?.number===pr.number&&p.head?.sha===pr.head.sha&&
@@ -31,9 +33,9 @@ function associated(run,pr){
       p.head?.repo?.id===pr.head.repo.id&&p.base?.repo?.id===pr.base.repo.id&&
       positive(pr.head.repo.id)&&positive(pr.base.repo.id));
 }
-function approvedBinding(state,reviewerReceipt){
-  const latest=state.transitions.at(-1);
-  if(state.phase!=='quality'||latest?.kind!=='reviewer'||latest.outcome!=='approved'||
+export function approvedBinding(state,reviewerReceipt){
+  const latest=state.transitions.findLast(t=>t.kind==='reviewer');
+  if(!['quality','acceptance'].includes(state.phase)||latest?.outcome!=='approved'||
       latest.target_sha!==state.target_sha||
       !state.transitions.some(t=>t.kind==='publisher'&&t.outcome==='published'&&
         t.target_sha===state.target_sha))return null;
@@ -99,7 +101,7 @@ export async function planQualityReconciliation({state,expectedVersion,reviewerR
     issue:state.issue,task_id:action.id,agent_id:null,input_sha:sha,output_sha:sha,verified:true};
   const next=acceptTaskResult(acknowledged,acknowledged.version,result,source,registry);
   return {status:'verified',pr:prNumber,quality_receipt:q,action_id:action.id,
-    acknowledged,next,expectedVersion};
+    acknowledged,next,expectedVersion,expectedDigest:stateDigest(state)};
 }
 
 function git(root,args){
@@ -118,11 +120,12 @@ function clone(remote,dir){
   if(git(dir,['symbolic-ref','--short','HEAD'])!=='agent-store')fail('unexpected Store ref');
 }
 function readApprovedReceipt(store,state){
-  const latest=state.transitions.at(-1);
+  const latest=state.transitions.findLast(t=>t.kind==='reviewer');
   if(latest?.kind!=='reviewer'||latest.outcome!=='approved'||!positive(latest.run_id)||
       !positive(latest.attempt))return null;
   const dir=path.join(store,'workflows','issues',String(state.issue),'results');
   if(!fs.existsSync(dir))return null;
+  if(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink())fail('unsafe Reviewer results directory');
   const prefix=latest.run_id+'-'+latest.attempt+'-';
   const candidates=fs.readdirSync(dir,{withFileTypes:true}).filter(d=>
     d.isFile()&&!d.isSymbolicLink()&&d.name.startsWith(prefix)&&
@@ -134,19 +137,30 @@ function readApprovedReceipt(store,state){
   if(candidates[0].name!==prefix+receipt.action_id+'.json')fail('Reviewer receipt path mismatch');
   return receipt;
 }
+export const stateDigest=state=>createHash('sha256').update(JSON.stringify(state,null,2)+'\n').digest('hex');
 export function stageQualityReconciliation(store,plan){
   if(plan.status!=='verified')fail('Quality proof not verified');
   const issue=plan.next.issue;
   const current=readIssueWorkflowState(store,issue);
-  if(current.version!==plan.expectedVersion||
+  if(current.version!==plan.expectedVersion||current.digest!==plan.expectedDigest||
       current.state?.outbox.find(a=>a.id===plan.action_id)?.status!=='pending')
     fail('stale state CAS');
   // Both versions are staged in one remote CAS commit; never publish the
   // intermediate verification receipt alone.
   writeIssueWorkflowState(store,plan.acknowledged,current.version);
   writeIssueWorkflowState(store,plan.next,plan.acknowledged.version);
+  const t=plan.next.transitions.at(-1);
+  const proof=plan.acceptance_receipt??plan.quality_receipt;
+  const rel='workflows/issues/'+issue+'/verification-results/'+t.run_id+'-'+t.attempt+'-'+plan.action_id+'.json';
+  const dir=path.join(store,path.dirname(rel));
+  if(!fs.existsSync(dir))fs.mkdirSync(dir);
+  if(!fs.lstatSync(dir).isDirectory()||fs.lstatSync(dir).isSymbolicLink())fail('unsafe verification receipt directory');
+  const record={schema_version:1,kind:t.kind,issue,pr:plan.pr,action_id:plan.action_id,
+    target_sha:t.target_sha,run_id:t.run_id,run_attempt:t.attempt,
+    prior_state_sha256:plan.expectedDigest,result_state_sha256:stateDigest(plan.next),proof};
+  fs.writeFileSync(path.join(store,rel),JSON.stringify(record,null,2)+'\n',{flag:'wx',mode:0o600});
   return [issueStatePath(issue,plan.acknowledged.version),issueStatePath(issue,plan.next.version),
-    'workflows/issues/'+issue+'/head.json'];
+    'workflows/issues/'+issue+'/head.json',rel];
 }
 function rest(token){
   if(typeof token!=='string'||token.length<8)fail('missing trusted REST read token');
@@ -168,7 +182,7 @@ async function main(){
       !SHA.test(e.GITHUB_SHA??'')||git(process.cwd(),['rev-parse','HEAD'])!==e.GITHUB_SHA)
     fail('protected main verification reconciliation only');
   const registry=JSON.parse(fs.readFileSync('automation/agents/registry.json','utf8'));
-  const request=rest(e.GH_TOKEN),root=fs.mkdtempSync(path.join(os.tmpdir(),'quality-reconcile-'));
+  const request=rest(e.GH_TOKEN),artifactReader=createGitHubResultArtifactReader(e.GH_TOKEN),root=fs.mkdtempSync(path.join(os.tmpdir(),'quality-reconcile-'));
   try{
     const store=path.join(root,'agent-store');
     clone(e.AGENT_STORE_CONTROLLER_REMOTE,store);
@@ -176,7 +190,7 @@ async function main(){
       .filter(d=>d.isDirectory()&&!d.isSymbolicLink()&&/^[1-9][0-9]*$/.test(d.name)&&positive(Number(d.name)))
       .map(d=>Number(d.name)).sort((a,b)=>a-b);
     if(dirs.length>5000)fail('Issue state listing exceeds bound');
-    const candidates=dirs.filter(issue=>readIssueWorkflowState(store,issue).state?.phase==='quality');
+    const candidates=dirs.filter(issue=>readIssueWorkflowState(store,issue).state&&['quality','acceptance'].includes(readIssueWorkflowState(store,issue).state.phase));
     const runNumber=Number(e.GITHUB_RUN_NUMBER);
     if(!positive(runNumber))fail('missing trusted run ordinal');
     // Rotate over at most eight candidates per invocation, even when older
@@ -185,25 +199,27 @@ async function main(){
     const ordered=candidates.slice(start).concat(candidates.slice(0,start)).slice(0,8);
     for(const issue of ordered){
       const {state,version}=readIssueWorkflowState(store,issue);
-      if(!state||state.phase!=='quality')continue;
+      if(!state||!['quality','acceptance'].includes(state.phase))continue;
       const receipt=readApprovedReceipt(store,state);
       if(!receipt){console.log(JSON.stringify({issue,status:'pending',reason:'no bound Reviewer receipt'}));continue;}
-      const plan=await planQualityReconciliation({state,expectedVersion:version,reviewerReceipt:receipt,request,registry});
+      const args={state,expectedVersion:version,reviewerReceipt:receipt,request,registry,artifactReader};
+      const plan=state.phase==='quality'?await planQualityReconciliation(args):await planAcceptanceReconciliation(args);
       if(plan.status!=='verified'){console.log(JSON.stringify({issue,...plan}));continue;}
       const paths=stageQualityReconciliation(store,plan);
       git(store,['add','--',...paths]);
-      if(auditStagedRunStore(store,'agent-store').checked_changes!==3)
-        fail('Quality CAS must add two immutable state versions and one head');
+      if(auditStagedRunStore(store,'agent-store').checked_changes!==4)
+        fail('Verification CAS must add two immutable state versions, receipt and head');
       git(store,['-c','user.name=nession-agent-controller','-c',
         'user.email=nession-agent-controller@users.noreply.github.com','commit','-m',
-        'agent-store: authenticate Quality result for Issue '+issue]);
+        'agent-store: authenticate '+state.phase+' result for Issue '+issue]);
       const pushed=publish('agent-store',store,4);
-      const actual=readIssueWorkflowState(store,issue);
-      if(actual.version<plan.next.version||!actual.state.transitions.some(t=>t.kind==='quality'&&
-          t.run_id===plan.quality_receipt.run_id&&t.attempt===plan.quality_receipt.run_attempt&&
-          t.target_sha===state.target_sha&&t.outcome==='passed'))fail('post-CAS Quality readback missing');
+      const actual=readIssueWorkflowState(store,issue),expected=plan.next.transitions.at(-1);
+      if(actual.version<plan.next.version||!actual.state.transitions.some(t=>t.kind===expected.kind&&
+          t.run_id===expected.run_id&&t.attempt===expected.attempt&&
+          t.target_sha===state.target_sha&&t.outcome==='passed')||
+          !fs.existsSync(path.join(store,paths[3])))fail('post-CAS verification readback missing');
       console.log(JSON.stringify({issue,status:'accepted',pr:plan.pr,action_id:plan.action_id,
-        quality_receipt:plan.quality_receipt,state_version:plan.next.version,
+        proof:plan.acceptance_receipt??plan.quality_receipt,state_version:plan.next.version,
         store_commit_sha:pushed.commit_sha}));
       // One mutation per invocation bounds the writer and allows the next
       // schedule to recover any lost wake without replaying a model.
