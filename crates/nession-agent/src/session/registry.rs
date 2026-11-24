@@ -19,6 +19,7 @@ use nession_protocol::contracts::terminal::v1::{
     TerminalStreamResumeResponse,
 };
 use nession_runtime::frame::WsFrame;
+use nession_runtime::metrics::{self, Direction, Domain, Labels, ResultKind};
 use tokio::sync::mpsc;
 
 use crate::server::issued_credit::SubscriberIssuedFlow;
@@ -655,7 +656,15 @@ impl SessionRegistry {
                 session.input.applied(through);
                 through
             }
-            InputVerdict::Duplicate | InputVerdict::Gap | InputVerdict::StaleEpoch => {
+            InputVerdict::Duplicate | InputVerdict::StaleEpoch => plan.applied_through,
+            InputVerdict::Gap => {
+                metrics::counter(
+                    "ws_stream_gap",
+                    Labels::new()
+                        .domain(Domain::Stream)
+                        .direction(Direction::Inbound)
+                        .result(ResultKind::Gap),
+                );
                 plan.applied_through
             }
         };

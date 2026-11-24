@@ -448,4 +448,35 @@ mod tests {
             "the verdict must come after the deadline, not instead of it"
         );
     }
+
+    /// The bounded write deadline and the one-shot settlement are observable
+    /// through the metric contract, and a write timeout is not mistaken for a
+    /// successful write.
+    #[tokio::test]
+    async fn a_write_timeout_and_settlement_emit_bounded_telemetry() {
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
+        let capture = std::sync::Arc::new(crate::metrics::TestCapture::new());
+        crate::metrics::set_sink(Some(capture.clone()));
+
+        let mut sink = StalledSink;
+        let result = write_frame(
+            &mut sink,
+            WsFrame::Text("x".into()),
+            Duration::from_millis(20),
+        )
+        .await;
+        assert_eq!(result, Err(WriteFailure::Timeout));
+        ConnectionLifecycle::new(0).settle(CloseReason::PeerClosed);
+
+        let names = capture.names();
+        assert!(
+            names.contains(&"ws_outbound_write_timeout"),
+            "a write timeout must be counted: {names:?}"
+        );
+        assert!(
+            names.contains(&"ws_connection_closed"),
+            "settlement must be counted with its reason: {names:?}"
+        );
+        crate::metrics::set_sink(None);
+    }
 }

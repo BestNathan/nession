@@ -6,6 +6,7 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nession_protocol::contracts::terminal::v1::TerminalStreamEventPayload;
+use nession_runtime::metrics::{self, Direction, Domain, Labels, ResultKind};
 
 use crate::stream::{
     StreamOverflow, INPUT_WINDOW, RUNTIME_RETENTION_BYTES, RUNTIME_RETENTION_EVENTS,
@@ -564,6 +565,13 @@ impl SessionStreamState {
         // Returning complete=true with no events would falsely synchronize
         // a client holding an impossible/forged resume position.
         if after_seq > self.cursor() {
+            metrics::counter(
+                "ws_stream_replay",
+                Labels::new()
+                    .domain(Domain::Stream)
+                    .direction(Direction::Outbound)
+                    .result(ResultKind::Replay),
+            );
             return Some(StreamReplay {
                 first_available_seq,
                 complete: false,
@@ -579,6 +587,13 @@ impl SessionStreamState {
             })
             .map(|entry| entry.event.clone())
             .collect();
+        metrics::counter(
+            "ws_stream_replay",
+            Labels::new()
+                .domain(Domain::Stream)
+                .direction(Direction::Outbound)
+                .result(ResultKind::Replay),
+        );
         Some(StreamReplay {
             first_available_seq,
             // The ring is contiguous, so the floor is the whole test: every

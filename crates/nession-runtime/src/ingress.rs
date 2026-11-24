@@ -420,6 +420,38 @@ mod tests {
     use axum::routing::get;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+    /// A connection attempt and the process-wide active gauge are emitted at
+    /// the ingress owner, including across two sequential connections (the
+    /// reconnect lifecycle this metric exists to observe).
+    #[tokio::test]
+    async fn connection_attempts_and_active_are_emitted_across_reconnects() {
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
+        let capture = Arc::new(crate::metrics::TestCapture::new());
+        crate::metrics::set_sink(Some(capture.clone()));
+
+        {
+            let _first = ActiveConnection::new();
+        }
+        {
+            let _second = ActiveConnection::new();
+        }
+
+        let names = capture.names();
+        assert_eq!(
+            names
+                .iter()
+                .filter(|name| **name == "ws_connection_attempts")
+                .count(),
+            2,
+            "two connections must be counted as two attempts: {names:?}"
+        );
+        assert!(
+            names.contains(&"ws_connection_active"),
+            "the process-wide active gauge must be published: {names:?}"
+        );
+        crate::metrics::set_sink(None);
+    }
+
     #[test]
     fn the_adapter_is_unpin_like_the_transports_around_it() {
         fn assert_unpin<T: Unpin>() {}
