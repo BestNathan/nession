@@ -661,12 +661,33 @@ route's auth (Server Token), single-Range/ETag/resume and GC-transfer guard
 semantics in `nession-server::image::http` are preserved for the compatibility
 window and are the rollback surface.
 
-**Removal and rollback guards (separate slice).** The legacy route is removed
-only for migrated clients after the staging parity Case is accepted; a protected
-compatibility toggle can re-enable an explicitly supported legacy reader without
-relaxing digest/grant checks. Durable blobs are never deleted and Manifest
-identity is never rewritten. Rollback re-enables the proprietary path; Session
-pins, resume and digest verification never regress.
+**Removal and rollback guards (separate slice).** After the staging parity Case
+(SC-02) is accepted, the legacy route mount is gated by the protected operator
+toggle `ServerConfig::legacy_blob_route` (`[server] legacy_blob_route`, default
+`true`), applied by the Server ingress `http_router` — the single owner of the
+mount decision. The standard `/v2/` Registry is mounted regardless of the toggle.
+
+- `legacy_blob_route = true` (default) keeps the bounded compatibility window:
+  untagged builds and digest-only legacy rows still resolve to the proprietary
+  route, while Tag-reachable catalog images already acquire through `/v2/` only.
+- `legacy_blob_route = false` is the staged removal. The proprietary route is
+  unmounted, so a migrated client holding only `/v2/` grants is unaffected and a
+  caller still asking for `/images/blobs/{digest}` receives a 404. `/v2/` continues
+  to serve approved complete closures and to deny wrong principal, wrong
+  repository and forged digest.
+- Flipping back to `true` is the fail-closed rollback: the supported legacy reader
+  returns without relaxing the Server Token or digest checks (absent/wrong token
+  stays 403, an unknown digest stays 404).
+
+The toggle is an operator configuration, never a client-negotiated capability. It
+deletes no durable blob and rewrites no Manifest identity; Session pins, resume
+and digest verification never regress. Because acquisition is `/v2/`-only, the
+persistent Agent cache and an active mount (pin) survive the removal unchanged.
+The #4250 SC-03 staging Case
+(`sc03_legacy_route_removed_with_protected_rollback`,
+`nession-server::server::websocket`) drives the real `http_router` in both toggle
+states and proves these negatives, the cache/mount preservation and the
+fail-closed rollback.
 
 ## Composition and mount delivery (#3693)
 
