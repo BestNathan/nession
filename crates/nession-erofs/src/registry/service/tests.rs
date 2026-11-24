@@ -1736,3 +1736,140 @@ async fn sc02_agent_fetches_via_server_v2_and_pin_survives_tag_move() {
         moved.manifest.digest(),
     );
 }
+
+/// #4250 SC-02 (SCN-03): the migrated production path. The Server derives the
+/// repository whose Tags reach the resolved Manifest (`v2_repository_for_manifest`)
+/// and issues repository-scoped `/v2/` grants; the Agent fetches the verified
+/// closure through the unified SDK/cache with cold/warm reuse, restart-safe
+/// adoption, tag-move pin stability and lease-protected eviction. No proprietary
+/// `/images/blobs/` URL appears anywhere in the authorized closure.
+#[cfg(feature = "cache")]
+#[tokio::test]
+async fn sc02_migrated_grants_fetch_via_v2_with_warm_restart_and_lease() {
+    use crate::cache::fetch::{fetch_manifest_image_v2, ImageObjectGrant};
+    use crate::cache::ErofsCache;
+    use crate::catalog::reference::v2_repository_for_manifest;
+    use crate::catalog::tag::TagExpectation;
+    use crate::oci::annotation::{MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST};
+
+    let host = server_host(RegistryMode::ReadWrite).await;
+    let (base, server) = serve_loopback(host.router.clone()).await;
+    let fixture = seed_image(&host, "team/app", "v1", b"4250 parity layer").await;
+    let agent = agent_host().await;
+
+    // The Server's cutover derivation: the resolved Manifest is Tag-reachable in
+    // team/app, so the grant is repository-scoped `/v2/`, not the legacy prefix.
+    let repository = v2_repository_for_manifest(&host.conn, fixture.manifest.digest())
+        .await
+        .unwrap()
+        .expect("a tagged Manifest is /v2/-addressable");
+    assert_eq!(repository, "team/app");
+    let grants = vec![
+        ImageObjectGrant {
+            digest: fixture.manifest.digest().to_string(),
+            media_type: MEDIA_TYPE_MANIFEST.to_string(),
+            size_bytes: fixture.manifest.size().unwrap(),
+            path: format!("/v2/{repository}/manifests/{}", fixture.manifest.digest()),
+        },
+        ImageObjectGrant {
+            digest: fixture.config.digest().to_string(),
+            media_type: MEDIA_TYPE_CONFIG.to_string(),
+            size_bytes: fixture.config.size().unwrap(),
+            path: format!("/v2/{repository}/blobs/{}", fixture.config.digest()),
+        },
+        ImageObjectGrant {
+            digest: fixture.layer.digest().to_string(),
+            media_type: MEDIA_TYPE_EROFS.to_string(),
+            size_bytes: fixture.layer.size().unwrap(),
+            path: format!("/v2/{repository}/blobs/{}", fixture.layer.digest()),
+        },
+    ];
+    assert!(grants.iter().all(|g| g.path.starts_with("/v2/team/app/")));
+    assert!(!grants.iter().any(|g| g.path.contains("/images/blobs/")));
+
+    // Cold fetch verifies every descriptor and caches the payload.
+    let cold = fetch_manifest_image_v2(&agent.cache, &grants, &base, "good-token", &repository)
+        .await
+        .expect("authorized /v2/ fetch");
+    assert_eq!(cold.manifest_digest, fixture.manifest.digest());
+    assert_eq!(cold.layer.digest, fixture.layer.digest());
+    assert_eq!(
+        tokio::fs::read(&cold.layer_path).await.unwrap(),
+        fixture.layer.bytes()
+    );
+    let cold_transfers = agent.cache.fetch_count();
+    assert_eq!(
+        cold_transfers, 3,
+        "cold fetch transfers Manifest/Config/EROFS"
+    );
+
+    // Warm reuse: a second fetch adopts the verified cache with no re-transfer.
+    let warm = fetch_manifest_image_v2(&agent.cache, &grants, &base, "good-token", &repository)
+        .await
+        .unwrap();
+    assert_eq!(warm.layer_path, cold.layer_path);
+    assert_eq!(
+        agent.cache.fetch_count(),
+        cold_transfers,
+        "warm reuse re-transfers nothing"
+    );
+
+    // Restart-safe adoption: a fresh cache instance over the same durable root
+    // adopts the verified blob without contacting the Server.
+    let restarted = ErofsCache::open(agent._dir.path(), "agent-registry", false)
+        .await
+        .unwrap();
+    let adopted = fetch_manifest_image_v2(&restarted, &grants, &base, "good-token", &repository)
+        .await
+        .unwrap();
+    assert_eq!(
+        tokio::fs::read(&adopted.layer_path).await.unwrap(),
+        fixture.layer.bytes()
+    );
+    assert_eq!(
+        restarted.fetch_count(),
+        0,
+        "restart adopts the verified blob"
+    );
+
+    // Lease: an active pin refuses eviction; the tag may move but the pinned
+    // identity stays byte-identical and consumable, then is reclaimed on release.
+    let pin = agent.cache.pin(fixture.layer.digest()).unwrap();
+    let moved = seed_image(&host, "team/app", "v2", b"4250 moved tag").await;
+    set_tag(
+        &host.conn,
+        "team/app",
+        "v1",
+        moved.manifest.digest(),
+        &TagExpectation::Exact(fixture.manifest.digest().to_string()),
+        2,
+    )
+    .await
+    .unwrap();
+    assert_ne!(moved.manifest.digest(), fixture.manifest.digest());
+    assert!(
+        !agent.cache.evict(fixture.layer.digest()).unwrap(),
+        "a pinned blob refuses eviction"
+    );
+    assert_eq!(
+        tokio::fs::read(&cold.layer_path).await.unwrap(),
+        fixture.layer.bytes(),
+        "the pinned identity survives the tag move byte-identical"
+    );
+    drop(pin);
+    assert!(
+        agent.cache.evict(fixture.layer.digest()).unwrap(),
+        "the released blob is reclaimed"
+    );
+
+    server.abort();
+    println!(
+        "#4250 SC-02 measured: Server derived repository {repository} for tagged Manifest {} and \
+         issued /v2/ grants only (no /images/blobs URL); Agent cold fetch transferred {cold_transfers} \
+         objects, warm reuse and restart adoption re-transferred 0; pinned layer {} survived Server tag \
+         v1 move to {} byte-identical, refused eviction while pinned and was reclaimed after release",
+        fixture.manifest.digest(),
+        fixture.layer.digest(),
+        moved.manifest.digest(),
+    );
+}

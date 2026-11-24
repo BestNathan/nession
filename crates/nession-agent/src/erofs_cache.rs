@@ -8,8 +8,8 @@
 
 pub use nession_erofs::cache::eviction::{evict_all_unpinned, evict_unpinned, EvictionReport};
 pub use nession_erofs::cache::fetch::{
-    fetch_composite_image, fetch_manifest_image, fetch_manifest_image_v2, FetchedComposite,
-    FetchedImage, ImageObjectGrant, MAX_METADATA_BYTES,
+    fetch_composite_image, fetch_composite_image_v2, fetch_manifest_image, fetch_manifest_image_v2,
+    FetchedComposite, FetchedImage, ImageObjectGrant, MAX_METADATA_BYTES,
 };
 pub use nession_erofs::cache::{
     identity_root, CacheDiagnostics, CacheObservation, CachePhase, CacheProgress, CachedImage,
@@ -283,9 +283,9 @@ fn v2_manifest_repository(path: &str, digest: &str) -> Option<String> {
 /// Resolve a standard `/v2/` Registry grant through the unified SDK/cache (#4090).
 ///
 /// The reachability fence is the Server's: the Agent fetches only the authorized
-/// repository closure by immutable digest. Composite `/v2/` cutover is pending —
-/// the Server delivers Composite grants over the compatibility route during the
-/// window, so this fails closed rather than guessing a partial closure.
+/// repository closure by immutable digest. Both a single-EROFS Manifest and a
+/// referenced Composite closure (#4250) are fetched through the unified SDK/cache
+/// over `/v2/`; a partial or descriptor-mismatched closure still fails closed.
 async fn resolve_grant_image_v2(
     cache: &ErofsCache,
     grant: &ManagedImageGrant,
@@ -336,9 +336,34 @@ async fn resolve_grant_image_v2(
         .iter()
         .any(|object| object.media_type == nession_erofs::oci::MEDIA_TYPE_COMPOSITE)
     {
-        anyhow::bail!(
-            "Composite /v2/ cutover is pending; the Server delivers Composite grants over the compatibility route"
-        );
+        let fetched =
+            fetch_composite_image_v2(cache, &objects, origin, server_auth_token, repository)
+                .await
+                .with_context(|| {
+                    format!("cannot prepare Composite image {} via /v2/", grant.digest)
+                })?;
+        let usage = nession_erofs::oci::usage::ImageRuntimeUsage::from_manifest_and_config(
+            &fetched.manifest,
+            &fetched.config,
+        )
+        .with_context(|| format!("cannot read the runtime usage of Manifest {}", grant.digest))?;
+        return Ok(ResolvedGrantImage {
+            manifest_digest: Some(fetched.manifest_digest.clone()),
+            layer_digest: fetched.metadata.digest.clone(),
+            layer_path: fetched.metadata_path.clone(),
+            usage: Some(usage),
+            composite: Some(ResolvedCompositeGrant {
+                descriptor_digest: fetched.composite_digest,
+                metadata_digest: fetched.metadata.digest.clone(),
+                device_digests: fetched
+                    .devices
+                    .iter()
+                    .map(|device| device.digest.clone())
+                    .collect(),
+                metadata_path: fetched.metadata_path,
+                device_paths: fetched.device_paths,
+            }),
+        });
     }
     let fetched = fetch_manifest_image_v2(cache, &objects, origin, server_auth_token, repository)
         .await
