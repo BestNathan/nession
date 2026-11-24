@@ -24,6 +24,15 @@ if [ "${1:-}" = "rev-parse" ] && [ "${2:-}" = "--show-toplevel" ]; then
   printf '%s\n' "$NSESSION_TEST_DEST"
   exit 0
 fi
+if [ "${1:-}" = "-C" ] && [ "${3:-}" = "worktree" ] && [ "${4:-}" = "list" ]; then
+  main_root="${NSESSION_TEST_MAIN_ROOT:-$NSESSION_TEST_DEST}"
+  printf 'worktree %s\n' "$main_root"
+  if [ -d "$main_root/.claude/worktrees/_seed-base" ]; then
+    printf 'worktree %s\n' "$main_root/.claude/worktrees/_seed-base"
+  fi
+  printf 'worktree %s\n' "$NSESSION_TEST_DEST"
+  exit 0
+fi
 echo "unexpected fake git call: $*" >&2
 exit 1
 EOF
@@ -220,6 +229,7 @@ run_seed() {
   set +e
   out=$(env PATH="$search_path:/usr/bin:/bin" \
     NSESSION_TEST_DEST="$fixture/dest" \
+    NSESSION_TEST_MAIN_ROOT="$fixture/main" \
     NSESSION_TEST_CARGO_LOG="$fixture/state/cargo.log" \
     NSESSION_TEST_DISKUTIL_LOG="$fixture/state/diskutil.log" \
     NSESSION_TEST_CP_LOG="$fixture/state/cp.log" \
@@ -242,7 +252,69 @@ run_seed() {
   set -e
 }
 
+# Invoke the seed script through its automatic source resolution: the fake git
+# reports $fixture/main as the first worktree and $fixture/dest as this checkout.
+run_seed_auto() {
+  local fixture=$1
+  local search_path=$2
+  shift 2
+  set +e
+  out=$(env PATH="$search_path:/usr/bin:/bin" \
+    NSESSION_TEST_DEST="$fixture/dest" \
+    NSESSION_TEST_MAIN_ROOT="$fixture/main" \
+    NSESSION_TEST_CARGO_LOG="$fixture/state/cargo.log" \
+    NSESSION_TEST_DISKUTIL_LOG="$fixture/state/diskutil.log" \
+    NSESSION_TEST_CP_LOG="$fixture/state/cp.log" \
+    NSESSION_TEST_DF_STATE="$fixture/state/df-count" \
+    NSESSION_TEST_UNAME="${NSESSION_TEST_UNAME:-Linux}" \
+    NSESSION_TEST_FS="${NSESSION_TEST_FS:-apfs}" \
+    NSESSION_TEST_FUSER="${NSESSION_TEST_FUSER:-idle}" \
+    NSESSION_TEST_CP_MODE="${NSESSION_TEST_CP_MODE:-clone}" \
+    NSESSION_TEST_DF_BEFORE="${NSESSION_TEST_DF_BEFORE:-1000000}" \
+    NSESSION_TEST_DF_AFTER="${NSESSION_TEST_DF_AFTER:-1000000}" \
+    NSESSION_TEST_CARGO_MODE="${NSESSION_TEST_CARGO_MODE:-ok}" \
+    NSESSION_TEST_DISKUTIL_BROKEN="${NSESSION_TEST_DISKUTIL_BROKEN:-0}" \
+    NSESSION_TEST_MV_MODE="${NSESSION_TEST_MV_MODE:-ok}" \
+    NSESSION_TEST_BSD_DEVICE="${NSESSION_TEST_BSD_DEVICE:-disk3s5}" \
+    NSESSION_TEST_DEVNUM="${NSESSION_TEST_DEVNUM:-16777233}" \
+    NSESSION_TEST_DEST_BSD="${NSESSION_TEST_DEST_BSD:-}" \
+    NSESSION_TEST_DEST_DEVNUM="${NSESSION_TEST_DEST_DEVNUM:-}" \
+    "$seed" --dest "$fixture/dest" "$@" 2>"$fixture/state/stderr")
+  rc=$?
+  set -e
+}
+
+new_auto_fixture() {
+  fixture="$tmp/$1"
+  rm -rf "$fixture"
+  mkdir -p "$fixture/main/.claude/worktrees" "$fixture/dest" "$fixture/state"
+  printf 'lock\n' >"$fixture/main/Cargo.lock"
+  printf 'lock\n' >"$fixture/dest/Cargo.lock"
+  printf 'toolchain\n' >"$fixture/main/rust-toolchain.toml"
+  printf 'toolchain\n' >"$fixture/dest/rust-toolchain.toml"
+  printf '0\n' >"$fixture/state/df-count"
+  : >"$fixture/state/cargo.log"
+  : >"$fixture/state/diskutil.log"
+  : >"$fixture/state/cp.log"
+  : >"$fixture/state/stderr"
+}
+
+add_seed_target() {
+  mkdir -p "$1/target/deps"
+  printf '%s\n' "$2" >"$1/target/deps/source-marker"
+  printf 'workspace\n' >"$1/target/workspace-artifact"
+}
+
+add_base_target() {
+  local base="$1/main/.claude/worktrees/_seed-base"
+  mkdir -p "$base"
+  add_seed_target "$base" "$2"
+  printf '%s\n' "${3:-lock}" >"$base/Cargo.lock"
+  printf 'toolchain\n' >"$base/rust-toolchain.toml"
+}
+
 reset_env() {
+  unset NSESSION_SEED_SOURCE
   NSESSION_TEST_UNAME=Linux
   NSESSION_TEST_FS=apfs
   NSESSION_TEST_FUSER=idle
@@ -464,6 +536,82 @@ assert_absent "$fixture/dest/target" 'incompatible Cargo.lock publishes nothing'
 [ ! -s "$fixture/state/cargo.log" ] || fail_test 'incompatible Cargo.lock skips Cargo' 'cargo ran for incompatible inputs'
 pass_test 'incompatible Cargo inputs cold-start'
 
+# ── Automatic seed source resolution (#4469) ────────────────────────────
+reset_env
+new_auto_fixture auto-base-preferred
+add_base_target "$fixture" 'base-marker'
+add_seed_target "$fixture/main" 'main-marker'
+run_seed_auto "$fixture" "$bin"
+assert_eq "$rc" 0 'base-preferred seed exits 0'
+assert_contains "$out" 'seed_status=seeded' 'base-preferred seed reports seeded'
+assert_contains "$out" 'seed_source_kind=seed-base' 'base-preferred seed selects the dedicated base'
+[ -f "$fixture/dest/target/deps/source-marker" ] || fail_test 'base-preferred seed publishes a target' 'seed target missing'
+assert_contains "$(cat "$fixture/dest/target/deps/source-marker")" 'base-marker' 'base-preferred seed uses the base target'
+assert_absent "$fixture/dest/target/workspace-artifact" 'base-preferred seed removes workspace artifacts'
+pass_test 'the dedicated seed base is preferred when warm'
+
+reset_env
+new_auto_fixture auto-main-fallback
+add_seed_target "$fixture/main" 'main-marker'
+run_seed_auto "$fixture" "$bin"
+assert_eq "$rc" 0 'main fallback exits 0'
+assert_contains "$out" 'seed_status=seeded' 'main fallback reports seeded'
+assert_contains "$out" 'seed_source_kind=main' 'main fallback selects main when the base is absent'
+assert_contains "$(cat "$fixture/dest/target/deps/source-marker")" 'main-marker' 'main fallback uses the main target'
+pass_test 'main remains the fallback when the base is absent'
+
+reset_env
+new_auto_fixture auto-env-override
+add_base_target "$fixture" 'base-marker'
+add_seed_target "$fixture/env" 'env-marker'
+printf 'lock\n' >"$fixture/env/Cargo.lock"
+printf 'toolchain\n' >"$fixture/env/rust-toolchain.toml"
+NSESSION_SEED_SOURCE="$fixture/env" run_seed_auto "$fixture" "$bin"
+assert_eq "$rc" 0 'env override exits 0'
+assert_contains "$out" 'seed_status=seeded' 'env override reports seeded'
+assert_contains "$out" 'seed_source_kind=env' 'env override selects NSESSION_SEED_SOURCE'
+assert_contains "$(cat "$fixture/dest/target/deps/source-marker")" 'env-marker' 'env override uses the configured source'
+pass_test 'NSESSION_SEED_SOURCE overrides the dedicated base'
+
+reset_env
+new_auto_fixture auto-env-invalid
+NSESSION_SEED_SOURCE='relative/path' run_seed_auto "$fixture" "$bin"
+assert_eq "$rc" 1 'invalid env source exits 1'
+assert_contains "$out" 'seed_status=failed' 'invalid env source reports failed'
+assert_contains "$(cat "$fixture/state/stderr")" 'NSESSION_SEED_SOURCE must be an absolute path' 'invalid env source names the contract'
+assert_absent "$fixture/dest/target" 'invalid env source publishes nothing'
+pass_test 'an invalid explicit source fails loudly'
+
+reset_env
+new_auto_fixture auto-base-incompatible
+add_base_target "$fixture" 'base-marker' 'different-lock'
+run_seed_auto "$fixture" "$bin"
+assert_eq "$rc" 0 'stale base exits 0'
+assert_contains "$out" 'seed_status=skipped' 'stale base reports skipped'
+assert_contains "$(cat "$fixture/state/stderr")" 'dedicated seed base is stale' 'stale base names the base'
+assert_contains "$(cat "$fixture/state/stderr")" 'just seed-worktree-base' 'stale base offers the refresh path'
+assert_absent "$fixture/dest/target" 'stale base publishes nothing'
+pass_test 'a stale dedicated base skips with the refresh path'
+
+reset_env
+new_auto_fixture auto-print-source
+add_base_target "$fixture" 'base-marker'
+set +e
+print_source=$(env PATH="$bin:/usr/bin:/bin" NSESSION_TEST_DEST="$fixture/dest" \
+  NSESSION_TEST_MAIN_ROOT="$fixture/main" "$seed" --print-source --dest "$fixture/dest" 2>/dev/null)
+print_rc=$?
+print_base=$(env PATH="$bin:/usr/bin:/bin" NSESSION_TEST_DEST="$fixture/dest" \
+  NSESSION_TEST_MAIN_ROOT="$fixture/main" "$seed" --print-base --dest "$fixture/dest" 2>/dev/null)
+base_rc=$?
+set -e
+assert_eq "$print_rc" 0 '--print-source exits 0'
+assert_eq "$base_rc" 0 '--print-base exits 0'
+assert_eq "$print_base" "$fixture/main/.claude/worktrees/_seed-base" '--print-base names the dedicated base'
+assert_contains "$print_source" 'seed_source_kind=seed-base' '--print-source resolves the dedicated base'
+assert_contains "$print_source" 'seed_base_target=yes' '--print-source reports the base target'
+assert_contains "$print_source" 'seed_base_registered=yes' '--print-source reports the registered base'
+pass_test '--print-source/--print-base expose the resolved seed contract'
+
 # ── WorktreeCreate hook outcomes (SC-03) ────────────────────────────────
 hook_repo="$tmp/hook-repo"
 mkdir -p "$hook_repo/scripts"
@@ -473,6 +621,11 @@ git -C "$hook_repo" config user.email "selftest@example.invalid"
 git -C "$hook_repo" config user.name "Seed Selftest"
 cat >"$hook_repo/scripts/seed-worktree-target.sh" <<'EOF'
 #!/usr/bin/env bash
+printf '%s\n' "$*" >>"${NSESSION_TEST_HOOK_ARGS_LOG:-/dev/null}"
+if [ "${1:-}" = "--dest" ] && [ "${NSESSION_TEST_HOOK_LEGACY:-0}" = "1" ]; then
+  printf 'unknown option: --dest\n' >&2
+  exit 1
+fi
 printf 'seed_status=%s\n' "${NSESSION_TEST_HOOK_STATUS:-seeded}"
 printf 'seed_reason=%s\n' "${NSESSION_TEST_HOOK_REASON:-test outcome}"
 [ "${NSESSION_TEST_HOOK_EXIT:-0}" = "0" ] || exit 1
@@ -492,6 +645,8 @@ run_hook() {
     NSESSION_TEST_HOOK_STATUS="$status" \
     NSESSION_TEST_HOOK_EXIT="$exit_code" \
     NSESSION_TEST_HOOK_REASON="$reason" \
+    NSESSION_TEST_HOOK_LEGACY="${NSESSION_TEST_HOOK_LEGACY:-0}" \
+    NSESSION_TEST_HOOK_ARGS_LOG="${NSESSION_TEST_HOOK_ARGS_LOG:-/dev/null}" \
     bash "$hook" 2>"$error_file")
   hook_rc=$?
   set -e
@@ -517,4 +672,19 @@ assert_contains "$hook_err" 'continuing with an empty private target' 'hook cont
 assert_contains "$hook_err" 'seed-worktree-target-replace' 'hook offers the safe retry for a failure'
 pass_test 'WorktreeCreate reports a failed seed and still creates the worktree'
 
-echo "worktree target seed selftest OK ✓ seeded/skipped/failed outcomes, Darwin APFS, CoW refusal, quiescence and safe retry"
+legacy_worktree="$hook_repo/.claude/worktrees/feat-seed-legacy"
+legacy_args_log="$tmp/hook-legacy-args.log"
+: >"$legacy_args_log"
+NSESSION_TEST_HOOK_LEGACY=1
+NSESSION_TEST_HOOK_ARGS_LOG="$legacy_args_log"
+run_hook "feat/seed-legacy" seeded 0 "legacy script accepted the fallback"
+assert_contains "$hook_err" 'target seed seeded' 'hook reports seeded through the legacy fallback'
+first_call=$(sed -n '1p' "$legacy_args_log")
+second_call=$(sed -n '2p' "$legacy_args_log")
+assert_contains "$first_call" '--dest' 'hook first uses the --dest contract'
+assert_contains "$second_call" "$hook_repo" 'hook fallback passes the main worktree'
+assert_contains "$second_call" "$legacy_worktree" 'hook fallback passes the destination'
+unset NSESSION_TEST_HOOK_LEGACY NSESSION_TEST_HOOK_ARGS_LOG
+pass_test 'WorktreeCreate falls back to the legacy positional seed contract'
+
+echo "worktree target seed selftest OK ✓ seeded/skipped/failed outcomes, Darwin APFS, CoW refusal, quiescence, source resolution and safe retry"
