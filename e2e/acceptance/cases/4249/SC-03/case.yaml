@@ -1,0 +1,14 @@
+schema_version: 1
+issue: 4249
+criterion: SC-03
+stage: staging
+runtime: full-stack-local
+platform: linux
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+  - type: runtime
+    entry: build.cjs
+  - type: runtime
+    entry: execute.cjs
+result_policy: all-pass
