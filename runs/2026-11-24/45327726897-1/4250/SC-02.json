@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "f5fb13892b5184491b0b383a5e520bbd4a75ca1164c27be1d758c4cd7916cdb7",
+  "run_id": 45327726897,
+  "run_attempt": 1,
+  "issue": 4250,
+  "criterion": "SC-02",
+  "criterion_text": "An exact staging merged-SHA native Server+Agent Case proves OCI `/v2/` parity for a real verified EROFS Manifest closure: cold/warm fetch, interrupted/resumed transfer, tag movement and cache/progress/lease consistency. Payload/metadata match the pinned digest, with no unverified bytes reaching Sandbox.",
+  "stage": "staging",
+  "target_sha": "14ae7a043b0219872c7001a085872ca6dcd3153c",
+  "contract_sha256": "27d18abfb5a4e8e2652f7b8588285a64557f8e67179500ec92979f90a25f11e0",
+  "case_revision": "14ae7a043b0219872c7001a085872ca6dcd3153c",
+  "case_tree_sha": "4465fe20a0eb5dd2b922865834812d955df5e792",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T04:43:23.494Z",
+  "finished_at": "2026-11-24T04:43:58.112Z",
+  "duration_ms": 34618,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-02: the Server issues repository-scoped /v2/ grants for a Tag-reachable Manifest and the Agent fetches the verified closure via the unified SDK/cache with cold/warm reuse, restart adoption, tag-move pin stability and lease-protected eviction (no proprietary URL)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 14ae7a043b0219872c7001a085872ca6dcd3153c: #4250 SC-02 measured: Server derived repository team/app for tagged Manifest sha256:5627c6469e532534a171374a0a0dd339aa07653fa7a8bd879c10a06c32091fcd and issued /v2/ grants only (no /images/blobs URL); Agent cold fetch transferred 3 objects, warm reuse and restart adoption re-transferred 0; pinned layer sha256:6d188bd69f86a252a1ff76744c11b0f82d0c29ebaed5fc34303259fc513f90b3 survived Server tag v1 move to sha256:1972d17693e45498460c743f3bf19af0d51e0b5200ffdbddfcd485d74bff1969 byte-identical, refused eviction while pinned and was reclaimed after release"
+        }
+      ],
+      "duration_ms": 28510,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45327726897,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "14ae7a043b0219872c7001a085872ca6dcd3153c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45327726897",
+    "record_path": "runs/2026-11-24/45327726897-1/4250/SC-02.json",
+    "source_result_sha256": "35533459034178e5375386c8535608e8bea901a324f0b59d71f91491d6a72e5b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45327726897-1",
+    "sha256": "35533459034178e5375386c8535608e8bea901a324f0b59d71f91491d6a72e5b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45327726897",
+    "durability": "time-limited; object archival not configured"
+  }
+}

@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "76f9911d0c16c48f660b11cc319b8acc845623cf69b10fd2ca6f856b99afddc8",
+  "run_id": 45327726897,
+  "run_attempt": 1,
+  "issue": 4250,
+  "criterion": "SC-03",
+  "criterion_text": "After the staged cutover, the proprietary `/images/blobs/{digest}` route is unavailable to migrated clients; standard `/v2/` still serves approved complete closures, denies wrong principal/repository/forged digest and preserves persistent Agent cache and active mounts. A staged rollback/protected compatibility toggle restores only explicitly supported clients without bypassing authorization.",
+  "stage": "staging",
+  "target_sha": "14ae7a043b0219872c7001a085872ca6dcd3153c",
+  "contract_sha256": "27d18abfb5a4e8e2652f7b8588285a64557f8e67179500ec92979f90a25f11e0",
+  "case_revision": "14ae7a043b0219872c7001a085872ca6dcd3153c",
+  "case_tree_sha": "8373165c7a3ca7fc967a757638233eef5e2c41f8",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pending",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T04:43:58.113Z",
+  "finished_at": "2026-11-24T04:44:04.002Z",
+  "duration_ms": 5889,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pending",
+      "summary": "SC-03 stays Pending: the #4250 route-removal/rollback slice has not landed; the proprietary route remains mounted for the bounded compatibility window after the SC-02 parity cutover",
+      "evidence": [
+        {
+          "type": "blocked",
+          "value": "the removed-route negative/rollback proof (sc03_legacy_route_removed_with_protected_rollback) is not yet present at this SHA; the staged removal slice follows the accepted SC-02 parity receipt"
+        }
+      ],
+      "duration_ms": 30,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45327726897,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "14ae7a043b0219872c7001a085872ca6dcd3153c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45327726897",
+    "record_path": "runs/2026-11-24/45327726897-1/4250/SC-03.json",
+    "source_result_sha256": "1d529e8f5c9541eda6c0e52076f95932f3fe84b8499466d1852c9ed26fe1c72f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45327726897-1",
+    "sha256": "1d529e8f5c9541eda6c0e52076f95932f3fe84b8499466d1852c9ed26fe1c72f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45327726897",
+    "durability": "time-limited; object archival not configured"
+  }
+}
