@@ -38,6 +38,22 @@ test.describe('public Pages shared navigation',()=>{
   await expect(nav.getByRole('link')).toHaveCount(labels.length);
  });
 
+ test('the compiled artifact works under the publication subpath too',async({page})=>{
+  const failures:string[]=[];
+  page.on('response',response=>{
+   if(new URL(response.url()).pathname.startsWith('/nession/')&&response.status()>=400)
+    failures.push(response.status()+' '+response.url());
+  });
+  await page.goto(site.origin+'/nession/#/knowledge');
+  const nav=page.getByRole('navigation',{name:'Main navigation'});
+  await expect(nav.getByRole('link')).toHaveCount(9);
+  await expect(page.getByRole('heading',{name:'What we’ve learned, kept.'})).toBeVisible();
+  await page.goto(site.origin+'/nession/workflows.html');
+  await expect(page.getByRole('heading',{name:'Inside the workflow.'})).toBeVisible();
+  await expect(nav.getByRole('link',{name:'Workflows'})).toHaveAttribute('aria-current','page');
+  expect(failures).toEqual([]);
+ });
+
  test('mobile retains all destinations and usable workflow-to-knowledge navigation',async({page})=>{
   await page.setViewportSize({width:390,height:844});
   await page.goto(site.origin+'/workflows.html');

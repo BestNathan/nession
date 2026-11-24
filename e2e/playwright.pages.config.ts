@@ -5,6 +5,9 @@ import {defineConfig} from '@playwright/test';
 export default defineConfig({
   // Existing product-browser fixture specs plus Pages-only smoke tests.
   // The latter deliberately live outside the canonical product E2E catalog.
+  // The global setup performs the credential-free Vite/data build once so the
+  // suite serves the actual compiled Pages artifact.
+  globalSetup:'./pagesGlobalSetup.mjs',
   testDir:'.',
   testMatch:['**/tests/browser/pages-*.spec.ts','**/pages/*.test.ts'],
   fullyParallel:false,
