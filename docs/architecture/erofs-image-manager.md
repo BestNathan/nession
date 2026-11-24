@@ -457,7 +457,16 @@ image_gc_max_candidates = 64
 image_build_stage_timeout_secs = 1800  # 0 disables the subprocess bound
 image_build_log_max_bytes = 1048576
 image_build_retention_secs = 604800   # terminal build directories
+legacy_blob_route = true   # protected #4250 compatibility toggle; false stages removal
 ```
+
+`legacy_blob_route` gates the proprietary `/images/blobs/{digest}` transport
+route (default `true` keeps the bounded compatibility window for untagged builds
+and digest-only legacy rows). Setting it to `false` is the staged #4250 removal;
+flipping it back to `true` is the fail-closed rollback. The standard `/v2/`
+Registry is mounted regardless. See
+[OCI/EROFS image infrastructure](oci-erofs-image-infrastructure.md#proprietary-blob-transport-retirement-4250)
+for the cutover rule and the removal/rollback proof.
 
 Bounds: `image_max_concurrent_builds` in `[1, 8]`,
 `image_gc_interval_secs` either `0` or in `[60, 604800]`,
