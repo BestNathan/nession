@@ -1,0 +1,108 @@
+name: Acceptance / Agent Reconcile
+
+# #4482: thin trusted-main router for the single Agent Workflow V2 Reconcile
+# entrypoint. It is a non-model orchestrator: it never runs a Provider, writes
+# the Store, dispatches a Worker, publishes a PR, merges or projects an SC.
+#
+# Current mode is PLAN ONLY. The scheduled wake is fail-closed unless the
+# repository variable AGENT_RECONCILE_V2_ENABLED is true; a manual dispatch is
+# always read-only. Executing the committed effects is the separately authorized
+# SC-06 canary, not this workflow.
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: 'Optional Issue hint; empty plans every active durable lifecycle'
+        required: false
+        default: ''
+        type: string
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+  actions: read
+  issues: read
+  pull-requests: read
+  checks: read
+
+concurrency:
+  group: acceptance-agent-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      (github.event_name == 'workflow_dispatch' ||
+       vars.AGENT_RECONCILE_V2_ENABLED == 'true' ||
+       vars.AGENT_RECONCILE_V2_ENABLED == '1')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      ISSUE_NUMBER: ${{ github.event.inputs.issue_number }}
+      WAKE_SOURCE: ${{ github.event_name == 'schedule' && 'schedule' || 'manual' }}
+      WAKE_REASON: ${{ github.event_name == 'schedule' && 'scheduled_scan' || 'operator_plan' }}
+    steps:
+      - name: Checkout only trusted current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require the exact-source V2 reconciliation fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/lib/agent/workflow/contract-selftest.mjs
+          node scripts/lib/agent/workflow/lifecycle-selftest.mjs
+          node scripts/lib/agent/workflow/ci-barrier-selftest.mjs
+          node scripts/lib/agent/workflow/feedback-selftest.mjs
+          node scripts/lib/agent/workflow/migration-selftest.mjs
+          node scripts/lib/agent/workflow/reconcile-selftest.mjs
+          node scripts/lib/agent/workflow/resume-selftest.mjs
+          node scripts/lib/agent/workflow/telemetry-selftest.mjs
+          node scripts/lib/agent/workflow/cli-selftest.mjs
+      - name: Plan the bounded Reconcile decision (read-only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          AGENT_STORE_CONTROLLER_REMOTE: https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(--plan --wake-source "$WAKE_SOURCE" --reason "$WAKE_REASON")
+          if [[ -n "$ISSUE_NUMBER" ]]; then
+            [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]]
+            args+=(--issue "$ISSUE_NUMBER")
+          fi
+          node scripts/reconcile-agent-workflows.mjs "${args[@]}" \
+            > "$RUNNER_TEMP/reconcile-plan.json"
+          jq -e '
+            .schema_version == 1 and
+            .kind == "agent_workflow_v2_reconcile_plan" and
+            .mode == "plan" and
+            (.results | type == "array") and
+            (.telemetry | type == "array")
+          ' "$RUNNER_TEMP/reconcile-plan.json" >/dev/null
+          {
+            echo '## Agent Workflow V2 Reconcile plan (read-only)'
+            echo '- Wake: `'"$WAKE_SOURCE"'` / `'"$WAKE_REASON"'`'
+            echo '- Processed: '"$(jq -r .processes "$RUNNER_TEMP/reconcile-plan.json")"''
+            echo '- Mode: plan only; no Store write, dispatch, PR, merge or SC verdict.'
+            jq -r '.telemetry[] |
+              "- Issue #\(.issue): phase `\(.phase)` / decision `\(.decision)`" +
+              (if .reason then " / `\(.reason)`" else "" end) +
+              " / store v\(.store_version) / pending \(.pending_actions)"' \
+              "$RUNNER_TEMP/reconcile-plan.json" || true
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload the sanitized Reconcile observation
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-reconcile-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/reconcile-plan.json
+          if-no-files-found: error
+          retention-days: 7
