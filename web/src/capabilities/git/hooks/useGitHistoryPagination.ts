@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { gitApi } from '../GitPlugin';
+import { describeUnavailable } from '../state';
 import { gitRequestTargetKey } from './useGitRequest';
 import type { GitCommit, GitLogResponse } from '../types';
 
@@ -94,6 +95,13 @@ export function useGitHistoryPagination(
         setCommits((prev) => [...prev, ...page.history.commits]);
         setNextCursor(page.history.next_cursor ?? null);
         setEndOfHistory(page.history.end_of_history);
+      } else {
+        // A fulfilled non-ok answer is the agent's domain answer, not a
+        // transport failure: it describes no page, so the loaded list, cursor,
+        // and end flag stay exactly as they were. The same Load older control
+        // remains the retry, and the reason is shown beside it. The fence
+        // above already dropped an answer for a replaced list (#4116).
+        setOlderError(describeUnavailable(page).title);
       }
     } catch {
       // Same fence as the success path: a rejected continuation for a replaced

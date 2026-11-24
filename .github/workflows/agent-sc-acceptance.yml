@@ -270,6 +270,8 @@ jobs:
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" "${TARGET_REF}"
               node scripts/acceptance-4342-downstream-evidence.mjs collect \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" "${TARGET_REF}"
+              node scripts/acceptance-4342-historical-evidence.mjs collect \
+                "${RUNNER_TEMP}/acceptance-ci-evidence.json" "${TARGET_REF}"
             fi
           fi
 
