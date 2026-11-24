@@ -20,6 +20,18 @@ server {
 }
 EOF
 
+# Source-pin the image identity (#4354). The UI image is otherwise fully
+# deterministic: two SHAs with identical web content produce the same image
+# config, and containerd's CRI can then report a previously pulled
+# same-config image's digest as the pod imageID — breaking the deployed
+# identity witness even though the pull itself was correct. The revision
+# label makes every SHA's config unique, matching Dockerfile.mcp.prebuilt.
+# Placed after the stable nginx config layer so its cache is preserved.
+ARG NESSION_SOURCE_REVISION=unknown
+LABEL org.opencontainers.image.title="Nession Web UI" \
+      org.opencontainers.image.source="https://github.com/BestNathan/nession" \
+      org.opencontainers.image.revision="${NESSION_SOURCE_REVISION}"
+
 # Volatile web files — only this layer rebuilds on each commit
 COPY --from=web-dist / /usr/share/nginx/html
 

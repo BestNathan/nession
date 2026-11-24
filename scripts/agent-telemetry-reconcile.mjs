@@ -110,10 +110,13 @@ export function indexedSourceSummaries(root){
   }
   return new Map([...summaryCounts].map(([key,value])=>[key,value.size]));
 }
-export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rotation=0){
+export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rotation=0,maxInspections=Infinity){
   // Round-robin starting source on each scheduled tick, oldest first WITHIN
   // each source. A permanently backlogged Provider must not starve Audit.
   if(!Number.isSafeInteger(rotation)||rotation<0)fail('invalid recovery rotation');
+  if(maxInspections!==Infinity&&(!positive(maxInspections)))
+    fail('invalid bounded artifact-inspection budget');
+  let inspected=0;
   const offset=rotation%SOURCES.length;
   const orderedSources=[...SOURCES.slice(offset),...SOURCES.slice(0,offset)];
   for(const source of orderedSources){
@@ -122,6 +125,8 @@ export async function chooseMissing(runsBySource,summaryCounts,artifactCount,rot
     const ordered=runs.filter(run=>trustedSource(run,source))
       .sort((a,b)=>String(a.created_at).localeCompare(String(b.created_at)));
     for(const run of ordered){
+      if(inspected>=maxInspections)return null;
+      inspected++;
       const key=source.id+'/'+run.id+'/'+run.run_attempt;
       const recorded=summaryCounts.get(key)??0;
       const published=await artifactCount(run);
@@ -138,41 +143,304 @@ function ghJson(endpoint){
   });
   return JSON.parse(output);
 }
-export function validateReconciliationContext(env){
+// #4342 SC-05: bounded cross-page recovery of the historical 2026-11-09 gap.
+// The schedule rotates exactly one Catalog source, one historical page and at
+// most 12 attempt-scoped artifact queries per tick. No caller-selected ref,
+// source, date or SHA obtains the Metrics writer; normal recent replay remains.
+export const HISTORY_START='2026-11-09';
+const HISTORY_PROBE_LIMIT=12;
+const MAX_RECOVERY_ARTIFACT_QUERIES=250;
+const INVENTORY_CRON='47 * * * *';
+export function historicalPagePlan(total,runNumber,sourceCount=SOURCES.length){
+  if(!Number.isSafeInteger(total)||total<0||!positive(runNumber)||
+     !positive(sourceCount))fail('invalid historical scan bounds');
+  const source_index=(runNumber-1)%sourceCount;
+  const iteration=Math.floor((runNumber-1)/sourceCount);
+  const page_count=Math.ceil(total/MAX_RUNS);
+  if(!page_count)return {source_index,page:null,offset:0,page_count:0,truncated:false};
+  // The historical window's oldest pages get sampled first; explicitly
+  // announce any portion beyond the per-source 50-page audit budget.
+  const budget=Math.min(page_count,50);
+  const page=page_count-(iteration%budget);
+  const offset=(Math.floor(iteration/budget)%Math.ceil(MAX_RUNS/HISTORY_PROBE_LIMIT))*
+    HISTORY_PROBE_LIMIT;
+  return {source_index,page,offset,page_count,truncated:page_count>budget};
+}
+export function classifyHistoricalArtifact(run,source,listing,recorded){
+  if(!trustedSource(run,source))return {status:'invalid_source',published:0,recorded};
+  if(!Number.isSafeInteger(recorded)||recorded<0)fail('invalid stored count');
+  let published;
+  try{published=countArtifactSummaries(listing,run);}
+  catch{return {status:'invalid_artifact',published:0,recorded};}
+  if(published>recorded)return {status:'missing_recoverable',published,recorded};
+  // A formerly persisted source remains already-stored even when GitHub
+  // subsequently expires its original Artifact ZIP. The immutable Git bytes
+  // are authoritative for stored history; expiration cannot erase that proof.
+  if(recorded>0||published>0)
+    return {status:'already_stored',published,recorded};
+  const suffix='-'+run.id+'-'+run.run_attempt;
+  const relevant=listing.artifacts.filter(a=>typeof a.name==='string'&&
+    a.name.startsWith('agent-telemetry-')&&a.name.endsWith(suffix));
+  if(relevant.some(a=>a.expired===true))
+    return {status:'expired_unrecoverable',published:0,recorded};
+  // No currently listed Artifact is NOT proof that no Agent ever ran.
+  // This state deliberately covers no-model and an expired/unlisted ZIP.
+  return {status:'unobserved_no_artifact',published:0,recorded};
+}
+export async function scanHistoricalScope({source,runNumber,summaryCounts,listing,artifacts,includeArtifactRefs=false}){
+  if(!source||!positive(runNumber)||!(summaryCounts instanceof Map)||
+     typeof listing!=='function'||typeof artifacts!=='function')
+    fail('invalid historical scan context');
+  const end=new Date().toISOString().slice(0,10);
+  if(end<HISTORY_START)fail('historical scan before start');
+  const query='actions/workflows/'+source.file+'/runs?status=completed&created='+
+    HISTORY_START+'..'+end+'&per_page='+MAX_RUNS;
+  const first=await listing(query+'&page=1');
+  if(!Number.isSafeInteger(first?.total_count)||first.total_count<0||
+     !Array.isArray(first.workflow_runs)||first.workflow_runs.length>MAX_RUNS)
+    fail('untrusted historical workflow inventory');
+  const plan=historicalPagePlan(first.total_count,runNumber);
+  const pageData=plan.page===null?{workflow_runs:[]}:
+    plan.page===1?first:await listing(query+'&page='+plan.page);
+  const runs=pageData.workflow_runs;
+  if(!Array.isArray(runs)||runs.length>MAX_RUNS)
+    fail('unbounded historical workflow page');
+  const sampled=runs.slice(plan.offset,plan.offset+HISTORY_PROBE_LIMIT);
+  const observations=[];
+  let selected=null;
+  for(const run of sampled){
+    const key=source.id+'/'+run.id+'/'+run.run_attempt;
+    const recorded=summaryCounts.get(key)??0;
+    let classification,artifactRefs=[];
+    if(!trustedSource(run,source) ||
+       !Number.isFinite(Date.parse(run.created_at??'')) ||
+       run.created_at.slice(0,10)<HISTORY_START ||
+       run.created_at.slice(0,10)>end){
+      classification={status:'invalid_source',published:0,recorded};
+    }else{
+      let result;
+      try{result=await artifacts(run);}
+      catch{classification={status:'invalid_artifact',published:0,recorded};}
+      if(result){
+        classification=classifyHistoricalArtifact(run,source,result,recorded);
+        if(includeArtifactRefs&&Array.isArray(result.artifacts)){
+          const suffix='-'+run.id+'-'+run.run_attempt;
+          artifactRefs=result.artifacts.filter(a=>typeof a.name==='string'&&
+            a.name.startsWith('agent-telemetry-')&&a.name.endsWith(suffix));
+          if(artifactRefs.some(a=>!positive(a.id)||typeof a.expired!=='boolean')||
+             new Set(artifactRefs.map(a=>a.name)).size!==artifactRefs.length)
+            classification={status:'invalid_artifact',published:0,recorded};
+          artifactRefs=artifactRefs.filter(a=>positive(a.id)&&typeof a.expired==='boolean')
+            .map(a=>({artifact_id:a.id,name:a.name,expired:a.expired}));
+        }
+      }else if(!classification)classification={status:'invalid_artifact',published:0,recorded};
+    }
+    observations.push({run_id:run.id,attempt:run.run_attempt,
+      source_sha:run.head_sha,status:classification.status,
+      published:classification.published,recorded:classification.recorded,
+      ...(includeArtifactRefs?{artifacts:artifactRefs,earlier_attempts_unobserved:run.run_attempt>1}:{})});
+    if(!selected&&classification.status==='missing_recoverable')
+      selected={run_id:run.id,run_attempt:run.run_attempt,source_path:run.path,
+        target_sha:run.head_sha,recorded,published:classification.published};
+  }
+  return {schema_version:1,kind:'agent_metrics_historical_recovery_scope',
+    created_at:new Date().toISOString(),repository:REPO,start_date:HISTORY_START,
+    end_date:end,source_workflow_key:source.key,telemetry_group_id:source.id,
+    workflow_path:'.github/workflows/'+source.file,
+    page:plan.page,total_pages:plan.page_count,page_offset:plan.offset,
+    total_runs_in_date_window:first.total_count,
+    truncated:plan.truncated,probe_limit:HISTORY_PROBE_LIMIT,
+    observations,
+    counts:Object.fromEntries(['invalid_source','invalid_artifact','already_stored',
+      'missing_recoverable','expired_unrecoverable','unobserved_no_artifact']
+      .map(status=>[status,observations.filter(item=>item.status===status).length])),
+    selected,selected_persisted:false,recovered_count:0};
+}
+export function finalizeHistoricalReport(report,summaryCounts){
+  if(report?.kind!=='agent_metrics_historical_recovery_scope'||
+     !(summaryCounts instanceof Map))fail('invalid historical finalization');
+  const picked=report.selected;
+  if(!picked)return {...report,selected_persisted:false,recovered_count:0};
+  const key=report.telemetry_group_id+'/'+picked.run_id+'/'+picked.run_attempt;
+  const persisted=(summaryCounts.get(key)??0)>=picked.published;
+  return {...report,selected_persisted:persisted,recovered_count:persisted?1:0};
+}
+
+export function validateReconciliationContext(env,event=null){
   if(env.GITHUB_REPOSITORY!==REPO||
      env.GITHUB_REF!=='refs/heads/main')
     fail('reconciler must execute only on trusted main');
   if(env.GITHUB_EVENT_NAME==='schedule')return 'schedule';
-  fail('reconciliation denied: only main schedule may scan history');
+  // GitHub may drop scheduled events under heavy load. A *writer* which
+  // successfully persisted a real source can request exactly one bot wake;
+  // never accept a public, user-ref-selected workflow_dispatch fallback.
+  if(env.GITHUB_EVENT_NAME==='repository_dispatch' &&
+     env.GITHUB_ACTOR==='github-actions[bot]'&&
+     event?.action==='nession-agent-metrics-history-recover'&&
+     event?.sender?.login==='github-actions[bot]'&&
+     event?.repository?.full_name===REPO&&
+     Number.isSafeInteger(Number(event?.client_payload?.writer_run_id))&&
+     Number(event.client_payload.writer_run_id)>0)
+    return 'trusted-bot-recovery';
+  fail('reconciliation denied: schedule or trusted post-Store bot wake required');
+}
+// Repository-dispatch's bot identity is necessary, not sufficient: another
+// workflow with GITHUB_TOKEN could manufacture the same actor. The immutable
+// writer run is independently re-read with the exact attempt and completed
+// post-Store steps before a bot wake can enter privileged recovery.
+export function attestHistoryWriterWake(run,jobs,event,now=Date.now()){
+  const id=Number(event?.client_payload?.writer_run_id);
+  if(!positive(id)||run?.id!==id||run.run_attempt!==1||
+     run.path!=='.github/workflows/metrics-agent-telemetry.yml'||
+     run.event!=='workflow_run'||run.status!=='completed'||run.conclusion!=='success'||
+     run.repository?.full_name!==REPO||run.head_repository?.full_name!==REPO||
+     run.head_branch!=='main'||!SHA.test(run.head_sha??'')||
+     !Number.isFinite(Date.parse(run.updated_at??''))||
+     now-Date.parse(run.updated_at)>6*60*60*1000||
+     Date.parse(run.updated_at)>now+5*60*1000)
+    fail('untrusted historical wake writer provenance');
+  if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)
+    fail('unbounded historical wake writer jobs');
+  const ingests=jobs.jobs.filter(j=>j.name==='ingest');
+  if(ingests.length!==1||ingests[0].run_id!==id||
+     ingests[0].run_attempt!==1||ingests[0].conclusion!=='success'||
+     ingests[0].status!=='completed')
+    fail('untrusted historical wake writer job');
+  for(const stepName of ['Validate and append immutable telemetry',
+    'Commit metrics history','Verify immutable Git bytes before uploading Run Store receipts']){
+    const matching=(ingests[0].steps??[]).filter(step=>
+      step.name===stepName&&step.conclusion==='success');
+    if(matching.length!==1)fail('historical wake requires real immutable Store write: '+stepName);
+  }
+  return true;
+}
+function reconcileEventContext(){
+  if(process.env.GITHUB_EVENT_NAME!=='repository_dispatch')return null;
+  const file=process.env.GITHUB_EVENT_PATH;
+  if(!file||!path.isAbsolute(file))fail('GitHub event payload file required');
+  return JSON.parse(fs.readFileSync(file,'utf8'));
 }
 async function select(store){
-  validateReconciliationContext(process.env);
-  if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
-  const summaryCounts=indexedSourceSummaries(store),runsBySource=new Map();
-  for(const source of SOURCES){
-    const response=ghJson('actions/workflows/'+source.file+
-      '/runs?status=completed&per_page='+MAX_RUNS);
-    if(!Array.isArray(response.workflow_runs))fail('malformed GitHub workflow run listing');
-    runsBySource.set(source.file,response.workflow_runs);
+  const event=reconcileEventContext();
+  const context=validateReconciliationContext(process.env,event);
+  if(context==='trusted-bot-recovery'){
+    const id=Number(event.client_payload.writer_run_id);
+    const run=ghJson('actions/runs/'+id);
+    const jobs=ghJson('actions/runs/'+id+'/attempts/1/jobs?per_page=100');
+    attestHistoryWriterWake(run,jobs,event);
   }
-  // GitHub run_number is main-owned; rotation is not client/dispatch input.
+  if(!path.isAbsolute(store))fail('absolute trusted Metrics Store path required');
+  const summaryCounts=indexedSourceSummaries(store);
   const runNumber=Number(process.env.GITHUB_RUN_NUMBER);
   if(!positive(runNumber))fail('trusted schedule run_number required for fairness');
-  const result=await chooseMissing(runsBySource,summaryCounts,async run=>{
-    const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
-    return countArtifactSummaries(artifacts,run);
-  },runNumber%SOURCES.length);
+  const source=SOURCES[(runNumber-1)%SOURCES.length];
+  const report=await scanHistoricalScope({source,runNumber,summaryCounts,
+    listing:async endpoint=>ghJson(endpoint),
+    artifacts:async run=>ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS)});
+  const reportPath=process.env.RECOVERY_REPORT_PATH;
+  if(!path.isAbsolute(reportPath??'')||!reportPath.endsWith('.json'))
+    fail('absolute historical report output required');
+  fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n',{flag:'wx'});
+  // Prioritize the selected authentic gap source; ordinary 14-source bounded
+  // discovery still runs when no old missing artifact was observed.
+  let result=report.selected;
+  if(!result){
+    const runsBySource=new Map();
+    for(const candidate of SOURCES){
+      const response=ghJson('actions/workflows/'+candidate.file+
+        '/runs?status=completed&per_page='+MAX_RUNS);
+      if(!Array.isArray(response.workflow_runs))fail('malformed workflow run listing');
+      runsBySource.set(candidate.file,response.workflow_runs);
+    }
+    let recentQueries=0;
+    const recentLimit=MAX_RECOVERY_ARTIFACT_QUERIES-HISTORY_PROBE_LIMIT;
+    result=await chooseMissing(runsBySource,summaryCounts,async run=>{
+      recentQueries++;
+      const artifacts=ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS);
+      return countArtifactSummaries(artifacts,run);
+    },runNumber%SOURCES.length,recentLimit);
+    report.recent_recovery={artifact_queries:recentQueries,limit:recentLimit,
+      budget_exhausted:recentQueries>=recentLimit,coverage:'bounded-partial'};
+    fs.writeFileSync(reportPath,JSON.stringify(report,null,2)+'\n');
+  }
   console.log(JSON.stringify(result??{run_id:null}));
+}
+// All-source hourly observation reuses the writer's exact source/attempt
+// classifier and immutable index. It does not select or publish a recovery.
+export async function inventoryHistoricalCoverage({runNumber,summaryCounts,listing,artifacts}){
+  if(!positive(runNumber)||!positive(runNumber*SOURCES.length))
+    fail('invalid inventory rotation');
+  let artifactQueries=0,listingQueries=0;
+  const reports=[];
+  for(const [i,source] of SOURCES.entries()){
+    const report=await scanHistoricalScope({source,
+      runNumber:(runNumber-1)*SOURCES.length+i+1,summaryCounts,
+      listing:async endpoint=>{listingQueries++;return listing(endpoint);},
+      artifacts:async run=>{artifactQueries++;return artifacts(run);},
+      includeArtifactRefs:true});
+    // The observer is not a recovery claim. Never expose a selection as persisted.
+    const {selected,selected_persisted,recovered_count,...observation}=report;
+    reports.push({...observation,coverage:'bounded-partial',
+      unscanned_current_attempts:Math.max(0,report.total_runs_in_date_window-report.observations.length)});
+  }
+  const totals={};
+  for(const report of reports)for(const [status,count] of Object.entries(report.counts))
+    totals[status]=(totals[status]??0)+count;
+  return {schema_version:1,kind:'agent_telemetry_historical_inventory',
+    repository:REPO,generated_at:new Date().toISOString(),start_date:HISTORY_START,
+    read_only:true,coverage:'bounded-partial',source_count:reports.length,
+    artifact_queries:artifactQueries,artifact_query_limit:SOURCES.length*HISTORY_PROBE_LIMIT,
+    listing_queries:listingQueries,listing_query_limit:SOURCES.length*2,
+    totals,reports,limitations:['Only sampled current attempts are observed; older rerun attempts remain unobserved.',
+      'No observed Artifact is unknown, never zero model calls.',
+      'No full historical census or recovery is claimed.']};
+}
+export function validateInventoryContext(env,event){
+  if(env.GITHUB_REPOSITORY!==REPO||env.GITHUB_REF!=='refs/heads/main'||
+     env.GITHUB_EVENT_NAME!=='schedule'||event?.schedule!==INVENTORY_CRON)
+    fail('read-only inventory requires its protected main hourly schedule');
+}
+async function inventory(store,output){
+  const event=JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH,'utf8'));
+  validateInventoryContext(process.env,event);
+  if(!path.isAbsolute(store??'')||!path.isAbsolute(output??'')||!output.endsWith('.json'))
+    fail('absolute inventory paths required');
+  const report=await inventoryHistoricalCoverage({runNumber:Number(process.env.GITHUB_RUN_NUMBER),
+    summaryCounts:indexedSourceSummaries(store),listing:async endpoint=>ghJson(endpoint),
+    artifacts:async run=>ghJson('actions/runs/'+run.id+'/artifacts?per_page='+MAX_ARTIFACTS)});
+  const bytes=JSON.stringify(report,null,2)+'\n';
+  if(Buffer.byteLength(bytes)>6*1024*1024)fail('historical inventory output too large');
+  fs.writeFileSync(output,bytes,{flag:'wx',mode:0o600});
+  console.log(JSON.stringify({coverage:report.coverage,source_count:report.source_count,
+    artifact_queries:report.artifact_queries,totals:report.totals}));
+}
+function finalize(store,reportPath){
+  validateReconciliationContext(process.env,reconcileEventContext());
+  if(!path.isAbsolute(store)||!path.isAbsolute(reportPath))fail('absolute finalization paths required');
+  const report=JSON.parse(fs.readFileSync(reportPath,'utf8'));
+  fs.writeFileSync(reportPath,JSON.stringify(
+    finalizeHistoricalReport(report,indexedSourceSummaries(store)),null,2)+'\n');
 }
 // The scheduled replay is allowed only through trusted main-selected workflow
 // code; an arbitrary-ref workflow_dispatch cannot obtain the metrics writer.
 export function validateRecoveryRouting(workflow){
   const trigger=workflow.split(/^permissions:/m)[0];
-  const job=workflow.split(/^jobs:/m)[1]??'';
-  if(!/^  schedule:\s*\n    - cron: '[^'\n]+'\s*$/m.test(trigger) ||
+  const jobs=workflow.split(/^jobs:/m)[1]??'';
+  const [job,inventoryJob]=jobs.split(/^  history-inventory:\s*$/m);
+  if(!inventoryJob||!inventoryJob.includes("github.event.schedule == '47 * * * *'")||
+     !inventoryJob.includes("github.ref == 'refs/heads/main'")||
+     !inventoryJob.includes("github.event_name == 'schedule'")||
+     !inventoryJob.includes("github.repository == 'BestNathan/nession'")||
+     !inventoryJob.includes('permissions:\n      actions: read\n      contents: read\n    steps:')||
+     !inventoryJob.includes('ref: metrics\n          path: metrics-store\n          persist-credentials: false')||
+     !inventoryJob.includes('node scripts/agent-telemetry-reconcile.mjs history-inventory')||
+     !inventoryJob.includes('retention-days: 30')||
+     /concurrency:|contents: write|secrets\.|git push|repository_dispatch|gh api --method POST/.test(inventoryJob))
+    fail('inventory must remain isolated read-only main hourly job');
+  if(!/^  schedule:\s*\n    - cron: '\*\/5 \* \* \* \*'\n    - cron: '47 \* \* \* \*'\s*$/m.test(trigger) ||
      /^  workflow_dispatch:/m.test(trigger))
-    fail('Metrics replay must be scheduled-only, never arbitrary-ref dispatch');
-  if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main'")||
+    fail('Metrics replay must remain main-owned; no arbitrary-ref dispatch');
+  if(!job.includes("github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.event.schedule == '*/5 * * * *'")||
      !job.includes("github.repository == 'BestNathan/nession'"))
     fail('missing trusted main schedule guard');
   // GitHub workflow_run.workflows uses static top-level display names *only*
@@ -195,9 +463,9 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes('node scripts/agent-telemetry-reconcile.mjs select')||
      !workflow.includes('run-store-integrity.mjs"'))
     fail('trusted reconciliation or immutable Store Gate omitted');
-  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule'")||
-     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'")||
-     !job.includes("if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
+  if(!job.includes("- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover')")||
+     !job.includes("- name: Checkout metrics history\n        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'")||
+     !job.includes("if: ((github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')) && steps.event_artifacts.outputs.count != '' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''")||
      job.includes("steps.event_artifacts.outputs.count == '0'")||
      !job.includes('run_id="${RECOVERY_RUN_ID:-${EVENT_RUN_ID:-}}"'))
     fail('empty telemetry events must skip history and scheduled recovery; retain source precedence');
@@ -218,7 +486,20 @@ export function validateRecoveryRouting(workflow){
      !job.includes('RUN_ATTEMPT: ${{ steps.source.outputs.run_attempt }}') ||
      !job.includes('--pattern "agent-telemetry-*-${RUN_ID}-${RUN_ATTEMPT}"'))
     fail('source attempt-scoped telemetry discovery/download is required');
-  if(!trigger.includes('    types: [nession-agent-review-completed]') ||
+  // Only Reviewer dispatch accepts sender-selected source metadata; a history
+  // wake selects a source independently, and an empty history scan is a no-op.
+  if(!job.includes('EVENT_DISPATCH_ACTION: ${{ github.event.action }}')||
+     !job.includes("if [[ \"$GITHUB_EVENT_NAME\" == repository_dispatch &&\n                \"$EVENT_DISPATCH_ACTION\" == nession-agent-review-completed ]]; then"))
+    fail('Reviewer-specific dispatch guard must exclude historical recovery');
+  const reviewerGuard=[
+    "(github.event_name == 'repository_dispatch' &&",
+    "          github.ref == 'refs/heads/main' &&",
+    "          github.event.action == 'nession-agent-review-completed' &&",
+    "          github.actor == 'github-actions[bot]' &&",
+    "          github.event.sender.login == 'github-actions[bot]')",
+  ].join('\n');
+  if(!trigger.includes('    types: [nession-agent-review-completed, nession-agent-metrics-history-recover]') ||
+     !job.includes(reviewerGuard) ||
      !job.includes("github.event.action == 'nession-agent-review-completed'") ||
      !job.includes("github.actor == 'github-actions[bot]'") ||
      !job.includes("github.event.sender.login == 'github-actions[bot]'") ||
@@ -233,6 +514,21 @@ export function validateRecoveryRouting(workflow){
   if(!workflow.includes("github.event.workflow_run.event == 'push'") ||
      !workflow.includes("github.event.workflow_run.event == 'pull_request_target'"))
     fail('source event routing omitted');
+  // The emergency history wake is a *main-owned* bot signal, not public
+  // workflow_dispatch. The same writer re-authenticates the selected source.
+  const botGuard=[
+    "(github.event_name == 'repository_dispatch' &&",
+    "          github.ref == 'refs/heads/main' &&",
+    "          github.event.action == 'nession-agent-metrics-history-recover' &&",
+    "          github.actor == 'github-actions[bot]' &&",
+    "          github.event.sender.login == 'github-actions[bot]')",
+  ].join('\n');
+  if(!trigger.includes('nession-agent-metrics-history-recover')||
+     !job.includes(botGuard)||
+     !job.includes("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''")||
+     !job.includes('client_payload[writer_run_id]=${GITHUB_RUN_ID}')||
+     !job.includes('if: github.event_name == \'workflow_run\' || (github.event_name == \'repository_dispatch\' && github.event.action == \'nession-agent-review-completed\')'))
+    fail('untrusted or recursive Metrics history bot wake');
   // Never report successful metrics ingestion as failed merely because the
   // *authentic source Provider job* failed. Only a successful source may wake
   // Acceptance; all source identity checks still apply to success cases.
@@ -245,6 +541,15 @@ export function validateRecoveryRouting(workflow){
 function selfTest(){
   const workflow=fs.readFileSync('.github/workflows/metrics-agent-telemetry.yml','utf8');
   assert.equal(validateRecoveryRouting(workflow),true);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace('contents: read\n    steps:',
+    'contents: write\n    steps:')),/inventory must remain isolated/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace("github.event.schedule == '47 * * * *'",
+    "github.event.schedule == '*/5 * * * *'")),/inventory must remain isolated/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(" && github.event.schedule == '*/5 * * * *'",'')),/trusted main schedule guard/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(
+    '"$EVENT_DISPATCH_ACTION" == nession-agent-review-completed ]]; then',
+    '"$EVENT_DISPATCH_ACTION" == nession-agent-metrics-history-recover ]]; then'
+  )),/Reviewer-specific dispatch guard/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '      - Agent / Issue Audit',
     '      - Attacker / Source'
@@ -252,9 +557,18 @@ function selfTest(){
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
     '      - Agent / Issue Audit\n',''
   )),/subscriptions drifted from Catalog/);
+  for(const weaker of [
+    workflow.replace("github.event.action == 'nession-agent-metrics-history-recover'",
+      "github.event.action == 'attacker-recover'"),
+    workflow.replace('client_payload[writer_run_id]=${GITHUB_RUN_ID}',
+      'client_payload[writer_run_id]=attacker'),
+    workflow.replace("github.event_name == 'workflow_run' &&\n          steps.persist.outputs.changed != ''",
+      "github.event_name == 'repository_dispatch' &&\n          steps.persist.outputs.changed != ''"),
+  ])assert.throws(()=>validateRecoveryRouting(weaker),
+    /untrusted or recursive Metrics history bot wake|empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("  schedule:\n", "  workflow_dispatch:\n  schedule:\n")
-  ),/scheduled-only/);
+  ),/main-owned/);
   assert.throws(()=>validateRecoveryRouting(
     workflow.replace("github.event_name == 'schedule' && github.ref == 'refs/heads/main'",
       "github.event_name == 'schedule'")
@@ -276,6 +590,53 @@ function selfTest(){
   ),/failed Provider evidence/);
     const mainEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main'};
   assert.equal(validateReconciliationContext({...mainEnv,GITHUB_EVENT_NAME:'schedule'}),'schedule');
+  const writerRun={id:45168056749,run_attempt:1,
+    path:'.github/workflows/metrics-agent-telemetry.yml',
+    name:'Metrics / Agent Telemetry Ingest',event:'workflow_run',
+    status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    head_branch:'main',head_sha:'a'.repeat(40),
+    updated_at:'2026-11-23T12:00:00Z'};
+  const writerJobs={jobs:[{name:'ingest',run_id:writerRun.id,run_attempt:1,
+    status:'completed',conclusion:'success',steps:[
+      'Validate and append immutable telemetry','Commit metrics history',
+      'Verify immutable Git bytes before uploading Run Store receipts',
+    ].map(name=>({name,conclusion:'success'}))}]};
+  const botEvent={action:'nession-agent-metrics-history-recover',
+    sender:{login:'github-actions[bot]'},repository:{full_name:REPO},
+    client_payload:{writer_run_id:45168056749}};
+  assert.equal(validateReconciliationContext({...mainEnv,
+    GITHUB_EVENT_NAME:'repository_dispatch',GITHUB_ACTOR:'github-actions[bot]'},botEvent),
+    'trusted-bot-recovery');
+  assert.equal(attestHistoryWriterWake(writerRun,writerJobs,botEvent,
+    Date.parse('2026-11-23T12:05:00Z')),true);
+  assert.equal(attestHistoryWriterWake({...writerRun,name:'Dynamic display #4342'},
+    writerJobs,botEvent,Date.parse('2026-11-23T12:05:00Z')),true,
+    'display name must never become writer authorization identity');
+  for(const [badRun,badJobs] of [
+    [{...writerRun,path:'.github/workflows/evil.yml'},writerJobs],
+    [{...writerRun,event:'workflow_dispatch'},writerJobs],
+    [{...writerRun,conclusion:'failure'},writerJobs],
+    [writerRun,{jobs:[{...writerJobs.jobs[0],steps:writerJobs.jobs[0].steps
+      .filter(step=>step.name!=='Commit metrics history')}]}],
+  ])assert.throws(()=>attestHistoryWriterWake(badRun,badJobs,botEvent,
+      Date.parse('2026-11-23T12:05:00Z')),/untrusted historical wake|real immutable Store write/);
+  assert.throws(()=>attestHistoryWriterWake(writerRun,writerJobs,botEvent,
+    Date.parse('2026-11-24T12:05:00Z')),/untrusted historical wake/);
+  for(const [badEnv,badEvent] of [
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'attacker'},botEvent],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,sender:{login:'attacker'}}],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,action:'nession-agent-review-completed'}],
+    [{...mainEnv,GITHUB_EVENT_NAME:'repository_dispatch',
+      GITHUB_ACTOR:'github-actions[bot]'},{
+        ...botEvent,client_payload:{writer_run_id:0}}],
+  ])assert.throws(()=>validateReconciliationContext(badEnv,badEvent),
+    /reconciliation denied/);
   for(const invalid of [
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_dispatch'},
     {...mainEnv,GITHUB_EVENT_NAME:'workflow_run',RECOVERY_EVENT_RUN_ID:'321',RECOVERY_EMPTY_SOURCE_COUNT:'1'},
@@ -290,12 +651,12 @@ function selfTest(){
     "- name: Select missed trusted Agent telemetry source\n        if: github.event_name == 'workflow_run'"
   )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'",
-    "github.event_name == 'schedule' || steps.event_artifacts.outputs.count == '0'"
+    "github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'",
+    "github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count == '0'"
   )),/empty telemetry events/);
   // Empty telemetry must not proceed through source resolution after preflight.
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
-    "if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
+    "if: ((github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')) && steps.event_artifacts.outputs.count != '' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''",
     "if: github.event_name == 'workflow_run' || steps.reconcile.outputs.run_id != ''"
   )),/empty telemetry events/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(
@@ -328,6 +689,23 @@ function selfTest(){
   assert.equal(new Set(SOURCES.map(s=>s.file)).size,14);
   assert.equal(SOURCES.filter(s=>s.id==='requirement-acceptance').length,3);
   assert.equal(SOURCES[0].key,'agent-provider-smoke');
+  assert.deepEqual(historicalPagePlan(0,1),{source_index:0,page:null,
+    offset:0,page_count:0,truncated:false});
+  assert.equal(historicalPagePlan(250,1).page,3);
+  assert.equal(historicalPagePlan(250,1+SOURCES.length).page,2);
+  assert.equal(historicalPagePlan(250,1+3*SOURCES.length).offset,12);
+  const historicalSample=classifyHistoricalArtifact(run,source,
+    {total_count:1,artifacts:[{name:'agent-telemetry-test-321-1',
+       size_in_bytes:100,expired:true}]},0);
+  assert.equal(historicalSample.status,'expired_unrecoverable');
+  assert.equal(classifyHistoricalArtifact(run,source,
+    {total_count:1,artifacts:[{name:'agent-telemetry-test-321-1',
+      size_in_bytes:100,expired:true}]},1).status,'already_stored');
+  assert.equal(classifyHistoricalArtifact(run,source,
+    {total_count:0,artifacts:[]},0).status,'unobserved_no_artifact');
+  assert.equal(finalizeHistoricalReport({kind:'agent_metrics_historical_recovery_scope',
+    telemetry_group_id:source.id,selected:{run_id:321,run_attempt:1,published:1}},
+    new Map([[source.id+'/321/1',1]])).selected_persisted,true);
   const auditSource=SOURCES.find(item=>item.file==='agent-issue-audit.yml');
   assert.ok(auditSource);
   for(const [name,event] of [
@@ -379,10 +757,28 @@ function selfTest(){
   assert.throws(()=>countArtifactSummaries(both,{id:321,run_attempt:0}),/invalid source/);
   const runs=new Map([[source.file,[{...run,id:322,created_at:'2026-10-14T01:00:00Z'},run]]]);
   return (async()=>{
+    const inventoryEnv={GITHUB_REPOSITORY:REPO,GITHUB_REF:'refs/heads/main',GITHUB_EVENT_NAME:'schedule'};
+    validateInventoryContext(inventoryEnv,{schedule:INVENTORY_CRON});
+    assert.throws(()=>validateInventoryContext(inventoryEnv,{schedule:'*/5 * * * *'}),/protected main hourly/);
+    const coverage=await inventoryHistoricalCoverage({runNumber:1,summaryCounts:new Map(),
+      listing:async()=>({total_count:0,workflow_runs:[]}),artifacts:async()=>{throw Error('unexpected Artifact query');}});
+    assert.equal(coverage.source_count,SOURCES.length);
+    assert.equal(coverage.coverage,'bounded-partial');
+    assert.equal(coverage.listing_queries,SOURCES.length);
+    assert.ok(coverage.reports.every(x=>!Object.hasOwn(x,'selected')));
     const nextSource=SOURCES[1];
     const alternate={...run,id:400,path:'.github/workflows/'+nextSource.file,
       name:nextSource.name,event:nextSource.events[0]};
     const rotationRuns=new Map([[source.file,[run]],[nextSource.file,[alternate]]]);
+    const historical=await scanHistoricalScope({
+      source,runNumber:1,summaryCounts:new Map(),
+      listing:async query=>({total_count:1,workflow_runs:[{...run,
+        created_at:'2026-11-10T00:00:00Z'}]}),
+      artifacts:async()=>({total_count:1,artifacts:[{...attempt1}]}),
+    });
+    assert.equal(historical.selected.run_id,321);
+    assert.equal(historical.counts.missing_recoverable,1);
+    assert.equal(historical.counts.expired_unrecoverable,0);
     assert.equal((await chooseMissing(rotationRuns,new Map(),async()=>1,1)).run_id,400,
       'round-robin recovery must not permanently prioritize Provider');
     await assert.rejects(()=>chooseMissing(rotationRuns,new Map(),async()=>1,-1),
@@ -395,6 +791,10 @@ function selfTest(){
     const complete=await chooseMissing(runs,new Map([
       ['agent-provider-smoke/321/1',1],['agent-provider-smoke/322/1',1]]),async()=>1);
     assert.equal(complete,null);
+    let boundedQueries=0;
+    assert.equal(await chooseMissing(runs,new Map(),async()=>{boundedQueries++;return 0;},0,1),null);
+    assert.equal(boundedQueries,1);
+    await assert.rejects(()=>chooseMissing(runs,new Map(),async()=>0,0,0),/invalid bounded artifact-inspection/);
     const absent=await chooseMissing(runs,new Map(),async()=>0);
     assert.equal(absent,null);
     assert.equal(await chooseMissing(new Map([[source.file,[{
@@ -407,6 +807,8 @@ if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.ur
   const cmd=process.argv[2];
   const operation=cmd==='self-test'?selfTest():
     cmd==='select'?select(process.argv[3]):
+    cmd==='history-inventory'?inventory(process.argv[3],process.argv[4]):
+    cmd==='history-finalize'?Promise.resolve().then(()=>finalize(process.argv[3],process.argv[4])):
     cmd==='artifact-count'?Promise.resolve().then(()=>{
       const [file,id,attempt]=process.argv.slice(3);
       if(!file || !/^[1-9][0-9]*$/.test(id??'') || !/^[1-9][0-9]*$/.test(attempt??''))

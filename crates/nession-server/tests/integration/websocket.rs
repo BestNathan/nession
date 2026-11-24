@@ -2928,8 +2928,23 @@ async fn start_mock_agent_endpoint_with_subscription(
                 };
                 let (mut sink, mut stream) = ws.split();
                 while let Some(Ok(message)) = stream.next().await {
-                    let tokio_tungstenite::tungstenite::Message::Text(text) = message else {
-                        continue;
+                    // This is a healthy Agent peer, unlike the separate
+                    // intentionally half-open fixture. Send an actual Pong
+                    // for every Server probe instead of assuming a queued
+                    // tungstenite auto-Pong was flushed by read-only polling.
+                    let text = match message {
+                        tokio_tungstenite::tungstenite::Message::Ping(payload) => {
+                            if sink
+                                .send(tokio_tungstenite::tungstenite::Message::Pong(payload))
+                                .await
+                                .is_err()
+                            {
+                                return;
+                            }
+                            continue;
+                        }
+                        tokio_tungstenite::tungstenite::Message::Text(text) => text,
+                        _ => continue,
                     };
                     let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) else {
                         continue;
@@ -4122,4 +4137,338 @@ async fn an_agent_registration_with_a_wrong_token_is_rejected() {
     let reply: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(reply["msg_type"], "server.agent.register");
     assert_eq!(reply["payload"]["status"], "rejected");
+}
+
+/// The Agent's *control* WebSocket is healthy throughout the artificial
+/// Relay-leg partition. Exercise production heartbeats and poll WS ping/pong;
+/// otherwise a 45s fault-injection test could accidentally expire an unrelated
+/// 30s control registration and call that false failure a half-open detection.
+fn keep_mock_agent_control_healthy(agent: TestWs) {
+    tokio::spawn(async move {
+        let (mut sink, mut stream) = agent.split();
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut ordinal = 0u64;
+        loop {
+            tokio::select! {
+                _ = heartbeat.tick() => {
+                    ordinal += 1;
+                    let frame = serde_json::json!({
+                        "msg_type": "control.heartbeat",
+                        "id": format!("half-open-control-heartbeat-{ordinal}"),
+                        "timestamp": current_timestamp(),
+                        "payload": {
+                            "agent_id": "a1",
+                            "status": "online",
+                            "session_count": 1,
+                            "active_sessions": 1,
+                        },
+                    });
+                    if sink
+                        .send(tokio_tungstenite::tungstenite::Message::Text(
+                            frame.to_string(),
+                        ))
+                        .await
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+                msg = stream.next() => {
+                    if !matches!(msg, Some(Ok(_))) {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// #4065: the first Relay→Agent TCP/WebSocket stays open after a successful
+/// authenticated attach but deliberately stops reading frames. Unlike a socket
+/// close this never sends FIN/RST or pong, so it exercises the *ongoing* 45s
+/// Agent-leg watchdog. Later dials answer normally for detach and reattach.
+/// The real Server and browser protocol connections remain live throughout.
+async fn start_half_open_agent_endpoint() -> anyhow::Result<MockAgentEndpoint> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await?;
+    let addr = listener.local_addr()?;
+    let (tx, frames) = tokio::sync::mpsc::unbounded_channel();
+
+    tokio::spawn(async move {
+        let mut partition_first_relay = true;
+        while let Ok((tcp, _)) = listener.accept().await {
+            let half_open = partition_first_relay;
+            partition_first_relay = false;
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else {
+                    return;
+                };
+                let (mut sink, mut read) = ws.split();
+                while let Some(Ok(message)) = read.next().await {
+                    let tokio_tungstenite::tungstenite::Message::Text(text) = message else {
+                        continue;
+                    };
+                    let Ok(request) = serde_json::from_str::<serde_json::Value>(&text) else {
+                        continue;
+                    };
+                    let attach = request.get("msg_type").and_then(serde_json::Value::as_str)
+                        == Some("agent.attach");
+                    if is_relay_request(&request) {
+                        let response = mock_agent_relay_reply(&request);
+                        if sink
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                response.to_string(),
+                            ))
+                            .await
+                            .is_err()
+                        {
+                            return;
+                        }
+                    }
+                    if tx.send(request).is_err() {
+                        return;
+                    }
+                    if half_open && attach {
+                        // Hold both live TCP halves while *never* polling
+                        // read again. Ping receives no automatic tungstenite
+                        // pong; this is a silent partition, not graceful EOF.
+                        // Both halves stay owned by this async task across
+                        // the pending read. The loop cannot advance or drop
+                        // either socket half until the test runtime ends.
+                        std::future::pending::<()>().await;
+                    }
+                }
+            });
+        }
+    });
+    Ok(MockAgentEndpoint { addr, frames })
+}
+
+/// #4065 SC-01/02/03: real Server + two browser WebSockets + an authenticated
+/// Agent control socket and a silent-partitioned Agent-facing relay socket.
+/// Assert the specific client-visible close *reason*, bounded completion,
+/// preserved Session registration, and one fresh input on the replacement
+/// relay without replaying it twice.
+#[tokio::test]
+async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (_db_dir, server, _handle) =
+        start_ownership_server("test_ws_agent_leg_half_open_4065.db").await?;
+    let mut endpoint = start_half_open_agent_endpoint().await?;
+    let mut agent = connect_agent_on_port(server, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+    keep_mock_agent_control_healthy(agent);
+
+    let mut browser = connect_client(server).await?;
+    wait_for_session(&mut browser, "a1:dev").await?;
+    send_json(
+        &mut browser,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "half-open-first",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    let first = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        first["payload"]["session_name"] == "dev",
+        "the first Relay must attach before the partition"
+    );
+
+    let started = tokio::time::Instant::now();
+    let reason = tokio::time::timeout(std::time::Duration::from_secs(70), async {
+        loop {
+            match browser.next().await {
+                Some(Ok(Message::Close(Some(frame)))) => {
+                    return Ok::<String, anyhow::Error>(frame.reason.to_string())
+                }
+                Some(Ok(Message::Close(None))) => {
+                    anyhow::bail!("half-open has no client-visible reason")
+                }
+                Some(Ok(_)) => {}
+                Some(Err(error)) => return Err(error.into()),
+                None => anyhow::bail!("half-open closed without reason"),
+            }
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow::anyhow!("Agent-leg half-open timeout did not retire the live Relay within 70s")
+    })??;
+    anyhow::ensure!(
+        reason == "relay-agent-half-open",
+        "wrong explicit Agent-leg close reason: {reason}"
+    );
+    anyhow::ensure!(
+        started.elapsed() >= std::time::Duration::from_secs(35),
+        "Relay disconnected before its documented idle watchdog"
+    );
+
+    // The original Agent control socket and registered Session were never
+    // retired by that relay-local failure.
+    let mut reconnect = connect_client(server).await?;
+    anyhow::ensure!(
+        listed_session_ids(&mut reconnect)
+            .await?
+            .contains(&"a1:dev".to_string()),
+        "half-open Relay cleanup lost the persisted Session"
+    );
+
+    send_json(
+        &mut reconnect,
+        session_attach_request("half-open-reattach", "a1:dev", "relay"),
+    )
+    .await?;
+    let attached = next_reply(
+        &mut reconnect,
+        &["half-open-reattach"],
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        payload_of(&attached, "server.session.attach")?["status"] == "success",
+        "the replacement browser cannot reattach to the Session"
+    );
+    send_json(
+        &mut reconnect,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "half-open-second",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    let second = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        second["payload"]["session_name"] == "dev",
+        "a new Agent-side Relay never attached"
+    );
+
+    send_json(
+        &mut reconnect,
+        serde_json::json!({
+            "msg_type": "agent.terminal.input",
+            "id": "half-open-input-once",
+            "timestamp": current_timestamp(),
+            "payload": {"session_name": "dev", "data": "QQ=="},
+        }),
+    )
+    .await?;
+    let forwarded = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.terminal.input",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        forwarded["id"] == "half-open-input-once" && forwarded["payload"]["data"] == "QQ==",
+        "the new Relay lost or rewrote input"
+    );
+    no_frame_of_type_within(
+        &mut endpoint.frames,
+        "agent.terminal.input",
+        std::time::Duration::from_millis(200),
+    )
+    .await?;
+    Ok(())
+}
+
+/// #4065 SC-01: a *responsive* idle Agent leg must survive more than the
+/// production 45-second watchdog, not only a 100ms model-time Unit fixture.
+/// Real tungstenite peers process ping/pong while both connections are idle.
+/// A terminal frame sent after 50 seconds must still reach the same Agent.
+#[tokio::test]
+async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
+    use tokio_tungstenite::tungstenite::Message;
+
+    let (_db_dir, server, _handle) =
+        start_ownership_server("test_ws_agent_idle_healthy_4065.db").await?;
+    let mut endpoint = start_mock_agent_endpoint().await?;
+    let mut agent = connect_agent_on_port(server, "a1", endpoint.addr.port()).await?;
+    send_json(&mut agent, session_update("a1", "dev")).await?;
+    keep_mock_agent_control_healthy(agent);
+
+    let mut browser = connect_client(server).await?;
+    wait_for_session(&mut browser, "a1:dev").await?;
+    send_json(
+        &mut browser,
+        serde_json::json!({
+            "msg_type": "server.session.relay.begin",
+            "id": "idle-healthy-first",
+            "timestamp": current_timestamp(),
+            "payload": {"session_id": "a1:dev", "cols": 80, "rows": 24},
+        }),
+    )
+    .await?;
+    let attached = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.attach",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        attached["payload"]["session_name"] == "dev",
+        "healthy Agent never completed authenticated Relay attach"
+    );
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(51);
+    while tokio::time::Instant::now() < deadline {
+        // Continue polling the browser WebSocket to answer its own 10s
+        // keepalives; otherwise the *browser* could appear half-open too.
+        match tokio::time::timeout(std::time::Duration::from_secs(4), browser.next()).await {
+            Err(_)
+            | Ok(Some(Ok(Message::Text(_))))
+            | Ok(Some(Ok(Message::Pong(_))))
+            | Ok(Some(Ok(Message::Binary(_)))) => {}
+            Ok(Some(Ok(Message::Ping(payload)))) => {
+                // A live browser also answers keepalive probes on its own
+                // socket. Keep this independent of the Agent-leg watchdog.
+                browser.send(Message::Pong(payload)).await?;
+            }
+            Ok(Some(Ok(Message::Close(frame)))) => {
+                anyhow::bail!("healthy idle Relay closed: {frame:?}")
+            }
+            Ok(Some(Ok(other))) => {
+                anyhow::bail!("healthy idle Relay terminated: {other:?}")
+            }
+            Ok(Some(Err(error))) => return Err(error.into()),
+            Ok(None) => anyhow::bail!("healthy idle Relay vanished"),
+        }
+    }
+
+    send_json(
+        &mut browser,
+        serde_json::json!({
+            "msg_type": "agent.terminal.input",
+            "id": "healthy-after-watchdog",
+            "timestamp": current_timestamp(),
+            "payload": {"session_name": "dev", "data": "Qg=="},
+        }),
+    )
+    .await?;
+    let forwarded = expect_frame_of_type(
+        &mut endpoint.frames,
+        "agent.terminal.input",
+        std::time::Duration::from_secs(5),
+    )
+    .await?;
+    anyhow::ensure!(
+        forwarded["id"] == "healthy-after-watchdog" && forwarded["payload"]["data"] == "Qg==",
+        "healthy but idle Agent could not resume terminal input"
+    );
+    Ok(())
 }

@@ -624,14 +624,21 @@ impl ClientConnection {
     /// can name — an unknown session, a session on an offline agent — so the
     /// reply is returned whole rather than mapped into an error here, the same
     /// way the list and attach replies are.
+    ///
+    /// `expected_instance_id` is the caller-observed incarnation precondition
+    /// (#4302): `Some` binds the kill to that durable tmux instance through the
+    /// Server's canonical Agent route; `None` is the legacy name-addressed kill.
+    /// A guarded refusal carries its classification in the reply's `error_kind`.
     pub async fn kill_session(
         &mut self,
         session_id: &str,
+        expected_instance_id: Option<&str>,
     ) -> Result<ClientSessionKillResponsePayload, ClientError> {
         self.request(proto_msg(
             wire::SERVER_SESSION_KILL,
             ClientSessionKillPayload {
                 session_id: session_id.to_string(),
+                expected_instance_id: expected_instance_id.map(str::to_owned),
             },
         ))
         .await

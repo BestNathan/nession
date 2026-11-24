@@ -46,7 +46,7 @@ The baseline catalog has seventeen Tools:
 | Server | `nession_server_session_env_binding_reapply` | `server.session.env.binding.reapply` (re-resolve at a new revision) |
 | Agent | `nession_agent_list_sessions` | the named Agent's live Session state |
 | Agent | `nession_agent_create_session` | `agent.session.create` on the named Agent |
-| Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent |
+| Agent | `nession_agent_kill_session` | `agent.session.kill` on the named Agent, bound to the caller-observed instance |
 | Agent | `nession_agent_get_session_metadata` | Agent-owned Session work context (title/description/tags/revision + instance identity) |
 | Agent | `nession_agent_update_session_metadata` | Agent-owned partial metadata update with incarnation + revision preconditions |
 
@@ -58,6 +58,33 @@ heartbeat and advertised addresses — not from a live query of an Agent. The
 `nession_agent_*` Tools always require an explicit, non-empty `agent_id`; there
 is no implicit "this host" fallback, and a missing, empty or mismatched target
 is refused rather than redirected.
+
+### Session Kill instance precondition (#4302)
+
+`nession_agent_kill_session` requires `expected_instance_id`: the durable tmux
+incarnation the caller observed from `nession_agent_create_session`,
+`nession_agent_list_sessions` or `nession_agent_get_session_metadata`. A
+missing or empty value is an `invalid_argument` refusal at the Tool.
+
+Every hosting adapter forwards the precondition on its canonical payload
+(`agent.session.kill` directly or through the Server broker,
+`server.session.kill` for the Server-routed standalone host), and the Agent's
+`SessionManager::kill_session_guarded` is the one enforcement owner: it reads
+the name's current `@nession_instance_id` and compares **before** terminating,
+inside the same keyed Session mutation lane a same-name create is serialized
+on. A stale caller whose Session A was replaced by a same-name B is a
+`conflict`; B keeps running with its identity, environment binding, Sandbox
+resources and attachment. A matching precondition kills exactly once; a
+settled name is `not_found`. The classification travels back through each
+route's own refusal shape (error code, command `error_kind`, reply
+`error_kind`), so every hosting mode reports the same `conflict` kind.
+
+The wire field is optional: the legacy Web/CLI name-addressed kill
+(`server.session.kill` / `client.session.kill` without a precondition) is
+unchanged, and only the AI-facing Tool makes it mandatory. A timed-out or
+disconnected guarded kill keeps the outcome-indeterminate semantics below —
+and a queued kill that starts only after a replacement now refuses as a
+`conflict` instead of terminating the successor.
 
 The four Project Tools are Server-owned. `project_list`/`project_get` read the
 Project declaration store and work while every Agent is offline. The two

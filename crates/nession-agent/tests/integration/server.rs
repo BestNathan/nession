@@ -173,6 +173,7 @@ async fn integration_session_create_and_kill() {
 
     let kill = SessionKillPayload {
         name: session_name.to_string(),
+        expected_instance_id: None,
     };
     let req = new_message(msg_types::SESSION_KILL, kill);
     let resp: nession_agent::server::websocket::Message<SessionKillResponse> =
@@ -3975,8 +3976,8 @@ async fn two_peers_mutating_one_file_are_ordered() {
     handle.shutdown().await.ok();
 }
 
-/// A peer naming many distinct sessions gets a worker for a bounded number of
-/// them.
+/// A peer naming more distinct sessions than its admission bound gets a worker
+/// for a bounded number of them.
 ///
 /// `#961`'s review, finding 3, on the socket it names first: `ExecutionLanes`
 /// was built with the no-budget constructor, so a peer naming a thousand sessions
@@ -3984,62 +3985,53 @@ async fn two_peers_mutating_one_file_are_ordered() {
 /// inside its own depth. The bound tests repeat work for one key; this is the
 /// flood.
 ///
-/// Each create carries a large environment snapshot. Every variable is one
-/// `set-environment` spawn *after* `new-session` returns, so a session appears
-/// at the start of its create's park, and the count below observes the first
-/// admitted batch. The window is derived from this machine's per-variable
-/// spawn cost rather than guessed: three quarters of the extrapolated park is
-/// below the park, so no slot can recycle, and far above the `new-session`
-/// phase, so an unbounded lane shows many more than the bound.
+/// The witness is causal, and `#3837` is why it had to become one. This test
+/// used to count sessions in tmux at the end of a window extrapolated from the
+/// creates' park, and read that count as the number admitted at once. A slot
+/// that finished inside the window recycled, and the next create's session was
+/// counted as one more concurrent worker; the number of sessions ever created
+/// is not the number in flight.
+///
+/// What is asserted instead is which frame the reader could reach. One frame
+/// more than the bound is written, followed by a cheap query. Every create parks
+/// on `PARK_VARS` post-create `set-environment` spawns, so no create answers
+/// quickly, while the query is one `list-sessions`. With the bound in place the
+/// reader stops at the frame that would exceed it, so the query behind it is not
+/// read until a create's slot frees — and the first create's answer was queued
+/// *before* that slot freed, on the same FIFO the query's answer would use.
+/// Without the bound the reader consumes every create and the query together,
+/// and the query answers while every create is still parked.
+///
+/// So a create's answer arriving first means the reader stopped at its bound,
+/// and the query's answer arriving first means it did not — whatever the
+/// machine under the test does with its clock. The exact number of concurrent
+/// workers is the lane's own unit test
+/// (`a_flood_of_distinct_resources_is_bounded_per_connection`); this one is
+/// about the connection wiring the bound to this wire.
 #[tokio::test]
 async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them() {
     use std::time::Duration;
 
-    const FLOOD: usize = 48;
-    const PARK_VARS: usize = 160;
-    /// How many `set-environment` calls the probe times. Small enough that
-    /// the probe cannot reach the manager's create timeout under coverage.
-    const PROBE_CALLS: usize = 5;
+    /// Every create's park: this many post-create `set-environment` spawns,
+    /// far outlasting the one-command query behind the flood, and small next to
+    /// the manager's 10 s create timeout — the test now waits for the first
+    /// create to finish, and that wait must stay inside that timeout under
+    /// coverage.
+    const PARK_VARS: usize = 8;
 
     let (addr, handle, auth) = start_server(0).await.unwrap();
-    let (mut sink, _stream) = connect(&auth, addr).await.unwrap();
+    let (mut sink, mut stream) = connect(&auth, addr).await.unwrap();
     let tmux = SessionManager::new();
     let prefix = unique_session_name("flood");
+    let bound = nession_agent::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT;
+    let flood = bound + 1;
 
-    let pairs: Vec<(String, String)> = (0..PARK_VARS)
-        .map(|i| (format!("NS_FLOOD_{i}"), "1".to_string()))
-        .collect();
-    let vars: Vec<serde_json::Value> = pairs
-        .iter()
-        .map(|(key, value)| serde_json::json!([key, value]))
+    let vars: Vec<serde_json::Value> = (0..PARK_VARS)
+        .map(|i| serde_json::json!([format!("NS_FLOOD_{i}"), "1"]))
         .collect();
 
-    // Every binding variable is one post-create `set-environment` spawn, so
-    // timing a few of them on this machine and scaling to the flood's count
-    // gives its park without paying for a full-size probe create (which can
-    // reach the manager's 10 s create timeout under coverage). Three quarters
-    // of that estimate is below the park, so no slot can recycle, and long
-    // enough above the `new-session` phase that an unbound lane shows many
-    // more than the bound.
-    let probe = unique_session_name("flood-probe");
-    tmux.create_session(&probe, 80, 24, "/tmp", &[])
-        .await
-        .expect("the probe session exists");
-    let probe_started = std::time::Instant::now();
-    for n in 0..PROBE_CALLS {
-        tmux.tmux_dep()
-            .ops()
-            .set_environment(&probe, &format!("NS_PROBE_{n}"), "1")
-            .await
-            .expect("the probe can set an environment variable");
-    }
-    let probe_calls = u32::try_from(PROBE_CALLS).expect("the probe call count fits in u32");
-    let per_variable = probe_started.elapsed() / probe_calls;
-    tmux.kill_session(&probe).await.ok();
-    let park_vars = u32::try_from(PARK_VARS).expect("the flood variable count fits in u32");
-    let window = (per_variable * (park_vars * 3 / 4)).max(Duration::from_millis(20));
-
-    for n in 0..FLOOD {
+    let mut create_ids: Vec<String> = Vec::with_capacity(flood);
+    for n in 0..flood {
         let create = new_message(
             msg_types::SESSION_CREATE,
             serde_json::json!({
@@ -4054,6 +4046,7 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
                 }],
             }),
         );
+        create_ids.push(create.id.clone());
         sink.send(WsMessage::Text(
             serde_json::to_value(&create).unwrap().to_string(),
         ))
@@ -4061,52 +4054,54 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
         .expect("send the create");
     }
 
-    // Wait until the first admitted create has made its session visible. From
-    // there, three quarters of the extrapolated park is enough for the rest of
-    // the first batch to appear and too little for any slot to have finished
-    // its own park and recycle.
-    let count = || async {
-        tmux.list_sessions()
-            .await
-            .expect("list the flood's sessions")
-            .into_iter()
-            .filter(|session| session.name.starts_with(&prefix))
-            .count()
-    };
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if count().await > 0 {
-            break;
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "not one of the flood's sessions was created: nothing was measured"
-        );
-        tokio::time::sleep(Duration::from_millis(5)).await;
-    }
-    tokio::time::sleep(window).await;
-    let created = count().await;
-    let bound = nession_agent::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT;
+    // Behind the flood: the reader reaches this frame only after the create that
+    // would exceed the bound has been admitted.
+    let query = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&query).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the query");
 
-    assert!(
-        created < FLOOD,
-        "a peer naming {FLOOD} distinct sessions had a worker for every one of them: the \
-         tasks in flight track the number of keys, which is the unbounded unique-key \
-         growth this bound exists for"
+    let mut answered_ids: Vec<&str> = create_ids.iter().map(String::as_str).collect();
+    answered_ids.push(&query.id);
+    let answered = first_answer(&mut stream, &answered_ids, Duration::from_secs(60))
+        .await
+        .expect("neither the flood nor the query was answered");
+
+    assert_ne!(
+        answered["id"],
+        serde_json::json!(query.id),
+        "the query written behind {flood} creates was answered before any create: the \
+         reader read and dispatched every frame, so this connection got a worker for every \
+         distinct key instead of stopping at its bound of {bound}"
     );
-    assert!(
-        created <= bound,
-        "the flood was admitted for {created} sessions, past this connection's bound of \
-         {bound}"
+    assert_eq!(
+        answered["msg_type"],
+        serde_json::json!(msg_types::OK),
+        "a create was answered with a failure: {:?}",
+        answered["payload"]
     );
+
+    // The answer is a create that made a real session, so the work the bound
+    // delayed is work rather than a refused frame.
+    let answered_name = answered["payload"]["name"]
+        .as_str()
+        .expect("a create response carries the session's name")
+        .to_string();
+    let sessions = tmux
+        .list_sessions()
+        .await
+        .expect("list the flood's sessions");
     assert!(
-        created > 0,
-        "not one of the flood's sessions was created: nothing was measured"
+        sessions.iter().any(|session| session.name == answered_name),
+        "the create answered for {answered_name}, but tmux has no such session"
     );
 
     handle.shutdown().await.ok();
-    // The flood is large; leaving it behind on a shared test socket exhausts
-    // ptys for every later run on this machine.
+    // The rest of the flood is still parked when the connection ends, so its
+    // sessions outlive the assertion; leaving them behind on a shared test
+    // socket exhausts ptys for every later run on this machine.
     if let Ok(sessions) = tmux.list_sessions().await {
         for session in sessions {
             if session.name.starts_with(&prefix) {
@@ -5391,6 +5386,7 @@ async fn integration_a_killed_session_retires_its_attachment() {
             msg_types::SESSION_KILL,
             nession_agent::server::websocket::SessionKillPayload {
                 name: session_name.clone(),
+                expected_instance_id: None,
             },
         ),
     )

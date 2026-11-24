@@ -536,7 +536,13 @@ async fn a_created_session_reaches_the_composed_preparation_hook() {
         addr,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": text_of(&created)["instance_id"]
+                .as_str()
+                .expect("the create reports its durable instance")
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
@@ -642,7 +648,13 @@ async fn agent_mcp_serves_local_tools_and_reports_a_missing_server() {
         addr,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": text_of(&created)["instance_id"]
+                .as_str()
+                .expect("the create reports its durable instance")
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
@@ -818,7 +830,13 @@ async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
         addr,
         &session,
         "nession_agent_kill_session",
-        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": text_of(&created)["instance_id"]
+                .as_str()
+                .expect("the create reports its durable instance")
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");
@@ -925,6 +943,7 @@ async fn abandoned_queued_call(
     mutations: &Arc<KeyedLane<ResourceKey>>,
     name: &str,
     tool_name: &str,
+    expected_instance_id: Option<&str>,
 ) {
     let key = ResourceKey::Session(name.to_string());
     let (started_tx, started_rx) = tokio::sync::oneshot::channel();
@@ -940,13 +959,11 @@ async fn abandoned_queued_call(
         .await;
     started_rx.await.expect("the blocker owns the Session key");
 
-    let result = call_tool(
-        addr,
-        mcp_session,
-        tool_name,
-        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
-    )
-    .await;
+    let mut arguments = json!({ "agent_id": TEST_AGENT_ID, "name": name });
+    if let Some(expected) = expected_instance_id {
+        arguments["expected_instance_id"] = json!(expected);
+    }
+    let result = call_tool(addr, mcp_session, tool_name, arguments).await;
     assert_eq!(
         result["isError"], true,
         "a blocked tool must time out: {result}"
@@ -1000,6 +1017,7 @@ async fn agent_mcp_abandoned_queued_create_and_kill_preserve_tmux_state() {
         &mutations,
         &name,
         "nession_agent_create_session",
+        None,
     )
     .await;
     let absent = call_tool(
@@ -1035,6 +1053,11 @@ async fn agent_mcp_abandoned_queued_create_and_kill_preserve_tmux_state() {
         &mutations,
         &name,
         "nession_agent_kill_session",
+        Some(
+            text_of(&created)["instance_id"]
+                .as_str()
+                .expect("the create reports its durable instance"),
+        ),
     )
     .await;
     let retained = call_tool(
@@ -1057,7 +1080,218 @@ async fn agent_mcp_abandoned_queued_create_and_kill_preserve_tmux_state() {
         addr,
         &mcp_session,
         "nession_agent_kill_session",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": text_of(&created)["instance_id"]
+                .as_str()
+                .expect("the create reports its durable instance")
+        }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
+    let _ = handle.shutdown().await;
+}
+
+/// #4302 SC-01: a guarded kill already queued on the Session key must conflict
+/// when a controlled A→B replacement lands before the lane admits it.
+///
+/// The blocker holds the keyed lane; the replacement runs on the listener's
+/// own tmux manager (the user terminates A and recreates the name); only then
+/// is the blocker released. The queued kill therefore checks identity against
+/// B, refuses as a `conflict`, and B keeps running with its own incarnation.
+/// The ordering is forced by the lane and the blocker, not by timing.
+#[tokio::test]
+async fn a_queued_guarded_kill_conflicts_after_a_controlled_replacement() {
+    let mutations = nession_agent::execution::mutation_scheduler();
+    let mut shared: Option<Arc<SessionManager>> = None;
+    let (addr, handle) = start_agent_with_provider_factory(
+        Arc::clone(&mutations),
+        10,
+        |tmux| {
+            shared = Some(tmux);
+            Vec::new()
+        },
+        None,
+    )
+    .await;
+    let tmux = shared.expect("the factory receives the listener's own manager");
+    let mcp_session = initialize(addr).await;
+    let name = unique_session_name("mcp-aba");
+
+    let created = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_create_session",
         json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let a = text_of(&created)["instance_id"]
+        .as_str()
+        .expect("the create reports its durable instance")
+        .to_string();
+
+    // The blocker owns the Session key; the guarded kill queues behind it.
+    let key = ResourceKey::Session(name.clone());
+    let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+    let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+    mutations
+        .enqueue(
+            key.clone(),
+            Box::pin(async move {
+                let _ = started_tx.send(());
+                let _ = release_rx.await;
+            }),
+        )
+        .await;
+    started_rx.await.expect("the blocker owns the Session key");
+
+    let kill_task = tokio::spawn({
+        let mcp_session = mcp_session.clone();
+        let name = name.clone();
+        let a = a.clone();
+        async move {
+            call_tool(
+                addr,
+                &mcp_session,
+                "nession_agent_kill_session",
+                json!({
+                    "agent_id": TEST_AGENT_ID,
+                    "name": name,
+                    "expected_instance_id": a
+                }),
+            )
+            .await
+        }
+    });
+
+    // While the kill is queued, the user terminates A and recreates the name.
+    // This is outside the lane on purpose: it is the replacement that cuts in
+    // ahead of the queued mutation, the exact ABA ordering of the Issue.
+    tmux.kill_session(&name).await.expect("A is terminated");
+    let outcome = tmux
+        .create_session_with_options(&name, 80, 24, "/tmp", None, None, None)
+        .await
+        .expect("B is created under the same name");
+    let b = outcome.instance_id.expect("B reports its identity");
+    assert_ne!(a, b, "the replacement is a fresh incarnation");
+
+    release_tx.send(()).expect("release the blocker");
+    let killed = kill_task.await.expect("the queued kill answers");
+    assert_eq!(killed["isError"], true, "{killed}");
+    assert_eq!(text_of(&killed)["error"]["kind"], "conflict", "{killed}");
+
+    // B is untouched: alive, its own identity, and still killable by a caller
+    // that actually observed it.
+    assert!(
+        tmux.list_sessions()
+            .await
+            .expect("tmux list")
+            .iter()
+            .any(|session| session.name == name),
+        "the refused kill terminated the replacement"
+    );
+    assert_eq!(tmux.session_instance_id(&name).await.unwrap(), b);
+    let killed = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_kill_session",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": b
+        }),
+    )
+    .await;
+    assert_eq!(killed["isError"], false, "{killed}");
+    let _ = handle.shutdown().await;
+}
+
+/// #4302 SC-02: the Agent-embedded Tool refuses a missing or empty expected
+/// instance explicitly, and a stale one as a conflict that leaves B running.
+#[tokio::test]
+async fn agent_mcp_kill_requires_and_enforces_the_observed_instance() {
+    let (addr, handle) = start_agent_with_mcp().await;
+    let mcp_session = initialize(addr).await;
+    let name = unique_session_name("mcp-guard");
+
+    let created = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_create_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(created["isError"], false, "{created}");
+    let instance = text_of(&created)["instance_id"]
+        .as_str()
+        .expect("the create reports its durable instance")
+        .to_string();
+
+    let missing = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_kill_session",
+        json!({ "agent_id": TEST_AGENT_ID, "name": name }),
+    )
+    .await;
+    assert_eq!(missing["isError"], true, "{missing}");
+    assert_eq!(text_of(&missing)["error"]["kind"], "invalid_argument");
+
+    let empty = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_kill_session",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": ""
+        }),
+    )
+    .await;
+    assert_eq!(empty["isError"], true, "{empty}");
+    assert_eq!(text_of(&empty)["error"]["kind"], "invalid_argument");
+
+    let stale = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_kill_session",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": "00000000-0000-4000-8000-000000000000"
+        }),
+    )
+    .await;
+    assert_eq!(stale["isError"], true, "{stale}");
+    assert_eq!(text_of(&stale)["error"]["kind"], "conflict", "{stale}");
+
+    let listed = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_list_sessions",
+        json!({ "agent_id": TEST_AGENT_ID }),
+    )
+    .await;
+    let entry = text_of(&listed)["sessions"]
+        .as_array()
+        .expect("sessions")
+        .iter()
+        .find(|entry| entry["name"] == name)
+        .cloned()
+        .expect("the refused kills left the Session running");
+    assert_eq!(entry["instance_id"], instance);
+
+    let killed = call_tool(
+        addr,
+        &mcp_session,
+        "nession_agent_kill_session",
+        json!({
+            "agent_id": TEST_AGENT_ID,
+            "name": name,
+            "expected_instance_id": instance
+        }),
     )
     .await;
     assert_eq!(killed["isError"], false, "{killed}");

@@ -411,19 +411,26 @@ impl NodeBackend for ServerRoutedNodeBackend {
         &self,
         agent_id: &str,
         name: &str,
+        expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
         let mut connection = self.connect_to_agent(agent_id).await?;
+        // The precondition rides the canonical `server.session.kill` payload;
+        // the Server forwards it to the Agent that owns the termination (#4302).
         let reply = connection
-            .kill_session(&format!("{agent_id}:{name}"))
+            .kill_session(&format!("{agent_id}:{name}"), Some(expected_instance_id))
             .await
             .map_err(map_client_error)?;
         close_server(connection).await;
         if !reply.success {
-            return Err(ToolError::backend(
-                reply
-                    .error
-                    .unwrap_or_else(|| "the Server refused the kill".to_string()),
-            ));
+            let message = reply
+                .error
+                .unwrap_or_else(|| "the Server refused the kill".to_string());
+            // A guarded refusal classifies itself; a legacy name-only refusal
+            // keeps its unclassified backend mapping.
+            return Err(match reply.error_kind {
+                Some(kind) => ToolError::new(ToolErrorKind::from_wire(&kind), message),
+                None => ToolError::backend(message),
+            });
         }
         Ok(SessionKillResponse {
             name: name.to_string(),
@@ -576,15 +583,15 @@ impl NodeBackend for RemoteNodeBackend {
         &self,
         agent_id: &str,
         name: &str,
+        expected_instance_id: &str,
     ) -> Result<SessionKillResponse, ToolError> {
         self.ensure_target(agent_id)?;
         let mut connection = self.connect().await?;
         let reply = connection
-            .kill_session(name)
-            .await
-            .map_err(map_client_error)?;
+            .kill_session(name, Some(expected_instance_id))
+            .await;
         Self::close(connection).await;
-        Ok(reply)
+        Ok(reply.map_err(map_direct_kill_error)?)
     }
 
     async fn get_session_metadata(
@@ -652,6 +659,23 @@ fn reply_result(reply: McpToolCallReply) -> Result<serde_json::Value, ToolError>
         ToolErrorKind::from_wire(&error.kind),
         error.message,
     ))
+}
+
+/// Map a direct-Agent kill failure (#4302).
+///
+/// The guarded kill owner classifies its refusals (`conflict`, `not_found`,
+/// `unavailable`) as delivered error codes; those keep their kind and the
+/// owner's own sentence. Every other failure keeps the legacy client-error
+/// mapping, so a pre-#4302 refusal reads exactly as it did before.
+fn map_direct_kill_error(error: ClientError) -> ToolError {
+    match error {
+        ClientError::AgentRefused { code, message, .. }
+            if matches!(code.as_str(), "conflict" | "not_found" | "unavailable") =>
+        {
+            ToolError::new(ToolErrorKind::from_wire(&code), message)
+        }
+        other => map_client_error(other),
+    }
 }
 
 fn map_client_error(error: ClientError) -> ToolError {

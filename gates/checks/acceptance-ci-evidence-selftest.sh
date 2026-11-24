@@ -21,6 +21,9 @@ gate_check() {
   gate_run_invariant node scripts/e2e-selected-run-receipt.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-qwen-3433-recovery-selftest.mjs || return $?
   gate_run_invariant node scripts/acceptance-ci-evidence.mjs self-test || return $?
+  gate_run_invariant node scripts/acceptance-4342-metrics-evidence.mjs self-test || return $?
+  gate_run_invariant node scripts/acceptance-4342-downstream-evidence.mjs self-test || return $?
+  gate_run_invariant node scripts/acceptance-4342-historical-evidence.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-pr-pages-e2e-evidence.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-4117-pr-evidence.mjs self-test || return $?
 }

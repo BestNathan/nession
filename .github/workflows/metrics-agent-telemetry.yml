@@ -6,7 +6,6 @@ on:
   # historical Workflow Run scans.
   schedule:
     - cron: '*/5 * * * *'
-    # Main-only hourly read-only historical gap inventory (#4342).
     - cron: '47 * * * *'
   workflow_run:
     workflows:
@@ -28,7 +27,7 @@ on:
   # A bot-dispatched Reviewer Run cannot rely on workflow_run chaining.
   # This wake is NOT a trusted result: the main-owned writer rechecks REST.
   repository_dispatch:
-    types: [nession-agent-review-completed]
+    types: [nession-agent-review-completed, nession-agent-metrics-history-recover]
 permissions:
   actions: read
   contents: write
@@ -49,10 +48,15 @@ jobs:
     if: >-
       github.repository == 'BestNathan/nession' &&
       (
-        (github.event_name == 'schedule' && github.ref == 'refs/heads/main') ||
+        (github.event_name == 'schedule' && github.ref == 'refs/heads/main' && github.event.schedule == '*/5 * * * *') ||
         (github.event_name == 'repository_dispatch' &&
           github.ref == 'refs/heads/main' &&
           github.event.action == 'nession-agent-review-completed' &&
+          github.actor == 'github-actions[bot]' &&
+          github.event.sender.login == 'github-actions[bot]') ||
+        (github.event_name == 'repository_dispatch' &&
+          github.ref == 'refs/heads/main' &&
+          github.event.action == 'nession-agent-metrics-history-recover' &&
           github.actor == 'github-actions[bot]' &&
           github.event.sender.login == 'github-actions[bot]') ||
         (github.event_name == 'workflow_run' &&
@@ -128,7 +132,7 @@ jobs:
       # One attempt-scoped artifact query. A source without Agent telemetry
       # is a no-op; the five-minute scheduled scan owns missed-run replay.
       - name: Detect source Agent telemetry
-        if: github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch'
+        if: github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')
         id: event_artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -148,7 +152,7 @@ jobs:
           fi
 
       - name: Checkout metrics history
-        if: github.event_name == 'schedule' || steps.event_artifacts.outputs.count != '0'
+        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover') || steps.event_artifacts.outputs.count != '0'
         uses: actions/checkout@v4
         with:
           ref: metrics
@@ -157,11 +161,12 @@ jobs:
           persist-credentials: false
 
       - name: Select missed trusted Agent telemetry source
-        if: github.event_name == 'schedule'
+        if: github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover')
         id: reconcile
         working-directory: trusted
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RECOVERY_REPORT_PATH: ${{ runner.temp }}/agent-metrics-history.json
         run: |
           set -euo pipefail
           node scripts/agent-telemetry-reconcile.mjs select \
@@ -175,12 +180,13 @@ jobs:
           fi
 
       - name: Resolve source run
-        if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
+        if: ((github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')) && steps.event_artifacts.outputs.count != '' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
         id: source
         env:
           EVENT_RUN_ID: ${{ github.event.workflow_run.id || github.event.client_payload.source_run_id }}
           EVENT_RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt || github.event.client_payload.source_run_attempt }}
           EVENT_SOURCE_SHA: ${{ github.event.client_payload.source_sha }}
+          EVENT_DISPATCH_ACTION: ${{ github.event.action }}
           RECOVERY_RUN_ID: ${{ steps.reconcile.outputs.run_id }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -196,7 +202,8 @@ jobs:
           # The dispatch sender cannot assert a successful source by itself.
           # Only a tiny bounded readiness wait applies to the newly introduced
           # bot wake: the notification job is still finishing when dispatched.
-          if [[ "$GITHUB_EVENT_NAME" == repository_dispatch ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == repository_dispatch &&
+                "$EVENT_DISPATCH_ACTION" == nession-agent-review-completed ]]; then
             [[ "$EVENT_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
             [[ "$EVENT_RUN_ATTEMPT" =~ ^[1-9][0-9]*$ ]]
             for attempt in 1 2 3 4 5 6 7 8; do
@@ -388,6 +395,27 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+      # The historical report describes ONLY the 12 bounded candidates actually
+      # checked in this main-owned schedule run. It is a read-only observation;
+      # source records are persisted by the existing immutable Metrics writer.
+      - name: Finalize bounded historical recovery report
+        if: success() && (github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover'))
+        working-directory: trusted
+        run: |
+          node scripts/agent-telemetry-reconcile.mjs history-finalize \
+            "${GITHUB_WORKSPACE}/metrics-store" "${RUNNER_TEMP}/agent-metrics-history.json"
+          jq '{source_workflow_key,total_runs_in_date_window,page,page_offset,counts,selected,selected_persisted,recovered_count,truncated}' \
+            "${RUNNER_TEMP}/agent-metrics-history.json" >> "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload scoped historical recovery and expiry inventory
+        if: always() && (github.event_name == 'schedule' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-metrics-history-recover'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-metrics-history-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-metrics-history.json
+          if-no-files-found: ignore
+          retention-days: 30
+
       # A wake-up, not an Acceptance verdict; never loop on Acceptance telemetry.
       - name: Notify Acceptance of durable Provider evidence
         if: >-
@@ -460,9 +488,24 @@ jobs:
             -f "client_payload[source_sha]=$source_sha"
           echo "Notified trusted Reviewer result ingest after durable Metrics CAS: $SOURCE_RUN_ID/$SOURCE_RUN_ATTEMPT" >> "$GITHUB_STEP_SUMMARY"
 
-  # The historical inventory is a separate, read-only observer. It has no
-  # metrics-writer concurrency, App token, Store push, or source-selected code.
-  # Reports distinguish observed model Artifacts from unknown/expired coverage.
+      # A successful authentic source write supplies one bounded follow-up
+      # when GitHub drops or delays high-frequency schedule events. The wake
+      # carries NO source/ref/writer authority and cannot recursively dispatch.
+      - name: Wake bounded history scan after new real Agent telemetry
+        if: >-
+          success() &&
+          github.event_name == 'workflow_run' &&
+          steps.persist.outputs.changed != '' &&
+          steps.persist.outputs.changed != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "repos/${GITHUB_REPOSITORY}/dispatches" \
+            -f event_type=nession-agent-metrics-history-recover \
+            -F "client_payload[writer_run_id]=${GITHUB_RUN_ID}"
+          echo "Requested one main-owned bounded historical scan; no trust or SC result delegated" >> "${GITHUB_STEP_SUMMARY}"
+
   history-inventory:
     if: >-
       github.repository == 'BestNathan/nession' &&
@@ -470,56 +513,40 @@ jobs:
       github.event_name == 'schedule' &&
       github.event.schedule == '47 * * * *'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
       actions: read
       contents: read
     steps:
-      - name: Checkout trusted main-only inventory tooling
+      - name: Checkout trusted inventory tooling
         uses: actions/checkout@v4
         with:
           ref: main
           path: trusted
           persist-credentials: false
-
       - name: Checkout immutable Metrics history read-only
         uses: actions/checkout@v4
         with:
           ref: metrics
           path: metrics-store
           persist-credentials: false
-
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-
-      - name: Verify catalog, source trust and historical inventory fixtures
+      - name: Verify canonical telemetry tooling
         working-directory: trusted
         run: ./gates/run agent-workflow-telemetry
-
-      - name: Inventory 2026-11-09 onward source Runs and Artifact expiry
+      - name: Inventory bounded historical coverage across Catalog sources
         working-directory: trusted
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          node scripts/agent-telemetry-history-inventory.mjs audit \
-            "${GITHUB_WORKSPACE}/metrics-store" \
-            "${RUNNER_TEMP}/agent-telemetry-historical-inventory.json" \
-            > "${RUNNER_TEMP}/historical-inventory-summary.json"
-          {
-            echo '## Historical Agent Metrics inventory (read-only)'
-            echo
-            jq -r '"- Coverage: " + .status, "- Window: " + .window.start + " to " + .window.end, "- Counts: " + (.totals | tostring), "- Truncation: " + (.truncation | tostring)' \
-              "${RUNNER_TEMP}/historical-inventory-summary.json"
-            echo
-            echo 'Missing, expired and unknown are NOT zero Agent calls. This job cannot mutate the Metrics Store.'
-          } >> "${GITHUB_STEP_SUMMARY}"
-
-      - name: Preserve independent read-only recovery/expiry report
+          node scripts/agent-telemetry-reconcile.mjs history-inventory \
+            "${GITHUB_WORKSPACE}/metrics-store" "${RUNNER_TEMP}/agent-metrics-inventory.json"
+      - name: Upload read-only historical inventory
         uses: actions/upload-artifact@v4
         with:
-          name: agent-telemetry-history-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/agent-telemetry-historical-inventory.json
+          name: agent-metrics-inventory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/agent-metrics-inventory.json
           if-no-files-found: error
           retention-days: 30

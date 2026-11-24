@@ -267,6 +267,10 @@ async fn a_session_kill_round_trips() {
             kill["payload"]["session_id"], "a1:work",
             "the wire takes the whole id, not a name to be re-assembled"
         );
+        assert!(
+            kill["payload"].get("expected_instance_id").is_none(),
+            "a legacy kill stays name-addressed on the wire"
+        );
         answer(&mut ws, &kill, json!({ "success": true })).await?;
         linger().await;
         Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
@@ -277,11 +281,57 @@ async fn a_session_kill_round_trips() {
             .await
             .unwrap();
         let reply = client
-            .kill_session("a1:work")
+            .kill_session("a1:work", None)
             .await
             .expect("the reply arrives");
         assert!(reply.success);
         assert_eq!(reply.error, None);
+    });
+
+    server.unwrap();
+}
+
+/// #4302: a guarded kill carries the caller-observed incarnation on the wire,
+/// and a classified refusal comes back whole instead of becoming a transport
+/// error.
+#[tokio::test]
+async fn a_guarded_session_kill_round_trips_its_precondition_and_conflict() {
+    let (listener, url) = bind().await.unwrap();
+
+    let server = async {
+        let mut ws = accept(&listener).await?;
+        handshake(&mut ws).await?;
+        let kill = next_request(&mut ws).await?;
+        assert_eq!(kill["msg_type"], "server.session.kill");
+        assert_eq!(kill["payload"]["session_id"], "a1:work");
+        assert_eq!(
+            kill["payload"]["expected_instance_id"], "instance-a",
+            "the precondition rides the canonical payload"
+        );
+        answer(
+            &mut ws,
+            &kill,
+            json!({
+                "success": false,
+                "error": "expected instance instance-a, current instance instance-b",
+                "error_kind": "conflict"
+            }),
+        )
+        .await?;
+        linger().await;
+        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(())
+    };
+
+    let (server, ()) = tokio::join!(server, async {
+        let mut client = ClientConnection::connect(ClientConfig::new(&url, "t"))
+            .await
+            .unwrap();
+        let reply = client
+            .kill_session("a1:work", Some("instance-a"))
+            .await
+            .expect("the refusal is a delivered reply");
+        assert!(!reply.success);
+        assert_eq!(reply.error_kind.as_deref(), Some("conflict"));
     });
 
     server.unwrap();

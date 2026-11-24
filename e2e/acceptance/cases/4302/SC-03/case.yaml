@@ -1,0 +1,22 @@
+schema_version: 1
+issue: 4302
+criterion: SC-03
+stage: staging
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: warmup-agent-integration.cjs
+  - type: runtime
+    entry: abandoned-timeout.cjs
+  - type: runtime
+    entry: queued-interleaving.cjs
+  - type: runtime
+    entry: warmup-server-lib.cjs
+  - type: runtime
+    entry: server-classification.cjs
+  - type: runtime
+    entry: warmup-protocol-lib.cjs
+  - type: runtime
+    entry: protocol-wire.cjs
+result_policy: all-pass
