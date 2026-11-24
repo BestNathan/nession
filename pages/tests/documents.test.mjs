@@ -10,9 +10,14 @@ import {releaseProtocolHistory,sortedReleases}
   from '../scripts/protocol-release-history.mjs';
 import {taggedProtocolSchema,cachedTaggedProtocolSchema}
   from '../scripts/protocol-git-history.mjs';
-import {documentsHref,documentsRoute,validDocumentsSnapshot,
-  filterDocuments,renderDocuments,renderDocumentsIndex} from '../documents.js';
-import {NAV_ITEMS} from '../navigation.js';
+import {documentsHref,documentsRoute,
+  filterDocuments} from '../src/features/documents/protocol/model.ts';
+import {validDocumentsSnapshot} from '../src/data/validation.ts';
+import {DocumentsIndex,ProtocolPage} from '../src/features/documents/protocol/ProtocolPage.tsx';
+import {UiStateProvider} from '../src/app/ui-state.tsx';
+import {NAV_ITEMS} from '../src/app/navigation.ts';
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
 
 const SHA='a'.repeat(40), OLD_SHA='b'.repeat(40);
 const AT='2026-11-10T10:00:00.000Z';
@@ -269,7 +274,7 @@ test('missing historical codegen does not fabricate a field introduction',async(
   }finally{await rm(dir,{recursive:true,force:true});}
 });
 test('credentialed Pages publisher never runs historical Rust codegen',async()=>{
-  const source=await readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8');
+  const source=await readFile(new URL('../scripts/build-data.mjs',import.meta.url),'utf8');
   assert.match(source,/cachedTaggedProtocolSchema/);
   assert.doesNotMatch(source,/(?:^|[^a-zA-Z])taggedProtocolSchema\(/);
   const producer=await readFile(
@@ -290,52 +295,32 @@ test('deep links and search work with contract versions and paths',()=>{
   assert.equal(filterDocuments(doc.protocols,{owner:'git'}).length,1);
   assert.ok(NAV_ITEMS.some(x=>x.route==='/documents'));
 });
-class Element{
-  constructor(tag){this.tagName=tag.toUpperCase();this.nodes=[];this.attrs={};this.dataset={};this.text='';}
-  set textContent(value){this.text=String(value);this.nodes=[];}
-  get textContent(){return this.text+this.nodes.map(x=>x.textContent||'').join('');}
-  set className(value){this.classes=value;}
-  setAttribute(k,v){this.attrs[k]=v;}
-  addEventListener(){}
-  append(...nodes){this.nodes.push(...nodes);}
-  replaceChildren(...nodes){this.text='';this.nodes=nodes;}
-  querySelector(tag){return descendants(this).find(x=>x.tagName===tag.toUpperCase())||null;}
+function renderProtocol(data,hash){
+  return renderToStaticMarkup(createElement(UiStateProvider,null,
+    createElement(ProtocolPage,{data,hash})));
 }
-function descendants(node){return [node,...(node.nodes||[]).flatMap(descendants)];}
 test('Protocol reference renders one since-version column, not a matrix',()=>{
-  const original=globalThis.document;
-  globalThis.document={createElement:t=>new Element(t),
-    createTextNode:s=>({textContent:s})};
-  try{
-    const data=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT,
-      releases:[{version:'0.35.0',tag:'v0.35.0',sha:null,status:'unavailable',schema:null}]});
-    const ui=new Element('main');
-    renderDocuments(ui,data,documentsHref('git.status',1));
-    const elements=descendants(ui);
-    assert.ok(elements.some(x=>x.tagName==='TABLE'));
-    assert.ok(elements.some(x=>x.tagName==='TH'&&x.textContent==='Since Nession'));
-    assert.equal(elements.filter(x=>x.tagName==='TH'&&x.textContent==='0.35.0').length,0);
-    assert.ok(elements.some(x=>x.tagName==='TD'&&x.textContent==='Unknown'));
-    assert.equal(elements.some(x=>x.tagName==='TD'&&x.textContent==='?'),false);
-    assert.ok(elements.some(x=>x.tagName==='DETAILS'));
-    assert.equal(elements.some(x=>x.tagName==='SCRIPT'),false);
-  }finally{globalThis.document=original;}
+  const data=projectProtocolSchema(fixture(),{sha:SHA,generatedAt:AT,
+    releases:[{version:'0.35.0',tag:'v0.35.0',sha:null,status:'unavailable',schema:null}]});
+  const html=renderProtocol(data,documentsHref('git.status',1));
+  assert.match(html,/<table class="documents-field-table">/);
+  assert.match(html,/<th>Since Nession<\/th>/);
+  assert.equal(html.includes('<th>0.35.0</th>'),false);
+  assert.match(html,/<td class="documents-since unknown"[^>]*>Unknown<\/td>/);
+  assert.equal(html.includes('>?<'),false);
+  assert.match(html,/<details class="documents-raw">/);
+  assert.equal(html.includes('<script'),false);
 });
 
 test('Documents index presents independent Protocol and MCP destinations with source availability',()=>{
-  const original=globalThis.document;
-  globalThis.document={createElement:t=>new Element(t)};
-  try{
-    const ui=new Element('main');
-    renderDocumentsIndex(ui,{protocolCount:130,protocolStatus:'available',
-      mcpCount:11,mcpStatus:'available'});
-    const links=descendants(ui).filter(x=>x.tagName==='A');
-    assert.deepEqual(links.map(x=>x.href),['#/documents/protocol','#/documents/mcp']);
-    assert.ok(ui.textContent.includes('130 protocol units'));
-    assert.ok(ui.textContent.includes('11 registered tools'));
-    const fallback=new Element('main');
-    renderDocumentsIndex(fallback,{protocolStatus:'unavailable',mcpStatus:'loading'});
-    assert.ok(fallback.textContent.includes('Catalog unavailable'));
-    assert.ok(fallback.textContent.includes('Loading public catalog'));
-  }finally{globalThis.document=original;}
+  const html=renderToStaticMarkup(createElement(DocumentsIndex,{
+    protocolCount:130,protocolStatus:'available',mcpCount:11,mcpStatus:'available'}));
+  const links=[...html.matchAll(/<a class="documents-index-card" href="([^"]+)"/g)].map(x=>x[1]);
+  assert.deepEqual(links,['#/documents/protocol','#/documents/mcp']);
+  assert.ok(html.includes('130 protocol units'));
+  assert.ok(html.includes('11 registered tools'));
+  const fallback=renderToStaticMarkup(createElement(DocumentsIndex,{
+    protocolStatus:'unavailable',mcpStatus:'loading'}));
+  assert.ok(fallback.includes('Catalog unavailable'));
+  assert.ok(fallback.includes('Loading public catalog'));
 });

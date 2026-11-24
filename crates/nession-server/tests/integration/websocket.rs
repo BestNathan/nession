@@ -780,7 +780,11 @@ async fn connect_client(addr: std::net::SocketAddr) -> anyhow::Result<TestWs> {
         }),
     )
     .await?;
-    let reply = next_json(&mut ws).await?;
+    // The Server pushes a `server.sessions.changed` snapshot (id "") once a
+    // client authenticates; under CI load that push can reach the socket
+    // before the correlated `server.auth` reply. Select the reply by its
+    // request id instead of assuming it is the first protocol frame (#4476).
+    let reply = next_reply(&mut ws, &["auth-1"], std::time::Duration::from_secs(15)).await?;
     let payload = payload_of(&reply, "server.auth")?;
     anyhow::ensure!(
         payload.get("status").and_then(serde_json::Value::as_str) == Some("success"),
@@ -3503,7 +3507,14 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
         }),
     )
     .await?;
-    let auth = next_json(&mut client).await?;
+    // Select the auth reply by id: a `server.sessions.changed` push can
+    // precede it under load (#4476).
+    let auth = next_reply(
+        &mut client,
+        &["auth-proof"],
+        std::time::Duration::from_secs(15),
+    )
+    .await?;
     anyhow::ensure!(
         auth["payload"]["status"] == "success",
         "auth failed: {auth}"
@@ -3611,7 +3622,14 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
         }),
     )
     .await?;
-    let auth = next_json(&mut client).await?;
+    // Select the auth reply by id: a `server.sessions.changed` push can
+    // precede it under load (#4476).
+    let auth = next_reply(
+        &mut client,
+        &["auth-credit"],
+        std::time::Duration::from_secs(15),
+    )
+    .await?;
     anyhow::ensure!(auth["payload"]["status"] == "success");
     wait_for_session(&mut client, "a1:dev").await?;
     send_json(

@@ -1,9 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {NAV_ITEMS} from '../navigation.js';
+import {NAV_ITEMS} from '../src/app/navigation.ts';
 import {readFile} from 'node:fs/promises';
 import {projectKnowledge,unavailableKnowledge,validatePublicKnowledge} from '../scripts/knowledge-project.mjs';
-import {knowledgeHref,knowledgeRoute,validKnowledgeSnapshot,filterKnowledge} from '../knowledge.js';
+import {knowledgeHref,knowledgeRoute,filterKnowledge,parseMarkdown} from '../src/features/knowledge/model.ts';
+import {validKnowledgeSnapshot} from '../src/data/validation.ts';
 
 const SHA='a'.repeat(40),AT='2026-10-29T19:22:00Z';
 const X='topics/terminal/terminal-facts.md',Y='topics/engineering/knowledge-ownership.md';
@@ -83,19 +84,21 @@ test('topic, category and text filters work on published article data',()=>{
  assert.equal(filterKnowledge(docs,{query:'not in docs'}).length,0);
 });
 test('Pages native navigation, trusted deployment and safe text-only rendering are wired',async()=>{
- const [html,app,reader,workflow,build]=await Promise.all([
+ const [html,app,reader,workflow,build,resources]=await Promise.all([
   readFile(new URL('../index.html',import.meta.url),'utf8'),
-  readFile(new URL('../app.js',import.meta.url),'utf8'),
-  readFile(new URL('../knowledge.js',import.meta.url),'utf8'),
+  readFile(new URL('../src/app/App.tsx',import.meta.url),'utf8'),
+  readFile(new URL('../src/features/knowledge/KnowledgePage.tsx',import.meta.url),'utf8'),
   readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8'),
-  readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8')
+  readFile(new URL('../scripts/build-data.mjs',import.meta.url),'utf8'),
+  readFile(new URL('../src/data/validation.ts',import.meta.url),'utf8')
  ]);
- assert.match(html, /<script src="navigation\.js" type="module"><\/script>/);
+ assert.match(html, /<script type="module" src="\/src\/app\/main\.tsx"><\/script>/);
  assert.ok(NAV_ITEMS.some(item=>item.route==='/knowledge'));
- assert.match(app,/renderKnowledge\(root,knowledgeSnapshot,location\.hash\)/);
- assert.match(app,/validKnowledgeSnapshot/);
- assert.match(reader,/document\.createTextNode/);
- assert.doesNotMatch(reader,/\binnerHTML\b\s*=/);
+ assert.match(app,/case '\/knowledge':/);
+ assert.match(resources,/validKnowledgeSnapshot/);
+ // React text nodes only: no raw HTML injection path anywhere in the reader.
+ assert.doesNotMatch(reader,/\binnerHTML\b\s*=|dangerouslySetInnerHTML/);
+ assert.match(reader,/\{node\.value\}/);
  assert.match(workflow,/ref: knowledge/);
  assert.match(workflow,/ref: knowledge\n\s+path: knowledge-store\n[\s\S]*?fetch-depth: 0/);
  assert.match(workflow,/persist-credentials: false/);
@@ -105,4 +108,20 @@ test('Pages native navigation, trusted deployment and safe text-only rendering a
  assert.match(workflow,/sha256sum "\$knowledge_json"/);
  assert.match(workflow,/\$url\/data\/knowledge\.json\?revision=\$EXPECTED_KNOWLEDGE_SHA/);
  assert.match(build,/data\/knowledge\.json/);
+});
+
+test('unsafe Markdown links resolve to text and never external HTML',()=>{
+ const article={path:'topics/engineering/source.md',title:'t',description:'d',topic:'engineering',
+  categories:[],status:'verified',updated_at:AT,body:'',sources:[]};
+ const paths=new Set([article.path]);
+ const blocks=parseMarkdown(
+  '[private](https://evil.example/x) [safe](https://github.com/BestNathan/nession/issues/1) '+
+  '[relative](source.md) `code` **bold**',article,paths);
+ const nodes=blocks.flatMap(block=>block.type==='p'?block.children:[]);
+ assert.ok(!JSON.stringify(nodes).includes('evil.example'));
+ assert.ok(nodes.some(node=>node.type==='text'&&node.value==='private'));
+ assert.ok(nodes.some(node=>node.type==='link'&&node.external&&node.href.includes('github.com')));
+ assert.ok(nodes.some(node=>node.type==='link'&&!node.external&&node.href.includes('#/knowledge?article=')));
+ assert.ok(nodes.some(node=>node.type==='code'&&node.value==='code'));
+ assert.ok(nodes.some(node=>node.type==='strong'&&node.value==='bold'));
 });
