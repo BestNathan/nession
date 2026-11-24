@@ -1372,6 +1372,13 @@ async fn handle_ws_stream(
     // verified web client's registry subscriber also holds one — that clone is
     // not this connection's to drop — which is what the bounded wait and abort
     // are still for.
+    // Close the outbound first. The classified receiver owns an `Arc` of the
+    // same inner cell that holds the class senders, so dropping the sender
+    // clones alone never closes a channel: `recv` would park until the grace
+    // expires and be aborted. `close` is the explicit signal that ends the
+    // scheduler, which is what makes an unauthenticated socket or any other
+    // ordinary teardown drop its write half promptly.
+    sender.close();
     drop(handler);
     drop(sender);
     if tokio::time::timeout(terminal_stall_grace, &mut relay_writer.0)
