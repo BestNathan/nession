@@ -3992,22 +3992,21 @@ async fn two_peers_mutating_one_file_are_ordered() {
 /// counted as one more concurrent worker; the number of sessions ever created
 /// is not the number in flight.
 ///
-/// What is asserted instead is which frame the reader could reach. One frame
-/// more than the bound is written, followed by a cheap query. Every create parks
-/// on `PARK_VARS` post-create `set-environment` spawns, so no create answers
-/// quickly, while the query is one `list-sessions`. With the bound in place the
-/// reader stops at the frame that would exceed it, so the query behind it is not
-/// read until a create's slot frees — and the first create's answer was queued
-/// *before* that slot freed, on the same FIFO the query's answer would use.
-/// Without the bound the reader consumes every create and the query together,
-/// and the query answers while every create is still parked.
+/// What is asserted instead is the **explicit refusal contract** (`#4433`).
+/// One frame more than the bound is written, followed by a cheap query. Every
+/// admitted create parks on `PARK_VARS` post-create `set-environment` spawns,
+/// so none of them answers quickly, while the query is one `list-sessions`.
 ///
-/// So a create's answer arriving first means the reader stopped at its bound,
-/// and the query's answer arriving first means it did not — whatever the
-/// machine under the test does with its clock. The exact number of concurrent
-/// workers is the lane's own unit test
+/// - Exactly `bound` creates are admitted and eventually answer `ok`, each
+///   having made a real session.
+/// - The one create past the bound is answered `overloaded` (`payload.code`)
+///   and makes no session.
+/// - The query behind the flood **is read and answered**: the reader does not
+///   park on the full lane, which is the property this test now proves.
+///
+/// The exact number of concurrent workers is the lane's own unit test
 /// (`a_flood_of_distinct_resources_is_bounded_per_connection`); this one is
-/// about the connection wiring the bound to this wire.
+/// about the connection wiring the bound and its explicit refusal to this wire.
 #[tokio::test]
 async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them() {
     use std::time::Duration;
@@ -4054,8 +4053,8 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
         .expect("send the create");
     }
 
-    // Behind the flood: the reader reaches this frame only after the create that
-    // would exceed the bound has been admitted.
+    // Behind the flood: with non-blocking admission the reader reaches this
+    // frame immediately, even while every admitted create is parked.
     let query = new_message(msg_types::SESSION_LIST, serde_json::json!({}));
     sink.send(WsMessage::Text(
         serde_json::to_value(&query).unwrap().to_string(),
@@ -4063,39 +4062,83 @@ async fn a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them()
     .await
     .expect("send the query");
 
-    let mut answered_ids: Vec<&str> = create_ids.iter().map(String::as_str).collect();
-    answered_ids.push(&query.id);
-    let answered = first_answer(&mut stream, &answered_ids, Duration::from_secs(60))
-        .await
-        .expect("neither the flood nor the query was answered");
+    let mut pending: Vec<&str> = create_ids.iter().map(String::as_str).collect();
+    pending.push(&query.id);
 
-    assert_ne!(
-        answered["id"],
-        serde_json::json!(query.id),
-        "the query written behind {flood} creates was answered before any create: the \
-         reader read and dispatched every frame, so this connection got a worker for every \
-         distinct key instead of stopping at its bound of {bound}"
+    let mut admitted = 0usize;
+    let mut refused = 0usize;
+    let mut query_answered = false;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(60);
+    while !pending.is_empty() {
+        let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
+        assert!(
+            !remaining.is_zero(),
+            "the flood was not fully answered; still waiting for {pending:?}"
+        );
+        let answer = first_answer(&mut stream, &pending, remaining)
+            .await
+            .expect("the flood was not fully answered");
+        let id = answer["id"]
+            .as_str()
+            .expect("an answer carries its request's id")
+            .to_string();
+        pending.retain(|pending_id| *pending_id != id);
+
+        if id == query.id {
+            query_answered = true;
+        } else if answer["payload"]["code"] == "overloaded" {
+            refused += 1;
+        } else {
+            assert_eq!(
+                answer["msg_type"],
+                serde_json::json!(msg_types::OK),
+                "a create was answered with an unexpected failure: {:?}",
+                answer["payload"]
+            );
+            admitted += 1;
+            // An admitted create is real work: the session it names exists.
+            let name = answer["payload"]["name"]
+                .as_str()
+                .expect("a create response carries the session's name")
+                .to_string();
+            let sessions = tmux
+                .list_sessions()
+                .await
+                .expect("list the flood's sessions");
+            assert!(
+                sessions.iter().any(|session| session.name == name),
+                "the create answered for {name}, but tmux has no such session"
+            );
+        }
+    }
+
+    assert!(
+        query_answered,
+        "the query written behind {flood} creates was never answered: the reader \
+         parked on the full lane instead of refusing the excess frame explicitly"
     );
     assert_eq!(
-        answered["msg_type"],
-        serde_json::json!(msg_types::OK),
-        "a create was answered with a failure: {:?}",
-        answered["payload"]
+        admitted, bound,
+        "{admitted} of {flood} creates were admitted against a bound of {bound}"
+    );
+    assert_eq!(
+        refused,
+        flood - bound,
+        "{refused} of {flood} creates were refused `overloaded` against a bound of {bound}"
     );
 
-    // The answer is a create that made a real session, so the work the bound
-    // delayed is work rather than a refused frame.
-    let answered_name = answered["payload"]["name"]
-        .as_str()
-        .expect("a create response carries the session's name")
-        .to_string();
     let sessions = tmux
         .list_sessions()
         .await
         .expect("list the flood's sessions");
-    assert!(
-        sessions.iter().any(|session| session.name == answered_name),
-        "the create answered for {answered_name}, but tmux has no such session"
+    let created = sessions
+        .iter()
+        .filter(|session| session.name.starts_with(&prefix))
+        .count();
+    assert_eq!(
+        created, bound,
+        "a refused create still made a session: {created} sessions exist for a \
+         bound of {bound}"
     );
 
     handle.shutdown().await.ok();

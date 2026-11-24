@@ -12,7 +12,7 @@ use axum::routing::{any, get};
 use axum::Router;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 
-use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
+use super::handler::{overload_reply, ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
 use crate::image::{ImageHttpService, ImageManager, ImageManagerOptions};
@@ -29,7 +29,7 @@ use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
-use nession_runtime::lane::KeyedLane;
+use nession_runtime::lane::{AdmitError, KeyedLane};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -1019,14 +1019,28 @@ async fn handle_ws_stream(
                     // agent's control channel, and a query may reach for the broker
                     // as soon as its task is scheduled.
                     claim_agent_channel(&handler, &command_broker, &sender).await;
-                    // `query` waits here when the connection's lane is
-                    // full. That wait is the bound the requirement asks for: the
-                    // frame that would exceed the lane is not *read* until there is
-                    // room for it, so a connection cannot grow tasks with its
-                    // message count.
-                    lanes
-                        .query(answer(handler.clone(), msg, sender.clone(), "a query"))
-                        .await;
+                    // Admission is non-blocking (`#4433`): a full lane is answered
+                    // with an explicit overload, so the reader never parks on a
+                    // business permit and heartbeat/control keep moving.
+                    let reply_wire = msg.msg_type.clone();
+                    let reply_id = msg.id.clone();
+                    match lanes.try_query(answer(handler.clone(), msg, sender.clone(), "a query")) {
+                        Ok(()) => {}
+                        Err(AdmitError::Saturated) => {
+                            if sender
+                                .send_reply(overload_reply(&reply_wire, &reply_id))
+                                .await
+                                .is_err()
+                            {
+                                close_reason = "outbound-closed";
+                                break;
+                            }
+                        }
+                        Err(AdmitError::Closed) => {
+                            close_reason = "lane-closed";
+                            break;
+                        }
+                    }
                     continue;
                 }
                 ExecutionPolicy::Key(key) => {
@@ -1035,16 +1049,34 @@ async fn handle_ws_stream(
                     // and the claim is about *this* connection rather than about the
                     // frame that prompted it.
                     claim_agent_channel(&handler, &command_broker, &sender).await;
-                    // Waits only when that resource's own queue is at its depth. The
-                    // wait parks the reader, which is the backpressure — see
-                    // `server::execution`. A mutation for another resource is not
-                    // behind it.
-                    lanes
-                        .key(
+                    // Atomic non-blocking admission at both bounds: the per-key
+                    // depth and this connection's mutation slots. A refusal
+                    // reserves nothing and is answered explicitly (#4433).
+                    let reply_wire = msg.msg_type.clone();
+                    let reply_id = msg.id.clone();
+                    match lanes
+                        .try_key(
                             key,
                             Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
                         )
-                        .await;
+                        .await
+                    {
+                        Ok(()) => {}
+                        Err(AdmitError::Saturated) => {
+                            if sender
+                                .send_reply(overload_reply(&reply_wire, &reply_id))
+                                .await
+                                .is_err()
+                            {
+                                close_reason = "outbound-closed";
+                                break;
+                            }
+                        }
+                        Err(AdmitError::Closed) => {
+                            close_reason = "lane-closed";
+                            break;
+                        }
+                    }
                     continue;
                 }
                 ExecutionPolicy::Ordered => {
@@ -2415,19 +2447,44 @@ async fn answer_server_unit(
     // the claim is about an *agent's* control channel — which is every
     // connection that reaches a relay.
     claim_agent_channel(handler, command_broker, sender).await;
+    let reply_wire = msg.msg_type.clone();
+    let reply_id = msg.id.clone();
     match policy_for_wire(&msg.msg_type, &msg.payload) {
         ExecutionPolicy::Query => {
-            lanes
-                .query(answer(handler.clone(), msg, sender.clone(), "a query"))
-                .await;
+            match lanes.try_query(answer(handler.clone(), msg, sender.clone(), "a query")) {
+                Ok(()) => {}
+                Err(AdmitError::Saturated) => {
+                    if sender
+                        .send_reply(overload_reply(&reply_wire, &reply_id))
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+                Err(AdmitError::Closed) => return false,
+            }
         }
         ExecutionPolicy::Key(key) => {
-            lanes
-                .key(
+            match lanes
+                .try_key(
                     key,
                     Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
                 )
-                .await;
+                .await
+            {
+                Ok(()) => {}
+                Err(AdmitError::Saturated) => {
+                    if sender
+                        .send_reply(overload_reply(&reply_wire, &reply_id))
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+                Err(AdmitError::Closed) => return false,
+            }
         }
         // The barrier an ordered unit waits behind is what makes it
         // deterministic on a connection that is no longer serial, so it is

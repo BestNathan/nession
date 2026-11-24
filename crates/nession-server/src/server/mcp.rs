@@ -53,7 +53,7 @@ use crate::server::handler::{
     dispatch_server, ConnectionHandler, ConnectionHandlerConfig, ConnectionHandlerDeps,
     HandlerAction,
 };
-use nession_runtime::lane::KeyedLane;
+use nession_runtime::lane::{AdmitError, KeyedLane};
 
 /// Build the Server-hosted MCP service when `[mcp] enabled = true`.
 pub(crate) fn build(
@@ -369,8 +369,8 @@ impl ServerNodeBackend {
             DEFAULT_MUTATIONS_IN_FLIGHT,
             LANE_LABEL,
         );
-        lanes
-            .key(
+        if let Err(error) = lanes
+            .try_key(
                 key,
                 Box::pin(async move {
                     // An expired MCP request must not start its queued mutation.
@@ -381,7 +381,15 @@ impl ServerNodeBackend {
                     }
                 }),
             )
-            .await;
+            .await
+        {
+            return Err(match error {
+                AdmitError::Saturated => ToolError::backend(
+                    "the Server's mutation lane is at its execution bound; retry the request",
+                ),
+                AdmitError::Closed => ToolError::backend("the Server's mutation lane is closed"),
+            });
+        }
         let outcome = result
             .await
             .map_err(|_| ToolError::backend("the Server's mutation lane ended before answering"))?;
