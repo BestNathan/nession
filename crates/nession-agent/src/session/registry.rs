@@ -993,8 +993,9 @@ async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayloa
         return;
     };
     for peer in peers {
-        // Input ACK is per-stream flow control, not RPC work: it rides the
-        // non-dropping terminal lane with the bounded stall verdict.
+        // Input ACK is flow control for this exchange, not live terminal
+        // output: it must be written before the input request's `ok` reply, so
+        // the class seam maps it onto the response FIFO (#4434/#4435).
         let _ = peer
             .outbound
             .send_for_class(

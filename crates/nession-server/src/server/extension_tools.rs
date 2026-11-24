@@ -230,10 +230,14 @@ impl ExtensionToolCatalog {
                 )))
             }
             Err(_) => {
+                // Same terminal outcome as the other command callers: the
+                // caller's deadline removes the entry so a late reply cannot
+                // resolve a request nobody is waiting for (#4434, SC-03).
+                self.broker.expire_pending(agent_id, &request_id).await;
                 return Err(ToolError::timeout(format!(
                     "Agent '{agent_id}' did not answer `{tool}` in time. The call may already have \
                      started or completed; inspect the target's state before retrying"
-                )))
+                )));
             }
         };
         let reply: McpToolCallReply = serde_json::from_value(response).map_err(|error| {

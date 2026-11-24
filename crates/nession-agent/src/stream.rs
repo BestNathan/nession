@@ -97,8 +97,12 @@ pub enum OutboundStreamClass {
     OrderedOutput,
     /// Droppable level delivery; the peer restates it.
     LatestState,
-    /// Non-dropping stream bookkeeping with the terminal stall deadline.
+    /// Non-dropping stream bookkeeping that must precede its request's reply
+    /// (terminal input ACK, lease-change notice).
     FlowControl,
+    /// One-off attach history (bootstrap capture, atomic output prefix): a
+    /// response to attach, ordered before its `ok`, not steady output.
+    AttachHistory,
     /// A reply the peer is waiting for; waits for room and never drops.
     Reply,
 }

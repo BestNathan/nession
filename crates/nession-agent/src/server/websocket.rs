@@ -595,7 +595,7 @@ async fn send_atomic_output_prefix(
         return false;
     };
     match outbound
-        .send_for_class(OutboundStreamClass::OrderedOutput, WsFrame::Text(json))
+        .send_for_class(OutboundStreamClass::AttachHistory, WsFrame::Text(json))
         .await
     {
         Ok(()) => true,
@@ -781,7 +781,7 @@ async fn send_bootstrap(
         return true;
     };
     match outbound
-        .send_for_class(OutboundStreamClass::OrderedOutput, WsFrame::Text(json))
+        .send_for_class(OutboundStreamClass::AttachHistory, WsFrame::Text(json))
         .await
     {
         Ok(()) => true,
@@ -6373,22 +6373,23 @@ mod tests {
     /// detaching this subscriber) could never be delivered, because the
     /// forwarder never got to observe its own receiver closing.
     ///
-    /// The queue is saturated with one oversized state frame — `charge` clamps a
-    /// frame larger than the budget to the whole of it — so the next terminal
+    /// The stream class is filled to its frame bound — control's reserved
+    /// budget is deliberately not involved — so the forwarder's next terminal
     /// frame has no room and the grace is what decides. The grace is shortened
     /// because waiting out a production number is waiting out the calendar; the
-    /// bound still has to be reached first, which is what the saturation
-    /// arranges.
+    /// bound still has to be reached first, which is what the fill arranges.
     #[tokio::test]
     async fn a_terminal_forwarder_that_cannot_drain_closes_the_connection() {
-        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
-
         let (outbound, _rx) = P2pOutbound::with_terminal_grace(Duration::from_millis(50));
-        assert_eq!(
-            outbound.try_send_state(WsFrame::Text("x".repeat(OUTBOUND_BYTE_BUDGET))),
-            Ok(()),
-            "the whole byte budget is one frame's worth"
-        );
+        // Fill the stream class's reserved frame slots. That is what the
+        // forwarder below sends on, so its next send is the one that cannot
+        // drain — control's budget is separate and deliberately not involved.
+        for _ in 0..crate::server::outbound::STREAM_FRAME_SLOTS {
+            outbound
+                .send_terminal(WsFrame::Text("x".into()))
+                .await
+                .expect("a stream frame fits the reserved frame slots");
+        }
 
         let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         spawn_output_forwarder(
@@ -7682,11 +7683,10 @@ mod tests {
     /// draining then parks the session's backend for that whole window, which is
     /// the opposite of what `AttachedSession::backend` documents the lock is for.
     ///
-    /// **The assertion is the lock, not the code shape.** `charge` clamps a frame
-    /// to the byte budget, so one oversized frame on the connection's outbound is
-    /// enough to leave no room for the next send; the fan-out then parks, and the
-    /// test asks for the backend and fails if it does not get it. Scoping the
-    /// guard is the only thing that makes it available.
+    /// **The assertion is the lock, not the code shape.** The stream class is
+    /// filled to its frame bound, so the fan-out's terminal send has no room and
+    /// parks; the test then asks for the backend and fails if it does not get
+    /// it. Scoping the guard is the only thing that makes it available.
     ///
     /// Two preconditions keep this from passing vacuously: the fan-out must
     /// actually have had to wait (`awaited` rose — a timeout would otherwise be
@@ -7694,7 +7694,6 @@ mod tests {
     /// must still be running when the lock is asked for.
     #[tokio::test]
     async fn a_stalled_fan_out_does_not_hold_the_session_backend() {
-        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
         use crate::tmux::session::TmuxSession;
 
         /// Only `resize` is reached; the rest exist because the arm holds a
@@ -7758,13 +7757,19 @@ mod tests {
             .collect(),
         ));
 
-        // The connection's outbound, with nothing draining it. One frame at the
-        // byte budget's own size takes the whole budget (`charge` clamps to it),
-        // so the fan-out's send has no room and waits.
+        // The connection's outbound, with nothing draining it. Filling the
+        // stream class's frame slots leaves the fan-out's terminal send with no
+        // room, so it waits.
         let (outbound, _outbound_rx) = P2pOutbound::new();
-        outbound
-            .try_send_state(WsFrame::Text("x".repeat(OUTBOUND_BYTE_BUDGET)))
-            .expect("the first frame fits the budget it is about to exhaust");
+        // Fill the stream class's reserved frame slots: the fan-out's terminal
+        // send is what this test needs to observe waiting, and control's
+        // reserved budget must not be the thing that makes it wait.
+        for _ in 0..crate::server::outbound::STREAM_FRAME_SLOTS {
+            outbound
+                .send_terminal(WsFrame::Text("x".into()))
+                .await
+                .expect("a stream frame fits the reserved frame slots");
+        }
 
         let tmux = Arc::new(SessionManager::new());
         let session_metadata = Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new())));

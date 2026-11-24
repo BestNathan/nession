@@ -710,6 +710,13 @@ impl ConnectionHandler {
                     "agent_command_with_timeout: timeout waiting for agent {} (req: {})",
                     agent_id, request_id
                 );
+                // The caller's deadline is the terminal outcome for this
+                // request: remove the pending entry so a reply that arrives
+                // later is classified as late instead of resolving a request
+                // nobody is waiting for (#4434, SC-03).
+                self.command_broker
+                    .expire_pending(agent_id, &request_id)
+                    .await;
                 Err("Timeout waiting for agent response".to_string())
             }
         }

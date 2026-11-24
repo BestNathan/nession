@@ -77,7 +77,12 @@ use crate::connection::outbox::{Outbox, OutboxFrames};
 use crate::connection::sync_intent::{SyncIntent, SyncToken};
 // The lanes' boxed work is the shared type: the lane that carries it knows
 // nothing about this connection, which is the point of `nession-runtime`.
+use nession_runtime::frame::WsFrame;
 use nession_runtime::lane::{AdmitError, Work};
+use nession_runtime::lifecycle::{CloseReason, ConnectionLifecycle, WriteTimeouts};
+use nession_runtime::outbound::{
+    ClassLimits, ClassifiedLimits, FrameClass, Outbound, OutboundReceiver, SubmitOutcome,
+};
 // The three policies by name, because the `core_routes!` invocation at the
 // bottom of this file declares one per unit and the names are the column there.
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
@@ -126,6 +131,107 @@ const DEFAULT_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// memory. At the extension contracts' 1 MiB read cap that is 32 MiB of frames
 /// rather than the unbounded channel's "as much as the Server can ask for".
 const AGENT_RESPONSE_QUEUE_SLOTS: usize = 32;
+
+/// The response queue's byte budget (`#4434`).
+///
+/// The old queue bounded only the frame *count*, so 32 extension reads at the
+/// 1 MiB contract cap were 32 MiB of frames — the count bounded nothing a memory
+/// budget cares about. Bytes and frames are both enforced here, by the same
+/// classified queue the sockets use, and the response class is separate from
+/// control so a pong never waits behind a large answer.
+const AGENT_RESPONSE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
+
+/// The central connection's response/control class bounds.
+const CENTRAL_CLASS_LIMITS: ClassifiedLimits = ClassifiedLimits {
+    control: ClassLimits {
+        bytes: 256 * 1024,
+        frames: 8,
+    },
+    response: ClassLimits {
+        bytes: AGENT_RESPONSE_BYTE_BUDGET,
+        frames: AGENT_RESPONSE_QUEUE_SLOTS,
+    },
+    // The central connection's business stream rides the coalescing outbox,
+    // not this queue; the class exists so the shared type is complete.
+    stream: ClassLimits {
+        bytes: 256 * 1024,
+        frames: 4,
+    },
+};
+
+/// The writing half's reply lane: one bounded, byte-accounted queue shared by
+/// every handler task, drained only by [`ServerClient::run_connection`].
+///
+/// A reply waits for room until the connection closes; a pong is control and
+/// never waits. This is the same mechanism as the sockets' classified queue, so
+/// the central connection's process-wide accounting is part of the same total.
+#[derive(Clone)]
+pub(crate) struct ResponseSender {
+    queue: Outbound,
+}
+
+impl ResponseSender {
+    fn channel() -> (Self, OutboundReceiver) {
+        let (queue, rx) = Outbound::new(
+            "central responses",
+            CENTRAL_CLASS_LIMITS,
+            Duration::from_secs(15),
+        );
+        (Self { queue }, rx)
+    }
+
+    /// Queue one command response. Waits for room; never silently drops.
+    pub(crate) async fn send(&self, message: WsMessage) -> Result<()> {
+        let Some(frame) = WsFrame::from_tungstenite(message) else {
+            return Err(anyhow::anyhow!(
+                "a raw tungstenite frame cannot be sent as a response"
+            ));
+        };
+        self.queue
+            .send_reply(frame)
+            .await
+            .map_err(|error| anyhow::anyhow!("the response queue is closed: {error}"))
+    }
+
+    /// Queue one command response **without waiting** (`#4433`'s explicit
+    /// overload outcome).
+    ///
+    /// The reader answers a refused request through this. It must not park the
+    /// reader on the very queue that is already behind: if the response class
+    /// has no room, the refusal cannot be delivered and the caller ends the
+    /// connection.
+    pub(crate) fn try_send(&self, message: WsMessage) -> Result<()> {
+        let Some(frame) = WsFrame::from_tungstenite(message) else {
+            return Err(anyhow::anyhow!(
+                "a raw tungstenite frame cannot be sent as a response"
+            ));
+        };
+        match self.queue.try_submit(FrameClass::Response, frame) {
+            SubmitOutcome::Accepted => Ok(()),
+            SubmitOutcome::Refused(error) => Err(anyhow::anyhow!(
+                "the response queue refused the overload reply: {error}"
+            )),
+            SubmitOutcome::Closed => Err(anyhow::anyhow!("the response queue is closed")),
+        }
+    }
+
+    /// Queue one control frame (a pong), without waiting.
+    pub(crate) fn send_control(&self, message: WsMessage) -> Result<()> {
+        let Some(frame) = WsFrame::from_tungstenite(message) else {
+            return Err(anyhow::anyhow!(
+                "a raw tungstenite frame cannot be sent as a control frame"
+            ));
+        };
+        self.queue
+            .send_control(frame)
+            .map_err(|error| anyhow::anyhow!("the control queue is closed: {error}"))
+    }
+
+    #[cfg(test)]
+    fn test_channel() -> (Self, OutboundReceiver) {
+        Self::channel()
+    }
+}
 
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
@@ -1009,17 +1115,28 @@ impl ServerClient {
         // those never parks anybody. What is *gone* is the case the unbounded
         // channel actually existed for — an agent whose Server stopped reading
         // growing its heap for as long as the Server stayed away.
-        let (resp_tx, mut resp_rx) = mpsc::channel::<WsMessage>(AGENT_RESPONSE_QUEUE_SLOTS);
+        // The reply queue is the same classified, byte-accounted mechanism as
+        // the sockets' (`#4434`): the old channel bounded only 32 frames, so a
+        // Server could make the agent hold 32 MiB of 1 MiB reads. Control (the
+        // pong lane) has its own reserved capacity.
+        let (responses, mut responses_rx) = ResponseSender::channel();
+
+        // One verdict per connection, shared with the reading half. A write
+        // deadline, a socket error or a normal end settles it exactly once.
+        let lifecycle = ConnectionLifecycle::new(1);
+        let write_timeouts = WriteTimeouts::default();
 
         // The reading half, and the signal that says how it ended. A channel
         // rather than joining the handle here: the handle is only needed to
         // *stop* a reader that is parked, and a `JoinHandle` polled after it has
         // completed panics.
         let (read_done_tx, mut read_done_rx) = mpsc::channel::<ConnectionOutcome>(1);
-        let reader = tokio::spawn(
-            self.clone()
-                .read_loop(stream, resp_tx.clone(), read_done_tx),
-        );
+        let reader = tokio::spawn(self.clone().read_loop(
+            stream,
+            responses.clone(),
+            read_done_tx,
+            Arc::clone(&lifecycle),
+        ));
 
         let outcome = loop {
             tokio::select! {
@@ -1033,9 +1150,23 @@ impl ServerClient {
                 outgoing = outbox_rx.next() => {
                     match outgoing {
                         Some(msg) => {
-                            if let Err(e) = sink.send(msg).await {
-                                warn!("Failed to send to server: {:#}", e);
-                                break ConnectionOutcome::Disconnected;
+                            match tokio::time::timeout(write_timeouts.write, sink.send(msg)).await
+                            {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    warn!("Failed to send to server: {:#}", e);
+                                    lifecycle.settle(CloseReason::WriteError);
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "A write to the server did not complete within {:?}; \
+                                         the peer is unhealthy",
+                                        write_timeouts.write
+                                    );
+                                    lifecycle.settle(CloseReason::WriteTimeout);
+                                    break ConnectionOutcome::Disconnected;
+                                }
                             }
                         }
                         None => {
@@ -1046,34 +1177,69 @@ impl ServerClient {
                     }
                 }
                 // Command responses from the reading half's lanes.
-                response = resp_rx.recv() => {
+                response = responses_rx.recv() => {
                     match response {
-                        Some(msg) => {
-                            if let Err(e) = sink.send(msg).await {
-                                warn!("Failed to send to server: {:#}", e);
-                                break ConnectionOutcome::Disconnected;
+                        Some(frame) => {
+                            // The exact byte claim is released after the write,
+                            // not when the frame was handed over.
+                            let nession_runtime::outbound::QueuedFrame {
+                                message, budget, ..
+                            } = frame;
+                            let written = tokio::time::timeout(
+                                write_timeouts.write,
+                                sink.send(message.into_tungstenite()),
+                            )
+                            .await;
+                            drop(budget);
+                            match written {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    warn!("Failed to send to server: {:#}", e);
+                                    lifecycle.settle(CloseReason::WriteError);
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                                Err(_) => {
+                                    lifecycle.settle(CloseReason::WriteTimeout);
+                                    break ConnectionOutcome::Disconnected;
+                                }
                             }
                         }
                         None => {
-                            // Unreachable while this loop holds a `resp_tx` clone;
-                            // kept as a defensive disconnect.
+                            // Unreachable while this loop holds a `responses`
+                            // clone; kept as a defensive disconnect.
                             break ConnectionOutcome::Disconnected;
                         }
                     }
                 }
-                // The reading half ended: its stream closed, or a write to
-                // `resp_tx` failed. Either way this connection is over.
+                // The reading half ended: its stream closed, or the write
+                // deadline settled the connection. Either way it is over.
                 done = read_done_rx.recv() => {
                     break done.unwrap_or(ConnectionOutcome::Disconnected);
                 }
-                // Shutdown: close the socket and stop the supervisor.
+                // Shutdown: close the socket and stop the supervisor. The close
+                // frame is best-effort and bounded; a peer that is not reading
+                // must not hold the supervisor open.
                 _ = shutdown_rx.recv() => {
                     info!("Shutdown signal received");
-                    let _ = sink.send(WsMessage::Close(None)).await;
+                    let _ = tokio::time::timeout(
+                        write_timeouts.close,
+                        sink.send(WsMessage::Close(None)),
+                    )
+                    .await;
                     break ConnectionOutcome::Shutdown;
                 }
             }
         };
+
+        // Record why this connection ended if no write path already did. The
+        // read half can then stop even if it is parked on a frame that will
+        // never arrive.
+        if !lifecycle.is_settled() {
+            lifecycle.settle(match outcome {
+                ConnectionOutcome::Shutdown => CloseReason::Shutdown,
+                ConnectionOutcome::Disconnected => CloseReason::PeerClosed,
+            });
+        }
 
         // Stop the reader, however this ended. It owns the lanes, and a reader
         // parked on a full key's queue would otherwise outlive the connection
@@ -1138,8 +1304,9 @@ impl ServerClient {
     async fn read_loop(
         self: Arc<Self>,
         mut stream: WsStreamHalf,
-        responses: mpsc::Sender<WsMessage>,
+        responses: ResponseSender,
         done: mpsc::Sender<ConnectionOutcome>,
+        lifecycle: Arc<ConnectionLifecycle>,
     ) {
         // The lanes this connection reads into, and the only thing that admits
         // to them. Dropped with the loop, which is what ends their tasks.
@@ -1160,7 +1327,15 @@ impl ServerClient {
         );
 
         let outcome = loop {
-            match stream.next().await {
+            // The write half's settlement is a fact this half must act on even
+            // while it is parked on a stream that will never produce another
+            // frame (#4434). Without the race, a stalled write left the reader,
+            // the lanes and the connection task alive until TCP gave up.
+            let next = tokio::select! {
+                _ = lifecycle.wait_cancelled() => break ConnectionOutcome::Disconnected,
+                next = stream.next() => next,
+            };
+            match next {
                 Some(Ok(WsMessage::Text(text))) => {
                     // Decoded here rather than in the task that serves it,
                     // because the unit's execution policy is read from the
@@ -1246,7 +1421,9 @@ impl ServerClient {
                     // ordinary operation is empty — a full one means the
                     // Server is not draining, and a pong it is not reading
                     // would not have kept the connection alive either.
-                    if responses.send(WsMessage::Pong(data)).await.is_err() {
+                    // Control has its own reserved capacity, so a pong never
+                    // waits behind a large response.
+                    if responses.send_control(WsMessage::Pong(data)).is_err() {
                         break ConnectionOutcome::Disconnected;
                     }
                 }
@@ -1304,7 +1481,7 @@ impl ServerClient {
     async fn handle_server_message(
         &self,
         msg: ProtocolMessage<serde_json::Value>,
-        responses: &mpsc::Sender<WsMessage>,
+        responses: &ResponseSender,
     ) -> Result<()> {
         // Extension dispatch first, decided by the registry rather than by the
         // message type's spelling.
@@ -6063,7 +6240,7 @@ mod versioned_routing {
     /// Which body ran, as the error it returned.
     async fn ran(payload: serde_json::Value) -> String {
         let client = unconnected_client();
-        let (responses, _rx) = mpsc::channel(1);
+        let (responses, _rx) = ResponseSender::test_channel();
         dispatch_core(&client, &message(payload), &responses)
             .await
             .expect_err("the synthetic bodies answer with an error so the arm is visible")
@@ -6158,7 +6335,7 @@ mod versioned_routing {
         // run an arm either, or a message written for a generation this table
         // has never heard of would be handled as whichever arm matched first.
         let client = unconnected_client();
-        let (responses, _rx) = mpsc::channel(1);
+        let (responses, _rx) = ResponseSender::test_channel();
         let outcome = dispatch_core(
             &client,
             &message(serde_json::json!({ "contract_version": 99 })),

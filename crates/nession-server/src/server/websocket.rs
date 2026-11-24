@@ -807,7 +807,6 @@ async fn handle_ws_stream(
     ctx: ServerContext,
     pending_auth: tokio::sync::OwnedSemaphorePermit,
 ) -> anyhow::Result<()> {
-    use futures_util::SinkExt;
     use futures_util::StreamExt;
 
     let ServerContext {
@@ -881,8 +880,14 @@ async fn handle_ws_stream(
     // The ping is written directly rather than queued: it is connection control,
     // and a keepalive that a saturated business queue can starve is not a
     // keepalive. `select!` polls both arms regardless of whether the other is
-    // parked, so a stalled business frame never delays a ping.
+    // parked, so a stalled business frame never delays a ping. The one thing
+    // that could keep the ping from running was an unbounded `write.send`; each
+    // write now has a finite deadline, and a timeout settles the connection so
+    // the reader stops too (#4434).
     let ping_period = std::time::Duration::from_secs(heartbeat_interval_secs.max(1));
+    let lifecycle = nession_runtime::lifecycle::ConnectionLifecycle::new(0);
+    let write_timeouts = nession_runtime::lifecycle::WriteTimeouts::default();
+    let writer_lifecycle = std::sync::Arc::clone(&lifecycle);
     let mut relay_writer = RelayWriterGuard(tokio::spawn(async move {
         let mut ping_ticker = tokio::time::interval(ping_period);
         ping_ticker.tick().await; // consume the immediate first tick
@@ -892,13 +897,28 @@ async fn handle_ws_stream(
                     match maybe_msg {
                         Some(frame) => {
                             // Split so the budget claim is released *after* the
-                            // write, not before it: `budget` stays alive across
-                            // the await and drops at the end of the arm.
-                            let crate::server::outbound::QueuedFrame { message, budget } = frame;
-                            let written = write.send(message).await;
+                            // write, not before it: the permits stay alive
+                            // across the await and drop at the end of the arm.
+                            let crate::server::outbound::QueuedFrame {
+                                message, budget, ..
+                            } = frame;
+                            let written = nession_runtime::lifecycle::write_frame(
+                                &mut write,
+                                message,
+                                write_timeouts.write,
+                            )
+                            .await;
                             drop(budget);
-                            if let Err(e) = written {
-                                error!("Failed to send WebSocket message: {}", e);
+                            if let Err(failure) = written {
+                                error!("Failed to send WebSocket message: {failure}");
+                                writer_lifecycle.settle(match failure {
+                                    nession_runtime::lifecycle::WriteFailure::Timeout => {
+                                        nession_runtime::lifecycle::CloseReason::WriteTimeout
+                                    }
+                                    nession_runtime::lifecycle::WriteFailure::Sink(_) => {
+                                        nession_runtime::lifecycle::CloseReason::WriteError
+                                    }
+                                });
                                 break;
                             }
                         }
@@ -906,8 +926,19 @@ async fn handle_ws_stream(
                     }
                 }
                 _ = ping_ticker.tick() => {
-                    if write.send(WsFrame::Ping(Vec::new())).await.is_err() {
-                        // Connection closed — expected during shutdown, no need to log.
+                    let written = nession_runtime::lifecycle::write_frame(
+                        &mut write,
+                        WsFrame::Ping(Vec::new()),
+                        write_timeouts.write,
+                    )
+                    .await;
+                    if let Err(failure) = written {
+                        // A ping that times out is the clearest statement that
+                        // the peer's TCP path is not moving.
+                        debug!("WebSocket ping failed: {failure}");
+                        writer_lifecycle.settle(
+                            nession_runtime::lifecycle::CloseReason::WriteTimeout,
+                        );
                         break;
                     }
                 }
@@ -956,13 +987,36 @@ async fn handle_ws_stream(
             if handler.is_authenticated() {
                 pending_auth.take();
             }
+            // The reader races its own stream against the writer's settlement.
+            // Without this, a reader parked on a frame that will never come
+            // kept the connection (and its tasks and registry entry) alive
+            // after the writer had already declared the peer unhealthy
+            // (#4434; the same shape as #2179).
             let next = if handler.is_authenticated() {
-                read.next().await
+                tokio::select! {
+                    _ = lifecycle.wait_cancelled() => {
+                        close_reason = "write-side-closed";
+                        break;
+                    }
+                    next = read.next() => next,
+                }
             } else {
-                match tokio::time::timeout_at(auth_deadline, read.next()).await {
+                match tokio::select! {
+                    _ = lifecycle.wait_cancelled() => {
+                        close_reason = "write-side-closed";
+                        break;
+                    }
+                    next = tokio::time::timeout_at(auth_deadline, read.next()) => next,
+                } {
                     Ok(next) => next,
                     Err(_) => {
                         close_reason = "auth-timeout";
+                        // The deadline's verdict must reach the peer, not only
+                        // this process. A control Close is written by the writer
+                        // even though the connection is ending, so the peer
+                        // observes the close promptly instead of waiting for the
+                        // teardown's bounded writer wait.
+                        let _ = sender.send_control(WsFrame::Close(None));
                         break;
                     }
                 }
@@ -1291,6 +1345,18 @@ async fn handle_ws_stream(
 
     info!(close_reason, "WebSocket connection ended");
 
+    // Record the read half's verdict if the write half did not already. The
+    // first observation wins, which is what keeps the close line, the write
+    // deadline and a peer EOF from disagreeing about why this connection ended.
+    if !lifecycle.is_settled() {
+        lifecycle.settle(match close_reason {
+            "peer-closed" | "client-close" => nession_runtime::lifecycle::CloseReason::PeerClosed,
+            "outbound-closed" => nession_runtime::lifecycle::CloseReason::LocalClose,
+            "write-side-closed" => nession_runtime::lifecycle::CloseReason::Aborted,
+            _ => nession_runtime::lifecycle::CloseReason::ReadError,
+        });
+    }
+
     // End the work still in flight, before anything below waits on a writer it
     // may be parked in.
     //
@@ -1360,6 +1426,15 @@ async fn handle_ws_stream(
     // verified web client's registry subscriber also holds one — that clone is
     // not this connection's to drop — which is what the bounded wait and abort
     // are still for.
+    // Do not mark the outbound closed here. The classified receiver owns an
+    // `Arc` of the same cell that holds the class senders, so dropping the
+    // sender clones alone never closes a channel; the writer waits out the
+    // bounded grace below and is aborted. That bounded wait is deliberate: an
+    // Agent restart re-registers and re-reports its sessions a few seconds
+    // after the Relay's Agent leg ends, and closing the browser socket
+    // immediately makes its reconnect land in the stale-session window. The
+    // unauthenticated deadline does not rely on this wait — it writes an
+    // explicit control Close.
     drop(handler);
     drop(sender);
     if tokio::time::timeout(terminal_stall_grace, &mut relay_writer.0)
@@ -1817,6 +1892,32 @@ where
 /// same adapter edge as [`AgentRead`].
 struct AgentWrite<AS>(AS);
 
+/// How long one Relay→Agent write may take before the relay declares the Agent
+/// leg unhealthy (`#4434`). The Agent leg already has an idle timeout for
+/// *reads* (#4065); this is the matching bound for a socket write the peer has
+/// stopped draining.
+const RELAY_WRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+
+impl<AS> AgentWrite<AS>
+where
+    AS: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
+    AS::Error: std::fmt::Display,
+{
+    /// Send one frame under a finite deadline.
+    ///
+    /// The relay's Agent leg had no write deadline: a peer that stopped reading
+    /// could park `forward_client_to_agent` (and therefore the browser leg's
+    /// input) indefinitely. A timeout is the same terminal condition as a sink
+    /// error, and the caller breaks the relay on either.
+    async fn send_bounded(
+        &mut self,
+        frame: WsFrame,
+        deadline: std::time::Duration,
+    ) -> Result<(), nession_runtime::lifecycle::WriteFailure> {
+        nession_runtime::lifecycle::write_frame(self, frame, deadline).await
+    }
+}
+
 impl<AS> futures_util::Sink<WsFrame> for AgentWrite<AS>
 where
     AS: futures_util::Sink<tokio_tungstenite::tungstenite::Message> + Unpin,
@@ -1972,7 +2073,7 @@ where
         "payload": { "auth_token": agent_token, "client_id": client_id },
     });
     agent_write
-        .send(WsFrame::Text(auth_msg.to_string()))
+        .send_bounded(WsFrame::Text(auth_msg.to_string()), RELAY_WRITE_DEADLINE)
         .await?;
     let auth_response = tokio::time::timeout(
         std::time::Duration::from_secs(10),
@@ -2056,7 +2157,7 @@ where
         "payload": attach_payload,
     });
     agent_write
-        .send(WsFrame::Text(attach_msg.to_string()))
+        .send_bounded(WsFrame::Text(attach_msg.to_string()), RELAY_WRITE_DEADLINE)
         .await?;
 
     // Wait for the reply *to this request*, forwarding anything the agent says
@@ -2691,8 +2792,6 @@ where
     AS: futures_util::Sink<WsFrame> + Unpin,
     AS::Error: std::fmt::Display,
 {
-    use futures_util::SinkExt as _;
-
     let frames = std::mem::take(burst);
 
     // One frame needs no merge, and the common case is a burst of one.
@@ -2705,7 +2804,13 @@ where
             // that could not be folded in.
             None => {
                 for frame in frames {
-                    if let Err(e) = agent_write.send(frame).await {
+                    if let Err(e) = nession_runtime::lifecycle::write_frame(
+                        agent_write,
+                        frame,
+                        RELAY_WRITE_DEADLINE,
+                    )
+                    .await
+                    {
                         error!("Failed to forward client message to agent: {}", e);
                         return false;
                     }
@@ -2716,13 +2821,17 @@ where
     };
 
     match merged {
-        Some(frame) => match agent_write.send(frame).await {
-            Ok(()) => true,
-            Err(e) => {
-                error!("Failed to forward client message to agent: {}", e);
-                false
+        Some(frame) => {
+            match nession_runtime::lifecycle::write_frame(agent_write, frame, RELAY_WRITE_DEADLINE)
+                .await
+            {
+                Ok(()) => true,
+                Err(e) => {
+                    error!("Failed to forward client message to agent: {}", e);
+                    false
+                }
             }
-        },
+        }
         None => true,
     }
 }
@@ -2783,7 +2892,6 @@ where
     AS: futures_util::Sink<WsFrame> + Unpin,
     AS::Error: std::fmt::Display,
 {
-    use futures_util::SinkExt;
     use futures_util::StreamExt;
 
     // 60 s in the past, so the first input of a relay is never throttled: the
@@ -2820,7 +2928,13 @@ where
                 // `agent_to_client` side a frame to reset its idle deadline.
                 // A failure here is the same terminal condition as any other
                 // `agent_write` failure — the writer is gone.
-                if let Err(e) = agent_write.send(WsFrame::Ping(Vec::new())).await {
+                if let Err(e) = nession_runtime::lifecycle::write_frame(
+                    agent_write,
+                    WsFrame::Ping(Vec::new()),
+                    RELAY_WRITE_DEADLINE,
+                )
+                .await
+                {
                     error!("Failed to send agent-leg probe ping: {}", e);
                     break;
                 }
@@ -2870,7 +2984,10 @@ where
                 // An actual Agent-directed application message can defer the
                 // next probe briefly; browser keepalives never can.
                 probe_ticker.reset();
-                if let Err(e) = agent_write.send(msg).await {
+                if let Err(e) =
+                    nession_runtime::lifecycle::write_frame(agent_write, msg, RELAY_WRITE_DEADLINE)
+                        .await
+                {
                     error!("Failed to forward client message to agent: {}", e);
                     break;
                 }
@@ -2885,7 +3002,10 @@ where
         // This is the common path and the one that has to stay zero-latency.
         if last_terminal_input.elapsed() >= input_throttle {
             last_terminal_input = std::time::Instant::now();
-            if let Err(e) = agent_write.send(msg).await {
+            if let Err(e) =
+                nession_runtime::lifecycle::write_frame(agent_write, msg, RELAY_WRITE_DEADLINE)
+                    .await
+            {
                 error!("Failed to forward client message to agent: {}", e);
                 break;
             }
@@ -2956,7 +3076,13 @@ where
                         if !flush_burst(agent_write, &mut burst).await {
                             break 'forward;
                         }
-                        if let Err(e) = agent_write.send(m).await {
+                        if let Err(e) = nession_runtime::lifecycle::write_frame(
+                            agent_write,
+                            m,
+                            RELAY_WRITE_DEADLINE,
+                        )
+                        .await
+                        {
                             error!("Failed to forward client message to agent: {}", e);
                             break 'forward;
                         }
