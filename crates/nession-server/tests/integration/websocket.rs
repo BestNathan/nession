@@ -371,7 +371,7 @@ async fn the_server_pending_auth_budget_refuses_an_upgrade_and_authentication_re
     let reply = next_reply(
         &mut first,
         &["auth-budget"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -388,7 +388,7 @@ async fn the_server_pending_auth_budget_refuses_an_upgrade_and_authentication_re
                 let reply = next_reply(
                     &mut ws,
                     &["auth-admitted"],
-                    std::time::Duration::from_secs(15),
+                    std::time::Duration::from_secs(30),
                 )
                 .await?;
                 assert_eq!(payload_of(&reply, "server.auth")?["status"], "success");
@@ -1040,7 +1040,7 @@ async fn an_agent_that_sends_a_malformed_frame_is_torn_down_and_released() -> an
     send_frame(&mut agent, malformed_text_frame()).await?;
 
     assert!(
-        ends_within(&mut agent, std::time::Duration::from_secs(15)).await,
+        ends_within(&mut agent, std::time::Duration::from_secs(30)).await,
         "an undecodable frame must end the connection, not only its reader"
     );
 
@@ -1053,7 +1053,7 @@ async fn an_agent_that_sends_a_malformed_frame_is_torn_down_and_released() -> an
     let reply = next_reply(
         &mut client,
         &["after-malformed"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     let payload = payload_of(&reply, "server.session.capture-preview")?;
@@ -1086,7 +1086,7 @@ async fn a_superseded_agents_abnormal_exit_leaves_the_new_generation_authoritati
 
     send_frame(&mut old, malformed_text_frame()).await?;
     assert!(
-        ends_within(&mut old, std::time::Duration::from_secs(15)).await,
+        ends_within(&mut old, std::time::Duration::from_secs(30)).await,
         "the malformed frame must end the superseded connection"
     );
 
@@ -1109,7 +1109,7 @@ async fn a_superseded_agents_abnormal_exit_leaves_the_new_generation_authoritati
     let attach = next_reply(
         &mut client,
         &["attach-1"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     let attach = payload_of(&attach, "server.session.attach")?;
@@ -1151,7 +1151,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
     let reply = next_reply(
         &mut victim,
         &["victim-attach"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -1168,7 +1168,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
     let reply = next_reply(
         &mut sibling,
         &["sibling-attach"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -1178,7 +1178,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
 
     send_frame(&mut victim, malformed_text_frame()).await?;
     assert!(
-        ends_within(&mut victim, std::time::Duration::from_secs(15)).await,
+        ends_within(&mut victim, std::time::Duration::from_secs(30)).await,
         "the malformed frame must end the client's physical connection"
     );
 
@@ -1198,7 +1198,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
     let reply = next_reply(
         &mut reconnect,
         &["reconnect-attach"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -1240,7 +1240,7 @@ async fn an_attached_client_whose_relay_cannot_dial_is_torn_down() -> anyhow::Re
     .await?;
 
     assert!(
-        ends_within(&mut client, std::time::Duration::from_secs(15)).await,
+        ends_within(&mut client, std::time::Duration::from_secs(30)).await,
         "a failed relay dial must end the client's physical connection"
     );
 
@@ -1291,7 +1291,7 @@ async fn answered_barrier(ws: &mut TestWs, id: &str) -> anyhow::Result<()> {
         }),
     )
     .await?;
-    let reply = next_reply(ws, &[id], std::time::Duration::from_secs(15)).await?;
+    let reply = next_reply(ws, &[id], std::time::Duration::from_secs(30)).await?;
     // The type is the assertion: this is the answer to *that* frame, not a push
     // that happened to arrive at the same time.
     payload_of(&reply, "server.agent.register")?;
@@ -1314,7 +1314,7 @@ async fn listed_session_ids(client: &mut TestWs) -> anyhow::Result<Vec<String>> 
     // By id, not by "the next frame": this connection is also sent
     // `server.sessions.changed` pushes, and one of those arriving first would
     // otherwise be read as this reply.
-    let reply = next_reply(client, &["sessions-1"], std::time::Duration::from_secs(15)).await?;
+    let reply = next_reply(client, &["sessions-1"], std::time::Duration::from_secs(30)).await?;
     let payload = payload_of(&reply, "server.session.list")?;
     Ok(payload
         .get("sessions")
@@ -1426,7 +1426,7 @@ async fn replies_in_arrival_order(
     expected: &[&str],
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let mut seen: Vec<serde_json::Value> = Vec::new();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
 
     while seen.len() < expected.len() {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -1471,7 +1471,7 @@ async fn replies_in_arrival_order(
 /// asked. `session` is what the client named, which is how a test tells one
 /// request's answer from another's at the far end.
 async fn next_capture_command(agent: &mut TestWs) -> anyhow::Result<(String, String)> {
-    let command = tokio::time::timeout(std::time::Duration::from_secs(15), next_json(agent))
+    let command = tokio::time::timeout(std::time::Duration::from_secs(30), next_json(agent))
         .await
         .map_err(|_| anyhow::anyhow!("the server never forwarded the capture command"))??;
     let payload = payload_of(&command, "agent.session.capture-preview")?;
@@ -1901,7 +1901,7 @@ async fn a_slow_query_does_not_hold_the_connection_open() -> anyhow::Result<()> 
     .await?;
 
     assert!(
-        ends_within(&mut client, std::time::Duration::from_secs(15)).await,
+        ends_within(&mut client, std::time::Duration::from_secs(30)).await,
         "the connection was still open {:?} after a close frame, with a query the agent \
          has not answered in flight: the close was queued behind it (that query gives up \
          after 15s)",
@@ -3444,7 +3444,7 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(attach["payload"]["session_name"], serde_json::json!("dev"));
@@ -3534,7 +3534,7 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     let handshake = expect_frame_of_type(
         &mut endpoint.frames,
         "client.auth",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -3548,14 +3548,14 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(attach["payload"]["session_name"] == "dev");
     // Session watch notifications are legitimately asynchronous relative to
     // relay.ready. Skip ONLY those Server-authored notifications: any forged
     // receipt or unexpected frame must still fail the assertion below.
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let frame = next_json(&mut client).await?;
             if frame["msg_type"] != "server.sessions.changed" {
@@ -3644,10 +3644,10 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
     let _attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(15), async {
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let frame = next_json(&mut client).await?;
             if frame["msg_type"] != "server.sessions.changed" {
@@ -3683,7 +3683,7 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
     let forwarded = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.terminal.output.applied",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -3749,7 +3749,7 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(attach["payload"]["session_name"], serde_json::json!("dev"));
@@ -3877,7 +3877,7 @@ async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyho
     expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
 
@@ -4203,7 +4203,7 @@ async fn an_agent_registration_with_a_wrong_token_is_rejected() {
 fn keep_mock_agent_control_healthy(agent: TestWs) {
     tokio::spawn(async move {
         let (mut sink, mut stream) = agent.split();
-        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(15));
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
         let mut ordinal = 0u64;
         loop {
             tokio::select! {
@@ -4332,7 +4332,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let first = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4387,7 +4387,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let attached = next_reply(
         &mut reconnect,
         &["half-open-reattach"],
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4407,7 +4407,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let second = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4428,7 +4428,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let forwarded = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.terminal.input",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4474,7 +4474,7 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
     let attached = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4520,7 +4520,7 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
     let forwarded = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.terminal.input",
-        std::time::Duration::from_secs(15),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(

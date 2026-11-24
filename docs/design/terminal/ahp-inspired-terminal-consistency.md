@@ -308,7 +308,42 @@ behaviour on real Relay/P2P routes beyond the deterministic cases above
 remains covered by the separate full-stack integration tests, not this
 measurement.
 
-## 10. External references and non-goals
+## 10. Stream classes and resource fences (#4435)
+
+The live wires are classified by what their bytes mean to a stream, not by the
+Protocol Kernel category. The classification and the budgets it governs live in
+`crates/nession-agent/src/stream.rs`.
+
+| Class | Wires | Contract |
+| --- | --- | --- |
+| Reliable input | `agent.terminal.input` | Ordered, loss-intolerant. A frame is admitted against a finite window before any PTY write; an overflow is an explicit refusal with the current input cursor restated, never a silent drop or partial write. |
+| Recoverable output | `agent.terminal.output`, recorded authoritative resize | Ordered. Loss is detected as a gap and repaired through the existing replay/checkpoint path; a slow subscriber is isolated, not a reason to stall the PTY or a healthy subscriber. |
+| Latest state | heartbeat, address/session updates, legacy level resize | Coalesced per `(incarnation, key)`. Only a newer generation replaces a pending level; an incompatible incarnation requires a resync rather than a merge. The central Agent outbox remains the canonical queue. |
+| Stream flow control | input ACK, parser progress, reconcile notice | Per-stream bookkeeping, never general RPC work and never answered as a unit. |
+| Control | attach/detach, lease acquire, stream resume, resize request | Dependency-carrying; the Session owner serializes or rejects stale frames. |
+
+Three budgets stay independent: the per-subscriber window (16 384 frames /
+2 MiB) and the input window (128 chunks / 1 MiB, mirroring the browser's
+measured pending queue); the Session replay ring (4 096 events / 512 KiB /
+300 s); and the connection's general RPC reply/terminal lanes. A stream
+admission never waits for, and never consumes, an RPC permit, so the physical
+reader is not parked on a stream decision.
+
+Admission captures the resource incarnation: the stream epoch, the input epoch
+and the lease generation. After the backend await the owner re-checks the
+incarnation before advancing the input cursor or recording a resize, so a
+kill/recreate cannot make a retired resource's input or resize enter its
+successor's timeline. A lease generation that is **stated** is always enforced;
+the legacy `control_generation: None` tolerance is retained for the
+compatibility window, and absence continues to mean "a sender from before the
+field existed", not "skip the check".
+
+The Relay remains a forwarding adapter. It preserves input batching/order and
+negotiated capabilities, and it never synthesizes a frontier, epoch,
+generation, subscriber identity or reconcile notice. P2P and Relay therefore
+observe one Agent-assigned stream timeline.
+
+## 11. External references and non-goals
 
 - [Microsoft AHP Terminal Channel](https://github.com/microsoft/agent-host-protocol/blob/main/docs/specification/terminal-channel.md) is a reference for resource/subscribe/reconciliation semantics, not a drop-in VT checkpoint or global Channel Registry requirement.
 - [VS Code terminal service](https://github.com/microsoft/vscode/blob/main/src/vs/platform/terminal/node/ptyService.ts) and [terminal instance](https://github.com/microsoft/vscode/blob/main/src/vs/workbench/contrib/terminal/browser/terminalInstance.ts) motivate parser-applied acknowledgement and bounded PTY flow control.

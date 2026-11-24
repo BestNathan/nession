@@ -47,6 +47,7 @@ use crate::session::terminal::state::InputSequence;
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
+use crate::stream::OutboundStreamClass;
 use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
@@ -181,7 +182,10 @@ fn spawn_output_forwarder(
                 // this forwarder's to act on twice — another session's
                 // forwarder may reach it first — so the connection is closed
                 // and this task ends with it.
-                match outbound.send_terminal(WsFrame::Text(json)).await {
+                match outbound
+                    .send_for_class(OutboundStreamClass::OrderedOutput, WsFrame::Text(json))
+                    .await
+                {
                     Ok(()) => {}
                     Err(OutboundError::Stalled) => {
                         outbound.close();
@@ -427,7 +431,9 @@ async fn send_terminal_resize_msg(
         return true;
     };
     !matches!(
-        outbound.try_send_state(WsFrame::Text(json)),
+        outbound
+            .send_for_class(OutboundStreamClass::LatestState, WsFrame::Text(json))
+            .await,
         Err(OutboundError::Closed)
     )
 }
@@ -462,7 +468,11 @@ async fn send_recorded_resize_msg(
     else {
         return;
     };
-    if outbound.send_terminal(WsFrame::Text(json)).await.is_err() {
+    if outbound
+        .send_for_class(OutboundStreamClass::OrderedOutput, WsFrame::Text(json))
+        .await
+        .is_err()
+    {
         debug!(
             "session {session_name}: the resize at seq {} did not reach a peer that stopped \
              draining; the reply that follows carries the verdict",
@@ -584,7 +594,10 @@ async fn send_atomic_output_prefix(
     let Ok(json) = serde_json::to_string(&msg) else {
         return false;
     };
-    match outbound.send_attach_response(WsFrame::Text(json)).await {
+    match outbound
+        .send_for_class(OutboundStreamClass::AttachHistory, WsFrame::Text(json))
+        .await
+    {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             warn!("stream cut: client stalled on atomic prefix for {session_name}");
@@ -767,7 +780,10 @@ async fn send_bootstrap(
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
     };
-    match outbound.send_attach_response(WsFrame::Text(json)).await {
+    match outbound
+        .send_for_class(OutboundStreamClass::AttachHistory, WsFrame::Text(json))
+        .await
+    {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             // The honest verdict, and the same one the live-output task takes:
@@ -1868,6 +1884,16 @@ impl Frame {
                             verdict = ?outcome.verdict,
                             "terminal progress recorded without a reply"
                         );
+                        // Stream observation hook (#4435): a reconcile event
+                        // names its reason and required frontier. It is not a
+                        // wire frame; the exception-only notice below is.
+                        if let Some(event) = outcome.event {
+                            debug!(
+                                session = %payload.session_name,
+                                event = ?event,
+                                "terminal stream event"
+                            );
+                        }
                         let Some(notice) = outcome.notice else {
                             return true;
                         };
@@ -1885,7 +1911,11 @@ impl Frame {
                         )) else {
                             return true;
                         };
-                        match notice.outbound.send_terminal(WsFrame::Text(json)).await {
+                        match notice
+                            .outbound
+                            .send_for_class(OutboundStreamClass::FlowControl, WsFrame::Text(json))
+                            .await
+                        {
                             Ok(()) => true,
                             Err(_) => false,
                         }
@@ -3026,6 +3056,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                         "terminal input requires an active controller lease",
                     ),
                     Err(InputRejected::InvalidBase64(error)) => ctx.err("decode_error", &error),
+                    // Explicit refusal: the cursor was restated immediately
+                    // before this reply, so the sender can resume rather than
+                    // replaying blindly.
+                    Err(InputRejected::StreamOverflow(overflow)) => {
+                        ctx.err("input_overflow", &overflow.to_string())
+                    }
                     Err(InputRejected::Write(error)) => ctx.err("write_error", &error.to_string()),
                     Err(InputRejected::StateChanged) => ctx.err(
                         "write_error",
@@ -3101,6 +3137,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(ResizeRejected::NotController) => ctx.err(
                         "not_controller",
                         "terminal resize requires an active controller lease",
+                    ),
+                    // The stream was killed/recreated across the backend
+                    // resize; the size belonged to the retired resource and is
+                    // deliberately not recorded into its successor.
+                    Err(ResizeRejected::SessionReplaced) => ctx.err(
+                        "session_replaced",
+                        "the session was replaced while the resize was applied",
                     ),
                     Err(ResizeRejected::Backend(error)) => {
                         ctx.err("resize_error", &error.to_string())

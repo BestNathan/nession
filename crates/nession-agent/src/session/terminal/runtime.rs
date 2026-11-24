@@ -29,6 +29,7 @@ use crate::server::outbound::P2pOutbound;
 use crate::server::output_ack::SubscriberOutputAck;
 use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict};
 use crate::session::terminal::state as session_terminal;
+use crate::stream::{ReconcileReason, StreamEvent};
 use crate::tmux::session::TmuxSession;
 
 /// One Session's attached terminal backend.
@@ -194,14 +195,14 @@ pub(crate) struct AttachedSession {
 /// `DEFAULT_TERMINAL_STALL_GRACE`, and the queue's own byte reservation stops
 /// it before memory does. A subscriber evicted here must also actually *end* —
 /// see `P2pOutbound::close` on why the read loop races `wait_closed`.
-pub(crate) const SUBSCRIBER_QUEUE_SLOTS: usize = 16_384;
+pub(crate) const SUBSCRIBER_QUEUE_SLOTS: usize = crate::stream::SUBSCRIBER_WINDOW_FRAMES;
 /// Independent byte cap for the per-subscriber mpsc queue (#1983).
 ///
 /// This is the bound a slow consumer actually reaches, and it is deliberately
 /// small enough to be a real verdict: 2 MiB is tens of thousands of terminal
 /// lines. A client that accumulates that much has stopped reading in any
 /// useful sense.
-pub(crate) const SUBSCRIBER_QUEUE_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const SUBSCRIBER_QUEUE_BYTES: usize = crate::stream::SUBSCRIBER_WINDOW_BYTES;
 
 /// Fan one chunk of terminal output out to every subscriber of a session.
 ///
@@ -562,6 +563,9 @@ impl std::fmt::Debug for ReconcileNotice {
 pub(crate) struct OutputProgressOutcome {
     pub(crate) verdict: OutputAckVerdict,
     pub(crate) notice: Option<ReconcileNotice>,
+    /// The stream observation this report produced, if any (#4435). The
+    /// handler logs it; it is not a wire frame and never replaces `notice`.
+    pub(crate) event: Option<StreamEvent>,
 }
 
 /// Apply one subscriber's one-way parser-progress report (#2877).
@@ -647,6 +651,7 @@ pub(crate) fn accept_output_progress(
                     Ok(OutputProgressOutcome {
                         verdict,
                         notice: None,
+                        event: None,
                     })
                 }
                 // The claimed prefix passed the cursor check but the issued
@@ -660,18 +665,24 @@ pub(crate) fn accept_output_progress(
                         TerminalReconcileAction::Resume,
                         peer,
                     ),
+                    event: Some(StreamEvent::reconcile(
+                        ReconcileReason::ParserAheadOfIssued,
+                        head_seq,
+                    )),
                 }),
             }
         }
         OutputAckVerdict::Duplicate => Ok(OutputProgressOutcome {
             verdict,
             notice: None,
+            event: None,
         }),
         // A retired subscription's report is not a challenge to the binding
         // that replaced it.
         OutputAckVerdict::StaleSubscriber => Ok(OutputProgressOutcome {
             verdict,
             notice: None,
+            event: None,
         }),
         OutputAckVerdict::StaleEpoch => Ok(OutputProgressOutcome {
             verdict,
@@ -680,6 +691,10 @@ pub(crate) fn accept_output_progress(
                 TerminalReconcileAction::Reattach,
                 peer,
             ),
+            event: Some(StreamEvent::reconcile(
+                ReconcileReason::EpochChanged,
+                head_seq,
+            )),
         }),
         OutputAckVerdict::StaleRenderer => Ok(OutputProgressOutcome {
             verdict,
@@ -688,6 +703,10 @@ pub(crate) fn accept_output_progress(
                 TerminalReconcileAction::Reattach,
                 peer,
             ),
+            event: Some(StreamEvent::reconcile(
+                ReconcileReason::RendererReplaced,
+                head_seq,
+            )),
         }),
         OutputAckVerdict::BeyondIssuedHead => Ok(OutputProgressOutcome {
             verdict,
@@ -696,6 +715,10 @@ pub(crate) fn accept_output_progress(
                 TerminalReconcileAction::Resume,
                 peer,
             ),
+            event: Some(StreamEvent::reconcile(
+                ReconcileReason::ParserAheadOfIssued,
+                head_seq,
+            )),
         }),
         // Invalid identity or a malformed/regressive report fails closed:
         // never credit, never challenge the healthy binding.
@@ -703,6 +726,7 @@ pub(crate) fn accept_output_progress(
             Ok(OutputProgressOutcome {
                 verdict,
                 notice: None,
+                event: None,
             })
         }
     }

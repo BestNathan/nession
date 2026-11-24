@@ -26,9 +26,10 @@ use crate::server::outbound::P2pOutbound;
 use crate::server::output_ack::OutputAckVerdict;
 use crate::server::websocket::{make_error, msg_types, new_message};
 use crate::session::terminal::state::{
-    InputSequence, InputVerdict, SessionControlState, SessionInputState, SessionStreamState,
-    TerminalRole,
+    admit_run, InputSequence, InputVerdict, SessionControlState, SessionInputState,
+    SessionStreamState, TerminalRole,
 };
+use crate::stream::{OutboundStreamClass, StreamOverflow, WindowUnit, INPUT_WINDOW};
 use crate::tmux::session::TmuxSession;
 
 use super::terminal::runtime::{
@@ -318,7 +319,10 @@ impl SessionRegistry {
                 // stalled client's recovery notice.
                 let sent = tokio::time::timeout(
                     std::time::Duration::from_millis(500),
-                    peer.outbound.send_terminal(WsFrame::Text(json.clone())),
+                    peer.outbound.send_for_class(
+                        OutboundStreamClass::OrderedOutput,
+                        WsFrame::Text(json.clone()),
+                    ),
                 )
                 .await;
                 if !matches!(sent, Ok(Ok(()))) {
@@ -552,6 +556,11 @@ impl SessionRegistry {
     /// it. A frame that is a duplicate, a gap or from a stale epoch is not
     /// written, but is still acknowledged with the current cursor — the sender
     /// needs the position to resume from.
+    ///
+    /// A frame that exceeds the finite input window is refused **explicitly**:
+    /// nothing is written, the cursor is restated, and the caller receives
+    /// [`InputRejected::StreamOverflow`]. The check is non-blocking, so the
+    /// physical reader is never parked on stream admission.
     pub(crate) async fn apply_input(
         &self,
         session_name: &str,
@@ -579,6 +588,10 @@ impl SessionRegistry {
             else {
                 return Err(InputRejected::NotController);
             };
+            // The lease generation and the stream/input incarnations are all
+            // captured at admission. The lease is authorized here; a transfer
+            // that lands later cannot make these bytes someone else's because
+            // lease mutations and input share the Session key lane.
             if !session
                 .control
                 .authorize_mutation(&identity, control_generation)
@@ -588,6 +601,7 @@ impl SessionRegistry {
             InputPlan {
                 verdict: session.input.classify(sequence),
                 backend: Arc::clone(&session.backend),
+                stream_epoch: session.stream.epoch,
                 epoch: session.input.epoch,
                 applied_through: session.input.applied_through,
                 generation: session.control.generation,
@@ -595,25 +609,47 @@ impl SessionRegistry {
             }
         };
 
+        // The encoded frame is bounded **before** it is decoded, so a sender
+        // cannot make the Agent allocate its own refusal. Admission is a pure
+        // check: it never waits, and the physical reader is never parked here.
+        if u64::try_from(data_b64.len()).unwrap_or(u64::MAX) > INPUT_WINDOW.max_base64_bytes() {
+            restate_input_cursor(session_name, &plan).await;
+            return Err(InputRejected::StreamOverflow(StreamOverflow {
+                unit: WindowUnit::Bytes,
+                limit: INPUT_WINDOW.bytes,
+                in_use: 0,
+                requested: u64::try_from(data_b64.len().saturating_mul(3) / 4).unwrap_or(u64::MAX),
+            }));
+        }
+
         use base64::Engine;
         let data = base64::engine::general_purpose::STANDARD
             .decode(data_b64)
             .map_err(|error| InputRejected::InvalidBase64(error.to_string()))?;
+
+        // The finite per-stream window, checked against the decoded size before
+        // any write. A refusal restates the cursor, which is the existing
+        // sequence/ACK recovery path; no byte is silently dropped or replayed.
+        if let Err(overflow) = admit_run(plan.verdict, plan.applied_through, data.len()) {
+            restate_input_cursor(session_name, &plan).await;
+            return Err(InputRejected::StreamOverflow(overflow));
+        }
 
         let ack_through = match plan.verdict {
             InputVerdict::Apply { through } => {
                 write_input(&plan.backend, &data)
                     .await
                     .map_err(InputRejected::Write)?;
-                // Only now does the cursor move, and only if the state that
-                // classified this frame still holds it. The key lane serialises
-                // this Session's mutations, so a mismatch means that guarantee
-                // broke and the bytes must not be claimed as applied.
+                // Only now does the cursor move, and only if the resource that
+                // admitted this frame still holds it. The key lane serialises
+                // this Session's mutations, so a mismatch means the Session was
+                // killed, replaced or its stream retired across the write — the
+                // bytes must not be claimed against the replacement.
                 let mut guard = self.lock();
                 let Some(session) = guard.get_mut(session_name) else {
                     return Err(InputRejected::StateChanged);
                 };
-                if session.input.epoch != plan.epoch {
+                if session.input.epoch != plan.epoch || session.stream.epoch != plan.stream_epoch {
                     return Err(InputRejected::StateChanged);
                 }
                 session.input.applied(through);
@@ -661,7 +697,7 @@ impl SessionRegistry {
         _stated_cols: u16,
         rows: u16,
     ) -> Result<ResizeRecorded, ResizeRejected> {
-        let (role, authorized, authorized_generation, backend, terminal_cols) = {
+        let (role, authorized, authorized_generation, backend, terminal_cols, stream_epoch) = {
             let guard = self.lock();
             let Some(session) = guard.get(session_name) else {
                 return Err(ResizeRejected::NotAttached);
@@ -684,6 +720,10 @@ impl SessionRegistry {
                 session.control.generation,
                 Arc::clone(&session.backend),
                 session.terminal_cols,
+                // The resource incarnation this resize is admitted against.
+                // A kill/recreate across the backend await replaces it, and the
+                // replacement must not inherit this timeline event.
+                session.stream.epoch,
             )
         };
         if role == TerminalRole::Observer {
@@ -703,32 +743,41 @@ impl SessionRegistry {
 
         let recorded = {
             let mut guard = self.lock();
-            guard.get_mut(session_name).map(|session| {
-                let position = session.stream.record_resize(
-                    session_name,
-                    cols,
-                    rows,
-                    Some(authorized_generation),
-                );
-                let has_subscriber_queue =
-                    session.peers.iter().any(|peer| peer.output_tx.is_some());
-                let detached = fan_out_recorded_resize(
-                    &mut session.peers,
-                    cols,
-                    rows,
-                    position.0,
-                    position.1,
-                    Some(authorized_generation),
-                );
-                ResizeRecorded {
-                    position: Some(position),
-                    has_subscriber_queue,
-                    detached,
-                    authorized_generation,
-                    cols,
-                    rows,
-                }
-            })
+            match guard.get_mut(session_name) {
+                // Same incarnation that admitted this resize: record it in the
+                // one ordered timeline and fan it out under the producer lock.
+                Some(session) if session.stream.epoch == stream_epoch => Some({
+                    let position = session.stream.record_resize(
+                        session_name,
+                        cols,
+                        rows,
+                        Some(authorized_generation),
+                    );
+                    let has_subscriber_queue =
+                        session.peers.iter().any(|peer| peer.output_tx.is_some());
+                    let detached = fan_out_recorded_resize(
+                        &mut session.peers,
+                        cols,
+                        rows,
+                        position.0,
+                        position.1,
+                        Some(authorized_generation),
+                    );
+                    ResizeRecorded {
+                        position: Some(position),
+                        has_subscriber_queue,
+                        detached,
+                        authorized_generation,
+                        cols,
+                        rows,
+                    }
+                }),
+                // A replacement Session owns the name. The size change applied
+                // to the *old* backend; publishing it here would write a stale
+                // generation into the replacement's timeline (SC-03).
+                Some(_) => return Err(ResizeRejected::SessionReplaced),
+                None => None,
+            }
         };
         let recorded = recorded.unwrap_or(ResizeRecorded {
             position: None,
@@ -825,6 +874,9 @@ pub(crate) enum SubscribeRejected {
 struct InputPlan {
     verdict: InputVerdict,
     backend: super::terminal::runtime::SharedBackend,
+    /// The stream incarnation the frame was admitted under; a replacement
+    /// resource must not receive its cursor advance.
+    stream_epoch: u64,
     epoch: u64,
     applied_through: u64,
     generation: u64,
@@ -840,6 +892,10 @@ pub(crate) enum InputRejected {
     NotController,
     /// The base64 payload is not bytes.
     InvalidBase64(String),
+    /// The frame exceeded this stream's finite input window. Nothing was
+    /// written and the current cursor was restated, so the sender resumes from
+    /// a position the Agent actually holds.
+    StreamOverflow(StreamOverflow),
     /// The backend write failed; the cursor did not move.
     Write(anyhow::Error),
     /// The backend took the bytes, but this Session's input state changed
@@ -848,6 +904,7 @@ pub(crate) enum InputRejected {
 }
 
 /// What one resize recorded.
+#[derive(Debug)]
 pub(crate) struct ResizeRecorded {
     /// The stream position it was recorded at, or `None` when the Session
     /// ended across the backend resize.
@@ -876,6 +933,10 @@ pub(crate) enum ResizeRejected {
     Observer,
     /// The sender does not hold the ControlLease generation it claimed.
     NotController,
+    /// The Session was killed/recreated across the backend resize. The size
+    /// applied to the retired resource; it must not enter the successor's
+    /// ordered stream.
+    SessionReplaced,
     /// The attached backend refused the resize.
     Backend(anyhow::Error),
 }
@@ -902,6 +963,24 @@ fn control_changed(
     }
 }
 
+/// Restate the cursor a refused input frame did not move (#4435).
+///
+/// A refusal is only recoverable if the sender learns the position to resume
+/// from; this is the same `agent.terminal.input.ack` notification that every
+/// other verdict produces, sent before the explicit error reply.
+async fn restate_input_cursor(session_name: &str, plan: &InputPlan) {
+    notify_input_ack(
+        &plan.peers,
+        TerminalInputAckPayload {
+            session_name: session_name.to_string(),
+            input_epoch: plan.epoch,
+            applied_through: plan.applied_through,
+            control_generation: Some(plan.generation),
+        },
+    )
+    .await;
+}
+
 /// Tell a Session's peers where its input cursor now stands (#1307).
 ///
 /// The fact is about the *session*, not about one connection, so it goes to
@@ -916,11 +995,13 @@ async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayloa
     for peer in peers {
         // Input ACK is flow control for this exchange, not live terminal
         // output: it must be written before the input request's `ok` reply, so
-        // it shares the response class's FIFO (#4434). It is still
-        // non-dropping and still bounded by the terminal stall grace.
+        // the class seam maps it onto the response FIFO (#4434/#4435).
         let _ = peer
             .outbound
-            .send_input_ack(WsFrame::Text(json.clone()))
+            .send_for_class(
+                OutboundStreamClass::FlowControl,
+                WsFrame::Text(json.clone()),
+            )
             .await;
     }
 }
@@ -931,9 +1012,14 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
         return;
     };
     for peer in peers {
+        // A lease change is stream authority bookkeeping: non-dropping, with
+        // the same bounded stall verdict the previous terminal-lane send had.
         let _ = peer
             .outbound
-            .send_terminal(WsFrame::Text(json.clone()))
+            .send_for_class(
+                OutboundStreamClass::FlowControl,
+                WsFrame::Text(json.clone()),
+            )
             .await;
     }
 }
@@ -1122,6 +1208,462 @@ mod tests {
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
             vec![(88, 40)]
+        );
+    }
+
+    // ── #4435 stream admission and resource fences ──────────────────────────
+
+    struct CountingWrite {
+        writes: Arc<StdMutex<Vec<Vec<u8>>>>,
+    }
+
+    #[async_trait]
+    impl TmuxSession for CountingWrite {
+        async fn write_input(&mut self, data: &[u8]) -> anyhow::Result<()> {
+            self.writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(data.to_vec());
+            Ok(())
+        }
+        async fn resize(&mut self, _cols: u16, _rows: u16) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn viewport(&self) -> (u16, u16) {
+            (80, 24)
+        }
+        fn session_name(&self) -> &str {
+            "counting"
+        }
+        async fn close(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct BlockingWrite {
+        started: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        resume: StdMutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+        writes: Arc<StdMutex<Vec<Vec<u8>>>>,
+    }
+
+    #[async_trait]
+    impl TmuxSession for BlockingWrite {
+        async fn write_input(&mut self, data: &[u8]) -> anyhow::Result<()> {
+            self.writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(data.to_vec());
+            if let Some(started) = self
+                .started
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                let _ = started.send(());
+            }
+            let resume = self
+                .resume
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(resume) = resume {
+                let _ = resume.await;
+            }
+            Ok(())
+        }
+        async fn resize(&mut self, _cols: u16, _rows: u16) -> anyhow::Result<()> {
+            Ok(())
+        }
+        fn viewport(&self) -> (u16, u16) {
+            (80, 24)
+        }
+        fn session_name(&self) -> &str {
+            "blocking-write"
+        }
+        async fn close(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    struct BlockingResize {
+        started: StdMutex<Option<tokio::sync::oneshot::Sender<()>>>,
+        resume: StdMutex<Option<tokio::sync::oneshot::Receiver<()>>>,
+        applied: Arc<StdMutex<Vec<(u16, u16)>>>,
+    }
+
+    #[async_trait]
+    impl TmuxSession for BlockingResize {
+        async fn write_input(&mut self, _data: &[u8]) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn resize(&mut self, cols: u16, rows: u16) -> anyhow::Result<()> {
+            self.applied
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((cols, rows));
+            if let Some(started) = self
+                .started
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take()
+            {
+                let _ = started.send(());
+            }
+            let resume = self
+                .resume
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .take();
+            if let Some(resume) = resume {
+                let _ = resume.await;
+            }
+            Ok(())
+        }
+        fn viewport(&self) -> (u16, u16) {
+            (80, 24)
+        }
+        fn session_name(&self) -> &str {
+            "blocking-resize"
+        }
+        async fn close(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn outbound() -> P2pOutbound {
+        P2pOutbound::new().0
+    }
+
+    fn encoded() -> String {
+        use base64::Engine;
+        base64::engine::general_purpose::STANDARD.encode(b"x")
+    }
+
+    /// SC-01: a frame that reaches past the finite stream window is refused
+    /// **explicitly** and never written. The refusal is not a silent drop and
+    /// not a partial write, and the cursor the sender resumes from is the one
+    /// it already held.
+    #[tokio::test]
+    async fn input_beyond_the_finite_window_is_refused_before_any_write() {
+        let registry = SessionRegistry::new();
+        let token = Arc::new(());
+        let writes = Arc::new(StdMutex::new(Vec::new()));
+        let first = registry
+            .insert_new(
+                "s",
+                Box::new(CountingWrite {
+                    writes: Arc::clone(&writes),
+                }),
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-a"),
+                    peer_token: &token,
+                    outbound: outbound(),
+                },
+            )
+            .expect("a fresh subscription generation is available");
+        let epoch = first
+            .response
+            .input_epoch
+            .expect("the Agent states its input epoch");
+        let data = encoded();
+
+        let refused = registry
+            .apply_input(
+                "s",
+                "browser",
+                &token,
+                None,
+                InputSequence::Sequenced {
+                    epoch,
+                    seq_start: 1,
+                    seq_end: crate::stream::INPUT_WINDOW.frames + 1,
+                },
+                &data,
+            )
+            .await
+            .expect_err("129 chunks reaches past the 128-chunk window");
+        match refused {
+            InputRejected::StreamOverflow(overflow) => {
+                assert_eq!(overflow.unit, WindowUnit::Frames);
+                assert_eq!(overflow.limit, crate::stream::INPUT_WINDOW.frames);
+                assert_eq!(overflow.requested, crate::stream::INPUT_WINDOW.frames + 1);
+            }
+            other => panic!("expected an explicit stream overflow, got {other:?}"),
+        }
+        assert!(
+            writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "a refused frame must not reach the PTY"
+        );
+
+        // The byte bound is checked on the *encoded* size before decoding, so
+        // an oversized sender cannot even allocate its refusal.
+        let oversized = "A".repeat(
+            usize::try_from(crate::stream::INPUT_WINDOW.max_base64_bytes() + 1)
+                .expect("the test frame fits in usize"),
+        );
+        let refused = registry
+            .apply_input(
+                "s",
+                "browser",
+                &token,
+                None,
+                InputSequence::Unsequenced,
+                &oversized,
+            )
+            .await
+            .expect_err("the encoded frame exceeds the byte window");
+        match refused {
+            InputRejected::StreamOverflow(overflow) => {
+                assert_eq!(overflow.unit, WindowUnit::Bytes);
+                assert_eq!(overflow.limit, crate::stream::INPUT_WINDOW.bytes);
+            }
+            other => panic!("expected a byte overflow, got {other:?}"),
+        }
+        assert!(
+            writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .is_empty(),
+            "an oversized frame must not reach the PTY"
+        );
+    }
+
+    /// SC-01: the production input seam keeps the existing order/ACK contract.
+    /// A retried frame is not written twice, and a frame past a hole is
+    /// refused rather than applied out of order.
+    #[tokio::test]
+    async fn a_retried_frame_is_not_written_twice_and_a_gap_is_not_jumped() {
+        let registry = SessionRegistry::new();
+        let token = Arc::new(());
+        let writes = Arc::new(StdMutex::new(Vec::new()));
+        let first = registry
+            .insert_new(
+                "s",
+                Box::new(CountingWrite {
+                    writes: Arc::clone(&writes),
+                }),
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-a"),
+                    peer_token: &token,
+                    outbound: outbound(),
+                },
+            )
+            .expect("a fresh subscription generation is available");
+        let epoch = first.response.input_epoch.expect("input epoch");
+
+        let frame = |start: u64, end: u64| InputSequence::Sequenced {
+            epoch,
+            seq_start: start,
+            seq_end: end,
+        };
+        let data = encoded();
+
+        // One contiguous frame is written and applied.
+        registry
+            .apply_input("s", "browser", &token, None, frame(1, 1), &data)
+            .await
+            .expect("the first chunk continues the cursor");
+        assert_eq!(
+            writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+            1
+        );
+
+        // The lost-ACK retry is acknowledged but not written again.
+        registry
+            .apply_input("s", "browser", &token, None, frame(1, 1), &data)
+            .await
+            .expect("a duplicate is acknowledged, not an error");
+        // A hole is refused: writing past it would apply later input before
+        // the bytes that never arrived.
+        registry
+            .apply_input("s", "browser", &token, None, frame(3, 3), &data)
+            .await
+            .expect("a gap is acknowledged with the current cursor");
+        assert_eq!(
+            writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+            1,
+            "only the contiguous frame reached the PTY"
+        );
+
+        // The withheld chunk is still deliverable.
+        registry
+            .apply_input("s", "browser", &token, None, frame(2, 2), &data)
+            .await
+            .expect("the missing chunk completes the run");
+        assert_eq!(
+            writes
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+            2
+        );
+    }
+
+    /// SC-01/SC-03: input admitted under one stream incarnation is never
+    /// claimed against its replacement. The bytes reached the retired backend;
+    /// the successor's cursor stays where it was, so the sender cannot be told
+    /// a replacement resource applied its input.
+    #[tokio::test]
+    async fn input_admitted_before_a_stream_replacement_is_not_claimed() {
+        let registry = Arc::new(SessionRegistry::new());
+        let token = Arc::new(());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        let writes = Arc::new(StdMutex::new(Vec::new()));
+        let first = registry
+            .insert_new(
+                "s",
+                Box::new(BlockingWrite {
+                    started: StdMutex::new(Some(started_tx)),
+                    resume: StdMutex::new(Some(resume_rx)),
+                    writes: Arc::clone(&writes),
+                }),
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-a"),
+                    peer_token: &token,
+                    outbound: outbound(),
+                },
+            )
+            .expect("a fresh subscription generation is available");
+        let epoch = first.response.input_epoch.expect("input epoch");
+        let data = encoded();
+
+        let apply = tokio::spawn({
+            let registry = Arc::clone(&registry);
+            let token = Arc::clone(&token);
+            async move {
+                registry
+                    .apply_input(
+                        "s",
+                        "browser",
+                        &token,
+                        None,
+                        InputSequence::Sequenced {
+                            epoch,
+                            seq_start: 1,
+                            seq_end: 1,
+                        },
+                        &data,
+                    )
+                    .await
+            }
+        });
+
+        started_rx.await.expect("the backend saw the write");
+        // Kill/recreate replaces the whole resource while the write is in
+        // flight. This is a direct replacement, which is what a kill+create
+        // does to the registry map.
+        let replacement_token = Arc::new(());
+        let replacement = registry
+            .insert_new(
+                "s",
+                Box::new(Idle {
+                    closed: Arc::new(AtomicBool::new(false)),
+                }),
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-b"),
+                    peer_token: &replacement_token,
+                    outbound: outbound(),
+                },
+            )
+            .expect("a fresh subscription generation is available");
+        resume_tx.send(()).expect("the write resumes");
+
+        let refused = apply.await.expect("the task must not panic");
+        assert!(
+            matches!(refused, Err(InputRejected::StateChanged)),
+            "a replacement resource claimed the retired stream's input: {refused:?}"
+        );
+        assert_eq!(replacement.response.input_applied_through, Some(0));
+        assert_eq!(replacement.response.stream_cursor, Some(0));
+    }
+
+    /// SC-01/SC-03: a resize admitted under one stream incarnation is not
+    /// recorded into its replacement. The size did reach the retired backend,
+    /// but the successor's ordered timeline stays empty.
+    #[tokio::test]
+    async fn resize_admitted_before_a_stream_replacement_is_not_recorded() {
+        let registry = Arc::new(SessionRegistry::new());
+        let token = Arc::new(());
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+        let (resume_tx, resume_rx) = tokio::sync::oneshot::channel();
+        let applied = Arc::new(StdMutex::new(Vec::new()));
+        registry
+            .insert_new(
+                "s",
+                Box::new(BlockingResize {
+                    started: StdMutex::new(Some(started_tx)),
+                    resume: StdMutex::new(Some(resume_rx)),
+                    applied: Arc::clone(&applied),
+                }),
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-a"),
+                    peer_token: &token,
+                    outbound: outbound(),
+                },
+            )
+            .expect("a fresh subscription generation is available");
+
+        let resize = tokio::spawn({
+            let registry = Arc::clone(&registry);
+            let token = Arc::clone(&token);
+            async move { registry.resize("s", "browser", &token, None, 120, 40).await }
+        });
+
+        started_rx.await.expect("the backend saw the resize");
+        let replacement_token = Arc::new(());
+        let replacement = registry
+            .insert_new(
+                "s",
+                Box::new(Idle {
+                    closed: Arc::new(AtomicBool::new(false)),
+                }),
+                80,
+                FirstSubscriber {
+                    client_id: "browser",
+                    subscription_id: Some("tab-b"),
+                    peer_token: &replacement_token,
+                    outbound: outbound(),
+                },
+            )
+            .expect("a fresh subscription generation is available");
+        resume_tx.send(()).expect("the resize resumes");
+
+        let refused = resize.await.expect("the task must not panic");
+        assert!(
+            matches!(refused, Err(ResizeRejected::SessionReplaced)),
+            "a replacement stream recorded the retired stream's resize: {refused:?}"
+        );
+        assert_eq!(
+            *applied
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner),
+            vec![(80, 40)],
+            "the applied size belonged to the retired resource"
+        );
+        assert_eq!(
+            replacement.response.stream_cursor,
+            Some(0),
+            "the replacement's ordered timeline must not start with a stale resize"
         );
     }
 }
