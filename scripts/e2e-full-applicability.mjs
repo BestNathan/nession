@@ -49,6 +49,10 @@ function isE2ERunner(file) {
   // #4454: standalone Pages browser tests run under their own Playwright
   // config outside the product testDir; they are runner code, not data.
   if (file.startsWith('e2e/pages/')) return true;
+  // #4477: the standalone Pages runner's config/global setup execute that
+  // suite; they are runner contract, not unrecognized data.
+  if (file === 'e2e/playwright.pages.config.ts' ||
+      file === 'e2e/pagesGlobalSetup.mjs') return true;
   if (file.startsWith('e2e/acceptance/evaluator/') ||
       file.startsWith('e2e/acceptance/contract/') ||
       file.startsWith('e2e/acceptance/shared/')) return true;
@@ -88,9 +92,15 @@ function isRuntime(file) {
   // public CSS/favicon under pages/public/, and all compiled UI source under
   // pages/src/. These are not tooling or build scripts; they are the shipped
   // public UI. Nested test and publisher script subtrees are handled
-  // separately (tooling/test-only or unknown/fail-closed).
-  if (/^pages\/[^/]+\.(js|css|html)$/.test(file)) return true;
-  if (file.startsWith('pages/public/') || file.startsWith('pages/src/')) return true;
+  // separately (tooling/test-only or runtime build inputs).
+  //
+  // #4477: the migration's trusted Pages build pipeline (pages/scripts/**)
+  // assembles the shipped artifact and produces its manifest/readback. Like
+  // Dockerfile*/deploy/ it is a build input, so it must stay risk-bearing
+  // app-runtime rather than an unknown scope that blocks convergence.
+  if (/^pages\/[^/]+\.(js|css|html|svg)$/.test(file)) return true;
+  if (file.startsWith('pages/public/') || file.startsWith('pages/src/') ||
+      file.startsWith('pages/scripts/')) return true;
   if (file === 'pages/package.json' || file === 'pages/package-lock.json' ||
       file === 'pages/vite.config.ts' || file === 'pages/tsconfig.json') return true;
   return file === '.gitignore' ||
@@ -108,9 +118,15 @@ function isTooling(file) {
   if (file.endsWith('.md') || file.startsWith('docs/')) return true;
   // #4018: Pages' Node.js test-only sources under pages/tests/ are not shipped
   // by the compiled UI. Do not broaden this to pages/ source/public assets
-  // (runtime) or publisher build scripts (unknown/fail-closed): those may
-  // change the public runtime and must remain risk-bearing.
+  // (runtime) or the Pages build pipeline (pages/scripts/, runtime build
+  // inputs): those may change the public runtime and must remain risk-bearing.
   if (file.startsWith('pages/tests/')) return true;
+  // #4477: repository developer tooling cannot affect product runtime or the
+  // E2E suite: Claude worktree hooks and just recipes, plus the E2E tree's
+  // ignore rules. Only these exact surfaces are trusted, not arbitrary
+  // dotfiles.
+  if (file === 'justfile' || file.startsWith('.claude/') ||
+      file === 'e2e/.gitignore') return true;
   if (file.startsWith('gates/')) return true; // executor/suite paths handled first
   if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
   if (file.startsWith('scripts/')) return true; // e2e/ci paths handled first
@@ -232,6 +248,8 @@ function selfTest() {
     'scripts/acceptance-case-ingest.mjs',
     'scripts/deployment-binding-lookup.mjs',
     'pages/tests/public-deployment.test.mjs', // #4018: publisher verification, not public runtime
+    // #4477: repository developer tooling, not product runtime/E2E behavior
+    'justfile', '.claude/hooks/create-worktree.sh', 'e2e/.gitignore',
   ];
   for (const file of tooling) {
     assert.equal(categorizeChangedPath(file), 'tooling', file + ' must be tooling');
@@ -248,6 +266,8 @@ function selfTest() {
     'e2e/playwright.config.ts',
     // #4454: standalone Pages browser tests run under their own config
     'e2e/pages/knowledge.test.ts',
+    // #4477: the standalone Pages runner config/global setup are runner contract
+    'e2e/playwright.pages.config.ts', 'e2e/pagesGlobalSetup.mjs',
     'scripts/e2e-regression-policy.mjs',
     'scripts/issue-e2e-plan.mjs',
     'scripts/ci/try-web-build-reuse.sh',
@@ -288,8 +308,13 @@ function selfTest() {
     // entrypoints, React/TS UI source, stable public assets, locked build)
     'pages/index.html', 'pages/workflows.html',
     'pages/src/app/App.tsx', 'pages/src/features/knowledge/KnowledgePage.tsx',
-    'pages/public/styles.css', 'pages/public/favicon.svg',
-    'pages/package.json', 'pages/package-lock.json', 'pages/vite.config.ts']) {
+    'pages/public/styles.css', 'pages/public/favicon.svg', 'pages/favicon.svg',
+    'pages/package.json', 'pages/package-lock.json', 'pages/vite.config.ts',
+    'pages/tsconfig.json',
+    // #4477: the trusted Pages build/assembly/publisher pipeline is a build input
+    'pages/scripts/build.mjs', 'pages/scripts/build-data.mjs',
+    'pages/scripts/assemble.mjs', 'pages/scripts/artifact-manifest.mjs',
+    'pages/scripts/mcp-export-gate.mjs', 'pages/scripts/verify-published-artifact.mjs']) {
     assert.equal(categorizeChangedPath(file), 'app-runtime', file + ' must be runtime');
   }
   // #3520: the root .gitignore can expose/hide build inputs, not just docs.
@@ -352,34 +377,52 @@ function selfTest() {
     'pages/src/app/App.tsx',
     'unknown/path/that/does/not/exist.ts',
   ]).category, 'unknown', 'an unknown path must still fail closed alongside known Pages paths');
-  // Every shipped public Pages surface is runtime-affecting. The source-backed
-  // Pages build/publisher scripts remain unknown/fail-closed; only the test
-  // subtree is recognized as tooling.
-  for(const file of ['pages/index.html','pages/workflows.html',
-    'pages/src/app/App.tsx','pages/public/styles.css','pages/public/favicon.svg',
-    'pages/package.json','pages/package-lock.json','pages/vite.config.ts',
-    'pages/tsconfig.json']){
-    assert.equal(categorizeChangedPath(file),'app-runtime',file+' must be runtime');
-  }
-  for(const file of ['pages/scripts/build.mjs','pages/scripts/build-data.mjs',
-    'pages/scripts/assemble.mjs','pages/scripts/artifact-manifest.mjs']){
-    assert.equal(categorizeChangedPath(file),'unknown',file+' must fail closed');
-  }
+  // #4477: the Pages migration made pages/scripts/** the trusted build
+  // pipeline for the shipped public artifact. They are risk-bearing runtime
+  // build inputs (never tooling-only, never unknown) while the Pages test
+  // subtree remains tooling.
   assert.equal(classifyChangedPaths([
     'pages/tests/public-deployment.test.mjs','pages/scripts/build.mjs',
-  ]).category,'unknown','an unknown Pages build script path must not be laundered');
+  ]).category,'mixed','Pages build inputs must stay risk-bearing, not tooling-only');
+  // Exact 13-path batch from PR #4474 integration head
+  // bb48184ec2d2ada20dd63420bc14e7188e337418 after #4462/#4470 merged to
+  // main. Every path must be positively classified; the batch is mixed and
+  // applicable, and a truly unknown path in the same batch still fails closed.
+  const convergenceBatch = [
+    '.claude/hooks/create-worktree.sh',
+    'e2e/.gitignore',
+    'e2e/pagesGlobalSetup.mjs',
+    'e2e/playwright.pages.config.ts',
+    'justfile',
+    'pages/favicon.svg',
+    'pages/scripts/artifact-manifest.mjs',
+    'pages/scripts/assemble.mjs',
+    'pages/scripts/build-data.mjs',
+    'pages/scripts/build.mjs',
+    'pages/scripts/dev-fixtures.ts',
+    'pages/scripts/mcp-export-gate.mjs',
+    'pages/scripts/verify-published-artifact.mjs',
+  ];
+  for(const file of convergenceBatch){
+    assert.notEqual(categorizeChangedPath(file),'unknown',file+' must be positively classified');
+  }
+  const convergenceBatchClass=classifyChangedPaths(convergenceBatch);
+  assert.equal(convergenceBatchClass.category,'mixed');
+  assert.equal(convergenceBatchClass.applicable,true);
+  assert.equal(classifyChangedPaths([...convergenceBatch,'terraform/main.tf']).category,
+    'unknown','an unknown path must still fail closed in the same batch');
   assert.equal(classifyChangedPaths([
     'pages/tests/public-deployment.test.mjs','web/src/App.tsx',
   ]).category,'mixed','Pages test-only paths must not hide runtime changes');
   assert.throws(() => notRequiredReceipt('a'.repeat(40), ignoreRules),
     /not-required classification/,
     'build-input ignore changes must never emit a Full Not Required receipt');
-  assert.equal(classifyChangedPaths(['.gitignore', 'justfile']).category, 'unknown',
+  assert.equal(classifyChangedPaths(['.gitignore', 'terraform/main.tf']).category, 'unknown',
     'truly unrecognized paths must still fail closed in the same batch');
   assert.equal(categorizeChangedPath('local/.gitignore'), 'unknown',
     'root path recognition must not broadly trust arbitrary nested dotfiles');
 
-  for (const file of ['justfile', '.github/CODEOWNERS', 'terraform/main.tf']) {
+  for (const file of ['.github/CODEOWNERS', 'terraform/main.tf']) {
     assert.equal(categorizeChangedPath(file), 'unknown', file + ' must fail closed as unknown');
   }
 
@@ -407,8 +450,9 @@ function selfTest() {
     'mixed', 'runner and fixture/catalog changes are distinct risks');
   assert.equal(classifyChangedPaths(['e2e/acceptance/cases/2487/SC-09/verify.cjs',
     'crates/nession-agent/src/lib.rs']).category, 'mixed');
-  assert.equal(classifyChangedPaths(['justfile']).category, 'unknown');
-  assert.equal(classifyChangedPaths(['docs/a.md', 'justfile']).category, 'unknown',
+  assert.equal(classifyChangedPaths(['justfile']).category, 'tooling-only');
+  assert.equal(classifyChangedPaths(['terraform/main.tf']).category, 'unknown');
+  assert.equal(classifyChangedPaths(['docs/a.md', 'terraform/main.tf']).category, 'unknown',
     'an unknown path in a mixed change must fail closed');
   for (const category of ['e2e-runner', 'e2e-fixture-catalog', 'app-runtime', 'mixed', 'unknown']) {
     assert.equal(classifyChangedPaths(category === 'e2e-runner'
@@ -419,7 +463,7 @@ function selfTest() {
           ? ['web/src/App.tsx']
           : category === 'mixed'
             ? ['web/src/App.tsx', 'e2e/fixtures/server.js']
-            : ['justfile']).applicable, true, category + ' must stay applicable');
+            : ['terraform/main.tf']).applicable, true, category + ' must stay applicable');
   }
 
   // Untrusted text cannot downgrade a risk-bearing path: a path carrying a
