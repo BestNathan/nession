@@ -534,6 +534,11 @@ jobs:
             --manifest-sha "$EXPECTED_ARTIFACT_MANIFEST_SHA256" \
             --main-sha "$EXPECTED_SHA" \
             --attempts 18
+          # Emit the trusted closure identity to the job log as well as the
+          # step summary so the post-merge acceptance adapter can authenticate
+          # the exact bytes it independently re-downloads from the public site.
+          echo "Compiled Pages closure: $EXPECTED_ARTIFACT_FILES files · digest \`$EXPECTED_ARTIFACT_CLOSURE_SHA256\`"
+          echo "Artifact manifest SHA-256: \`$EXPECTED_ARTIFACT_MANIFEST_SHA256\` (trusted build output)"
           # Confirm the exact publicly served prototype snapshot, not a constructed
           # URL, a GitHub blob viewer, or a potentially stale previous deployment.
           [[ "$EXPECTED_PROTO_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
