@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45431653478,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4437-ws-telemetry",
+    "target_sha": "d7fa3b0d9d83120fe8dafd46af4f70abcd6a99a7",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45431653478",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "94b3473cd1f1af37cec51d370f34aa3d7dbf5a7e78195547e0935cfd6a14f3f6"
+  },
+  "record": "runs/2026-11-24/45431653478-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "3a36fbb42c97a7b9751cfd1bd4473d49cd423eb6edd13e23c207ff9170e7814e"
+}
