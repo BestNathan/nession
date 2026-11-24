@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "owner": "nession-runtime",
+  "description": "Versioned WS runtime diagnostic dashboards. Every panel metric must appear in nession_runtime::metrics::METRIC_CATALOG with the same kind; a panel without data is distinct from a zero value.",
+  "dashboards": [
+    {
+      "id": "overview",
+      "title": "Overview",
+      "panels": [
+        { "id": "connections", "title": "Active connections", "metric": "ws_connection_active", "kind": "gauge", "aggregation": "sum" },
+        { "id": "attempts", "title": "Connection attempts", "metric": "ws_connection_attempts", "kind": "counter", "aggregation": "rate" },
+        { "id": "closed", "title": "Connection closes by reason", "metric": "ws_connection_closed", "kind": "counter", "aggregation": "rate", "labels": { "domain": "lifecycle" } },
+        { "id": "dropped", "title": "Exporter drops", "metric": "ws_exporter_dropped", "kind": "counter", "aggregation": "rate" }
+      ]
+    },
+    {
+      "id": "request",
+      "title": "Request",
+      "panels": [
+        { "id": "accepted", "title": "Accepted admissions", "metric": "ws_admission_accepted", "kind": "counter", "aggregation": "rate", "labels": { "domain": "request" } },
+        { "id": "refused", "title": "Refused admissions", "metric": "ws_admission_refused", "kind": "counter", "aggregation": "rate", "labels": { "domain": "request" } },
+        { "id": "waited", "title": "Admissions that waited", "metric": "ws_admission_waited", "kind": "counter", "aggregation": "rate" },
+        { "id": "duration", "title": "Request duration p95", "metric": "ws_request_duration", "kind": "histogram", "aggregation": "histogram_quantile" },
+        { "id": "active", "title": "Active tasks", "metric": "ws_task_active", "kind": "gauge", "aggregation": "sum" },
+        { "id": "retained", "title": "Retained task records", "metric": "ws_task_retained", "kind": "gauge", "aggregation": "max" },
+        { "id": "panics", "title": "Task panics", "metric": "ws_task_panicked", "kind": "counter", "aggregation": "rate" },
+        { "id": "outcomes", "title": "Pending outcomes", "metric": "ws_pending_outcome", "kind": "counter", "aggregation": "rate" }
+      ]
+    },
+    {
+      "id": "stream",
+      "title": "Stream",
+      "panels": [
+        { "id": "queued", "title": "Queued outbound bytes", "metric": "ws_outbound_queued", "kind": "gauge", "aggregation": "sum" },
+        { "id": "outbound_accepted", "title": "Outbound accepted", "metric": "ws_outbound_accepted", "kind": "counter", "aggregation": "rate" },
+        { "id": "outbound_refused", "title": "Outbound refused", "metric": "ws_outbound_refused", "kind": "counter", "aggregation": "rate" },
+        { "id": "too_large", "title": "Oversized frames", "metric": "ws_outbound_too_large", "kind": "counter", "aggregation": "rate" },
+        { "id": "write_timeouts", "title": "Write deadline misses", "metric": "ws_outbound_write_timeout", "kind": "counter", "aggregation": "rate" },
+        { "id": "credit_lag", "title": "Subscriber credit lag", "metric": "ws_stream_credit_lag", "kind": "gauge", "aggregation": "max" },
+        { "id": "progress_lag", "title": "Parser progress lag", "metric": "ws_stream_progress_lag", "kind": "gauge", "aggregation": "max" },
+        { "id": "gaps", "title": "Output gaps", "metric": "ws_stream_gap", "kind": "counter", "aggregation": "rate" },
+        { "id": "replays", "title": "Replay windows", "metric": "ws_stream_replay", "kind": "counter", "aggregation": "rate" },
+        { "id": "coalesced", "title": "Coalesced levels", "metric": "ws_stream_coalesced", "kind": "counter", "aggregation": "rate" }
+      ]
+    },
+    {
+      "id": "lifecycle",
+      "title": "Lifecycle",
+      "panels": [
+        { "id": "closed_by_reason", "title": "Closes by bounded reason", "metric": "ws_connection_closed", "kind": "counter", "aggregation": "rate", "labels": { "domain": "lifecycle" } },
+        { "id": "write_failures", "title": "Write deadline misses", "metric": "ws_outbound_write_timeout", "kind": "counter", "aggregation": "rate" },
+        { "id": "reaped", "title": "Reaped records", "metric": "ws_task_reaped", "kind": "counter", "aggregation": "rate" },
+        { "id": "exporter_drops", "title": "Exporter drops", "metric": "ws_exporter_dropped", "kind": "counter", "aggregation": "rate" }
+      ]
+    }
+  ]
+}

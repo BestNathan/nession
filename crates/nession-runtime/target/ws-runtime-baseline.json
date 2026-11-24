@@ -1,0 +1,81 @@
+{
+  "high_water": {
+    "key_deepest": 0,
+    "key_depth": 4,
+    "outbound_byte_budget": 786432,
+    "outbound_queued_bytes": 0,
+    "query_bound": 8,
+    "query_peak_in_flight": 8
+  },
+  "kind": "ws_runtime_baseline",
+  "latency": {
+    "mutation_end_to_end": {
+      "max_ns": 127110,
+      "p50_ns": 10820,
+      "p95_ns": 25500,
+      "p99_ns": 56020,
+      "samples": 2000
+    },
+    "outbound_admission": {
+      "max_ns": 9330,
+      "p50_ns": 1760,
+      "p95_ns": 2590,
+      "p99_ns": 2850,
+      "samples": 2000
+    },
+    "query_admission": {
+      "max_ns": 3195464,
+      "p50_ns": 2910,
+      "p95_ns": 6280,
+      "p99_ns": 9540,
+      "samples": 5000
+    },
+    "query_end_to_end": {
+      "max_ns": 3275114,
+      "p50_ns": 4170,
+      "p95_ns": 9450,
+      "p99_ns": 71210,
+      "samples": 5000
+    }
+  },
+  "memory_kb": {
+    "after": 2636,
+    "before": 1596
+  },
+  "metrics": {
+    "ws_admission_accepted": 7000,
+    "ws_admission_waited": 12,
+    "ws_outbound_accepted": 2000,
+    "ws_outbound_queued": 2000,
+    "ws_request_duration": 5000,
+    "ws_task_active": 5000,
+    "ws_task_reaped": 6996,
+    "ws_task_retained": 5000
+  },
+  "quiescent": {
+    "key_keys": 0,
+    "key_queued": 0,
+    "key_retained": 0,
+    "outbound_queued_bytes": 0,
+    "outbound_queued_frames": 0,
+    "query_in_flight": 0,
+    "query_retained": 0
+  },
+  "runner": {
+    "class": "local",
+    "cores": 4,
+    "cpu": "AMD Ryzen 7 7700 8-Core Processor"
+  },
+  "schema_version": 1,
+  "sha": "local",
+  "workload": {
+    "key_depth": 4,
+    "keys": 32,
+    "mutations": 2000,
+    "outbound_class_bytes": 262144,
+    "outbound_class_frames": 64,
+    "outbound_frames": 2000,
+    "queries": 5000,
+    "query_bound": 8
+  }
+}

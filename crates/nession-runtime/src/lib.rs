@@ -84,4 +84,5 @@ pub mod frame;
 pub mod ingress;
 pub mod lane;
 pub mod lifecycle;
+pub mod metrics;
 pub mod outbound;
