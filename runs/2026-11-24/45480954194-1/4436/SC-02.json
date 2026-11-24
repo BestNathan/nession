@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "dec23a6aad9c01da069bdf25f264ce20e6c6058d3a45cca17dd6b651c5da1520",
+  "run_id": 45480954194,
+  "run_attempt": 1,
+  "issue": 4436,
+  "criterion": "SC-02",
+  "criterion_text": "Trusted Knowledge Publisher publishes article/index/CHANGELOG changes atomically; authenticated readback of knowledge head and deterministic ledger validation plus semantic review prove paths, source validity, links, status and implementation-vs-design distinction; no force-push or hand-written index.",
+  "stage": "staging",
+  "target_sha": "924b1615347aaf057c7fc7725469ccf2e88fb2f0",
+  "contract_sha256": "c783b257c0d1466eef32ca74666cf1bb772ab973490688ed2bfb632cf8afa61b",
+  "case_revision": "924b1615347aaf057c7fc7725469ccf2e88fb2f0",
+  "case_tree_sha": "178794d3c01ba88f05c58105feeb5b109af38684",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T20:30:27.632Z",
+  "finished_at": "2026-11-24T20:30:39.586Z",
+  "duration_ms": 11954,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The published knowledge artifact is readable and internally consistent at its current head: the canonical ledger validates, and the four WebSocket Runtime V2 articles carry their verified/candidate status, exact-commit sources, reciprocal cross-links and global changelog events",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "924b1615347aaf057c7fc7725469ccf2e88fb2f0: knowledge head ebb9bf6feebcd9880ef23f0fd5c1e29975858cd9 (parent e215c50b2d0b9682a00af75f3a25c4bb78319fe6) is readable anonymously; ledger check PASS; the four WS runtime articles exist with expected statuses, exact-commit sources, reciprocal links and changelog events"
+        }
+      ],
+      "duration_ms": 6058,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45480954194,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "924b1615347aaf057c7fc7725469ccf2e88fb2f0",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45480954194",
+    "record_path": "runs/2026-11-24/45480954194-1/4436/SC-02.json",
+    "source_result_sha256": "a14da5d235667410380b9e2617d78787863dc3f7642c098f78bfa9cd37eb9e12"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45480954194-1",
+    "sha256": "a14da5d235667410380b9e2617d78787863dc3f7642c098f78bfa9cd37eb9e12",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45480954194",
+    "durability": "time-limited; object archival not configured"
+  }
+}
