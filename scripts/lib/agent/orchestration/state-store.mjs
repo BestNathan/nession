@@ -2,8 +2,16 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { validateDevelopmentState } from './outbox.mjs';
+import { validateLifecycleState } from '../workflow/contract.mjs';
 
 function reject(m) { throw new Error('agent workflow state store: ' + m); }
+// One versioned Store path serves both eras: schema v1 is the immutable legacy
+// format, schema v2 is the Agent Workflow V2 lifecycle. The validator is chosen
+// by the record's declared schema, never by a caller guess.
+function validateWorkflowState(state) {
+  if (state?.schema_version === 2) return validateLifecycleState(state);
+  return validateDevelopmentState(state);
+}
 function bytes(record) { return Buffer.from(JSON.stringify(record, null, 2) + '\n'); }
 function sha256(value) { return createHash('sha256').update(value).digest('hex'); }
 const LIMIT = 512 * 1024;
@@ -58,12 +66,12 @@ export function readIssueWorkflowState(root, issue) {
       !/^[a-f0-9]{64}$/.test(head.sha256 ?? '')) reject('invalid head');
   const state = get(root,head.path);
   if (!state || state.issue !== issue || state.version !== head.version) reject('head target missing/mismatched');
-  validateDevelopmentState(state);
+  validateWorkflowState(state);
   if (sha256(bytes(state)) !== head.sha256) reject('head digest mismatch');
   return { state,version:head.version,digest:head.sha256 };
 }
 export function writeIssueWorkflowState(root, state, expectedVersion) {
-  validateDevelopmentState(state);
+  validateWorkflowState(state);
   const current = readIssueWorkflowState(root,state.issue);
   const nextBytes = bytes(state);
   if (nextBytes.byteLength > LIMIT) reject('state exceeds bounded metadata size');
