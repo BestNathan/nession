@@ -215,6 +215,27 @@ assert.throws(() => decideLifecycle(state, observation(state, {
   wake: { source: 'model', reason: 'choose-reviewer' },
 })), /invalid wake/);
 
+// ── cancelled/timeout are retried as infrastructure, not model verdicts ─
+for (const outcome of ['cancelled', 'timeout']) {
+  let cancelled = freshState();
+  const action = active(cancelled);
+  cancelled = dispatch(cancelled, action, outcome === 'cancelled' ? 111 : 112);
+  const decision = step(cancelled, {
+    developer: developerEvent(action,
+      outcome === 'cancelled' ? 111 : 112, {
+        outcome,
+        failure: { category: 'infrastructure', code: outcome },
+      }),
+  });
+  assert.equal(decision.decision, 'advance');
+  assert.equal(decision.nextState.phase, 'developing');
+  assert.equal(decision.nextState.budgets.infrastructure_retries, 1);
+  assert.equal(decision.intents.length, 1);
+  assert.equal(decision.intents[0].role, 'developer');
+  assert.equal(decision.nextState.outbox.find((entry) =>
+    entry.id === action.id).receipt.category, 'infrastructure');
+}
+
 // ── all four CI × Review combinations produce exactly one repair action ──
 for (const [ciStatus, reviewOutcome, expected] of [
   ['pass', 'approved', 'accepting'],
