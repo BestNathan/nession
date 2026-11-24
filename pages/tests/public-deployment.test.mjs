@@ -99,14 +99,58 @@ test('MCP public readback delegates typed-v2 validation and preserves exact-byte
    'data.tools.length !== Number(process.argv[4])',
    '"$EXPECTED_MCP_SOURCE_SHA" "$EXPECTED_MCP_SEMANTIC_SHA256" "$EXPECTED_MCP_TOOLS"',
    '"$EXPECTED_MCP_JSON_SHA256"',
-   '"$EXPECTED_MCP_UI_SHA256"',
    'sha256sum "$mcp_readback"',
-   'sha256sum "$mcp_ui_readback"',
    'mcp_ready=true',
    '[[ "$mcp_ready" == true ]] ||',
  ]) assert.ok(readback.includes(invariant),'MCP readback invariant lost: '+invariant);
+ assert.doesNotMatch(readback,/mcp-documents\.js|EXPECTED_MCP_UI_SHA256/,
+   'the removed fixed-JS proof must not be replaced by a same-origin JS hash');
  assert.match(readback,/for attempt in \{1\.\.18\}; do/,'readback must remain bounded');
  assert.match(readback,/MCP Documents public HTTPS bytes differ from validated build artifact/);
+});
+
+test('compiled Pages closure is a trusted-build manifest verified against anonymous bytes',async()=>{
+ const yaml=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
+ for(const required of [
+  'artifact_manifest_sha256: ${{ steps.public_data.outputs.artifact_manifest_sha256 }}',
+  'artifact_closure_sha256: ${{ steps.public_data.outputs.artifact_closure_sha256 }}',
+  'artifact_files: ${{ steps.public_data.outputs.artifact_files }}',
+  'EXPECTED_ARTIFACT_MANIFEST_SHA256: ${{ needs.build.outputs.artifact_manifest_sha256 }}',
+  'EXPECTED_ARTIFACT_CLOSURE_SHA256: ${{ needs.build.outputs.artifact_closure_sha256 }}',
+  'EXPECTED_ARTIFACT_FILES: ${{ needs.build.outputs.artifact_files }}',
+  'node pages/scripts/artifact-manifest.mjs verify pages/dist',
+  'sha256sum "$artifact_manifest"',
+  'node pages/scripts/verify-published-artifact.mjs',
+  '--manifest-sha "$EXPECTED_ARTIFACT_MANIFEST_SHA256"',
+  '--main-sha "$EXPECTED_SHA"',
+ ]) assert.ok(yaml.includes(required),'missing trusted closure manifest guarantee: '+required);
+ assert.doesNotMatch(yaml,/mcp-documents\.js|EXPECTED_MCP_UI_SHA256/);
+ const matched=yaml.indexOf('[[ "$matched" == true ]]');
+ const verify=yaml.indexOf('node pages/scripts/verify-published-artifact.mjs');
+ assert.ok(matched>=0&&verify>matched,'closure verification must follow exact JSON/HTML bytes');
+ assert.match(yaml,/\[\[ "\$EXPECTED_ARTIFACT_MANIFEST_SHA256" =~ \^\[a-f0-9\]\{64\}\$ \]\]/);
+ assert.match(yaml,/\[\[ "\$EXPECTED_ARTIFACT_FILES" =~ \^\[1-9\]\[0-9\]\*\$ \]\]/);
+});
+
+test('Pages UI compilation is credential-isolated before the privileged projection',async()=>{
+ const yaml=await readFile(new URL('../../.github/workflows/deploy-pages.yml',import.meta.url),'utf8');
+ const uiStart=yaml.indexOf('  ui:\n');
+ const buildStart=yaml.indexOf('  build:\n');
+ assert.ok(uiStart>=0&&buildStart>uiStart,'a credential-isolated ui job must precede build');
+ const ui=yaml.slice(uiStart,buildStart);
+ const build=yaml.slice(buildStart);
+ assert.match(ui,/permissions:\n      contents: read/);
+ assert.match(ui,/persist-credentials: false/);
+ assert.match(ui,/npm ci --ignore-scripts/);
+ assert.match(ui,/npm run check/);
+ assert.match(ui,/npm run build:ui/);
+ assert.match(ui,/name: pages-ui-\$\{\{ github\.run_attempt \}\}/);
+ assert.doesNotMatch(ui,/GITHUB_TOKEN|secrets\.|\bVITE_/);
+ assert.match(build,/needs: \[ui\]/);
+ assert.match(build,/name: pages-ui-\$\{\{ github\.run_attempt \}\}/);
+ assert.match(build,/PAGES_UI_DIR: \$\{\{ github\.workspace \}\}\/pages-ui/);
+ assert.doesNotMatch(build,/npm run check|npm run build:ui/,
+   'the credentialed projection job must not install or compile UI dependencies');
 });
 
 test('Pages publisher restores stable Cargo cache while preserving canonical source-backed publication',async()=>{
@@ -131,7 +175,7 @@ test('Pages publisher restores stable Cargo cache while preserving canonical sou
  assert.match(historic,/uses: actions\/cache@v4/);
  assert.ok(historic.includes('path: ${{ runner.temp }}/nession-protocol-schemas/schema-*.json'));
  assert.ok(historic.includes('pages-protocol-schemas-v1-'));
- const builder=await readFile(new URL('../scripts/build.mjs',import.meta.url),'utf8');
+ const builder=await readFile(new URL('../scripts/build-data.mjs',import.meta.url),'utf8');
  assert.match(builder,/\['run','--quiet','-p','nession-protocol-codegen','--','--schema'\]/);
  assert.match(builder,/\['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'\]/);
  assert.match(yaml,/node pages\/scripts\/publish-prototypes\.mjs/);
