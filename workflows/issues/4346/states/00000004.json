@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "issue": 4346,
+  "version": 4,
+  "phase": "review",
+  "target_sha": "74f7636031de87a47705e437fd724b34ad2964eb",
+  "repair_attempts": 0,
+  "transitions": [
+    {
+      "key": "21c638655af2158079e59363143b10a10898c9118527351cdfaa474253537bf9",
+      "kind": "publisher",
+      "run_id": 45337619816,
+      "attempt": 1,
+      "target_sha": "74f7636031de87a47705e437fd724b34ad2964eb",
+      "outcome": "published"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "9905be19a67e366d8302f7b3ecc0e7f0cb3346748db42905730cdda855b21e8b",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "74f7636031de87a47705e437fd724b34ad2964eb",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "pending",
+      "attempts": 0,
+      "receipt": null
+    }
+  ]
+}
