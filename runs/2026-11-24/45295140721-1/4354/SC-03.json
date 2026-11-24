@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8c6a2fcf4b5ffa067807258d9795799d88870cb94528aca3999cbbb05ec04d30",
+  "run_id": 45295140721,
+  "run_attempt": 1,
+  "issue": 4354,
+  "criterion": "SC-03",
+  "criterion_text": ": Authorized Staging Deploy / Identity run attests the same pinned deployed source with matching UI/Agent/Server digests, source Run/Job/SHA evidence and trusted readback; downstream deployed Acceptance is separately verified.",
+  "stage": "post-merge",
+  "target_sha": "8ae1a358643765f1c9dc34a6b971d6b893792457",
+  "contract_sha256": "8959154b6a3266d5547e427a5bc572a24e90bcc074e8e9639830dbb2cbbe18eb",
+  "case_revision": "8ae1a358643765f1c9dc34a6b971d6b893792457",
+  "case_tree_sha": "24c671857652d8c892ce261895c34aba1af62322",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T00:14:55.541Z",
+  "finished_at": "2026-11-24T00:15:01.480Z",
+  "duration_ms": 5939,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "authorized Staging Deploy / Identity attested exact source 8ae1a358643765f1c9dc34a6b971d6b893792457 with matching GHCR UI/Agent/Server digests and trusted staged readback",
+      "evidence": [
+        {
+          "type": "provenance",
+          "value": "trusted staged store record runs/2026-11-24/45294617212-1/deployment/staging.json execution e62acc90562c05f792e35929100b146ca3aa3033a304135fe2e56c63fc492cb2 source 8ae1a358643765f1c9dc34a6b971d6b893792457 GitOps 7e96b8c540a7e92b49faed450b3a5849708c28dd"
+        },
+        {
+          "type": "ci",
+          "value": "ingester-authenticated Deploy / Identity run 45294617212/1 (workflow_run, main) recorded as Attested in the append-only store"
+        },
+        {
+          "type": "runtime",
+          "value": "staged remote samples verify ready GHCR workloads and immutable role digests: agent=sha256:afdb5901836a67ae42c9cc39ba48e6f33c0c0fed08f12ad76d2708f76a542946 server=sha256:b814bdf4fbaf95e28bb50a124754088e8caf15910bc3875b5059131394abc343 ui=sha256:700cd1b7d964c22a2570bff4d299aa918978a527cc3097c5955dbaf73cc8d599"
+        },
+        {
+          "type": "runtime",
+          "value": "collector source at deployed SHA 8ae1a358643765f1c9dc34a6b971d6b893792457 contains the #4354 converged-rollout invariant; the trusted runner must separately validate environment=staging and exact SHA binding"
+        }
+      ],
+      "duration_ms": 36,
+      "exit_code": 0
+    }
+  ],
+  "deployment": {
+    "environment_id": "staging",
+    "deployed_source_sha": "8ae1a358643765f1c9dc34a6b971d6b893792457",
+    "attestation_execution_id": "e62acc90562c05f792e35929100b146ca3aa3033a304135fe2e56c63fc492cb2",
+    "gitops_revision": "7e96b8c540a7e92b49faed450b3a5849708c28dd",
+    "image_digests": {
+      "agent": "sha256:afdb5901836a67ae42c9cc39ba48e6f33c0c0fed08f12ad76d2708f76a542946",
+      "server": "sha256:b814bdf4fbaf95e28bb50a124754088e8caf15910bc3875b5059131394abc343",
+      "ui": "sha256:700cd1b7d964c22a2570bff4d299aa918978a527cc3097c5955dbaf73cc8d599"
+    }
+  },
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45295140721,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "6c10bfa34bbe29bd4874b8d2b2ceb4ce458f9324",
+      "head_branch": "main",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45295140721",
+    "record_path": "runs/2026-11-24/45295140721-1/4354/SC-03.json",
+    "source_result_sha256": "e852d39bd17c43521bc5b04c013f17c39f183084172e61dbdd89c5ff6b2c0b59"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45295140721-1",
+    "sha256": "e852d39bd17c43521bc5b04c013f17c39f183084172e61dbdd89c5ff6b2c0b59",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45295140721",
+    "durability": "time-limited; object archival not configured"
+  }
+}
