@@ -40,6 +40,7 @@ export const CATALOG = [
   ['agent-claude-resume-seed', 'agent-claude-resume-seed.yml', 'Agent / Claude Resume Seed', 'agent-claude-resume-seed.yml', 'Agent / Claude Resume Seed', 'agent'],
   ['agent-claude-resume-verify', 'agent-claude-resume-verify.yml', 'Agent / Claude Resume Verify', 'agent-claude-resume-verify.yml', 'Agent / Claude Resume Verify', 'agent'],
   ['acceptance-agent-controller', 'acceptance-agent-controller.yml', 'Acceptance / Agent Controller', 'acceptance-agent-controller.yml', 'Acceptance / Agent Controller', 'acceptance'],
+  ['acceptance-agent-reconcile', 'acceptance-agent-reconcile.yml', 'Acceptance / Agent Reconcile', 'acceptance-agent-reconcile.yml', 'Acceptance / Agent Reconcile', 'acceptance'],
   ['acceptance-staging-developer-admission', 'acceptance-staging-developer-admission.yml', 'Acceptance / Staging Developer Admission', 'acceptance-staging-developer-admission.yml', 'Acceptance / Staging Developer Admission', 'acceptance'],
   ['acceptance-staging-developer-dispatch', 'acceptance-staging-developer-dispatch.yml', 'Acceptance / Staging Developer Dispatch', 'acceptance-staging-developer-dispatch.yml', 'Acceptance / Staging Developer Dispatch', 'acceptance'],
   ['store-agent-controller-ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store-agent-controller-ingest.yml', 'Store / Agent Controller Ingest', 'store'],
