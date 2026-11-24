@@ -37,7 +37,7 @@ fn file(name: &str) -> EnvFileRef {
 
 /// Answer one `agent.session.env.binding.set` and return the payload it saw.
 async fn answer_binding_set(
-    rx: &mut tokio::sync::mpsc::Receiver<crate::server::outbound::QueuedFrame>,
+    rx: &mut crate::server::outbound::OutboundReceiver,
     broker: &Arc<crate::server::command_broker::CommandBroker>,
     observed: serde_json::Value,
 ) -> serde_json::Value {

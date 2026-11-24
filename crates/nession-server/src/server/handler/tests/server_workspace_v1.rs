@@ -29,7 +29,7 @@ async fn register_session(h: &ConnectionHandler, session_id: &str) {
 }
 
 async fn answer_agent_frame(
-    rx: &mut tokio::sync::mpsc::Receiver<crate::server::outbound::QueuedFrame>,
+    rx: &mut crate::server::outbound::OutboundReceiver,
     broker: &Arc<crate::server::command_broker::CommandBroker>,
     expected_wire: &str,
     response: serde_json::Value,
@@ -53,7 +53,7 @@ async fn claim_agent(
     h: &ConnectionHandler,
 ) -> (
     Arc<crate::server::command_broker::CommandBroker>,
-    tokio::sync::mpsc::Receiver<crate::server::outbound::QueuedFrame>,
+    crate::server::outbound::OutboundReceiver,
 ) {
     let (sender, rx) = WsMessageSender::new();
     let generation = h.command_broker.new_connection_generation();

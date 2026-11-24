@@ -1424,4 +1424,63 @@ mod tests {
             assert_eq!(class.dropped, 0, "{name} counts a drop that never happened");
         }
     }
+
+    /// SC-01's outbox half: under a continuously backlogged writer (no drain at
+    /// all), a Session's state level coalesces to its *latest* value while the
+    /// other sessions' levels are not superseded by it.
+    ///
+    /// This is the property `#4434` says must be retained, asserted with the
+    /// backlog present rather than as an isolated two-publish exchange: the
+    /// writer is absent, so every publish of `live` arrives while the previous
+    /// one is still pending.
+    #[test]
+    fn a_backlogged_writer_delivers_only_the_latest_state_per_session() {
+        let (outbox, mut frames, _) = outbox();
+        const OTHER_SESSIONS: usize = 64;
+        const UPDATES: usize = 100;
+
+        for session in 0..OTHER_SESSIONS {
+            outbox
+                .send_session_update(&format!("other-{session}"), text("initial"))
+                .expect("publish failed");
+        }
+        // Continuously re-state one Session while nothing drains.
+        for update in 0..UPDATES {
+            outbox
+                .send_session_update("live", text(&format!("version-{update}")))
+                .expect("publish failed");
+        }
+
+        let snapshot = frames.snapshot().session_state;
+        assert_eq!(
+            snapshot.pending,
+            OTHER_SESSIONS + 1,
+            "one slot per session, however many updates backlogged"
+        );
+        assert_eq!(
+            snapshot.superseded,
+            (UPDATES - 1) as u64,
+            "every update after the first superseded the pending one"
+        );
+        assert_eq!(snapshot.dropped, 0, "coalescing is not dropping");
+        assert!(snapshot.charged_bytes <= snapshot.byte_budget);
+
+        // Drain: each session appears exactly once, and the live session's one
+        // frame is the newest value.
+        let mut live = Vec::new();
+        let mut seen = 0;
+        while let Some(frame) = frames.try_next() {
+            let body = body(frame);
+            if body.starts_with("version-") {
+                live.push(body);
+            }
+            seen += 1;
+        }
+        assert_eq!(seen, OTHER_SESSIONS + 1);
+        assert_eq!(
+            live,
+            vec![format!("version-{}", UPDATES - 1)],
+            "the backlogged Session must deliver its latest state, once"
+        );
+    }
 }

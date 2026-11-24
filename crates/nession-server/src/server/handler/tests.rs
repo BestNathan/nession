@@ -1356,7 +1356,7 @@ async fn claim_control_channel(
     h: &ConnectionHandler,
 ) -> (
     crate::server::outbound::WsMessageSender,
-    tokio::sync::mpsc::Receiver<crate::server::outbound::QueuedFrame>,
+    crate::server::outbound::OutboundReceiver,
 ) {
     let (sender, rx) = crate::server::outbound::WsMessageSender::new();
     if let Some(agent_id) = h.registered_agent_id() {

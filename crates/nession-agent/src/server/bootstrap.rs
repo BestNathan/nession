@@ -350,7 +350,7 @@ pub fn cursor_escape(x: u16, y: u16) -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
+    use crate::server::outbound::STREAM_BYTE_BUDGET;
 
     /// A capture of `lines` newline-terminated lines, `payload` bytes each.
     fn capture_of(lines: usize, payload: usize) -> Vec<u8> {
@@ -551,10 +551,10 @@ mod tests {
         // is the point — the two numbers are one decision.
         let worst_case = BOOTSTRAP_MAX_BYTES.div_ceil(3) * 4;
         assert!(
-            worst_case < OUTBOUND_BYTE_BUDGET,
-            "a capped bootstrap base64s to {worst_case} bytes against a \
-             {OUTBOUND_BYTE_BUDGET}-byte budget; the ceiling is no longer a \
-             ceiling"
+            worst_case < STREAM_BYTE_BUDGET,
+            "a capped bootstrap base64s to {worst_case} bytes against the \
+             {STREAM_BYTE_BUDGET}-byte stream class budget; the ceiling is no \
+             longer a ceiling"
         );
     }
 

@@ -188,7 +188,7 @@ macro_rules! core_routes {
         pub(crate) async fn dispatch_core(
             $client: &ServerClient,
             $msg: &ProtocolMessage<serde_json::Value>,
-            $responses: &mpsc::Sender<WsMessage>,
+            $responses: &crate::connection::server_client::ResponseSender,
         ) -> Result<()> {
             match (
                 $msg.msg_type.as_str(),
