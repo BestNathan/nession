@@ -415,3 +415,5 @@ try {
 }finally{rmSync(repairStore,{recursive:true,force:true});}
 validateDevelopmentState(state);
 console.log('agent Issue outbox: durable CAS, trusted result transitions and replay fixtures passed');
+
+await import('./quality-reconcile-selftest.mjs');
