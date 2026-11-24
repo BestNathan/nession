@@ -906,3 +906,10 @@
 - Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox, registry
 - Reason: Record the #4250 proprietary Blob transport retirement — Tag-reachable Session image acquisition cut over to standard OCI /v2/, the protected legacy_blob_route compatibility toggle (default true) gating the legacy mount in the Server ingress http_router with fail-closed rollback, and bounded compatibility for untagged/digest-only rows; SC-01 agent run 45318146210 and SC-02/SC-03 merged-staging Case Run 45332521480 Pass at 00db673886ee5d6cda579d0f180d973ae7e7f600 (removal negatives, persistent Agent cache and active-pin preservation, fail-closed rollback)
 - Source: https://github.com/BestNathan/nession/issues/4250
+
+## 2026-11-24T08:54:57Z | update | Nession public Pages source publication and orphan-branch signals
+- Path: topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md
+- Topic: workflows
+- Categories: delivery, knowledge, pages, security
+- Reason: Record the #4448 independent React 19 + TypeScript + Vite Pages UI, credential-free UI build and trusted assembly split, exact compiled-closure artifact manifest and anonymous HTTPS readback, frozen-baseline parity, and the post-merge publication receipt at main 45c513ac (Deploy run 45359395680)
+- Source: https://github.com/BestNathan/nession/issues/4448

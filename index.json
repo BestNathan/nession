@@ -418,7 +418,7 @@
       },
       {
         "title": "Nession public Pages source publication and orphan-branch signals",
-        "description": "Verified trusted main Pages publishing of Prototype and Knowledge orphan branch push signals with exact-source public readback",
+        "description": "Verified trusted main Pages publishing of the independent React/Vite UI and exact compiled-closure readback, plus Prototype and Knowledge orphan-branch signals",
         "path": "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md",
         "status": "verified",
         "categories": [
@@ -427,7 +427,7 @@
           "pages",
           "security"
         ],
-        "updated_at": "2026-11-10T16:18:55Z"
+        "updated_at": "2026-11-24T08:54:57Z"
       }
     ]
   },
