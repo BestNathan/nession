@@ -179,7 +179,7 @@ jobs:
           fi
 
       - name: Resolve source run
-        if: ((github.event_name == 'workflow_run' || github.event_name == 'repository_dispatch') && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
+        if: ((github.event_name == 'workflow_run' || (github.event_name == 'repository_dispatch' && github.event.action == 'nession-agent-review-completed')) && steps.event_artifacts.outputs.count != '' && steps.event_artifacts.outputs.count != '0') || steps.reconcile.outputs.run_id != ''
         id: source
         env:
           EVENT_RUN_ID: ${{ github.event.workflow_run.id || github.event.client_payload.source_run_id }}
@@ -201,9 +201,6 @@ jobs:
           # The dispatch sender cannot assert a successful source by itself.
           # Only a tiny bounded readiness wait applies to the newly introduced
           # bot wake: the notification job is still finishing when dispatched.
-          # Only Reviewer wake carries a sender-provided source locator. History
-          # wake uses the independently selected main-owned recovery Run and
-          # shared REST/Catalog provenance, never Reviewer-specific fields.
           if [[ "$GITHUB_EVENT_NAME" == repository_dispatch &&
                 "$EVENT_DISPATCH_ACTION" == nession-agent-review-completed ]]; then
             [[ "$EVENT_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
