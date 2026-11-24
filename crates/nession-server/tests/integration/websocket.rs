@@ -652,11 +652,20 @@ fn ownership_server_config(db_path: String) -> nession_common::config::ServerCon
 /// protocol messages, so a close or a binary frame where one is expected is the
 /// answer, not a frame to skip past.
 async fn next_json(ws: &mut TestWs) -> anyhow::Result<serde_json::Value> {
-    match ws.next().await {
-        Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
-            Ok(serde_json::from_str(&text)?)
+    loop {
+        match ws.next().await {
+            Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
+                return Ok(serde_json::from_str(&text)?)
+            }
+            // Keepalive control is transport, not protocol: a Ping/Pong may
+            // interleave with any reply, and failing on it made these tests
+            // load-dependent.
+            Some(Ok(
+                tokio_tungstenite::tungstenite::Message::Ping(_)
+                | tokio_tungstenite::tungstenite::Message::Pong(_),
+            )) => continue,
+            other => anyhow::bail!("expected a JSON text frame, got {other:?}"),
         }
-        other => anyhow::bail!("expected a JSON text frame, got {other:?}"),
     }
 }
 
