@@ -170,6 +170,22 @@ export function mayProjectConvergenceWriter4059(result) {
     result.authenticated_convergence_writer_4059,result.target_ref);
 }
 
+// #4137 lifecycle repair: the historically disproven #4059 SC-02 Pass cited a
+// green Post-Run Waker (Run 44678335169) and a BLOCKED/MERGE_CONFLICT converge
+// job (Run 44678377431) whose workflow-file writer mint was skipped. Those exact
+// sources are immutable history, never acceptance. This deterministic,
+// source-bound invalidation lets the lifecycle owner refuse closure and
+// re-select the negative source for a trusted replay even though the old row is
+// still checked Pass. It never rewrites the row; new results remain governed by
+// enforceConvergenceWriter4059 / mayProjectConvergenceWriter4059 above.
+const DISPROVEN_4059_SC02_RUNS=Object.freeze([44678335169,44678377431]);
+export function invalidatedConvergenceWriter4059Row(issueNumber,criterion,evidence) {
+  if(issueNumber!==4059||criterion!=='SC-02')return false;
+  const text=String(evidence??'');
+  return DISPROVEN_4059_SC02_RUNS.some(id=>
+    new RegExp('(?:^|[^0-9])'+id+'(?:[^0-9]|$)').test(text));
+}
+
 // This routine makes read-only source-bound REST observations. The source Run
 // is only a lookup candidate; authorization comes from independent Run, Step,
 // structured Controller result, PR ancestry, CI and protected merge witnesses.
@@ -298,6 +314,19 @@ export function selfTestConvergenceWriter4137() {
   assert.equal(convergenceLogReceipt('unstructured green workflow'),null);
   assert.equal(convergenceLogReceipt('2026-11-23T07:00:00.001Z [\n' +
     '2026-11-23T07:00:00.001Z broken'),null);
+  // #4137 lifecycle invalidation is keyed to the exact disproven sources only.
+  assert.equal(invalidatedConvergenceWriter4059Row(4059,'SC-02',
+    'run 44678335169; ref f24451c94f700d9c25ddb061873854889ed4b36e; source agent-qwen; '+
+    'workflow: Convergence run 44678377431 conclusion=success'),true);
+  assert.equal(invalidatedConvergenceWriter4059Row(4059,'SC-02',
+    'run 45332410930; ref '+sha+'; source agent-qwen; authenticated-convergence-writer: '+
+    'Run 111/1, App writer minted, MERGED'),false,'a genuine receipt is not invalidated');
+  assert.equal(invalidatedConvergenceWriter4059Row(4059,'SC-02','run 999; ref '+sha),false);
+  assert.equal(invalidatedConvergenceWriter4059Row(4059,'SC-01','run 44678335169'),false);
+  assert.equal(invalidatedConvergenceWriter4059Row(4140,'SC-02','run 44678335169'),false);
+  assert.equal(invalidatedConvergenceWriter4059Row(4059,'SC-02','run 446783351690'),false,
+    'a longer run id must not match the disproven source');
+  assert.equal(invalidatedConvergenceWriter4059Row(4059,'SC-02',null),false);
   return true;
 }
 if(process.argv[1]?.endsWith('/acceptance-convergence-writer-4137.mjs')&&
