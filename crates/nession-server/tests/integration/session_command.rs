@@ -139,13 +139,21 @@ async fn test_session_create_flow() {
         .await
         .unwrap();
 
-    // Client receives the response
-    let client_msg = client_stream.next().await.unwrap().unwrap();
-    let client_text = match client_msg {
-        WsMessage::Text(t) => t,
-        _ => panic!("expected text"),
+    // Client receives the response. A session-list push may interleave with
+    // it (`#4434` class scheduling): replies correlate by id, notifications do
+    // not, so skip anything that is not this request's answer.
+    let client_parsed: serde_json::Value = loop {
+        let msg = tokio::time::timeout(Duration::from_secs(5), client_stream.next())
+            .await
+            .expect("no create response within the deadline")
+            .expect("the client stream ended")
+            .expect("read the create response");
+        let WsMessage::Text(t) = msg else { continue };
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["msg_type"].as_str() == Some("server.session.create") {
+            break v;
+        }
     };
-    let client_parsed: serde_json::Value = serde_json::from_str(&client_text).unwrap();
     assert_eq!(client_parsed["msg_type"], "server.session.create");
     assert_eq!(client_parsed["payload"]["success"], true);
     assert_eq!(client_parsed["payload"]["session_id"], "agent-1:my-session");
@@ -308,13 +316,19 @@ async fn test_create_with_offline_agent_returns_error() {
         .await
         .unwrap();
 
-    // Should get immediate error
-    let resp = client_stream.next().await.unwrap().unwrap();
-    let text = match resp {
-        WsMessage::Text(t) => t,
-        _ => panic!("expected text"),
+    // Should get immediate error. As above, skip any interleaved notification.
+    let parsed: serde_json::Value = loop {
+        let resp = tokio::time::timeout(Duration::from_secs(5), client_stream.next())
+            .await
+            .expect("no create error within the deadline")
+            .expect("the client stream ended")
+            .expect("read the create error");
+        let WsMessage::Text(t) = resp else { continue };
+        let v: serde_json::Value = serde_json::from_str(&t).unwrap();
+        if v["msg_type"].as_str() == Some("server.session.create") {
+            break v;
+        }
     };
-    let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(parsed["msg_type"], "server.session.create");
     assert_eq!(parsed["payload"]["success"], false);
     assert!(parsed["payload"]["error"]

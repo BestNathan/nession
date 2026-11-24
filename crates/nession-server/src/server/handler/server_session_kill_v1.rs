@@ -200,14 +200,22 @@ impl ConnectionHandler {
                     error_kind: Some("unavailable".to_string()),
                 },
             )),
-            Err(_) => Ok(session_kill_reply(
-                &msg.id,
-                WebSessionKillResponse {
-                    success: false,
-                    error: Some("Timeout waiting for agent response".to_string()),
-                    error_kind: Some("timeout".to_string()),
-                },
-            )),
+            Err(_) => {
+                // The caller's deadline settles the pending entry (#4434,
+                // SC-03): a late reply must not be delivered to a request
+                // whose caller has already been answered.
+                self.command_broker
+                    .expire_pending(&agent_id, &request_id)
+                    .await;
+                Ok(session_kill_reply(
+                    &msg.id,
+                    WebSessionKillResponse {
+                        success: false,
+                        error: Some("Timeout waiting for agent response".to_string()),
+                        error_kind: Some("timeout".to_string()),
+                    },
+                ))
+            }
         }
     }
 }

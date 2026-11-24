@@ -914,9 +914,13 @@ async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayloa
         return;
     };
     for peer in peers {
+        // Input ACK is flow control for this exchange, not live terminal
+        // output: it must be written before the input request's `ok` reply, so
+        // it shares the response class's FIFO (#4434). It is still
+        // non-dropping and still bounded by the terminal stall grace.
         let _ = peer
             .outbound
-            .send_terminal(WsFrame::Text(json.clone()))
+            .send_input_ack(WsFrame::Text(json.clone()))
             .await;
     }
 }
