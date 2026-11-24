@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "a86a12f3f377f9938874c1f6ffeae50128f5fbd577366f1a3847c9cc860494e3",
+  "run_id": 45444355511,
+  "run_attempt": 1,
+  "issue": 4434,
+  "criterion": "SC-02",
+  "criterion_text": "A source-aligned staging protocol/runtime Case with a stalled sink/peer proves finite write deadline and propagation to reader, no half-open task or registry leak, and slow peer does not stop another connection; exercise Server, P2P, central and Relay leg.",
+  "stage": "staging",
+  "target_sha": "b2fe36db2adfdd490a380398f1fa5580cd5fa99a",
+  "contract_sha256": "7c2ccea5728c644180f95a24133f97c7a6340f9849d001b5f8948c08abdfa22b",
+  "case_revision": "b2fe36db2adfdd490a380398f1fa5580cd5fa99a",
+  "case_tree_sha": "637d6d035ea997b3ac2e9f6ea772f5e8c9de590f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T17:10:35.070Z",
+  "finished_at": "2026-11-24T17:12:15.715Z",
+  "duration_ms": 100645,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A stalled sink has a finite write deadline whose verdict reaches the read side, half-open and stale-owner settlement is exactly-once, a slow peer is isolated from another connection, and the Server/P2P/central/Relay legs all end rather than leak",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "b2fe36db2adfdd490a380398f1fa5580cd5fa99a: Relay stall closed the connection, half-open Agent leg reported and reattached, a disconnected owner did not unregister its successor, the P2P forwarder and central connection closed on their bounds, the broker timeout settled once, and a stalled write returned a finite timeout verdict"
+        }
+      ],
+      "duration_ms": 94784,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45444355511,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b2fe36db2adfdd490a380398f1fa5580cd5fa99a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45444355511",
+    "record_path": "runs/2026-11-24/45444355511-1/4434/SC-02.json",
+    "source_result_sha256": "82d3756cc39668ba6675ea5615c9b37ab587306fbff626f05333fa3d57712a6d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45444355511-1",
+    "sha256": "82d3756cc39668ba6675ea5615c9b37ab587306fbff626f05333fa3d57712a6d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45444355511",
+    "durability": "time-limited; object archival not configured"
+  }
+}
