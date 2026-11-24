@@ -9,7 +9,8 @@
 //! | class | what is on it | at the bound |
 //! |---|---|---|
 //! | [`P2pOutbound::send_reply`] | an answer to a request the peer made | **wait** — it is never dropped |
-//! | [`P2pOutbound::send_terminal`] | `terminal.output` — a PTY chunk, or a scrollback prefill | **wait, then end the connection** |
+//! | [`P2pOutbound::send_attach_response`] | the bootstrap / atomic history prefix an attach asked for | **wait, then end the connection** — ordered with the attach reply |
+//! | [`P2pOutbound::send_terminal`] | `terminal.output` — a live PTY chunk | **wait, then end the connection** |
 //! | [`P2pOutbound::try_send_state`] | `terminal.resize`, a pong | **drop** — a level, and the peer restates it |
 //!
 //! ## Reserved capacity
@@ -190,6 +191,45 @@ impl P2pOutbound {
     /// grace, then reports `Stalled`.
     pub async fn send_terminal(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_terminal(msg).await
+    }
+
+    /// Send the one-off history a client asked for on attach.
+    ///
+    /// The bootstrap (and the atomic output prefix that precedes it) is a
+    /// **response to the attach**, not live stream data: it must be written
+    /// before the attach's `ok` reply (`#321`), and the response class is the
+    /// only class that shares the attach reply's FIFO. Putting it on the stream
+    /// class lets the scheduler's response protection overtake it, which is the
+    /// regression this method exists to prevent.
+    ///
+    /// It keeps the terminal stall policy — a finite wait — because a client
+    /// that cannot drain its snapshot will not drain the session behind it.
+    pub async fn send_attach_response(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.send_response_class(msg).await
+    }
+
+    /// Send a terminal-input acknowledgement before its request's `ok` reply.
+    ///
+    /// The ACK is the frame a client's input cursor advances on. It shares its
+    /// exchange with the input request's reply, so it must stay in the same
+    /// FIFO: the response class's protection would otherwise overtake it and a
+    /// client reading in order would see the *previous* cursor. Same class as
+    /// the reply, still non-dropping and still bounded by the stall grace.
+    pub async fn send_input_ack(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.send_response_class(msg).await
+    }
+
+    /// Submit on the non-dropping response class with the terminal stall grace.
+    async fn send_response_class(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.queue
+            .submit(
+                FrameClass::Response,
+                self.queue.current_generation(),
+                msg,
+                WaitPolicy::Finite(DEFAULT_TERMINAL_STALL_GRACE),
+            )
+            .await
+            .into_result()
     }
 
     /// Send a frame that reports a *level*: `terminal.resize`, a pong.

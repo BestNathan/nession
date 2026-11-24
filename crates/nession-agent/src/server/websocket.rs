@@ -584,7 +584,7 @@ async fn send_atomic_output_prefix(
     let Ok(json) = serde_json::to_string(&msg) else {
         return false;
     };
-    match outbound.send_terminal(WsFrame::Text(json)).await {
+    match outbound.send_attach_response(WsFrame::Text(json)).await {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             warn!("stream cut: client stalled on atomic prefix for {session_name}");
@@ -767,7 +767,7 @@ async fn send_bootstrap(
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
     };
-    match outbound.send_terminal(WsFrame::Text(json)).await {
+    match outbound.send_attach_response(WsFrame::Text(json)).await {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             // The honest verdict, and the same one the live-output task takes:
