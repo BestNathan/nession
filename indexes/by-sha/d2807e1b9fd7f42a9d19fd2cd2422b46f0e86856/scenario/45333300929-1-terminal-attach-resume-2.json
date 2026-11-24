@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45333300929,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4434-classified-outbound",
+    "target_sha": "d2807e1b9fd7f42a9d19fd2cd2422b46f0e86856",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45333300929",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "dac75ece2dcd1938d98e6fdf5770beb659da0b28014f683ebe981f8b2740e126"
+  },
+  "record": "runs/2026-11-24/45333300929-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "4d74e86fdd77b6739c7cb722a4ae27447804cd8bfd87e486384289e88e251407"
+}
