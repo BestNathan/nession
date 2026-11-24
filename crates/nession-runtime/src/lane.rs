@@ -130,6 +130,14 @@ use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, warn};
 
+use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
+
+/// Labels for a lane event. Only the bounded vocabulary is used; the adapter
+/// that owns the runtime identity adds `runtime`/`peer` when it emits its own.
+fn lane_labels(domain: Domain, direction: Direction) -> Labels {
+    Labels::new().domain(domain).direction(direction)
+}
+
 /// A boxed unit of work, as the key lane carries it.
 ///
 /// Boxed because the key lane keeps work in a queue until a worker can run it,
@@ -347,6 +355,12 @@ impl QueryLane {
             Ok(permit) => permit,
             Err(tokio::sync::TryAcquireError::NoPermits) => {
                 self.counters.refused.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_admission_refused",
+                    lane_labels(Domain::Request, Direction::Inbound)
+                        .result(ResultKind::Refused)
+                        .reason(ReasonKind::Saturated),
+                );
                 debug!(
                     "{}query lane is full ({} in flight of {}); refusing the frame explicitly",
                     self.label,
@@ -372,6 +386,13 @@ impl QueryLane {
             .fetch_max(self.in_flight() as u64, Ordering::Relaxed);
         self.tasks
             .spawn(run(work, permit, Arc::clone(&self.counters)));
+        metrics::counter(
+            "ws_admission_accepted",
+            lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
+        );
+        let labels = lane_labels(Domain::Request, Direction::Internal);
+        metrics::gauge("ws_task_active", labels, self.in_flight() as f64);
+        metrics::gauge("ws_task_retained", labels, self.tasks.len() as f64);
     }
 
     /// Reap finished tasks without waiting (`#4433`).
@@ -382,8 +403,18 @@ impl QueryLane {
     fn reap(&mut self) {
         while let Some(joined) = self.tasks.try_join_next() {
             self.counters.reaped.fetch_add(1, Ordering::Relaxed);
+            metrics::counter(
+                "ws_task_reaped",
+                lane_labels(Domain::Request, Direction::Internal).result(ResultKind::Reaped),
+            );
             if report(&joined, self.label, "query") == Outcome::Panicked {
                 self.counters.panics.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_task_panicked",
+                    lane_labels(Domain::Request, Direction::Internal)
+                        .result(ResultKind::Panicked)
+                        .reason(ReasonKind::Panic),
+                );
             }
         }
     }
@@ -462,6 +493,10 @@ impl QueryLane {
         self.counters
             .admission_waits
             .fetch_add(1, Ordering::Relaxed);
+        metrics::counter(
+            "ws_admission_waited",
+            lane_labels(Domain::Request, Direction::Inbound),
+        );
         debug!(
             "{}query lane is full ({} in flight of {}); the connection waits for a slot \
              before reading on",
@@ -481,6 +516,7 @@ async fn run<F>(work: F, permit: Option<OwnedSemaphorePermit>, counters: Arc<Que
 where
     F: Future<Output = ()>,
 {
+    let started = std::time::Instant::now();
     // A query handler panicking must not turn its slot into a retained record
     // forever: the slot is released and the query is counted as finished, with
     // the panic recorded beside it (`#4433`).
@@ -492,6 +528,11 @@ where
     }
     drop(permit);
     counters.completed.fetch_add(1, Ordering::Relaxed);
+    metrics::record(
+        "ws_request_duration",
+        lane_labels(Domain::Request, Direction::Internal).result(ResultKind::Completed),
+        started.elapsed().as_secs_f64() * 1_000.0,
+    );
 }
 
 /// How a joined task ended, for the counters at the reap.
@@ -666,6 +707,10 @@ where
     /// why the waiter is the reader and what that costs.
     pub async fn enqueue(&self, key: K, work: Work) {
         self.reap_workers().await;
+        metrics::counter(
+            "ws_admission_accepted",
+            lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
+        );
         let mut work = Some(work);
         loop {
             // Register for the wake-up *before* looking, so a queue that frees
@@ -763,6 +808,12 @@ where
             let queue = queues.entry(key.clone()).or_default();
             if queue.pending.len() >= self.inner.depth {
                 self.inner.refused.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_admission_refused",
+                    lane_labels(Domain::Request, Direction::Inbound)
+                        .result(ResultKind::Refused)
+                        .reason(ReasonKind::Capacity),
+                );
                 debug!(
                     "{}key lane: `{key}` is at its queue depth ({}); refusing the frame explicitly",
                     self.inner.label, self.inner.depth
@@ -775,6 +826,12 @@ where
                     Ok(permit) => Some(permit),
                     Err(_) => {
                         self.inner.refused.fetch_add(1, Ordering::Relaxed);
+                        metrics::counter(
+                            "ws_admission_refused",
+                            lane_labels(Domain::Request, Direction::Inbound)
+                                .result(ResultKind::Refused)
+                                .reason(ReasonKind::Capacity),
+                        );
                         debug!(
                             "{}key lane: {} resources are already being mutated; refusing the \
                              frame explicitly",
@@ -807,6 +864,10 @@ where
                 work_key(inner, worker_key).await
             });
         }
+        metrics::counter(
+            "ws_admission_accepted",
+            lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
+        );
         Ok(())
     }
 
@@ -819,8 +880,18 @@ where
         let mut workers = self.workers.lock().await;
         while let Some(joined) = workers.try_join_next() {
             self.inner.reaped.fetch_add(1, Ordering::Relaxed);
+            metrics::counter(
+                "ws_task_reaped",
+                lane_labels(Domain::Request, Direction::Internal).result(ResultKind::Reaped),
+            );
             if report(&joined, self.inner.label, "key") == Outcome::Panicked {
                 self.inner.panics.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_task_panicked",
+                    lane_labels(Domain::Request, Direction::Internal)
+                        .result(ResultKind::Panicked)
+                        .reason(ReasonKind::Panic),
+                );
             }
         }
     }
@@ -951,6 +1022,12 @@ where
                     Ok(()) => {}
                     Err(_) => {
                         inner.panics.fetch_add(1, Ordering::Relaxed);
+                        metrics::counter(
+                            "ws_task_panicked",
+                            lane_labels(Domain::Request, Direction::Internal)
+                                .result(ResultKind::Panicked)
+                                .reason(ReasonKind::Panic),
+                        );
                         error!("{}key lane: `{key}` mutation panicked", inner.label);
                     }
                 }

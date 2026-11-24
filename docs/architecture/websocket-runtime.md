@@ -324,6 +324,22 @@ path.
 - A missing collector cannot delay message handling. The exporter queue is
   bounded and drops are counted.
 
+The executable owners are:
+
+- the metric contract and catalog — `nession_runtime::metrics`
+  (`METRIC_SCHEMA_VERSION`, `METRIC_CATALOG`, bounded `Labels` that accept only
+  the enum vocabulary);
+- the versioned diagnostic dashboards —
+  [`crates/nession-runtime/assets/ws-runtime-dashboards.json`](../../crates/nession-runtime/assets/ws-runtime-dashboards.json),
+  whose panels are validated against the catalog by a test;
+- the reproducible controlled-load baseline —
+  `crates/nession-runtime/tests/ws_runtime_baseline.rs`, which prints and writes
+  a report with exact-SHA/runner/workload/limits, p50/p95/p99, memory, task and
+  queue high-water, and quiescent values.
+
+This section names the contract; the catalog and the baseline are the live
+truth for names, units and numbers.
+
 ## 9. Current behavior and the approved target
 
 The baseline is main at `e656d1f9c95baafc8735a2bb0274f668a2cc30d7` (the

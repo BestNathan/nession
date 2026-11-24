@@ -78,6 +78,7 @@ use tokio::sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
 
 use crate::frame::WsFrame;
+use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
 
 /// What the WebSocket frame header costs beyond the payload `WsFrame::len`
 /// reports. Charged so a queue full of small frames is priced honestly.
@@ -595,9 +596,32 @@ impl OutboundInner {
     fn note_refused(&self, class: FrameClass, error: OutboundError) {
         self.counters.refused.fetch_add(1, Ordering::Relaxed);
         self.process.refused.fetch_add(1, Ordering::Relaxed);
-        if let OutboundError::TooLarge { .. } = error {
+        let reason = match error {
+            OutboundError::Closed => ReasonKind::Shutdown,
+            OutboundError::Saturated | OutboundError::Stalled => ReasonKind::Saturated,
+            OutboundError::TooLarge { .. } => ReasonKind::Capacity,
+            OutboundError::StaleGeneration => ReasonKind::Replacement,
+        };
+        metrics::counter(
+            "ws_outbound_refused",
+            Labels::new()
+                .domain(Domain::Stream)
+                .direction(Direction::Outbound)
+                .result(ResultKind::Refused)
+                .reason(reason),
+        );
+        if let OutboundError::TooLarge { size, .. } = error {
             self.counters.too_large.fetch_add(1, Ordering::Relaxed);
             self.process.too_large.fetch_add(1, Ordering::Relaxed);
+            metrics::record(
+                "ws_outbound_too_large",
+                Labels::new()
+                    .domain(Domain::Stream)
+                    .direction(Direction::Outbound)
+                    .result(ResultKind::TooLarge)
+                    .reason(ReasonKind::Capacity),
+                size as f64,
+            );
         }
         debug!(
             "{}: refused a {} frame ({error})",
@@ -932,6 +956,20 @@ impl Outbound {
             Ok(()) => {
                 self.inner.counters.accepted.fetch_add(1, Ordering::Relaxed);
                 self.inner.process.accepted.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_outbound_accepted",
+                    Labels::new()
+                        .domain(Domain::Stream)
+                        .direction(Direction::Outbound)
+                        .result(ResultKind::Accepted),
+                );
+                metrics::gauge(
+                    "ws_outbound_queued",
+                    Labels::new()
+                        .domain(Domain::Stream)
+                        .direction(Direction::Outbound),
+                    self.queued_bytes() as f64,
+                );
                 self.inner.wake.notify_one();
                 SubmitOutcome::Accepted
             }
@@ -1006,6 +1044,20 @@ impl Outbound {
             Ok(()) => {
                 self.inner.counters.accepted.fetch_add(1, Ordering::Relaxed);
                 self.inner.process.accepted.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_outbound_accepted",
+                    Labels::new()
+                        .domain(Domain::Stream)
+                        .direction(Direction::Outbound)
+                        .result(ResultKind::Accepted),
+                );
+                metrics::gauge(
+                    "ws_outbound_queued",
+                    Labels::new()
+                        .domain(Domain::Stream)
+                        .direction(Direction::Outbound),
+                    self.queued_bytes() as f64,
+                );
                 self.inner.wake.notify_one();
                 SubmitOutcome::Accepted
             }

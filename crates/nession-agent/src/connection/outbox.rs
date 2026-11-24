@@ -96,6 +96,7 @@ use tokio::sync::Notify;
 use tokio_tungstenite::tungstenite::Message as WsMessage;
 use tracing::{debug, warn};
 
+use nession_runtime::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
 use nession_runtime::outbound::{charge, Limits};
 
 use super::sync_intent::SyncIntent;
@@ -562,9 +563,24 @@ impl Outbox {
                     pending.charged = charged;
                     pending.message = msg;
                     counters.superseded += 1;
+                    metrics::counter(
+                        "ws_stream_coalesced",
+                        Labels::new()
+                            .domain(Domain::Stream)
+                            .direction(Direction::Outbound)
+                            .result(ResultKind::Coalesced),
+                    );
                     Verdict::Pending
                 } else {
                     counters.dropped += 1;
+                    metrics::counter(
+                        "ws_outbound_refused",
+                        Labels::new()
+                            .domain(Domain::Stream)
+                            .direction(Direction::Outbound)
+                            .result(ResultKind::Refused)
+                            .reason(ReasonKind::Capacity),
+                    );
                     Verdict::Refused {
                         total: counters.dropped,
                     }
@@ -1433,6 +1449,34 @@ mod tests {
     /// backlog present rather than as an isolated two-publish exchange: the
     /// writer is absent, so every publish of `live` arrives while the previous
     /// one is still pending.
+    /// Replacing a pending level is observable as a bounded telemetry event.
+    #[test]
+    fn coalescing_emits_the_stream_coalesced_metric() {
+        struct Count(Arc<std::sync::atomic::AtomicU64>);
+        impl nession_runtime::metrics::MetricSink for Count {
+            fn record(&self, metric: nession_runtime::metrics::Metric) {
+                if metric.name == "ws_stream_coalesced" {
+                    self.0.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+            }
+        }
+
+        let count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        nession_runtime::metrics::set_sink(Some(Arc::new(Count(Arc::clone(&count)))));
+        let (outbox, _frames, _) = outbox();
+        outbox
+            .send_session_update("coalesce", text("a"))
+            .expect("publish failed");
+        outbox
+            .send_session_update("coalesce", text("b"))
+            .expect("publish failed");
+        assert!(
+            count.load(std::sync::atomic::Ordering::Relaxed) >= 1,
+            "the superseding publish was not instrumented"
+        );
+        nession_runtime::metrics::set_sink(None);
+    }
+
     #[test]
     fn a_backlogged_writer_delivers_only_the_latest_state_per_session() {
         let (outbox, mut frames, _) = outbox();

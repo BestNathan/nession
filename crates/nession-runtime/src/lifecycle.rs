@@ -48,6 +48,7 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::frame::WsFrame;
+use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
 
 /// Why one connection ended.
 ///
@@ -71,6 +72,20 @@ pub enum CloseReason {
     Shutdown,
     /// The read half was cancelled by the write half (or vice versa).
     Aborted,
+}
+
+/// The bounded telemetry reason for a settlement.
+fn settle_reason(reason: CloseReason) -> ReasonKind {
+    match reason {
+        CloseReason::PeerClosed => ReasonKind::PeerClosed,
+        CloseReason::ReadError => ReasonKind::ReadError,
+        CloseReason::WriteError => ReasonKind::WriteError,
+        CloseReason::WriteTimeout => ReasonKind::WriteTimeout,
+        CloseReason::Stalled => ReasonKind::Stalled,
+        CloseReason::LocalClose => ReasonKind::LocalClose,
+        CloseReason::Shutdown => ReasonKind::Shutdown,
+        CloseReason::Aborted => ReasonKind::Aborted,
+    }
 }
 
 impl CloseReason {
@@ -170,6 +185,13 @@ impl ConnectionLifecycle {
             }
         });
         if winner {
+            metrics::counter(
+                "ws_connection_closed",
+                Labels::new()
+                    .domain(Domain::Lifecycle)
+                    .result(ResultKind::Closed)
+                    .reason(settle_reason(reason)),
+            );
             debug!(generation = self.generation, reason = %reason, "connection settled");
         }
         winner
@@ -270,7 +292,17 @@ where
     match tokio::time::timeout(deadline, sink.send(frame)).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(WriteFailure::Sink(error.to_string())),
-        Err(_) => Err(WriteFailure::Timeout),
+        Err(_) => {
+            metrics::counter(
+                "ws_outbound_write_timeout",
+                Labels::new()
+                    .domain(Domain::Stream)
+                    .direction(Direction::Outbound)
+                    .result(ResultKind::Timeout)
+                    .reason(ReasonKind::WriteTimeout),
+            );
+            Err(WriteFailure::Timeout)
+        }
     }
 }
 
