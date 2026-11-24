@@ -899,3 +899,10 @@
 - Categories: architecture, ci, erofs, release, security, toolchain, workflows
 - Reason: Record #4249 source-bound end-to-end consumption proof of the pinned gh-2.105.0 GHCR Index through Server Catalog, Session grant, verified Agent EROFS cache, Host-root Sandbox composition and isolated gh execution, with authenticated staging Case Run 45206980580 SC-02/SC-03 Pass receipts at dcb2b5785dd43bdd68b76485fa699b130548940b
 - Source: https://github.com/BestNathan/nession/issues/4249
+
+## 2026-11-24T05:28:21Z | update | Global EROFS Image Manager
+- Path: topics/engineering/global-erofs-image-manager.md
+- Topic: engineering
+- Categories: architecture, erofs, images, server, storage, security, agent, workspace, sandbox, registry
+- Reason: Record the #4250 proprietary Blob transport retirement — Tag-reachable Session image acquisition cut over to standard OCI /v2/, the protected legacy_blob_route compatibility toggle (default true) gating the legacy mount in the Server ingress http_router with fail-closed rollback, and bounded compatibility for untagged/digest-only rows; SC-01 agent run 45318146210 and SC-02/SC-03 merged-staging Case Run 45332521480 Pass at 00db673886ee5d6cda579d0f180d973ae7e7f600 (removal negatives, persistent Agent cache and active-pin preservation, fail-closed rollback)
+- Source: https://github.com/BestNathan/nession/issues/4250
