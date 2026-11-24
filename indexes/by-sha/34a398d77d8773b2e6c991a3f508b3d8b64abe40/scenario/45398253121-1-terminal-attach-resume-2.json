@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45398253121,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4476-ws-relay-load-flake",
+    "target_sha": "34a398d77d8773b2e6c991a3f508b3d8b64abe40",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45398253121",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "2b00ab1721c224700df9d944e2a8724734b892bdbe8872732d63e59d01d9b9bf"
+  },
+  "record": "runs/2026-11-24/45398253121-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "560ae41c53da2287a8e04c80776428e166501c34b5a3d9eef3a226ad328f4d01"
+}
