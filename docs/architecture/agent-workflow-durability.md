@@ -291,6 +291,12 @@ Issues and carry a reason; it cannot start an arbitrary open Issue, select a
 role, approve a result or authorize merge/SC/Store writes. New lifecycles start
 only from the verified owner-authorized command/admission path.
 
+The sanitized observation projection (`workflow/telemetry.mjs`) carries
+phase/substate, stage age, reconcile source/outcome, unresolved dispatch, retry
+budget, checkpoint version binding, stale results, repair round and finding
+counts. It is emitted in the existing trusted-main workflow log/artifact
+boundary; it does not create a new metrics store, schema owner or public UI.
+
 State and receipts stay in the existing `agent-store` versioned Issue state;
 there is no second database or state engine. Every decision is persisted with
 expected-version CAS and deterministic action IDs before any external effect.
