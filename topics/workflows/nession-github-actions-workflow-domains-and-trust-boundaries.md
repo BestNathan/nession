@@ -1,12 +1,12 @@
 ---
 title: "Nession GitHub Actions workflow domains and trust boundaries"
-description: "Canonical workflow ownership, event routing, source identity and privilege boundaries"
+description: "Canonical workflow ownership, event routing, source identity, privilege boundaries and the single Reconcile-owned durable Agent lifecycle"
 topic: workflows
-categories: ["architecture","ci","security","workflows"]
+categories: ["architecture","agent","ci","security","workflows"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-20T01:08:30Z
-sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
+updated_at: 2026-11-24T16:01:07Z
+sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
 ---
 
 # Nession GitHub Actions workflow domains and trust boundaries
@@ -33,6 +33,58 @@ The responsibility chain is event → trusted route/plan → least-privileged ex
 
 Cross-branch producers are notifications, never trusted program inputs. Main-owned consumers verify branch, repository, event and conclusion and run only trusted source code. Run/Attempt/target SHA identity prevents stale or unrelated observations from becoming evidence.
 
+## Durable Agent lifecycle and Reconcile ownership (#4482)
+
+The durable Agent workflow is one Issue-centric lifecycle owned by
+`scripts/lib/agent/workflow/lifecycle.mjs` (`decideLifecycle`). The bounded
+`scripts/lib/agent/workflow/reconcile.mjs` loop is the single coordinator:
+authenticated GitHub events/completion hints, a GitHub schedule and an
+authorized manual/external wake all feed the same decision path. A wake can
+hint at active Issues, but it cannot start an arbitrary open Issue, select a
+role, approve a result or authorize merge/SC/Store writes.
+
+Business phases are `authorized → developing → publishing → ci_checking →
+reviewing → evaluating → accepting → waiting_merge → post_merge_acceptance →
+done`, plus durable `blocked` and authorized `cancelled`. One logical Developer
+Thread persists across attempts, yields and repair rounds; retrying is not a new
+Thread. Execution states (`pending/dispatching/dispatched/claimed/executing/
+result_available/committed/retired`, with `yielded/failed/cancelled/ambiguous`)
+are separate from business phase. A GitHub Run's queued/in_progress/completed
+status is an observation, not an accepted result.
+
+**CI precedes Review.** After the trusted Publisher confirms the exact PR HEAD,
+`workflow/ci-barrier.mjs` freezes the applicable required-check set for that
+HEAD. Pending waits; missing/cancelled/unknown/skipped-required is never a
+pass; infrastructure-only failure recovers or blocks; source failure still
+proceeds to Review. Reviewer then runs as an internal lifecycle action — never
+a GitHub Check, required check context or branch-protection requirement, and
+ordinary non-managed PRs never trigger it. `evaluating` combines the
+independent CI and Review outcomes deterministically: pass+approved proceeds to
+existing Acceptance; any actionable failure produces exactly one Developer
+repair action carrying one immutable, deduped feedback bundle for that exact
+HEAD/CI generation/Review result. A Reviewer approval can never override a CI
+failure; a materially changed CI evidence generation invalidates the old
+aggregate and Review before a new decision is bound.
+
+State and receipts remain in the existing `agent-store` versioned Issue state
+(no second database or engine). Decisions persist with expected-version CAS and
+deterministic Thread/action IDs before any external effect; dispatch and
+publication use write-ahead intent → external call → authenticated readback →
+receipt, so a lost response is adopted by readback rather than sent twice.
+Stale fences/HEAD/evidence, duplicate or out-of-order results, ambiguous
+publication effects and exhausted infrastructure/model/repair budgets fail
+closed or produce an explicit owner-recovery blocker. V1 immutable history is
+projected by an explicit readback migration; an under-specified legacy state
+becomes a durable blocked diagnostic. The legacy `advanceWorkflow` adapter never
+drives a v2 state and V2 never accepts a v1 state.
+
+Executable owners: `workflow/{contract,lifecycle,ci-barrier,feedback,migration,reconcile,telemetry}.mjs`;
+canonical architecture: [agent-workflow-durability.md](https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md).
+PR-stage criteria are proven by exact-source fixtures in the
+`agent-provider-contract` Gate. The real main-owned SC-06 canary remains
+Pending until the repository owner separately authorizes it; documentation and
+fixtures are not that execution evidence.
+
 ## Source-bound Staging convergence and Issue E2E authority (#2953)
 
 The trusted-Main `Release / Staging Convergence` controller discovers deploy-eligible **branches** from existing staging deployment triggers. It pins `main_sha`, `lane_sha` and a checked two-parent integration head (Staging first, Main second); no force pushes or direct-Main-to-diverged-Staging merge bypasses. An exact batch reuses or creates one open Requirement with a stable source marker, and the integration PR links that Issue with the canonical `Refs #N` association.
@@ -52,4 +104,4 @@ Owner `/approve-staging-convergence ...` comments and authenticated bot Audit re
 
 ## Limits / when to revisit
 
-This summarizes canonical workflow ownership as of source SHA 5eaaf2cf07d5 and the #2953 source-bound convergence implementation through cb81cd3469b9. New main/staging conflicts, approvals or deployment outcomes require their own exact-SHA evidence. Validate live workflows, protected refs, Gates and Issue authority when the implementation changes; this article is not a second workflow policy engine.
+This summarizes canonical workflow ownership as of source SHA 5eaaf2cf07d5, the #2953 source-bound convergence implementation through cb81cd3469b9 and the #4482 V2 lifecycle/reconcile implementation at 8783ecf6ab. New main/staging conflicts, approvals or deployment outcomes require their own exact-SHA evidence; the #4482 SC-06 canary remains unexecuted until separately authorized. Validate live workflows, protected refs, Gates and Issue authority when the implementation changes; this article is not a second workflow policy engine.

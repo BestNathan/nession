@@ -941,3 +941,10 @@
 - Categories: architecture, websocket, observability, telemetry, runtime, reliability
 - Reason: Record the approved bounded telemetry contract — closed label enums, owner-emitted units, optional non-blocking bounded exporter, versioned validated dashboards and a reproducible controlled-load baseline — as distinct from the current snapshot/log observability
 - Source: https://github.com/BestNathan/nession/issues/4436
+
+## 2026-11-24T16:01:07Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, agent, ci, security, workflows
+- Reason: Record the Agent Workflow V2 single Reconcile-owned durable lifecycle, CI-before-Review barrier, Reviewer as an internal phase rather than a GitHub Check, the four-way aggregate with one deduped repair bundle, agent-store CAS/readback recovery, explicit v1 migration and the still-Pending SC-06 canary
+- Source: https://github.com/BestNathan/nession/issues/4482

@@ -450,16 +450,17 @@
       },
       {
         "title": "Nession GitHub Actions workflow domains and trust boundaries",
-        "description": "Canonical workflow ownership, event routing, source identity and privilege boundaries",
+        "description": "Canonical workflow ownership, event routing, source identity, privilege boundaries and the single Reconcile-owned durable Agent lifecycle",
         "path": "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
         "status": "verified",
         "categories": [
           "architecture",
+          "agent",
           "ci",
           "security",
           "workflows"
         ],
-        "updated_at": "2026-11-20T01:08:30Z"
+        "updated_at": "2026-11-24T16:01:07Z"
       },
       {
         "title": "Nession native Toolchain OCI release to GHCR",
@@ -507,7 +508,8 @@
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
       "topics/engineering/session-activity-ownership.md",
-      "topics/engineering/websocket-execution-budgets-and-backpressure.md"
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md",
+      "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md"
     ],
     "agents": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
