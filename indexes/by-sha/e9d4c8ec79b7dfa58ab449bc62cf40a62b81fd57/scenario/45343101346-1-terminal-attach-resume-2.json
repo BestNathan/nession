@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45343101346,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4433-runtime-ingress",
+    "target_sha": "e9d4c8ec79b7dfa58ab449bc62cf40a62b81fd57",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45343101346",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "460618382be9478be3d1d7930811ed93b6c02a204aefb0dd774c42e446e435f0"
+  },
+  "record": "runs/2026-11-24/45343101346-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "22b257e4cb25f16b9cc1980041332df559983bc5313da9690332dafa45112cba"
+}
