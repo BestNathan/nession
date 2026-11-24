@@ -56,11 +56,25 @@ check-worktree-target-seed:
 check-build-cache-verify:
     ./gates/run build-cache-verifier
 
-# Best-effort warm-start for a newly-created worktree. On APFS/reflink-capable
-# filesystems this clone-shares dependency artifacts while keeping a private
-# target directory and then removes all workspace-member artifacts. Prints a
-# machine-readable seeded/skipped/failed outcome; a skip or failure is not an
-# error and never publishes a partial target.
+# Create or update the dedicated warm seed base at .claude/worktrees/_seed-base
+# (detached origin/main, falling back to main/HEAD) and warm its dev target.
+# New worktrees seed from it when Cargo.lock and rust-toolchain.toml match;
+# main remains the fallback. The base is machine-local state and is never
+# committed. Use --check for a read-only report, --no-fetch for local refs,
+# or --release to warm the release profile.
+seed-worktree-base:
+    bash ./scripts/seed-worktree-base.sh
+
+# Read-only state report for the dedicated seed base.
+seed-worktree-base-check:
+    bash ./scripts/seed-worktree-base.sh --check
+
+# Best-effort warm-start for a newly-created worktree. Source selection is
+# NSESSION_SEED_SOURCE > dedicated seed base (when it has a target/) > main.
+# On APFS/reflink-capable filesystems this clone-shares dependency artifacts
+# while keeping a private target directory and then removes all workspace-member
+# artifacts. Prints a machine-readable seeded/skipped/failed outcome; a skip or
+# failure is not an error and never publishes a partial target.
 seed-worktree-target:
     bash ./scripts/seed-worktree-target.sh
 
@@ -70,7 +84,8 @@ seed-worktree-target:
 seed-worktree-target-replace:
     bash ./scripts/seed-worktree-target.sh --replace
 
-# Show the active local compiler-cache/worktree seed state.
+# Show the active local compiler-cache/worktree seed state, including the
+# dedicated base, its compatibility, and the resolved seed source.
 build-cache-status:
     bash ./scripts/build-cache-status.sh
 

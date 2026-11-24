@@ -22,7 +22,47 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  ui:
+    # Credential-isolated UI compilation. This job receives no GitHub token,
+    # no Actions read permission and no repository/prototype/Knowledge
+    # snapshots. It installs the locked Pages lockfile and produces only the
+    # compiled UI artifact consumed by the privileged projection job.
+    name: Build credential-free Pages UI
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout trusted main without credentials
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Setup standalone Node toolchain
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: pages/package-lock.json
+      - name: Install locked Pages UI dependencies
+        working-directory: pages
+        run: npm ci --ignore-scripts
+      - name: Validate independent public projection
+        working-directory: pages
+        run: npm run check
+      - name: Compile credential-free Vite Pages UI
+        working-directory: pages
+        env:
+          PAGES_UI_OUT_DIR: ${{ github.workspace }}/pages-ui
+        run: npm run build:ui
+      - name: Upload compiled UI for trusted assembly
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-ui-${{ github.run_attempt }}
+          path: pages-ui
+          retention-days: 1
+
   build:
+    needs: [ui]
     # workflow_run uses trusted main code. Each unprivileged orphan signal is
     # bound to its name + branch; no source code/artifacts enter this publisher.
     if: >-
@@ -60,7 +100,9 @@ jobs:
       mcp_semantic_sha256: ${{ steps.public_data.outputs.mcp_semantic_sha256 }}
       mcp_source_sha: ${{ steps.public_data.outputs.mcp_source_sha }}
       mcp_tools: ${{ steps.public_data.outputs.mcp_tools }}
-      mcp_ui_sha256: ${{ steps.public_data.outputs.mcp_ui_sha256 }}
+      artifact_manifest_sha256: ${{ steps.public_data.outputs.artifact_manifest_sha256 }}
+      artifact_closure_sha256: ${{ steps.public_data.outputs.artifact_closure_sha256 }}
+      artifact_files: ${{ steps.public_data.outputs.artifact_files }}
       knowledge_sha: ${{ steps.public_data.outputs.knowledge_sha }}
       knowledge_json_sha256: ${{ steps.public_data.outputs.knowledge_json_sha256 }}
       knowledge_articles: ${{ steps.public_data.outputs.knowledge_articles }}
@@ -119,6 +161,12 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
+      - name: Download credential-free compiled Pages UI
+        if: steps.detect.outputs.active == 'true'
+        uses: actions/download-artifact@v4
+        with:
+          name: pages-ui-${{ github.run_attempt }}
+          path: ${{ github.workspace }}/pages-ui
       - name: Prepare Rust toolchain for canonical Protocol codegen
         if: steps.detect.outputs.active == 'true'
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -175,9 +223,6 @@ jobs:
       - name: Validate Knowledge ledger at pinned checkout
         if: steps.detect.outputs.active == 'true'
         run: node scripts/knowledge-ledger-contract.mjs check knowledge-store
-      - name: Validate independent public projection
-        if: steps.detect.outputs.active == 'true'
-        run: cd pages && npm run check
       - name: Resolve previously published MCP Documents (read-only, no credentials)
         if: steps.detect.outputs.active == 'true'
         shell: bash
@@ -214,6 +259,8 @@ jobs:
           ACCEPTANCE_RESULTS_DIR: ${{ github.workspace }}/acceptance-store
           KNOWLEDGE_DIR: ${{ github.workspace }}/knowledge-store
           PAGES_PROTOCOL_CACHE_DIR: ${{ runner.temp }}/nession-protocol-schemas
+          # Credential-isolated UI artifact. build.mjs never runs Vite here.
+          PAGES_UI_DIR: ${{ github.workspace }}/pages-ui
         shell: bash
         run: |
           set -euo pipefail
@@ -227,8 +274,13 @@ jobs:
           test -s pages/dist/prototypes/terminal-fixed-cols-2487/index.html
           test -s pages/dist/prototypes/manifest.json
           test -s pages/dist/index.html
-          test -s pages/dist/data/site.json
           test -s pages/dist/workflows.html
+          test -s pages/dist/styles.css
+          test -s pages/dist/workflows.css
+          test -s pages/dist/favicon.svg
+          test -s pages/dist/artifact-manifest.json
+          node pages/scripts/artifact-manifest.mjs verify pages/dist
+          test -s pages/dist/data/site.json
           test -s pages/dist/data/workflows.json
           test -s pages/dist/data/knowledge.json
           test -s pages/dist/data/documents.json
@@ -274,11 +326,17 @@ jobs:
           # MCP is a separately validated, content-addressed Documents projection.
           # Its source SHA may remain at the last semantic change when main
           # advances without a Tool/schema change.
+          # Trusted build-generated closure manifest for both HTML entrypoints
+          # and every compiled JS/CSS/static asset. The deployed website never
+          # supplies this expected digest.
+          artifact_manifest=pages/dist/artifact-manifest.json
+          node pages/scripts/artifact-manifest.mjs verify pages/dist
+          echo "artifact_manifest_sha256=$(sha256sum "$artifact_manifest" | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
+          echo "artifact_closure_sha256=$(jq -r .closure_sha256 "$artifact_manifest")" >> "$GITHUB_OUTPUT"
+          echo "artifact_files=$(jq -r '.files | length' "$artifact_manifest")" >> "$GITHUB_OUTPUT"
           if [[ -f pages/scripts/mcp-reconcile.mjs ]]; then
             mcp_json=pages/dist/data/mcp.json
             test -s "$mcp_json"
-            test -s pages/dist/mcp-documents.js
-            echo "mcp_ui_sha256=$(sha256sum pages/dist/mcp-documents.js | cut -d ' ' -f1)" >> "$GITHUB_OUTPUT"
             node --input-type=module -e "
               import {readFileSync} from 'node:fs';
               import {validMcpPublication} from './pages/scripts/mcp-reconcile.mjs';
@@ -383,7 +441,9 @@ jobs:
           EXPECTED_MCP_SEMANTIC_SHA256: ${{ needs.build.outputs.mcp_semantic_sha256 }}
           EXPECTED_MCP_SOURCE_SHA: ${{ needs.build.outputs.mcp_source_sha }}
           EXPECTED_MCP_TOOLS: ${{ needs.build.outputs.mcp_tools }}
-          EXPECTED_MCP_UI_SHA256: ${{ needs.build.outputs.mcp_ui_sha256 }}
+          EXPECTED_ARTIFACT_MANIFEST_SHA256: ${{ needs.build.outputs.artifact_manifest_sha256 }}
+          EXPECTED_ARTIFACT_CLOSURE_SHA256: ${{ needs.build.outputs.artifact_closure_sha256 }}
+          EXPECTED_ARTIFACT_FILES: ${{ needs.build.outputs.artifact_files }}
           EXPECTED_KNOWLEDGE_SHA: ${{ needs.build.outputs.knowledge_sha }}
           EXPECTED_KNOWLEDGE_JSON_SHA256: ${{ needs.build.outputs.knowledge_json_sha256 }}
           EXPECTED_KNOWLEDGE_ARTICLES: ${{ needs.build.outputs.knowledge_articles }}
@@ -416,6 +476,9 @@ jobs:
           [[ "$EXPECTED_WORKFLOW_NODES" == 27 ]] || exit 1
           [[ "$EXPECTED_AGENT_RUNS" =~ ^[0-9]+$ ]] || exit 1
           [[ "$EXPECTED_AGENT_SOURCE" =~ ^(available|truncated|unavailable)$ ]] || exit 1
+          [[ "$EXPECTED_ARTIFACT_MANIFEST_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_ARTIFACT_CLOSURE_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
+          [[ "$EXPECTED_ARTIFACT_FILES" =~ ^[1-9][0-9]*$ ]] || exit 1
           matched=false
           for attempt in {1..18}; do
             if curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
@@ -462,6 +525,20 @@ jobs:
             echo "::error::Public Pages did not serve the exact HTML/JSON artifacts at the merged main SHA during bounded HTTPS polling"
             exit 1
           }
+          # Verify the complete trusted closure (both HTML entrypoints and every
+          # compiled JS/CSS/static asset) against the anonymous HTTPS bytes. The
+          # expected manifest digest is the trusted build output; a matching main
+          # SHA or stale CDN chunk cannot satisfy this check.
+          node pages/scripts/verify-published-artifact.mjs \
+            --base "$url" \
+            --manifest-sha "$EXPECTED_ARTIFACT_MANIFEST_SHA256" \
+            --main-sha "$EXPECTED_SHA" \
+            --attempts 18
+          # Emit the trusted closure identity to the job log as well as the
+          # step summary so the post-merge acceptance adapter can authenticate
+          # the exact bytes it independently re-downloads from the public site.
+          echo "Compiled Pages closure: $EXPECTED_ARTIFACT_FILES files · digest \`$EXPECTED_ARTIFACT_CLOSURE_SHA256\`"
+          echo "Artifact manifest SHA-256: \`$EXPECTED_ARTIFACT_MANIFEST_SHA256\` (trusted build output)"
           # Confirm the exact publicly served prototype snapshot, not a constructed
           # URL, a GitHub blob viewer, or a potentially stale previous deployment.
           [[ "$EXPECTED_PROTO_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
@@ -554,9 +631,7 @@ jobs:
             [[ "$EXPECTED_MCP_SEMANTIC_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             [[ "$EXPECTED_MCP_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]] || exit 1
             [[ "$EXPECTED_MCP_TOOLS" =~ ^[1-9][0-9]*$ ]] || exit 1
-            [[ "$EXPECTED_MCP_UI_SHA256" =~ ^[a-f0-9]{64}$ ]] || exit 1
             mcp_readback="$(mktemp)"
-            mcp_ui_readback="$(mktemp)"
             mcp_ready=false
             # Keep public readback tied to the producer-owned publication schema.
             # #3735 added schema-v2 typed outputs; an old v1 check rejects valid bytes.
@@ -572,16 +647,13 @@ jobs:
                       data.semantic_sha256 !== process.argv[3] ||
                       data.tools.length !== Number(process.argv[4])) process.exit(1);
                 ' "$mcp_readback" "$EXPECTED_MCP_SOURCE_SHA" "$EXPECTED_MCP_SEMANTIC_SHA256" "$EXPECTED_MCP_TOOLS" \
-                && [[ "$(sha256sum "$mcp_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_JSON_SHA256" ]] \
-                && curl --fail --silent --show-error --location --connect-timeout 10 --max-time 20 \
-                  -H 'Cache-Control: no-cache' "$url/mcp-documents.js?revision=$EXPECTED_SHA" -o "$mcp_ui_readback" \
-                && [[ "$(sha256sum "$mcp_ui_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_UI_SHA256" ]]; then
+                && [[ "$(sha256sum "$mcp_readback" | cut -d ' ' -f1)" == "$EXPECTED_MCP_JSON_SHA256" ]]; then
                 mcp_ready=true
                 break
               fi
               sleep 5
             done
-            rm -f "$mcp_readback" "$mcp_ui_readback"
+            rm -f "$mcp_readback"
             [[ "$mcp_ready" == true ]] || {
               echo "::error::MCP Documents public HTTPS bytes differ from validated build artifact"
               exit 1
@@ -606,13 +678,15 @@ jobs:
             echo "- Workflow topology nodes: $workflow_nodes; exact HTML SHA-256: \`$workflow_html_digest\`"
             echo "- Workflow topology exact JSON SHA-256: \`$workflow_json_digest\`"
             echo "- Exact published JSON SHA-256: \`$digest\` (matches pinned build artifact)"
+            echo "- Compiled Pages closure: $EXPECTED_ARTIFACT_FILES files · digest \`$EXPECTED_ARTIFACT_CLOSURE_SHA256\`"
+            echo "- Artifact manifest SHA-256: \`$EXPECTED_ARTIFACT_MANIFEST_SHA256\` (trusted build output)"
             echo "- Issue Agent Run observation: $status · source $source · visible runs $observed"
             echo "- Public Knowledge: $url/#/knowledge · source $EXPECTED_KNOWLEDGE_SHA · $EXPECTED_KNOWLEDGE_ARTICLES articles"
             echo "- Public Protocol Documents: $url/#/documents · source $EXPECTED_SHA · $EXPECTED_DOCUMENTS_PROTOCOLS Protocol Units"
             echo "- Documents JSON SHA-256: $EXPECTED_DOCUMENTS_JSON_SHA256 (exact anonymous HTTPS bytes)"
             if [[ -n "$EXPECTED_MCP_JSON_SHA256" ]]; then
               echo "- Public MCP Documents: $url/#/documents/mcp · $EXPECTED_MCP_TOOLS Tools · source $EXPECTED_MCP_SOURCE_SHA"
-              echo "- MCP semantic digest: $EXPECTED_MCP_SEMANTIC_SHA256; HTTPS bytes: $EXPECTED_MCP_JSON_SHA256; UI JS: $EXPECTED_MCP_UI_SHA256"
+              echo "- MCP semantic digest: $EXPECTED_MCP_SEMANTIC_SHA256; HTTPS bytes: $EXPECTED_MCP_JSON_SHA256"
             fi
             echo "- Knowledge JSON SHA-256: $EXPECTED_KNOWLEDGE_JSON_SHA256 (anonymous HTTPS bytes)"
             echo "- Public prototype gallery: $url/prototypes/ (source prototype SHA \`$EXPECTED_PROTO_SHA\`)"

@@ -10,6 +10,7 @@ on:
       - '.github/workflows/ci-pages.yml'
       - 'e2e/tests/browser/pages-*.spec.ts'
       - 'e2e/pages/**'
+      - 'e2e/pagesGlobalSetup.mjs'
       - 'e2e/helpers/pagesStandalone.ts'
       - 'e2e/playwright.pages.config.ts'
       - 'e2e/package*.json'
@@ -24,38 +25,8 @@ concurrency:
 
 jobs:
   standalone-pages:
-    name: Pages unit, security and static build
+    name: Pages typecheck, unit and static build
     runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - name: Verify standalone projection and import boundary
-        run: cd pages && npm run check
-      - name: Build sanitized Pages without network credentials
-        env:
-          PAGES_OFFLINE: '1'
-          SOURCE_MAIN_SHA: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
-        run: node pages/scripts/build.mjs
-      - name: Verify output and null semantics
-        run: |
-          node - <<'NODE'
-          const fs=require('node:fs');
-          const p=JSON.parse(fs.readFileSync('pages/dist/data/site.json','utf8'));
-          if(p.schema_version!==1 || p.source.main_sha!=='a'.repeat(40))process.exit(1);
-          if(p.work.issues_status!=='unavailable' || p.agents.summary.cost_7d!==null)process.exit(1);
-          if(!fs.existsSync('pages/dist/index.html'))process.exit(1);
-          console.log('Public Pages schema, offline state and static artifact verified');
-          NODE
-
-  pages-browser:
-    name: Pages browser smoke (Chromium only)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
@@ -65,16 +36,79 @@ jobs:
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: e2e/package-lock.json
+          cache-dependency-path: pages/package-lock.json
+      - name: Install locked Pages dependencies
+        working-directory: pages
+        run: npm ci --ignore-scripts
+      - name: Verify standalone projection, types and import boundary
+        working-directory: pages
+        run: npm run check
+      - name: Build sanitized Pages without network credentials
+        env:
+          PAGES_OFFLINE: '1'
+          SOURCE_MAIN_SHA: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
+        run: node pages/scripts/build.mjs
+      - name: Verify output, compiled closure and null semantics
+        run: |
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const p=JSON.parse(fs.readFileSync('pages/dist/data/site.json','utf8'));
+          if(p.schema_version!==1 || p.source.main_sha!=='a'.repeat(40))process.exit(1);
+          if(p.work.issues_status!=='unavailable' || p.agents.summary.cost_7d!==null)process.exit(1);
+          for(const file of ['index.html','workflows.html','styles.css','workflows.css','favicon.svg','artifact-manifest.json']){
+            if(!fs.existsSync('pages/dist/'+file))process.exit(1);
+          }
+          const manifest=JSON.parse(fs.readFileSync('pages/dist/artifact-manifest.json','utf8'));
+          if(manifest.schema_version!==1)process.exit(1);
+          if(manifest.entrypoints.join(',')!=='index.html,workflows.html')process.exit(1);
+          if(!manifest.files.every(f=>/^[a-f0-9]{64}$/.test(f.sha256)))process.exit(1);
+          console.log('Public Pages schema, offline state, compiled closure and static artifact verified');
+          NODE
+          node pages/scripts/artifact-manifest.mjs verify pages/dist
+
+  pages-browser:
+    name: Pages browser smoke (Chromium only)
+    runs-on: ubuntu-24.04
+    # The suite now also executes the frozen-baseline parity matrix (19 routes
+    # × 7 viewports × light/dark plus interactions). Keep headroom above the
+    # measured ~10 minutes without turning a slow runner into a false failure.
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+          # The frozen pre-migration renderer is read from its immutable SHA.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: |
+            e2e/package-lock.json
+            pages/package-lock.json
       - name: Install isolated browser test dependencies
         working-directory: e2e
         run: npm ci
+      - name: Install locked Pages build dependencies
+        working-directory: pages
+        run: npm ci --ignore-scripts
       - name: Install headless Chromium
         working-directory: e2e
         run: npx playwright install --with-deps chromium
+      # pagesGlobalSetup.ts runs the credential-free Pages build once, so every
+      # browser scenario reads the actual Vite-compiled artifact from pages/dist.
       - name: Run standalone Pages browser scenarios (no product runtime)
         working-directory: e2e
         run: npx playwright test --config playwright.pages.config.ts
+      - name: Preserve frozen-baseline parity evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pages-parity-evidence
+          path: e2e/test-results-pages/parity/
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Preserve browser failure screenshots and traces
         if: failure()
         uses: actions/upload-artifact@v4
