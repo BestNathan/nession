@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validMcpSnapshot,mcpSchemaFields} from '../mcp-documents.js';
+import {mcpSchemaFields,mcpToolRoute} from '../src/features/documents/mcp/model.ts';
+import {validMcpSnapshot} from '../src/data/validation.ts';
+import {McpPage} from '../src/features/documents/mcp/McpPage.tsx';
+import {UiStateProvider} from '../src/app/ui-state.tsx';
+import {createElement} from 'react';
+import {renderToStaticMarkup} from 'react-dom/server';
 const SHA='a'.repeat(40);
 const tool={name:'nession_agent_list_sessions',description:'List sessions',
   inputSchema:{type:'object',properties:{agent_id:{type:'string'}},required:['agent_id']},

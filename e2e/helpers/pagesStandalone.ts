@@ -1,9 +1,26 @@
-// Standalone static Pages origin for browser tests. Never serves the product web/.
+// Standalone built-Pages origin for browser tests. Never serves the product
+// web/. Playwright exercises the actual Vite-compiled artifact from pages/dist;
+// only the public data projections are replaced with deterministic fixtures.
 import {createServer} from 'node:http';
-import {readFile} from 'node:fs/promises';
-import {resolve,join} from 'node:path';
+import {readFile,stat} from 'node:fs/promises';
+import {resolve,join,sep} from 'node:path';
 const cwd=process.cwd();
 const root=resolve(cwd,cwd.endsWith('/e2e')?'../pages':'pages');
+const dist=resolve(process.env.PAGES_E2E_DIST||join(root,'dist'));
+const MIME:Record<string,string>={
+ '.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8',
+ '.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json',
+ '.woff2':'font/woff2','.woff':'font/woff','.png':'image/png',
+};
+function safePath(rootDir:string,pathname:string):string|null{
+ let decoded:string;
+ try{decoded=decodeURIComponent(pathname);}catch{return null;}
+ if(!decoded||decoded.includes('\0')||decoded.includes('\\'))return null;
+ const relative=decoded.replace(/^\/+/,'');
+ const absolute=resolve(rootDir,relative);
+ if(absolute!==rootDir&&!absolute.startsWith(rootDir+sep))return null;
+ return absolute;
+}
 const fixture={
  schema_version:1,generated_at:'2026-10-14T12:00:00Z',
  source:{repository:'BestNathan/nession',main_sha:'a'.repeat(40),metrics_sha:'b'.repeat(40),acceptance_results_sha:'c'.repeat(40)},
@@ -132,7 +149,7 @@ const topology={
  ],
  edges:[{from:'ci-quality',to:'acceptance-orchestrator',kind:'workflow_run'}],
 };
-export async function startPagesFixture(options:{historicalLineage?:boolean}={}){
+export function pagesFixtureData(options:{historicalLineage?:boolean}={}):Record<string,unknown>{
  // Closed historical Issue/PR are NOT in the active OPEN lists; only
  // independently source-attested public lineage edges may make them reachable.
  const selected=options.historicalLineage?{...fixture,work:{...fixture.work,
@@ -150,19 +167,39 @@ export async function startPagesFixture(options:{historicalLineage?:boolean}={})
     release_url:'https://github.com/modelcontextprotocol/modelcontextprotocol/releases/tag/2026-07-28',
     source_url:'https://github.com/modelcontextprotocol/modelcontextprotocol/blob/'+'c'.repeat(40)+'/docs/specification/2026-07-28/changelog.mdx',
     previous_version:'2025-11-25',highlights:['Stateless core']}},tools:[{name:'nession_server_list_agents',description:'List agents',inputSchema:{type:'object',properties:{}},outputSchema:{type:'object',required:['agents'],properties:{agents:{type:'array',description:'Registered Agents',items:{type:'object',properties:{agent_id:{type:'string',description:'Canonical Agent ID'}}}}}}}]};
-const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/navigation.js':'navigation.js','/knowledge.js':'knowledge.js','/documents.js':'documents.js','/mcp-documents.js':'mcp-documents.js','/styles.css':'styles.css','/favicon.svg':'favicon.svg','/workflows.html':'workflows.html','/workflows.js':'workflows.js','/workflows.css':'workflows.css'} as Record<string,string>;
+ return {
+  '/data/site.json':selected,'/data/workflows.json':topology,
+  '/data/knowledge.json':knowledge,'/data/mcp.json':mcp,
+  '/data/documents.json':documents,
+  // The compiled UI always probes the pinned prototype catalog. An empty
+  // valid public manifest keeps this route independent and observable.
+  '/prototypes/manifest.json':{schema_version:1,
+    source:{branch:'prototype',sha:'b'.repeat(40)},entries:[]},
+ };
+}
+// Serve either the compiled Pages artifact or an immutable baseline source
+// tree with the exact same deterministic public data projections.
+export async function startPagesServer({filesRoot,data}:{filesRoot:string;data:Record<string,unknown>}){
  const server=createServer(async(req,res)=>{
-  const path=(req.url||'/').split('?')[0];
-  if(path==='/data/site.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(selected));return;}
-  if(path==='/data/workflows.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(topology));return;}
-  if(path==='/data/knowledge.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(knowledge));return;}
-  if(path==='/data/mcp.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(mcp));return;}
-  if(path==='/data/documents.json'){res.writeHead(200,{'content-type':'application/json'});res.end(JSON.stringify(documents));return;}
-  if(!Object.hasOwn(allowed,path)){res.writeHead(404);res.end();return;}
-  try {const name=allowed[path],content=await readFile(join(root,name));
-   res.writeHead(200,{'content-type':name.endsWith('.js')?'text/javascript':name.endsWith('.css')?'text/css':name.endsWith('.svg')?'image/svg+xml':'text/html'});
+  const raw=(req.url||'/').split('?')[0];
+  if(!raw.startsWith('/')){res.writeHead(400);res.end();return;}
+  // Serve both the publication root and the documented /nession/ subpath.
+  const path=raw.startsWith('/nession/')?raw.slice('/nession'.length):raw==='/nession'?'/':raw;
+  if(Object.hasOwn(data,path)){
+   res.writeHead(200,{'content-type':'application/json','cache-control':'no-cache'});
+   res.end(JSON.stringify(data[path]));return;
+  }
+  const file=path==='/'||path===''?'index.html':path.replace(/^\/+/,'');
+  const absolute=safePath(filesRoot,file);
+  if(!absolute){res.writeHead(400);res.end();return;}
+  try{
+   const info=await stat(absolute);
+   if(!info.isFile()){res.writeHead(404);res.end();return;}
+   const content=await readFile(absolute);
+   const extension=absolute.slice(absolute.lastIndexOf('.'));
+   res.writeHead(200,{'content-type':MIME[extension]||'application/octet-stream'});
    res.end(content);
-  }catch{res.writeHead(500);res.end();}
+  }catch{res.writeHead(404);res.end();}
  });
  await new Promise<void>((done,fail)=>{server.once('error',fail);server.listen(0,'127.0.0.1',done);});
  const port=server.address();if(!port||typeof port==='string')throw new Error('missing fixture port');
@@ -175,4 +212,7 @@ const allowed={'/':'index.html','/index.html':'index.html','/app.js':'app.js','/
   server.close(e=>e?fail(e):done());
   server.closeAllConnections();
  })};
+}
+export async function startPagesFixture(options:{historicalLineage?:boolean}={}){
+ return startPagesServer({filesRoot:dist,data:pagesFixtureData(options)});
 }

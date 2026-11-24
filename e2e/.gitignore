@@ -1,4 +1,6 @@
 node_modules/
 test-results/
+test-results-pages/
 playwright-report/
+playwright-report-pages/
 blob-report/

@@ -83,12 +83,16 @@ function isRuntime(file) {
   // process executes. Leaving them "unknown" makes an otherwise scoped
   // main->staging batch unmergeable (measured on the #3791 MCP image sync).
   //
-  // #4454: shipped public Pages assets are runtime-affecting. The build script
-  // (pages/scripts/build.mjs) copies .js, .css and .html files directly under
-  // pages/ to the public output. These are not tooling or build scripts; they
-  // are the shipped public UI. Match only direct children of pages/, not
-  // nested subtrees like pages/tests/ (tooling) or pages/scripts/ (build).
+  // #4454: shipped public Pages assets are runtime-affecting. The React/Vite
+  // migration keeps the two HTML entrypoints directly under pages/, the stable
+  // public CSS/favicon under pages/public/, and all compiled UI source under
+  // pages/src/. These are not tooling or build scripts; they are the shipped
+  // public UI. Nested test and publisher script subtrees are handled
+  // separately (tooling/test-only or unknown/fail-closed).
   if (/^pages\/[^/]+\.(js|css|html)$/.test(file)) return true;
+  if (file.startsWith('pages/public/') || file.startsWith('pages/src/')) return true;
+  if (file === 'pages/package.json' || file === 'pages/package-lock.json' ||
+      file === 'pages/vite.config.ts' || file === 'pages/tsconfig.json') return true;
   return file === '.gitignore' ||
     file.startsWith('crates/') ||
     file.startsWith('web/') ||
@@ -103,9 +107,9 @@ function isRuntime(file) {
 function isTooling(file) {
   if (file.endsWith('.md') || file.startsWith('docs/')) return true;
   // #4018: Pages' Node.js test-only sources under pages/tests/ are not shipped
-  // by pages/scripts/build.mjs. Do not broaden this to pages/ assets (runtime)
-  // or publisher build scripts (unknown/fail-closed): those may change the
-  // public runtime and must remain risk-bearing.
+  // by the compiled UI. Do not broaden this to pages/ source/public assets
+  // (runtime) or publisher build scripts (unknown/fail-closed): those may
+  // change the public runtime and must remain risk-bearing.
   if (file.startsWith('pages/tests/')) return true;
   if (file.startsWith('gates/')) return true; // executor/suite paths handled first
   if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
@@ -280,8 +284,12 @@ function selfTest() {
     'Dockerfile', 'Dockerfile.server', 'Dockerfile.mcp.prebuilt',
     'deploy/docker-compose.yml', 'deploy/docker-compose.mcp.yml',
     'deploy/mcp.example.toml', 'deploy/entrypoint-server.sh',
-    // #4454: shipped public Pages assets are runtime-affecting
-    'pages/knowledge.js', 'pages/styles.css', 'pages/index.html', 'pages/app.js']) {
+    // #4454: shipped public Pages surfaces are runtime-affecting (HTML
+    // entrypoints, React/TS UI source, stable public assets, locked build)
+    'pages/index.html', 'pages/workflows.html',
+    'pages/src/app/App.tsx', 'pages/src/features/knowledge/KnowledgePage.tsx',
+    'pages/public/styles.css', 'pages/public/favicon.svg',
+    'pages/package.json', 'pages/package-lock.json', 'pages/vite.config.ts']) {
     assert.equal(categorizeChangedPath(file), 'app-runtime', file + ' must be runtime');
   }
   // #3520: the root .gitignore can expose/hide build inputs, not just docs.
@@ -323,16 +331,15 @@ function selfTest() {
   assert.equal(pagesTestConvergence.applicable, false);
   assert.equal(notRequiredReceipt('a'.repeat(40),pagesTestConvergence).full_regression,
     'NOT_REQUIRED');
-  // #4454: exact seven-path batch from PR #4451 head af9b1421ae0518d4f55a97a53e3a1bd11e0c8ccf.
-  // Four tooling paths (.github/workflows/metrics-agent-telemetry.yml and three scripts/*),
-  // three risk-bearing paths (two shipped Pages assets + one standalone Pages browser test).
-  // Must be mixed, applicable; the shipped assets are runtime risk and the standalone
-  // browser test is runner-affecting. Unknown paths remain fail-closed.
+  // #4454: shipped public Pages assets are runtime-affecting. The React/Vite
+  // migration groups them under pages/src and pages/public while keeping the
+  // HTML entrypoints at pages/. This batch stays mixed (tooling + runner +
+  // runtime) and applicable; an unknown path still fails closed.
   const pagesShippedConvergence = classifyChangedPaths([
     '.github/workflows/metrics-agent-telemetry.yml',
     'e2e/pages/knowledge.test.ts',
-    'pages/knowledge.js',
-    'pages/styles.css',
+    'pages/src/features/knowledge/KnowledgePage.tsx',
+    'pages/public/styles.css',
     'scripts/acceptance-4342-downstream-evidence.mjs',
     'scripts/agent-telemetry-reconcile.mjs',
     'scripts/run-store-inventory.mjs',
@@ -342,13 +349,20 @@ function selfTest() {
   // Negative: an unknown path in the same batch must still fail closed
   assert.equal(classifyChangedPaths([
     'e2e/pages/knowledge.test.ts',
-    'pages/knowledge.js',
+    'pages/src/app/App.tsx',
     'unknown/path/that/does/not/exist.ts',
   ]).category, 'unknown', 'an unknown path must still fail closed alongside known Pages paths');
-  // Only the *test* subtree is recognized as tooling. Shipped public Pages app
-  // assets are runtime-affecting (#4454). The source-backed Pages build script
-  // is not a shipped asset and remains unknown/fail-closed.
-  for(const file of ['pages/scripts/build.mjs']){
+  // Every shipped public Pages surface is runtime-affecting. The source-backed
+  // Pages build/publisher scripts remain unknown/fail-closed; only the test
+  // subtree is recognized as tooling.
+  for(const file of ['pages/index.html','pages/workflows.html',
+    'pages/src/app/App.tsx','pages/public/styles.css','pages/public/favicon.svg',
+    'pages/package.json','pages/package-lock.json','pages/vite.config.ts',
+    'pages/tsconfig.json']){
+    assert.equal(categorizeChangedPath(file),'app-runtime',file+' must be runtime');
+  }
+  for(const file of ['pages/scripts/build.mjs','pages/scripts/build-data.mjs',
+    'pages/scripts/assemble.mjs','pages/scripts/artifact-manifest.mjs']){
     assert.equal(categorizeChangedPath(file),'unknown',file+' must fail closed');
   }
   assert.equal(classifyChangedPaths([
