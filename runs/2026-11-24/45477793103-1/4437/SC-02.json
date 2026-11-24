@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "6863b670871e5ff24521713a1c818f746c34158269cec2280bc5557cec3dfb14",
+  "run_id": 45477793103,
+  "run_attempt": 1,
+  "issue": 4437,
+  "criterion": "SC-02",
+  "criterion_text": "Staging isolated protocol/runtime Case exercises mixed traffic and a local test collector, verifies emitted runtime/peer/domain telemetry correlates queue/handler/write/stream and broker phases with redacted traces/logs, and Collector failure does not block healthy WS processing.",
+  "stage": "staging",
+  "target_sha": "550f7ea0077b09b250fc8635a89871b8eed56975",
+  "contract_sha256": "be78e52a38b35396a3ad9741c284cd0e17f0741a066777c1329888d2130361f4",
+  "case_revision": "550f7ea0077b09b250fc8635a89871b8eed56975",
+  "case_tree_sha": "bd4133c5f27476a0867facd3b50fcf0a157b53cc",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T20:12:53.271Z",
+  "finished_at": "2026-11-24T20:14:55.461Z",
+  "duration_ms": 122190,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "A mixed runtime workload emits bounded, identifier-free telemetry covering admission, completion, timeout, saturation, broker outcomes, reconnect and stream coalescence; a stalled local collector drops and counts metrics without blocking the message path; and the versioned dashboards agree with the emitted catalog",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "550f7ea0077b09b250fc8635a89871b8eed56975: the mixed-load baseline settled with owner-emitted admission/outbound/task/duration counters and gauges; bounded labels, dashboard/catalog agreement, stalled-collector drops, write-timeout and settlement reasons, reconnect attempts/active, lane refusal, broker outcomes and stream coalescence all held"
+        }
+      ],
+      "duration_ms": 116234,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45477793103,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "550f7ea0077b09b250fc8635a89871b8eed56975",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45477793103",
+    "record_path": "runs/2026-11-24/45477793103-1/4437/SC-02.json",
+    "source_result_sha256": "0e510067d02efaa8ed265e825d4e4d59286ef36652a68261bf390e2fbf54d3eb"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45477793103-1",
+    "sha256": "0e510067d02efaa8ed265e825d4e4d59286ef36652a68261bf390e2fbf54d3eb",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45477793103",
+    "durability": "time-limited; object archival not configured"
+  }
+}
