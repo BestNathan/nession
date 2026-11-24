@@ -432,6 +432,7 @@ export function validateRecoveryRouting(workflow){
      !inventoryJob.includes("github.event_name == 'schedule'")||
      !inventoryJob.includes("github.repository == 'BestNathan/nession'")||
      !inventoryJob.includes('permissions:\n      actions: read\n      contents: read\n    steps:')||
+     !inventoryJob.includes('ref: main\n          path: trusted\n          persist-credentials: false')||
      !inventoryJob.includes('ref: metrics\n          path: metrics-store\n          persist-credentials: false')||
      !inventoryJob.includes('node scripts/agent-telemetry-reconcile.mjs history-inventory')||
      !inventoryJob.includes('retention-days: 30')||
@@ -543,6 +544,8 @@ function selfTest(){
   assert.equal(validateRecoveryRouting(workflow),true);
   assert.throws(()=>validateRecoveryRouting(workflow.replace('contents: read\n    steps:',
     'contents: write\n    steps:')),/inventory must remain isolated/);
+  assert.throws(()=>validateRecoveryRouting(workflow.replace(/(history-inventory:[\s\S]*?ref: )main/,
+    '$1feature')),/inventory must remain isolated/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace("github.event.schedule == '47 * * * *'",
     "github.event.schedule == '*/5 * * * *'")),/inventory must remain isolated/);
   assert.throws(()=>validateRecoveryRouting(workflow.replace(" && github.event.schedule == '*/5 * * * *'",'')),/trusted main schedule guard/);
