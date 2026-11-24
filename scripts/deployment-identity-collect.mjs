@@ -25,7 +25,7 @@ import {
 // mismatched registry digests, ambiguous authority or hostile inputs.
 export function deploymentReadinessRetryable(error) {
   const message = String(error instanceof Error ? error.message : error ?? '');
-  return /^(agent|server|ui) (deployment observed generation is stale|deployment is not Available|deployment has no available replica|deployment image does not match the trusted overlay tag|pod is not Running|pod container is not ready|pods disagree on the running imageID)$/.test(message) ||
+  return /^(agent|server|ui) (deployment observed generation is stale|deployment is not Available|deployment has no available replica|deployment rollout has not converged to the desired template|deployment image does not match the trusted overlay tag|pod is not Running|pod container is not ready|pods disagree on the running imageID)$/.test(message) ||
     /^missing running pod for (agent|server|ui) deployment$/.test(message) ||
     /^no ready pod reports the (agent|server|ui) deployment image$/.test(message) ||
     /^missing (agent|server|ui) deployment nession-(agent|server|ui)-(staging|staging-01)$/.test(message);
@@ -173,6 +173,11 @@ export function deploymentIdentityFailureObservation({
       generation: nonNegative(d?.metadata?.generation),
       observed_generation: nonNegative(d?.status?.observedGeneration),
       available_replicas: nonNegative(d?.status?.availableReplicas),
+      // #4354: bounded rollout facts let a failure log distinguish an
+      // unconverged desired revision from a genuine digest disagreement.
+      desired_replicas: d ? nonNegative(d.spec?.replicas ?? 1) : null,
+      updated_replicas: nonNegative(d?.status?.updatedReplicas),
+      status_replicas: nonNegative(d?.status?.replicas),
       matching_pods: owned.length,
       ready_containers: Math.min(readyContainers, 1000),
       expected_digests: expectedDigests,
@@ -354,17 +359,32 @@ function deploymentFor(overlay, roleName, deployments) {
   if (!Number.isSafeInteger(deployment.status?.availableReplicas) || deployment.status.availableReplicas < 1) {
     fail(roleName + ' deployment has no available replica');
   }
+  // #4354: Available/availableReplicas describe the OLD revision during a
+  // RollingUpdate: the previous ReplicaSet's ready pod keeps them satisfied
+  // while the desired template has not rolled out. Binding that pod's imageID
+  // would reject the trusted provenance digest as a permanent mismatch.
+  // Require the full desired-revision rollout (the `kubectl rollout status`
+  // completion semantics) before any identity binding; a non-converged
+  // rollout is a bounded retryable state, never a digest verdict.
+  const desiredReplicas = deployment.spec?.replicas ?? 1;
+  if (!Number.isSafeInteger(desiredReplicas) || desiredReplicas < 1 ||
+      deployment.status?.updatedReplicas !== desiredReplicas ||
+      deployment.status?.replicas !== desiredReplicas ||
+      deployment.status.availableReplicas !== desiredReplicas) {
+    fail(roleName + ' deployment rollout has not converged to the desired template');
+  }
   return {
     deployment,
     image,
     containerName: nonEmptyLine(roleContainers[0].name, roleName + ' deployment container name'),
     generation,
     observedGeneration,
+    replicas: desiredReplicas,
     uid: nonEmptyLine(deployment.metadata?.uid, roleName + ' deployment UID'),
   };
 }
 
-function imageIdFor(overlay, roleName, deploymentName, containerName, pods) {
+function imageIdFor(overlay, roleName, deploymentName, containerName, desiredReplicas, pods) {
   // The trusted Deployment spec names the precise role container and pins
   // its image repository/tag. Match this container by Kubernetes status.name,
   // NOT by status.image: containerd/registry mirrors may render that display
@@ -384,6 +404,14 @@ function imageIdFor(overlay, roleName, deploymentName, containerName, pods) {
       typeof owner.name === 'string' && replicaSetName.test(owner.name);
   });
   if (matching.length === 0) fail('missing running pod for ' + roleName + ' deployment');
+  // #4354: cross-check the observed pod set against the converged replica
+  // count. A surge or terminating straggler owned by the previous ReplicaSet
+  // — including one whose role-container status is not yet reported and would
+  // otherwise be skipped below — must never leave the old revision as the
+  // sole identity witness.
+  if (matching.length !== desiredReplicas) {
+    fail(roleName + ' deployment rollout has not converged to the desired template');
+  }
   const imageIds = new Set();
   for (const pod of matching) {
     if (pod.metadata?.namespace !== overlay.namespace) {
@@ -425,7 +453,8 @@ export function observationFromKubernetes({
   const workloads = ROLES.map((roleName) => {
     const selected = deploymentFor(overlay, roleName, deploymentItems);
     const imageId = imageIdFor(
-      overlay, roleName, selected.deployment.metadata.name, selected.containerName, podItems);
+      overlay, roleName, selected.deployment.metadata.name, selected.containerName,
+      selected.replicas, podItems);
     return {
       role: roleName,
       name: selected.deployment.metadata.name,
@@ -546,13 +575,14 @@ function kubernetesFixtures({ mutateDeployments, mutatePods } = {}) {
         generation: 9,
         labels: { app: 'nession', env: 'staging' },
       },
-      spec: { template: { spec: { containers: [{
+      spec: { replicas: 1, template: { spec: { containers: [{
         name: roleName,
         image: 'ghcr.io/bestnathan/nession:' + roleName + '-abcdef1',
       }] } } },
       status: {
         observedGeneration: 9,
         replicas: 1,
+        updatedReplicas: 1,
         availableReplicas: 1,
         conditions: [{ type: 'Available', status: 'True' }],
       },
@@ -778,12 +808,108 @@ function selfTest() {
   reject({ mutatePods: (p) => {
     p.items[1].status.containerStatuses[0].imageID = 'ghcr.io/bestnathan/nession@sha256:' + 'f'.repeat(64);
   } }, /pods disagree|imageID does not match/);
-  reject({ mutatePods: (p) => {
+  reject({ mutateDeployments: (d) => {
+    d.items[1].spec.replicas = 2;
+    d.items[1].status.replicas = 2;
+    d.items[1].status.updatedReplicas = 2;
+    d.items[1].status.availableReplicas = 2;
+  }, mutatePods: (p) => {
     p.items.push(structuredClone(p.items[1]));
     p.items[3].metadata.name = 'nession-server-staging-def34';
     p.items[3].metadata.ownerReferences[0].name = 'nession-server-staging-def34';
     p.items[3].status.containerStatuses[0].imageID = 'ghcr.io/bestnathan/nession@sha256:' + 'f'.repeat(64);
   } }, /pods disagree on the running imageID/);
+
+  // #4354: incident regression. The desired template already pins the new tag
+  // while the previous ReplicaSet's ready pod is the only witness
+  // (updatedReplicas has not reached spec.replicas). The old collector bound
+  // that stale imageID and rejected the trusted provenance digest as permanent
+  // (class=digest, retryable=false, exit 2 on attempt 1/18). The converged
+  // rollout invariant must instead surface a bounded retryable rollout state,
+  // and attest the same provenance once the desired revision has rolled out.
+  const staleRevision = kubernetesFixtures({ mutateDeployments: (d) => {
+    d.items[2].status.updatedReplicas = 0;
+  }, mutatePods: (p) => {
+    p.items[2].metadata.name = 'nession-ui-staging-old11';
+    p.items[2].metadata.ownerReferences[0].name = 'nession-ui-staging-old11';
+    p.items[2].status.containerStatuses[0].image = 'ghcr.io/bestnathan/nession:ui-abcdef0';
+    p.items[2].status.containerStatuses[0].imageID =
+      'ghcr.io/bestnathan/nession@sha256:' + 'e'.repeat(64);
+  }});
+  let staleError;
+  try {
+    attestFromObservations({ ...base, ...staleRevision });
+  } catch (error) {
+    staleError = error;
+  }
+  assert.ok(staleError, 'an unconverged desired revision must not attest');
+  assert.match(staleError.message, /ui deployment rollout has not converged to the desired template/);
+  assert.equal(deploymentReadinessRetryable(staleError), true);
+  const staleRejection = deploymentIdentityRejection(staleError);
+  assert.equal(staleRejection.class, 'readiness');
+  assert.equal(staleRejection.retryable, true);
+  const rolloutObservation = deploymentIdentityFailureObservation({
+    ...base, ...staleRevision, error: staleError,
+  });
+  assert.equal(rolloutObservation.rejection_class, 'readiness');
+  assert.equal(rolloutObservation.retryable, true);
+  assert.equal(rolloutObservation.roles[2].desired_replicas, 1);
+  assert.equal(rolloutObservation.roles[2].updated_replicas, 0);
+  assert.equal(rolloutObservation.roles[2].status_replicas, 1);
+  assert.equal(rolloutObservation.roles[2].matching_pods, 1);
+  // Negative-then-positive: the identical provenance attests once the desired
+  // revision's pod is the sole ready witness.
+  const rolledOut = structuredClone(staleRevision);
+  rolledOut.deployments.items[2].status.updatedReplicas = 1;
+  rolledOut.pods.items[2].metadata.name = 'nession-ui-staging-abc12';
+  rolledOut.pods.items[2].metadata.ownerReferences[0].name = 'nession-ui-staging-abc12';
+  rolledOut.pods.items[2].status.containerStatuses[0].image =
+    'ghcr.io/bestnathan/nession:ui-abcdef1';
+  rolledOut.pods.items[2].status.containerStatuses[0].imageID =
+    'ghcr.io/bestnathan/nession@sha256:' + '3'.repeat(64);
+  const rolledAttestation = attestFromObservations({ ...base, ...rolledOut });
+  assert.equal(rolledAttestation.source_sha, SOURCE_SHA);
+  assert.equal(rolledAttestation.workloads[2].image_id,
+    'ghcr.io/bestnathan/nession@sha256:' + '3'.repeat(64));
+
+  // Surge window: the new pod exists but its role-container status is not yet
+  // reported; the old ready pod must not become the sole identity witness.
+  const surge = kubernetesFixtures({ mutateDeployments: (d) => {
+    d.items[2].status.replicas = 2;
+    d.items[2].status.updatedReplicas = 1;
+  }, mutatePods: (p) => {
+    const old = structuredClone(p.items[2]);
+    old.metadata.name = 'nession-ui-staging-old11';
+    old.metadata.ownerReferences[0].name = 'nession-ui-staging-old11';
+    old.status.containerStatuses[0].imageID = 'ghcr.io/bestnathan/nession@sha256:' + 'e'.repeat(64);
+    p.items[2].status.containerStatuses = [];
+    p.items.push(old);
+  }});
+  assert.throws(() => attestFromObservations({ ...base, ...surge }),
+    /ui deployment rollout has not converged to the desired template/);
+  assert.equal(deploymentReadinessRetryable(
+    Error('ui deployment rollout has not converged to the desired template')), true);
+
+  // A status snapshot claiming convergence while a previous-revision pod
+  // lingers is inconsistent; the observed pod count must agree with the
+  // converged replica count before any imageID is bound.
+  const straggler = kubernetesFixtures({ mutatePods: (p) => {
+    const old = structuredClone(p.items[2]);
+    old.metadata.name = 'nession-ui-staging-old11';
+    old.metadata.ownerReferences[0].name = 'nession-ui-staging-old11';
+    old.status.containerStatuses[0].imageID = 'ghcr.io/bestnathan/nession@sha256:' + 'e'.repeat(64);
+    p.items.push(old);
+  }});
+  assert.throws(() => attestFromObservations({ ...base, ...straggler }),
+    /ui deployment rollout has not converged to the desired template/);
+
+  // An unknown rollout state fails closed as retryable, never as a permanent
+  // digest verdict.
+  const unknownRollout = kubernetesFixtures({ mutateDeployments: (d) => {
+    delete d.items[2].status.updatedReplicas;
+  }});
+  assert.throws(() => attestFromObservations({ ...base, ...unknownRollout }),
+    /ui deployment rollout has not converged to the desired template/);
 
 
   // Only finite-lived readiness conditions qualify for a bounded rerun.
@@ -792,6 +918,7 @@ function selfTest() {
     'server pod container is not ready',
     'ui deployment is not Available',
     'agent deployment observed generation is stale',
+    'ui deployment rollout has not converged to the desired template',
     'server pods disagree on the running imageID',
     'missing running pod for agent deployment',
     'no ready pod reports the ui deployment image',
