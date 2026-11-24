@@ -2637,6 +2637,61 @@ lane it is on was ended with the connection that left"
         .await;
     }
 
+    /// SC-01: 100,000 keyed mutations across changing keys, including injected
+    /// panics and a cancellation, settle with bounded queues and records.
+    ///
+    /// The keyed half of the stress: the queue depth and connection budget stay
+    /// small while the mutation count and key count move, and every completed
+    /// record, key and permit is released after quiescence — including work that
+    /// panicked and work whose worker was cancelled.
+    #[tokio::test]
+    async fn a_hundred_thousand_keyed_mutations_and_panics_settle() {
+        let body = async {
+            let mut lane = KeyedLane::new(4, "stress-key ");
+            for n in 0..100_000u64 {
+                let key = session(&format!("k{}", n % 64));
+                let work: Work = if n % 10_000 == 0 {
+                    Box::pin(async { panic!("injected stress panic") })
+                } else {
+                    Box::pin(async {})
+                };
+                lane.enqueue(key, work).await;
+            }
+            lane.drain().await;
+
+            let snapshot = lane.snapshot().await;
+            assert_eq!(snapshot.completed, 100_000);
+            assert_eq!(snapshot.panics, 10);
+            assert_eq!(snapshot.keys, 0, "a key outlived quiescence");
+            assert_eq!(snapshot.queued, 0);
+            assert_eq!(snapshot.retained, 0, "a worker record outlived quiescence");
+            assert!(snapshot.deepest <= 4);
+
+            // Cancellation settlement: a blocked worker and queued work are
+            // both ended and released by `shutdown`.
+            let held = gate();
+            lane.enqueue(
+                session("cancelled"),
+                Box::pin({
+                    let held = Arc::clone(&held);
+                    async move { pass(&held).await }
+                }),
+            )
+            .await;
+            lane.enqueue(session("cancelled"), nothing()).await;
+            lane.shutdown(Duration::from_secs(2)).await;
+
+            let snapshot = lane.snapshot().await;
+            assert_eq!(snapshot.keys, 0);
+            assert_eq!(snapshot.queued, 0);
+            assert_eq!(snapshot.retained, 0);
+        };
+
+        tokio::time::timeout(Duration::from_secs(60), body)
+            .await
+            .expect("the keyed stress lane did not settle within 60 s");
+    }
+
     /// SC-02: a full query lane is an outcome the reader can answer, not a
     /// reason to stop reading. `try_dispatch` must return without waiting.
     #[tokio::test]
