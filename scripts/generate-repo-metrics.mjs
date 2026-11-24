@@ -230,89 +230,148 @@ async function issueAndPrStats(
   };
 }
 
-// GitHub's filtered Actions list can report total_count capped at 2,500,
-// *even with per_page=1*. Partition timestamp ranges until every exact
-// subrange is below the cap; never silently mistake a capped total for truth.
+// #4346: filtered Actions counts may cap at 2,500. Only counts below
+// 2,000 are accepted as exact. Partition into adjacent, inclusive UTC-second
+// intervals; adaptive width is a scheduling hint, never evidence of a count.
+// One serial reader bounds concurrency and counts actual HTTP attempts as
+// well as logical probes. No partial result may reach the publisher.
+const ACTIONS_COUNT_LIMITS = Object.freeze({
+  probes:512, attempts:600, deadlineMs:480000, requestMs:15000,
+  maxRetryMs:15000, retries:2,
+});
+function createWorkflowCountReader({
+  transport=fetch, clock=Date.now,
+  sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms)),
+  limits=ACTIONS_COUNT_LIMITS,
+}={}) {
+  const deadline=clock()+limits.deadlineMs;
+  let attempts=0;
+  const read=async (endpoint,token)=>{
+    for(let retry=0;;retry++){
+      const remaining=deadline-clock();
+      if(remaining<=0 || attempts>=limits.attempts)
+        fail('Actions count transport budget exhausted','retry a new protected publisher run; no partial count.');
+      attempts++;
+      let response;
+      try {
+        response=await transport('https://api.github.com'+endpoint,{
+          headers:{Accept:'application/vnd.github+json',
+            Authorization:'Bearer '+token,'User-Agent':'nession-repo-metrics',
+            'X-GitHub-Api-Version':'2022-11-28'},
+          signal:AbortSignal.timeout(Math.max(1,Math.min(limits.requestMs,remaining))),
+        });
+      } catch(error) {
+        if(!(error instanceof TypeError || ['TimeoutError','AbortError'].includes(error?.name)))
+          throw error;
+        if(retry>=limits.retries)fail('Actions count transport retries exhausted','inspect network availability.');
+      }
+      if(response?.ok) {
+        // Malformed successful payloads are permanent evidence failures, not
+        // transient transport errors. Do not retry the JSON parser.
+        return await response.json();
+      }
+      const status=response?.status;
+      const retryAfter=response?.headers.get('Retry-After');
+      const exhausted=response?.headers.get('X-RateLimit-Remaining')==='0';
+      const rateLimited=status===429 || (status===403&&(exhausted||retryAfter!=null));
+      if(response && !rateLimited && !(status>=500&&status<=599))
+        fail('Actions count HTTP '+status,'verify repository read permissions and API response.');
+      if(retry>=limits.retries)
+        fail('Actions count HTTP retries exhausted','retry a new publisher run; no partial count.');
+      let wait=1000*2**retry;
+      if(retryAfter!=null){
+        if(!/^\d+$/.test(retryAfter)||!Number.isSafeInteger(Number(retryAfter)))
+          fail('invalid Actions Retry-After','refuse an unbounded or malformed retry.');
+        wait=Math.max(wait,Number(retryAfter)*1000);
+      } else if(exhausted){
+        const reset=response.headers.get('X-RateLimit-Reset');
+        if(!/^\d+$/.test(reset??'')||!Number.isSafeInteger(Number(reset)))
+          fail('invalid Actions rate-limit reset','retry a new publisher run.');
+        wait=Math.max(wait,Number(reset)*1000-clock());
+      } else if(rateLimited) {
+        fail('Actions secondary rate limit without bounded Retry-After','retry a new publisher run later.');
+      }
+      if(wait>limits.maxRetryMs||wait>=deadline-clock())
+        fail('Actions count retry exceeds deadline','retry a new publisher run later.');
+      await sleep(wait);
+    }
+  };
+  return {read,attempts:()=>attempts};
+}
+
 export async function workflowStats(repository, cutoff7dMs, cutoff30dMs, token,
-  nowMs = Date.now(), getJson = githubJson) {
+  nowMs = Date.now(), getJson = null, onDiagnostics = null) {
   if(!/^[a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+$/.test(repository) ||
      ![cutoff7dMs,cutoff30dMs,nowMs].every(Number.isFinite) ||
      cutoff30dMs >= cutoff7dMs || cutoff7dMs > nowMs)
     fail('invalid Actions workflow-count window',
       'provide ordered absolute UTC timestamps for 30d/7d.');
-  // GitHub created_at has second-level resolution. Ranges are inclusive and
-  // adjacent children never overlap, preserving the old created >= cutoff.
   const start7 = Math.ceil(cutoff7dMs/1000);
   const start30 = Math.ceil(cutoff30dMs/1000);
   const end = Math.floor(nowMs/1000);
   const format = sec => new Date(sec*1000).toISOString().replace('.000Z','Z');
-  const COUNT_SPLIT_THRESHOLD = 2000; // below observed 2,500 API result ceiling
-  const MAX_QUERIES = 256;
-  let queries = 0;
-  const cache = new Map();
-  const countRange = async (startSec,endSec) => {
-    if(startSec>endSec)return 0;
-    const key=startSec+':'+endSec;
-    if(cache.has(key))return cache.get(key);
-    if(++queries>MAX_QUERIES)
-      fail('GitHub Actions count needs more than 256 bounded queries',
-        'aggregate authoritative run records or narrow the collection window.');
-    const range=format(startSec)+'..'+format(endSec);
-    const endpoint='/repos/'+repository+'/actions/runs?per_page=1&created='+
-      encodeURIComponent(range);
-    const payload=await getJson(endpoint,token);
-    if(!Number.isSafeInteger(payload?.total_count)||payload.total_count<0||
-       !Array.isArray(payload.workflow_runs)||
-       (payload.total_count>0&&payload.workflow_runs.length!==1)||
-       (payload.total_count===0&&payload.workflow_runs.length!==0))
-      fail('invalid GitHub Actions count response',
-        'restore authenticated GitHub run-list metadata.');
-    if(payload.total_count>0){
-      const created=Date.parse(payload.workflow_runs[0].created_at);
-      if(!Number.isFinite(created)||created<startSec*1000||created>endSec*1000)
-        fail('workflow-count response is not scoped to the requested range',
-          'verify GitHub created-time filter and source provenance.');
-    }
-    let count=payload.total_count;
-    // Treat equality/excess at a conservative threshold as possibly capped.
-    // A single second that still saturates cannot be proven exact -> FAIL.
-    if(count>=COUNT_SPLIT_THRESHOLD){
-      if(startSec===endSec)
-        fail('GitHub count cap reached within a single UTC second',
-          'use an independently authenticated per-run durable log; do not truncate.');
-      const mid=startSec+Math.floor((endSec-startSec)/2);
-      const [left,right]=await Promise.all([
-        countRange(startSec,mid),countRange(mid+1,endSec),
-      ]);
-      count=left+right;
-      if(!Number.isSafeInteger(count))
-        fail('Actions workflow count overflow','retain exact integer counts.');
-    }
-    cache.set(key,count);
-    return count;
-  };
-  // GitHub caps `total_count`, so no single response may stand in for the
-  // all-time total: the unfiltered endpoint answered 40000 for a repository
-  // whose exact 30-day count is ~48000, and filtered queries cap at 2500.
-  // Derive every reported count from the same cap-aware split, bounding the
-  // all-time window at the repository creation instant.
-  const metadata=await getJson('/repos/'+repository,token);
-  const createdAt=Date.parse(metadata?.created_at??'');
+  const reader=getJson?null:createWorkflowCountReader();
+  const request=getJson??reader.read;
+  const diagnostics={probes:0,by_window:{last_7d:0,rest_of_30d:0,older:0},
+    capped_probes:0,max_split_depth:0,started_at:Date.now()};
+  const meta=await request('/repos/'+repository,token);
+  const createdAt=Date.parse(meta?.created_at??'');
   if(!Number.isFinite(createdAt)||createdAt>nowMs)
-    fail('invalid repository creation metadata',
-      'verify the authenticated repository response.');
+    fail('invalid repository creation metadata','verify the authenticated repository response.');
   const startAll=Math.max(0,Math.floor(createdAt/1000));
-  // Adjacent, non-overlapping second ranges share one cap-aware method and
-  // compose exactly: 7d + rest-of-30d + older-than-30d. This keeps the work
-  // near one 30-day scan instead of three independent scans (~197 vs ~85
-  // queries at current activity), so the 256-query budget keeps headroom.
-  const [last_7d,restOf30d,older]=await Promise.all([
-    countRange(start7,end),countRange(start30,start7-1),countRange(startAll,start30-1),
-  ]);
-  const last_30d=last_7d+restOf30d;
-  const total=last_30d+older;
+  const threshold=2000,target=1500,day=86400;
+  const countWindow=async (startSec,endSec,width,window)=>{
+    let cursor=Math.max(startSec,startAll),total=0,depth=0;
+    while(cursor<=endSec){
+      const last=Math.min(endSec,cursor+width-1),span=last-cursor+1;
+      if(diagnostics.probes>=ACTIONS_COUNT_LIMITS.probes)
+        fail('GitHub Actions count probe budget exhausted','use independently authenticated incremental history; do not truncate.');
+      diagnostics.probes++;
+      diagnostics.by_window[window]++;
+      diagnostics.max_split_depth=Math.max(diagnostics.max_split_depth,depth);
+      const range=format(cursor)+'..'+format(last);
+      const endpoint='/repos/'+repository+'/actions/runs?per_page=1&created='+encodeURIComponent(range);
+      const payload=await request(endpoint,token);
+      if(!Number.isSafeInteger(payload?.total_count)||payload.total_count<0||
+         !Array.isArray(payload.workflow_runs)||
+         payload.workflow_runs.length!==(payload.total_count>0?1:0))
+        fail('invalid GitHub Actions count response','restore authenticated GitHub run-list metadata.');
+      if(payload.total_count>0){
+        const created=Date.parse(payload.workflow_runs[0].created_at);
+        if(!Number.isFinite(created)||created<cursor*1000||created>last*1000)
+          fail('workflow-count response is not scoped to the requested range','verify GitHub created-time filter and source provenance.');
+      }
+      const count=payload.total_count;
+      if(count>=threshold){
+        diagnostics.capped_probes++;
+        if(span===1)
+          fail('GitHub count cap reached within a single UTC second','use an independently authenticated per-run durable log; do not truncate.');
+        width=Math.max(1,Math.floor(span/2));
+        depth++;
+        continue; // Requery same start, never accumulate a capped probe.
+      }
+      total+=count;
+      if(!Number.isSafeInteger(total))fail('Actions workflow count overflow','retain exact integer counts.');
+      cursor=last+1;
+      // Exact previous density guides the next interval only. Empty periods
+      // grow geometrically; a sudden burst shrinks safely without skipping.
+      width=Math.max(1,Math.min(365*day,Math.floor(span*Math.min(4,Math.max(0.5,target/Math.max(count,1))))));
+      depth=0;
+    }
+    return total;
+  };
+  const last_7d=await countWindow(start7,end,day,'last_7d');
+  const rest=await countWindow(start30,start7-1,day,'rest_of_30d');
+  const older=await countWindow(startAll,start30-1,7*day,'older');
+  const last_30d=last_7d+rest,total=last_30d+older;
   if(![last_7d,last_30d,total].every(Number.isSafeInteger))
     fail('Actions activity count overflow','retain exact integer counts.');
+  const {started_at,...details}=diagnostics;
+  const proof={...details,http_attempts:reader?reader.attempts():details.probes+1,
+    max_concurrency:1,elapsed_ms:Date.now()-started_at,
+    utc_window:{start:format(startAll),end:format(end)}};
+  if(onDiagnostics)onDiagnostics(proof);
+  else console.log('Actions count diagnostics: '+JSON.stringify(proof));
   return {total,last_7d,last_30d};
 }
 
@@ -766,6 +825,92 @@ async function runSelfTest() {
       total_count:endpoint.includes('created=')?2500:3000,
       workflow_runs:[{created_at:new Date(now-1000).toISOString()}],
     }),/cap reached|not scoped/);
+
+  // Measured production cohort (Metrics Store a87c9d3d, 2026-11-24):
+  // 167,536 total, 40,813/7d, 117,520/30d. Synthetic distribution is
+  // intentionally bursty in the older interval; exact counts are known
+  // independently of the simulated capped endpoint.
+  const liveEnd=Date.parse('2026-11-24T05:03:09Z')/1000;
+  const liveStart=Date.parse('2026-06-27T09:03:56Z')/1000;
+  const day=86400,live7=liveEnd-7*day,live30=liveEnd-30*day;
+  const liveEvents=[];
+  const spread=(from,to,count)=>{
+    for(let n=0;n<count;n++)liveEvents.push(from+Math.floor((n+0.5)*(to-from+1)/count));
+  };
+  spread(live7,liveEnd,40813);
+  spread(live30,live7-1,76707);
+  for(let n=0;n<25;n++){
+    const from=liveStart+n*3*day+10*3600;
+    spread(from,from+2*3600,2000+(n<16?1:0));
+  }
+  liveEvents.sort((a,b)=>a-b);
+  function lower(value){
+    let a=0,b=liveEvents.length;
+    while(a<b){const m=(a+b)>>>1;if(liveEvents[m]<value)a=m+1;else b=m;}
+    return a;
+  }
+  const exact=(from,to)=>lower(to+1)-lower(from);
+  let baselineQueries=0;
+  function oldBinary(from,to){
+    baselineQueries++;
+    const n=exact(from,to);
+    if(n<2000)return n;
+    const mid=Math.floor((from+to)/2);
+    return oldBinary(from,mid)+oldBinary(mid+1,to);
+  }
+  assert.equal(oldBinary(live7,liveEnd)+oldBinary(live30,live7-1)+oldBinary(liveStart,live30-1),167536);
+  assert.ok(baselineQueries>256);
+  let diagnostic,active=0,peak=0;
+  const measuredReader=async endpoint=>{
+    active++;peak=Math.max(peak,active);
+    try{
+      await Promise.resolve();
+      if(endpoint==='/repos/BestNathan/nession')
+        return {created_at:new Date(liveStart*1000).toISOString()};
+      const [from,to]=decodeURIComponent(endpoint.split('created=')[1]).split('..').map(x=>Date.parse(x)/1000);
+      const n=exact(from,to);
+      return {total_count:Math.min(2500,n),
+        workflow_runs:n?[{created_at:new Date(liveEvents[lower(from)]*1000).toISOString()}]:[]};
+    }finally{active--;}
+  };
+  assert.deepEqual(await workflowStats('BestNathan/nession',live7*1000,live30*1000,'fixture-token',
+    liveEnd*1000,measuredReader,d=>diagnostic=d),
+    {total:167536,last_7d:40813,last_30d:117520});
+  assert.equal(peak,1);
+  assert.ok(diagnostic.probes<baselineQueries&&diagnostic.probes<=ACTIONS_COUNT_LIMITS.probes);
+  assert.equal(diagnostic.http_attempts,diagnostic.probes+1);
+  console.log('Measured cohort fixture: baseline '+baselineQueries+', adaptive '+diagnostic.probes+' probes');
+
+  // Transport contract: actual retry attempts, fatal errors and deadline.
+  let clock=0,calls=0;
+  const limits={...ACTIONS_COUNT_LIMITS,attempts:3,deadlineMs:10000};
+  const response=(status,headers={},body={ok:true})=>({status,ok:status===200,
+    headers:{get:name=>headers[name]??null},json:async()=>body});
+  const transport=createWorkflowCountReader({limits,clock:()=>clock,
+    sleep:async ms=>{clock+=ms;},
+    transport:async()=>++calls===1?response(429,{'Retry-After':'2'}):response(200)});
+  assert.deepEqual(await transport.read('/fixture','token'),{ok:true});
+  assert.equal(transport.attempts(),2);assert.equal(clock,2000);
+  const fatal=createWorkflowCountReader({limits,clock:()=>0,
+    transport:async()=>response(401)});
+  await assert.rejects(()=>fatal.read('/fixture','token'),/HTTP 401/);
+  assert.equal(fatal.attempts(),1);
+  const malformed=createWorkflowCountReader({limits,clock:()=>0,
+    transport:async()=>response(429,{'Retry-After':'invalid'})});
+  await assert.rejects(()=>malformed.read('/fixture','token'),/invalid Actions Retry-After/);
+  assert.equal(malformed.attempts(),1);
+  const exhausted=createWorkflowCountReader({limits:{...limits,attempts:1},clock:()=>0,
+    sleep:async()=>{},transport:async()=>response(503)});
+  await assert.rejects(()=>exhausted.read('/fixture','token'),/transport budget exhausted/);
+  assert.equal(exhausted.attempts(),1);
+  const deadline=createWorkflowCountReader({limits,clock:()=>0,
+    transport:async()=>response(429,{'Retry-After':'60'})});
+  await assert.rejects(()=>deadline.read('/fixture','token'),/retry exceeds deadline/);
+  assert.equal(deadline.attempts(),1);
+  const badJson=createWorkflowCountReader({limits,clock:()=>0,
+    transport:async()=>({...response(200),json:async()=>{throw new SyntaxError('invalid JSON');}})});
+  await assert.rejects(()=>badJson.read('/fixture','token'),/invalid JSON/);
+  assert.equal(badJson.attempts(),1);
 
   const svg = renderSvg(fixture, 'dark');
   for (const required of [
