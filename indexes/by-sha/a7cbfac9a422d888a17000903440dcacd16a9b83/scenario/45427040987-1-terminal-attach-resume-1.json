@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45427040987,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4435-stream-fences",
+    "target_sha": "a7cbfac9a422d888a17000903440dcacd16a9b83",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45427040987",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e20e0281e73f7a5205eca0f5da4a2f3606ae5a279f771d387c26080a195ffbf5"
+  },
+  "record": "runs/2026-11-24/45427040987-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "33264b2f7d46f50b464b33dcf7b4a87635a8a2e472d95af560969f56474546de"
+}
