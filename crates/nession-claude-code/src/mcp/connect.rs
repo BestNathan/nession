@@ -649,6 +649,7 @@ async fn run(write: &ConnectWrite<'_>, arguments: &[String]) -> Result<(), Strin
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mcp::test_support::install_executable_fixture;
     use crate::session_context::{McpHostContext, McpHostEndpoint, SessionClaudeConfig};
     use async_trait::async_trait;
     use std::fs;
@@ -758,16 +759,10 @@ mod tests {
         fs::create_dir_all(&bin).unwrap();
         fs::create_dir_all(&cwd).unwrap();
         let claude = bin.join("claude");
-        fs::write(
+        install_executable_fixture(
             &claude,
             "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 2.1.325; exit 0; fi\nexit 0\n",
-        )
-        .unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        );
         let context = FixedContext {
             cwd: cwd.to_string_lossy().into_owned(),
             home: home.to_string_lossy().into_owned(),
