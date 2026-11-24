@@ -37,9 +37,19 @@ pub(super) fn managed_manifest_grant(
     access: ResolvedManifestAccess,
 ) -> ManagedImageGrant {
     let (role, target) = managed_role(selection);
+    // The grant route is the authorized Manifest object's route (#4250): a
+    // Tag-reachable Manifest carries a repository-scoped `/v2/` route, while an
+    // untagged build or digest-only legacy row keeps the bounded compatibility
+    // route. Deriving it from the object set keeps the grant and its Manifest
+    // object on one identical route, which the Agent's fetch fence requires.
+    let path = access
+        .objects
+        .first()
+        .map(|object| object.path.clone())
+        .unwrap_or_else(|| format!("{IMAGE_BLOB_PATH_PREFIX}{}", access.manifest_digest));
     ManagedImageGrant {
         role,
-        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", access.manifest_digest),
+        path,
         digest: access.manifest_digest,
         target,
         objects: access
