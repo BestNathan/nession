@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "e6229e35851d5009e2b9ea447bd624218996865711bbbd29728b13e22693ce1c",
+  "run_id": 45332521480,
+  "run_attempt": 1,
+  "issue": 4250,
+  "criterion": "SC-03",
+  "criterion_text": "After the staged cutover, the proprietary `/images/blobs/{digest}` route is unavailable to migrated clients; standard `/v2/` still serves approved complete closures, denies wrong principal/repository/forged digest and preserves persistent Agent cache and active mounts. A staged rollback/protected compatibility toggle restores only explicitly supported clients without bypassing authorization.",
+  "stage": "staging",
+  "target_sha": "00db673886ee5d6cda579d0f180d973ae7e7f600",
+  "contract_sha256": "27d18abfb5a4e8e2652f7b8588285a64557f8e67179500ec92979f90a25f11e0",
+  "case_revision": "00db673886ee5d6cda579d0f180d973ae7e7f600",
+  "case_tree_sha": "269b4899245b3afa5a737ce2a94a0ea5f3150bfd",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-24T05:23:44.557Z",
+  "finished_at": "2026-11-24T05:25:09.943Z",
+  "duration_ms": 85386,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "SC-03: the proprietary route is unavailable to migrated clients, /v2/ serves approved closures and denies wrong principal/repository/forged digest, cache and mounts are preserved, and the protected toggle restores only supported legacy clients without bypassing authorization",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 00db673886ee5d6cda579d0f180d973ae7e7f600: #4250 SC-03 measured: with legacy_blob_route=false the proprietary route /images/blobs/sha256:2cf555985deff16cb7f97c77b02754487312f38493dc4d2b6ddd2c40732f7528 is 404 while /v2/team/app serves Manifest sha256:f0339fbfb4843096fc32e355c87017b602d25c6e882dd5635b1295b4ed256715 and the EROFS layer byte-identical; foreign repository 404, no-cred 401, bad-token 403, forged digest 404; Agent cold fetch transferred 3 objects over /v2/ only, warm reuse and restart adoption re-transferred 0, pinned layer sha256:2cf555985deff16cb7f97c77b02754487312f38493dc4d2b6ddd2c40732f7528 refused eviction and was reclaimed on release; rollback legacy_blob_route=true restores the legacy reader (200 exact bytes) while bad/absent token stay 403 and unknown digest 404, with /v2/ still serving the closure"
+        }
+      ],
+      "duration_ms": 79491,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45332521480,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "00db673886ee5d6cda579d0f180d973ae7e7f600",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45332521480",
+    "record_path": "runs/2026-11-24/45332521480-1/4250/SC-03.json",
+    "source_result_sha256": "beed7b8d2059d4b2f847875198b2b928797caa9ad11c8a6099c5d41e30af879b"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45332521480-1",
+    "sha256": "beed7b8d2059d4b2f847875198b2b928797caa9ad11c8a6099c5d41e30af879b",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45332521480",
+    "durability": "time-limited; object archival not configured"
+  }
+}
