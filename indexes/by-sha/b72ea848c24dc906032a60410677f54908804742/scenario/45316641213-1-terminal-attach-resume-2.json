@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45316641213,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4250-oci-transport-cutover",
+    "target_sha": "b72ea848c24dc906032a60410677f54908804742",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45316641213",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "105b78d29ad8b576a5b6b1ef66a742de7d15b7f3875ce3f2012abda06593ee82"
+  },
+  "record": "runs/2026-11-24/45316641213-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "9c03f8da0052b44af6ea33aba40e21007cbb7d6d606fcf4a7d2fcae06ecc34e4"
+}

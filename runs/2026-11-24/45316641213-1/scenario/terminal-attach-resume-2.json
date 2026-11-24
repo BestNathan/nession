@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "b72ea848c24dc906032a60410677f54908804742",
+  "scenario_revision": "b72ea848c24dc906032a60410677f54908804742",
+  "run_id": 45316641213,
+  "run_attempt": 1,
+  "run_index": 2,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-24T03:06:39.699Z",
+  "finished_at": "2026-11-24T03:06:48.814Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-24T03:06:48.038Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "c4be14d6aa0ec75ed334fdfba99e4ceb5f9ea823e87fc8a7097490b9e0566078",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-24T03:06:48.285Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "c4be14d6aa0ec75ed334fdfba99e4ceb5f9ea823e87fc8a7097490b9e0566078",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-24T03:06:48.764Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "c4be14d6aa0ec75ed334fdfba99e4ceb5f9ea823e87fc8a7097490b9e0566078",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45316641213,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4250-oci-transport-cutover",
+    "target_sha": "b72ea848c24dc906032a60410677f54908804742",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45316641213",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "105b78d29ad8b576a5b6b1ef66a742de7d15b7f3875ce3f2012abda06593ee82"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-45316641213-1",
+    "sha256": "105b78d29ad8b576a5b6b1ef66a742de7d15b7f3875ce3f2012abda06593ee82",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45316641213",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "9c03f8da0052b44af6ea33aba40e21007cbb7d6d606fcf4a7d2fcae06ecc34e4"
+}
