@@ -171,23 +171,48 @@ function changeList(data){
   wrap.append(list);return wrap;
 }
 function filters(side,data,update){
-  side.replaceChildren();
   side.append(el('div','eyebrow','TOPICS'));
   const rail=el('div','knowledge-topic-group');
+  const buttons=[];
   for(const t of ['all',...data.topics]){
     const count=t==='all'?data.articles.length:data.articles.filter(a=>a.topic===t).length;
-    const b=el('button','knowledge-filter'+(state.topic===t?' active':''),(t==='all'?'All topics':t)+'  '+count);
-    b.type='button';b.setAttribute('aria-pressed',state.topic===t?'true':'false');
-    b.onclick=()=>{state.topic=t;update();};rail.append(b);
+    const b=el('button','knowledge-filter',(t==='all'?'All topics':t)+'  '+count);
+    b.type='button';
+    b.onclick=()=>{state.topic=t;syncTopics();update();};
+    buttons.push([t,b]);rail.append(b);
   }
-  side.append(rail);side.append(el('div','eyebrow knowledge-category-title','CATEGORIES'));
-  const chips=el('div','knowledge-categories');
-  for(const c of ['all',...data.categories]){
-    const b=el('button','knowledge-category'+(state.category===c?' active':''),c==='all'?'All tags':c);
-    b.type='button';b.setAttribute('aria-pressed',state.category===c?'true':'false');
-    b.onclick=()=>{state.category=c;update();};chips.append(b);
+  function syncTopics(){
+    for(const [t,b] of buttons){
+      b.classList.toggle('active',state.topic===t);
+      b.setAttribute('aria-pressed',String(state.topic===t));
+    }
   }
-  side.append(chips);
+  syncTopics();
+  side.append(rail);
+  const category=el('div','knowledge-categories');
+  const label=el('label','eyebrow knowledge-category-title','CATEGORIES');
+  label.htmlFor='knowledge-category';
+  const query=el('input','knowledge-category-search');
+  query.type='search';query.placeholder='Find a tag';
+  query.setAttribute('aria-label','Search categories');
+  const select=el('select','knowledge-category');
+  select.id='knowledge-category';
+  const all=['all',...data.categories];
+  if(!all.includes(state.category))state.category='all';
+  function options(){
+    const term=query.value.trim().toLocaleLowerCase();
+    select.replaceChildren();
+    for(const c of all){
+      if(c!=='all'&&c!==state.category&&!c.toLocaleLowerCase().includes(term))continue;
+      const option=el('option','',c==='all'?'All tags':c);
+      option.value=c;select.append(option);
+    }
+    select.value=state.category;
+  }
+  query.oninput=options;
+  select.onchange=()=>{state.category=select.value;options();update();};
+  options();
+  add(category,label,query,select);side.append(category);
 }
 export function renderKnowledge(root,data,hash){
   const route=knowledgeRoute(hash)||{view:'browse',article:null};
@@ -223,7 +248,6 @@ export function renderKnowledge(root,data,hash){
   const paths=new Set(data.articles.map(a=>a.path));
   const selected=route.article?data.articles.find(a=>a.path===route.article):data.articles[0]||null;
   function update(){
-    filters(side,data,update);
     const found=filterKnowledge(data.articles,state).sort((a,b)=>b.updated_at.localeCompare(a.updated_at));
     count.textContent=found.length+' '+(found.length===1?'ARTICLE':'ARTICLES');
     entries.replaceChildren();
@@ -238,7 +262,7 @@ export function renderKnowledge(root,data,hash){
       'No matching articles. Try another topic, category or search term.'));
   }
   search.oninput=()=>{state.query=search.value;update();};
-  update();add(layout,side,listBox);
+  filters(side,data,update);update();add(layout,side,listBox);
   const detail=el('div','knowledge-reader-slot');
   detail.setAttribute('role','region');
   detail.setAttribute('aria-label','Knowledge article reader');
