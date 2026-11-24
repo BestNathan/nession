@@ -1,0 +1,79 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "issue-audit",
+    "github_workflow": "Agent / Issue Audit",
+    "github_run_id": 45302294303,
+    "github_run_attempt": 1,
+    "job": "agent",
+    "repository": "BestNathan/nession",
+    "event": "issues",
+    "unique_run_name": "45302294303-1-issue-4399"
+  },
+  "task": {
+    "id": "issue-4399",
+    "type": "issue-audit",
+    "issue": 4399
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "audit-qwen-01",
+    "role": "auditor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "d5d8b015-66b1-41c8-ae9d-31c8d5d08f51",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "issue-audit",
+      "version": "v1",
+      "sha256": "ab44b4d88bca3c8fea6c034215a8a21533b1a3958d31f982a6a4d937f8c77f1a"
+    }
+  },
+  "execution": {
+    "turns": 2,
+    "model_requests": 1,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 6,
+    "output": 1529,
+    "cache_read": 3410,
+    "cache_write": 5130,
+    "reasoning": null,
+    "total": 10075
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-24T01:06:12.065Z",
+    "finished_at": "2026-11-24T01:06:52.680Z",
+    "agent_duration_ms": 34730,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "repaired",
+    "preflight_validation": {
+      "observed": false,
+      "calls": 0,
+      "passed": 0,
+      "final_candidate_checked": false,
+      "codes": [],
+      "evidence_kind": "local-readonly-mcp-proposal-checks"
+    }
+  }
+}
