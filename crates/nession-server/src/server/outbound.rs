@@ -247,6 +247,12 @@ impl WsMessageSender {
         self.queue.close();
     }
 
+    /// Queue a control frame without waiting (the control class's reserved
+    /// capacity). Used for the terminal Close a deadline verdict must deliver.
+    pub fn send_control(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.queue.send_control(msg)
+    }
+
     /// The queue's control-class `try_send`, with this runtime's answer to "no
     /// room". `Closed` and `TooLarge` pass through: they are not statements
     /// about room, and the caller must be able to tell them apart.

@@ -1011,6 +1011,12 @@ async fn handle_ws_stream(
                     Ok(next) => next,
                     Err(_) => {
                         close_reason = "auth-timeout";
+                        // The deadline's verdict must reach the peer, not only
+                        // this process. A control Close is written by the writer
+                        // even though the connection is ending, so the peer
+                        // observes the close promptly instead of waiting for the
+                        // teardown's bounded writer wait.
+                        let _ = sender.send_control(WsFrame::Close(None));
                         break;
                     }
                 }
@@ -1420,13 +1426,15 @@ async fn handle_ws_stream(
     // verified web client's registry subscriber also holds one — that clone is
     // not this connection's to drop — which is what the bounded wait and abort
     // are still for.
-    // Close the outbound first. The classified receiver owns an `Arc` of the
-    // same inner cell that holds the class senders, so dropping the sender
-    // clones alone never closes a channel: `recv` would park until the grace
-    // expires and be aborted. `close` is the explicit signal that ends the
-    // scheduler, which is what makes an unauthenticated socket or any other
-    // ordinary teardown drop its write half promptly.
-    sender.close();
+    // Do not mark the outbound closed here. The classified receiver owns an
+    // `Arc` of the same cell that holds the class senders, so dropping the
+    // sender clones alone never closes a channel; the writer waits out the
+    // bounded grace below and is aborted. That bounded wait is deliberate: an
+    // Agent restart re-registers and re-reports its sessions a few seconds
+    // after the Relay's Agent leg ends, and closing the browser socket
+    // immediately makes its reconnect land in the stale-session window. The
+    // unauthenticated deadline does not rely on this wait — it writes an
+    // explicit control Close.
     drop(handler);
     drop(sender);
     if tokio::time::timeout(terminal_stall_grace, &mut relay_writer.0)
