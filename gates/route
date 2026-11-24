@@ -93,6 +93,8 @@ applies() {
       matches '^(scripts/check-dev-workspace(\.sh|-selftest\.sh)$|gates/checks/dev-workspace-)' ;;
     gate-runtime-contract|gate-router-contract)
       matches '^(gates/|\.githooks/(pre-commit|pre-push)$|scripts/gate-router-selftest\.mjs$)' ;;
+    websocket-route-inventory)
+      matches '(\.rs$|^docs/architecture/websocket-runtime\.md$|^scripts/websocket-route-inventory\.mjs$|^gates/checks/websocket-route-inventory\.sh$|^gates/suites/)' ;;
     pre-push-diff-base-selftest)
       matches '^(scripts/lib/git-diff-base\.sh|scripts/test-pre-push-diff-base\.sh|gates/route$|\.githooks/pre-push$)' ;;
     *) echo "→ $stage: Gate $1 has no applicability rule" >&2; return 2 ;;

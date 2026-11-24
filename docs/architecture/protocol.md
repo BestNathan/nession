@@ -1163,6 +1163,13 @@ Conversion belongs to an adapter edge, never to a second vocabulary:
   queues keep their existing owners, and Axum remains the only WebSocket
   upgrade owner.
 
+The runtime that carries these frames — the one reader/writer, the Control /
+Request / Stream dispatch domains, admission and outbound classes, and
+connection settlement — is owned by
+[`websocket-runtime.md`](websocket-runtime.md). This section remains the
+transport/frame-vocabulary owner; that document does not redefine a protocol
+concept.
+
 The vocabulary preserves the semantics the product depends on: a Ping is
 answered with the same payload, Binary and Pong are ignored rather than fatal,
 Close is a close, `to_text` classifies exactly the frames the previous
@@ -1396,6 +1403,8 @@ owners (`#3439` W1/W2/W3):
   copying Nession DTOs; see [`docs/architecture/mcp.md`](mcp.md).
 - [`docs/architecture/web.md`](web.md) — the Web layer model this mirrors on the
   client side.
+- [`docs/architecture/websocket-runtime.md`](websocket-runtime.md) — the
+  runtime mechanism that carries this protocol over one physical socket.
 
 Reached from the root `CLAUDE.md` crate tree, where `nession-protocol` sits, and
 from that crate's own `lib.rs`. Deliberately **not** linked from
