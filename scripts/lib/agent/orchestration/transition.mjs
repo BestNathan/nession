@@ -21,7 +21,12 @@ function eventKey(e) {
 
 // The caller authenticates trusted evidence from the actual workflow run.
 // Neither Issue comment content nor the model chooses the next role.
-export function advanceWorkflow(state, event, trusted, config = {}) {
+//
+// This is the LEGACY schema v1 compatibility adapter. Active lifecycles and
+// all new transition decisions are owned by workflow/lifecycle.mjs
+// (`decideLifecycle`). A v1 state is immutable history that may still be
+// replayed for audit; it is never the owner of a v2 lifecycle.
+export function advanceWorkflowV1(state, event, trusted, config = {}) {
   if (!trusted || trusted.workflow_run_id !== event?.run_id ||
       trusted.attempt !== event?.run_attempt || trusted.issue !== event?.issue ||
       trusted.source_sha !== event?.target_sha || trusted.role !== event?.kind) {
@@ -131,6 +136,15 @@ export function advanceWorkflow(state, event, trusted, config = {}) {
     target_sha: event.target_sha, outcome: event.outcome,
     ...(event.reviewer_agent_id != null ? { reviewer_agent_id: event.reviewer_agent_id } : {}) });
   return { state: next, actions, duplicate: false };
+}
+
+// Versioned dispatch: a schema v2 lifecycle must never be driven by the legacy
+// engine. The V2 decision owner is `decideLifecycle` in workflow/lifecycle.mjs.
+export function advanceWorkflow(state, event, trusted, config = {}) {
+  if (state?.schema_version === 2) {
+    reject('schema v2 states are owned by Agent Workflow V2 decideLifecycle');
+  }
+  return advanceWorkflowV1(state, event, trusted, config);
 }
 
 export function authorizeCommentCommand(comment, authorPermission) {
