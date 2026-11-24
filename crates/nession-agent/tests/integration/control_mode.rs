@@ -824,7 +824,31 @@ async fn real_tmux_resize_during_a_capture_never_enters_the_body() -> Result<()>
                 "Enter",
             ])
             .await?;
-        sleep(Duration::from_millis(500)).await;
+        // A fixed delay does not mean the shell's 20,000 writes have made it
+        // through the pane parser under CI load. Observe the real pane before
+        // testing capture/resize interleaving, rather than racing an empty pane.
+        // The marker cannot appear in the input command (which has $i).
+        tokio::time::timeout(Duration::from_secs(15), async {
+            loop {
+                let pane = guard
+                    .dep()
+                    .cmd()
+                    .output(&["capture-pane", "-p", "-t", guard.name(), "-S", "-20"])
+                    .await?;
+                if !pane.status.success() {
+                    return Err(anyhow!(
+                        "tmux capture-pane readiness probe failed: {}",
+                        String::from_utf8_lossy(&pane.stderr)
+                    ));
+                }
+                if String::from_utf8_lossy(&pane.stdout).contains("history-20000") {
+                    return Ok::<(), anyhow::Error>(());
+                }
+                sleep(Duration::from_millis(50)).await;
+            }
+        })
+        .await
+        .map_err(|_| anyhow!("tmux did not render history-20000 before capture test"))??;
 
         let (mut client, mut events) = attach_over(&guard, transport).await?;
         let (body, resized) = tokio::join!(client.capture_pane(20_000), async {

@@ -16,6 +16,7 @@ import { explicitlyImplementsIssue, isMainMergeAncestorOfStaging,
 import { verifiedIssueAuditCriterion, verifiedIssueAudit3843Criterion, SIDEBAR_AUDIT_REPAIR_PROOF, ISSUE_AUDIT_3843_PROOF } from './acceptance-issue-audit-readback.mjs';
 import { verified4342AuditCriterion } from './acceptance-4342-metrics-evidence.mjs';
 import { verified4342DownstreamCriterion } from './acceptance-4342-downstream-evidence.mjs';
+import { verified4342HistoryCriterion } from './acceptance-4342-historical-evidence.mjs';
 import {
   collectPrWebQuality, collectPrToolingQuality, collectPrRustQuality,
   enforcePrWebQuality, enforcePrRustQuality, requiresWebIntegrationExecution,
@@ -1014,10 +1015,11 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
 function normalizeCommand(contextFile, rawFile, outFile, source) {
   const context = JSON.parse(fs.readFileSync(contextFile, 'utf8'));
   const raw = JSON.parse(fs.readFileSync(rawFile, 'utf8'));
-  const normalized = verified4342DownstreamCriterion(context,
-    verified4342AuditCriterion(context,
+  const normalized = verified4342HistoryCriterion(context,
+    verified4342DownstreamCriterion(context,
+      verified4342AuditCriterion(context,
       verifiedIssueAudit3843Criterion(context, verifiedIssueAuditCriterion(
-        context, normalizeAcceptanceResult(context, raw, source)))));
+        context, normalizeAcceptanceResult(context, raw, source))))));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
   const gated = enforceConvergenceWriter4059(context,
