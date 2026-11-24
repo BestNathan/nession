@@ -17,6 +17,8 @@ import {collectPrRequiredQualityAsync, validPrRequiredQualityReceipt}
   from './acceptance-pr-web-quality-receipt.mjs';
 import { parseCommand } from './github-comment-command.mjs';
 import {collectToolchain4241} from './acceptance-toolchain-4241-evidence.mjs';
+import {invalidatedConvergenceWriter4059Row,collectConvergenceWriter4059,
+  validConvergenceWriterReceipt} from './acceptance-convergence-writer-4137.mjs';
 
 const SHA = /^[0-9a-f]{40}$/i;
 const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
@@ -54,6 +56,21 @@ export function decideIssueClosure(issue, associatedPrs, options = {}) {
   if (accepted.kind !== 'accepted') {
     return { action: 'pending', reason: 'canonical closure validation: ' +
       (accepted.result?.errors || []).join('; ') };
+  }
+  // #4137: the historically disproven #4059 SC-02 Pass (green Waker + BLOCKED
+  // converge, skipped writer) is immutable history, not acceptance. Refuse
+  // closure until a real authenticated convergence-writer receipt replaces it;
+  // the original row is never hand-edited. The independent operation-level
+  // re-attestation lives in qualifyConvergenceWriter4059Closure below.
+  if (issue.number === 4059) {
+    const row = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'))
+      .rows.get('SC-02');
+    if (row && String(row.result).toLowerCase() === 'pass' &&
+        invalidatedConvergenceWriter4059Row(4059, 'SC-02', row.evidence)) {
+      return { action: 'pending', reason:
+        '#4059 SC-02 historical Pass is disproven; closure requires an authenticated ' +
+        'convergence-writer operation receipt (#4137)' };
+    }
   }
   if (!Array.isArray(associatedPrs) || associatedPrs.length === 0) {
     return { action: 'pending', reason: 'no verified implementation PR association' };
@@ -132,7 +149,12 @@ export function selectManualAgentRuns(issue, prs, {
   for (const [id, entry] of parsed.plan.entries()) {
     const row = report.rows.get(id);
     if (!row || entry.method !== 'agent') continue;
-    if (['pass', 'n/a'].includes(row.result.toLowerCase()) && success.criteria.get(id)?.checked) continue;
+    // #4137: a checked Pass row normally locks its source, but the historically
+    // disproven #4059 SC-02 must stay selectable so an explicit /accept can
+    // dispatch a trusted replay at the original negative main SHA. The
+    // invalidation is deterministic and source-bound, never prose-driven.
+    if (['pass', 'n/a'].includes(row.result.toLowerCase()) && success.criteria.get(id)?.checked &&
+        !invalidatedConvergenceWriter4059Row(issue.number, id, row.evidence)) continue;
     const stage = planStage(entry);
     if (!stage || planned.has(stage)) continue;
     const candidates = prs.filter(pr =>
@@ -442,6 +464,56 @@ function accepted4241Target(issue) {
     refs.push(match[1].toLowerCase());
   }
   return new Set(refs).size===1?refs[0]:null;
+}
+// #4137: closure of #4059 additionally requires the independent operation-level
+// convergence-writer receipt re-read from GitHub at the SC-02 source SHA. A
+// checked Pass row — even one that is not the known historical negative — cannot
+// close the Issue without a real authenticated workflow-bearing promotion. This
+// consumes the canonical attestor; it duplicates no writer policy.
+export async function qualifyConvergenceWriter4059Closure(repository, issue, token,
+  request = githubRequest, getLog = null) {
+  if (issue?.number !== 4059) return { qualified: true };
+  const row = parseAcceptanceReport(extractSection(issue.body, 'Acceptance Report'))
+    .rows.get('SC-02');
+  if (!row || String(row.result).toLowerCase() !== 'pass') return { qualified: true };
+  if (invalidatedConvergenceWriter4059Row(4059, 'SC-02', row.evidence)) {
+    return { qualified: false, reason: 'historical SC-02 Pass is disproven (#4137)' };
+  }
+  const match = /^run [1-9][0-9]*; ref ([a-f0-9]{40}); source agent/i
+    .exec(String(row.evidence ?? ''));
+  const targetSha = match?.[1]?.toLowerCase();
+  if (!SHA.test(String(targetSha || ''))) {
+    return { qualified: false, reason: 'SC-02 Pass lacks an exact source SHA receipt' };
+  }
+  const readLog = getLog ?? (async path => {
+    const response = await fetch('https://api.github.com' + path, {
+      headers: { Accept: 'application/vnd.github+json',
+        Authorization: 'Bearer ' + token,
+        'X-GitHub-Api-Version': '2022-11-28',
+        'User-Agent': 'nession-issue-lifecycle' },
+    });
+    if (!response.ok) throw Error('convergence read-only job log unavailable: ' + response.status);
+    return response.text();
+  });
+  const get = path => request(path, { token });
+  // Bounded exact-SHA run listing (the canonical collector owns all attestation
+  // policy). acceptance-ci-evidence.mjs executes main() at import, so it cannot
+  // be imported here; this mirrors its bounded workflowRunsForSha pagination.
+  const runs = [];
+  for (let page = 1; page <= 3; page += 1) {
+    const payload = await get('/repos/' + repository + '/actions/runs?head_sha=' +
+      targetSha + '&per_page=100&page=' + page);
+    const pageRuns = Array.isArray(payload?.workflow_runs) ? payload.workflow_runs : [];
+    runs.push(...pageRuns);
+    if (pageRuns.length < 100) break;
+  }
+  if (runs.length > 300) throw Error('excessive workflow run listing for exact SHA');
+  const proof = await collectConvergenceWriter4059({ repo: repository, targetSha, runs,
+    get, getLog: readLog });
+  return validConvergenceWriterReceipt(proof, targetSha)
+    ? { qualified: true, receipt: proof }
+    : { qualified: false,
+      reason: 'no authenticated convergence-writer operation receipt at SC-02 source (#4137)' };
 }
 function repoParts(repository) {
   const match = /^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/.exec(repository || '');
@@ -785,9 +857,16 @@ export async function assessNativeCompletedIssueSource(repository, number, token
       path => request(path, {token}))),
     (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request),
     (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request));
-  return qualified.qualified
-    ? {qualified:true,reason:'merged source and Quality verified'}
-    : {qualified:false,reason:'PR source Quality: '+qualified.reason};
+  if (!qualified.qualified) {
+    return {qualified:false,reason:'PR source Quality: '+qualified.reason};
+  }
+  if (number === 4059) {
+    const writer = await qualifyConvergenceWriter4059Closure(repository, issue, token, request);
+    if (!writer.qualified) {
+      return {qualified:false,reason:'convergence writer: '+writer.reason};
+    }
+  }
+  return {qualified:true,reason:'merged source and Quality verified'};
 }
 
 async function reconcileIssue(repository, number, token, { includePr = null,
@@ -837,6 +916,13 @@ async function reconcileIssue(repository, number, token, { includePr = null,
   if (!qualified.qualified) {
     return {action:'pending', reason:'PR source Quality: '+qualified.reason,
       prs:prs.map(pr => pr.number)};
+  }
+  if (number === 4059) {
+    const writer = await qualifyConvergenceWriter4059Closure(repository, issue, token, request);
+    if (!writer.qualified) {
+      return {action:'pending', reason:'convergence writer: '+writer.reason,
+        prs:prs.map(pr => pr.number)};
+    }
   }
   // Re-read before mutation: a later Issue edit or reopen must not be raced by
   // a stale evaluation. GitHub's Issues API has no compare-and-set PATCH.
@@ -1896,6 +1982,103 @@ async function selfTest() {
     request: async (path, options) => path.endsWith('/events?per_page=100')
       ? Array(100).fill({event:'labeled'}) : mock(path, options),
   }), /event history incomplete/);
+  // #4137: the live false-closure counterexample — #4059 with every SC checked
+  // Pass, including the historically disproven SC-02 (green Waker 44678335169 +
+  // BLOCKED converge 44678377431). Closure must fail closed and an explicit
+  // /accept must still select the negative main source for a trusted replay.
+  const repo4059 = 'BestNathan/nession';
+  const mainSha4059 = 'a'.repeat(40);
+  const prHead4059 = 'f'.repeat(40);
+  const invalidSc02 = 'run 44678335169; ref ' + mainSha4059 + '; source agent-qwen; ' +
+    'workflow: Post-Run Waker; workflow: Convergence run 44678377431 conclusion=success';
+  const body4059 = '## Success Criteria\n' +
+    '- [x] SC-01 deterministic policy fixture\n' +
+    '- [x] SC-02 real source-bound Convergence run\n' +
+    '- [x] SC-03 no weakened auto-merge\n\n' +
+    '## Acceptance Plan\n\n```yaml\nacceptance:\n  SC-01:\n    when: pr\n    method: agent\n' +
+    '  SC-02:\n    when: merged\n    branch: main\n    method: agent\n' +
+    '  SC-03:\n    when: pr\n    method: agent\n```\n\n' +
+    '## Acceptance Report\n\n| Criterion | Result | Evidence |\n|---|---|---|\n' +
+    '| SC-01 | Pass | run 100; ref ' + prHead4059 + '; source agent-qwen; test: fixture |\n' +
+    '| SC-02 | Pass | ' + invalidSc02 + ' |\n' +
+    '| SC-03 | Pass | run 100; ref ' + prHead4059 + '; source agent-qwen; test: fixture |\n';
+  const issue4059 = { number: 4059, state: 'open', labels: [{ name: 'bug' }], body: body4059 };
+  const mainPr4059 = { number: 4128, title: 'fix (#4059)', body: 'Fixes #4059',
+    head: { sha: prHead4059 }, base: { ref: 'main' },
+    merged_at: '2026-11-20T05:01:26Z', merge_commit_sha: mainSha4059 };
+  assert.equal(decideIssueClosure(issue4059, [mainPr4059]).action, 'pending',
+    'all-checked SCs with the disproven #4059 SC-02 must not close');
+  assert.match(decideIssueClosure(issue4059, [mainPr4059]).reason, /disproven/);
+  assert.equal(decideIssueClosure({ ...issue4059, number: 4140 }, [mainPr4059]).action,
+    'close', 'the invalidation is scoped to #4059 SC-02 only');
+  const genuineSc02 = 'run 45332410930; ref ' + mainSha4059 + '; source agent-qwen; ' +
+    'authenticated-convergence-writer: Run 111/1, App writer minted, MERGED';
+  const genuineBody4059 = body4059.replace(invalidSc02, genuineSc02);
+  assert.equal(decideIssueClosure({ ...issue4059, body: genuineBody4059 }, [mainPr4059]).action,
+    'close', 'a non-historical Pass row is not deterministically invalidated');
+  assert.deepEqual(selectManualAgentRuns(issue4059, [mainPr4059],
+    { verifiedMainSha: mainSha4059 }),
+    [{ stage: 'post-merge', target_ref: mainSha4059 }],
+    'explicit /accept selects the historical negative source despite the checked Pass');
+  assert.deepEqual(selectManualAgentRuns({ ...issue4059, number: 4140 }, [mainPr4059],
+    { verifiedMainSha: mainSha4059 }), [],
+    'other Issues keep the checked-Pass lock');
+  // Independent operation-level closure attestation re-read from GitHub.
+  const lane4059 = 'b'.repeat(40), head4059 = 'c'.repeat(40),
+    merge4059 = 'd'.repeat(40), staging4059 = 'e'.repeat(40);
+  const wf4059 = '.github/workflows/release-staging-convergence.yml';
+  const required4059 = ['CI / Quality Gate', 'E2E / Tests', 'Acceptance / Case Smoke'];
+  const run4059 = { id: 111, run_attempt: 1, path: wf4059,
+    name: 'Release / Staging Convergence', head_branch: 'main', head_sha: mainSha4059,
+    event: 'push', status: 'completed', conclusion: 'success' };
+  const mintStep = { name: 'Mint workflow-file integration token from Publisher App',
+    status: 'completed', conclusion: 'success' };
+  const armStep = { name: 'Idempotently prepare and arm protected GitHub Auto-merge',
+    status: 'completed', conclusion: 'success' };
+  const job4059 = { id: 222, name: 'converge', status: 'completed', conclusion: 'success',
+    steps: [mintStep, armStep] };
+  const plan4059 = { schema_version: 1, main_sha: mainSha4059, branches: [{ branch: 'staging',
+    sha: lane4059, workflow_write_required: true, actions: ['sync-main-to-lane'] }] };
+  const decisions4059 = [{ branch: 'staging', direction: 'sync-main-to-lane',
+    action: 'created', number: 333, integration_head: head4059, outcome: 'AUTO_MERGE_QUALIFIED' }];
+  const transcript4059 = [JSON.stringify(plan4059, null, 2), JSON.stringify(decisions4059, null, 2)]
+    .join('\n').split('\n').map(x => '2026-11-23T07:00:00.001Z ' + x).join('\n');
+  const pr4059 = { number: 333, state: 'closed', merged_at: '2026-11-23T07:30:00Z',
+    merge_commit_sha: merge4059, user: { login: 'nession-publisher[bot]' },
+    base: { ref: 'staging', repo: { full_name: repo4059 } },
+    head: { ref: 'chore/staging-sync-fixture', sha: head4059, repo: { full_name: repo4059 } },
+    body: 'Staging Convergence automated proposal (fixture)' };
+  const commit4059 = { sha: head4059, parents: [{ sha: lane4059 }, { sha: mainSha4059 }] };
+  const ci4059 = required4059.map((name, i) => ({ id: 400 + i, run_attempt: 1, name,
+    head_sha: head4059, event: 'pull_request', status: 'completed', conclusion: 'success',
+    pull_requests: [{ number: 333 }] }));
+  const compare4059 = { status: 'ahead', merge_base_commit: { sha: merge4059 } };
+  const writerMock = ({ job = job4059, log = transcript4059 } = {}) => async (path) => {
+    if (path.includes('/actions/runs?head_sha=' + mainSha4059)) return { workflow_runs: [run4059] };
+    if (path.includes('/actions/runs?head_sha=' + head4059)) return { workflow_runs: ci4059 };
+    if (path.includes('/actions/runs/111/attempts/1/jobs')) return { jobs: [job] };
+    if (path.endsWith('/pulls/333')) return pr4059;
+    if (path.includes('/git/commits/' + head4059)) return commit4059;
+    if (path.endsWith('/branches/staging')) return { commit: { sha: staging4059 } };
+    if (path.includes('/compare/' + merge4059 + '...' + staging4059)) return compare4059;
+    throw Error('unexpected convergence endpoint ' + path);
+  };
+  const writerLog = async () => transcript4059;
+  const genuineIssue4059 = { ...issue4059, body: genuineBody4059 };
+  assert.equal((await qualifyConvergenceWriter4059Closure(repo4059, issue4059,
+    'fixture-token', writerMock(), writerLog)).qualified, false,
+    'the historical disproven row fails closed without GitHub authority');
+  assert.equal((await qualifyConvergenceWriter4059Closure(repo4059, genuineIssue4059,
+    'fixture-token', writerMock(), writerLog)).qualified, true,
+    'a genuine source-bound operation receipt qualifies closure');
+  const blockedJob = { ...job4059, steps: [{ ...mintStep, conclusion: 'skipped' }, armStep] };
+  const blockedLog = transcript4059.replace('AUTO_MERGE_QUALIFIED', 'BLOCKED');
+  assert.equal((await qualifyConvergenceWriter4059Closure(repo4059, genuineIssue4059,
+    'fixture-token', writerMock({ job: blockedJob, log: blockedLog }), async () => blockedLog))
+    .qualified, false, 'green job with BLOCKED controller / skipped writer cannot close');
+  assert.equal((await qualifyConvergenceWriter4059Closure(repo4059,
+    { ...issue4059, number: 4140 }, 'fixture-token', writerMock(), writerLog)).qualified, true,
+    'non-#4059 Issues are unaffected');
   if (originalAttempt === undefined) delete process.env.GITHUB_RUN_ATTEMPT;
   else process.env.GITHUB_RUN_ATTEMPT = originalAttempt;
   console.log('issue-lifecycle-reconcile: closure and exact /accept negative fixtures passed');

@@ -26,7 +26,8 @@ import {
   requiresPrRequiredQualityEvidence,
 } from './acceptance-pr-web-quality-receipt.mjs';
 import { acceptanceModelView } from './lib/agent/tasks/acceptance.mjs';
-import {enforceConvergenceWriter4059,mayProjectConvergenceWriter4059}
+import {enforceConvergenceWriter4059,mayProjectConvergenceWriter4059,
+  invalidatedConvergenceWriter4059Row}
   from './acceptance-convergence-writer-4137.mjs';
 
 
@@ -849,6 +850,29 @@ export function applyAcceptanceResultToBody(body, normalized, options = {}) {
       }
     }
   }
+  // #4137: restoring the historically disproven #4059 SC-02 to Pending keeps the
+  // original invalid Pass row verbatim in the same non-authority history section.
+  // The active report becomes Pending; the immutable original evidence is never
+  // erased. Scoped to the deterministic source-bound invalidation only.
+  if (normalized.issue === 4059 && stage === 'post-merge') {
+    const restored = resultMap.get('SC-02');
+    const prior = contract.rows.get('SC-02');
+    if (restored?.result === 'Pending' && prior &&
+        String(prior.result).toLowerCase() === 'pass' &&
+        invalidatedConvergenceWriter4059Row(4059, 'SC-02', prior.evidence)) {
+      const heading = '## Acceptance Source Recovery History';
+      const marker = 'convergence-writer-4059:' + runId;
+      if (!updated.includes(marker)) {
+        const priorRef = /\bref ([a-f0-9]{40});/i.exec(String(prior.evidence ?? ''))?.[1];
+        updated += '\n\n' + (updated.includes(heading) ? '' : heading + '\n') +
+          '<!-- ' + marker + ' -->\n' +
+          '- SC-02 historical ' + prior.result + ' at ' + (priorRef ?? '(unspecified)') +
+          ' (evidence: ' + escapeCell(prior.evidence) + '); invalidated by #4137 ' +
+          'operation-level convergence-writer attestation and restored Pending at ' +
+          'acceptance run ' + runId;
+      }
+    }
+  }
   return updated;
 }
 
@@ -1309,6 +1333,47 @@ function selfTest() {
   assert.match(passedBody, /\| SC-01 \| staging \| Pass \| run 100; ref abc123;/);
   assert.match(passedBody, /Keep this paragraph exactly\./);
   assert.equal(validateRequirementBody(passedBody, { mode: 'merge' }).ok, true);
+
+  // #4137: a trusted post-merge replay restores the disproven #4059 SC-02 to
+  // Pending and preserves the original invalid Pass row verbatim in history.
+  const mainSha4059 = 'a'.repeat(40);
+  const invalidSc02 = 'run 44678335169; ref ' + mainSha4059 + '; source agent-qwen; ' +
+    'workflow: Convergence run 44678377431 conclusion=success';
+  const body4059 = [
+    '## Success Criteria',
+    '- [x] SC-01 deterministic policy fixture',
+    '- [x] SC-02 real source-bound Convergence run',
+    '- [x] SC-03 no weakened auto-merge',
+    '',
+    '## Acceptance Plan',
+    '```yaml', 'acceptance:', '  SC-01:', '    when: pr', '    method: agent',
+    '  SC-02:', '    when: merged', '    branch: main', '    method: agent',
+    '  SC-03:', '    when: pr', '    method: agent', '```', '',
+    '## Acceptance Report',
+    '| Criterion | Result | Evidence |', '|---|---|---|',
+    '| SC-01 | Pass | run 100; ref ' + 'f'.repeat(40) + '; source agent-qwen; test: fixture |',
+    '| SC-02 | Pass | ' + invalidSc02 + ' |',
+    '| SC-03 | Pass | run 100; ref ' + 'f'.repeat(40) + '; source agent-qwen; test: fixture |',
+  ].join('\n');
+  const pending4059 = {
+    issue: 4059, stage: 'post-merge', target_ref: mainSha4059, run_id: 45332410930,
+    source: 'agent-qwen', contract_sha256: contractDigest(parseContract(body4059)),
+    selected_criteria: ['SC-02'],
+    criteria: [{ criterion: 'SC-02', result: 'Pending', evidence: [],
+      summary: 'Workflow writer authorization is unproven' }],
+  };
+  const restored4059 = applyAcceptanceResultToBody(body4059, pending4059);
+  assert.match(restored4059, /\| SC-02 \| Pending \|/, 'active SC-02 restored to Pending');
+  assert.match(restored4059, /- \[ \] SC-02/, 'SC-02 checkbox unchecked');
+  assert.match(restored4059, /## Acceptance Source Recovery History/);
+  assert.match(restored4059, new RegExp('SC-02 historical Pass at ' + mainSha4059));
+  assert.ok(restored4059.includes('44678335169'), 'original Waker evidence preserved verbatim');
+  assert.ok(restored4059.includes('44678377431'), 'original BLOCKED source preserved verbatim');
+  assert.equal((restored4059.match(/convergence-writer-4059:/g) || []).length, 1,
+    'the history row is recorded once');
+  const otherIssue = applyAcceptanceResultToBody(body4059, { ...pending4059, issue: 4140 });
+  assert.equal(otherIssue.includes('convergence-writer-4059:'), false,
+    'the preservation is scoped to #4059');
 
   // #4253: a force-pushed/orphaned historical SC can be re-evaluated only
   // after an independently validated replacement. Preserve exact old receipt
