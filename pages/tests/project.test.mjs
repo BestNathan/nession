@@ -81,7 +81,8 @@ test('orphan inventory lists only existing refs with bounded counts and freshnes
   assert.equal(p.evidence.stores[1].freshness.state,'stale');
 });
 test('independent UI must not import product Web styles/components/tokens',async()=>{
-  for(const path of ['../app.js','../styles.css','../index.html']){
+  for(const path of ['../src/app/App.tsx','../src/features/knowledge/KnowledgePage.tsx',
+    '../public/styles.css','../index.html','../vite.config.ts']){
     const contents=await readFile(new URL(path,import.meta.url),'utf8');
     assert.doesNotMatch(contents,/(?:from|import|href|src)\s*(?:\(|=)?\s*['"](?:\.\.\/)+web\//i);
     assert.doesNotMatch(contents,/web\/src\/|web\/public\/|design\/tokens\//);

@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
-# Seed a worktree-local Cargo target from the main worktree using filesystem
-# copy-on-write. The destination remains a distinct directory with distinct
-# Cargo locks. Workspace-member artifacts are removed after cloning so only
-# dependency artifacts are carried forward.
+# Seed a worktree-local Cargo target using filesystem copy-on-write. The
+# destination remains a distinct directory with distinct Cargo locks.
+# Workspace-member artifacts are removed after cloning so only dependency
+# artifacts are carried forward.
+#
+# Source resolution (when no explicit SOURCE_ROOT is given), first match wins:
+#   1. NSESSION_SEED_SOURCE (absolute path; an invalid configuration fails loudly)
+#   2. the dedicated warm seed base at <main-worktree>/.claude/worktrees/_seed-base
+#      when it has a target/
+#   3. the main worktree (historical default)
+#
+# `just seed-worktree-base` creates/refreshes the dedicated base.
 #
 # Outcomes are machine-readable on stdout and human diagnostics are on stderr:
 #
@@ -13,6 +21,10 @@
 # `skipped` and `failed` never leave a partially published target. Worktree
 # creation treats every outcome as non-fatal and reports the actual one.
 set -euo pipefail
+
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
+# shellcheck source=lib/seed-worktree.sh
+. "$script_dir/lib/seed-worktree.sh"
 
 log() { echo "$*" >&2; }
 
@@ -67,28 +79,102 @@ fail() {
 }
 
 replace_existing=0
+dest_opt=''
+mode='seed'
 positional=()
-for arg in "$@"; do
-  case "$arg" in
-    --replace) replace_existing=1 ;;
-    -*) fail "unknown option: $arg" "Usage: seed-worktree-target.sh [--replace] [SOURCE_ROOT [DEST_ROOT]]" ;;
-    *) positional+=("$arg") ;;
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --replace) replace_existing=1; shift ;;
+    --dest)
+      if [ "$#" -lt 2 ]; then
+        fail "--dest requires a path" "Usage: seed-worktree-target.sh [--replace] [--dest DEST_ROOT] [SOURCE_ROOT [DEST_ROOT]]"
+      fi
+      dest_opt=$2
+      shift 2
+      ;;
+    --print-source) mode='print-source'; shift ;;
+    --print-base) mode='print-base'; shift ;;
+    -*) fail "unknown option: $1" "Usage: seed-worktree-target.sh [--replace] [--dest DEST_ROOT] [SOURCE_ROOT [DEST_ROOT]]" ;;
+    *) positional+=("$1"); shift ;;
   esac
 done
-set -- "${positional[@]}"
 
-current_root=$(git rev-parse --show-toplevel 2>/dev/null) || fail "not inside a Git worktree" "Run this from a worktree: just seed-worktree-target"
-dest_root=${2:-$current_root}
-
-if [ "$#" -ge 1 ] && [ -n "${1:-}" ]; then
-  source_root=$1
-else
-  source_root=$(git -C "$dest_root" worktree list --porcelain | sed -n '1s/^worktree //p')
+if [ "${#positional[@]}" -gt 2 ]; then
+  fail "too many positional arguments" "Usage: seed-worktree-target.sh [--replace] [--dest DEST_ROOT] [SOURCE_ROOT [DEST_ROOT]]"
+fi
+if [ -n "$dest_opt" ] && [ "${#positional[@]}" -ge 2 ]; then
+  fail "--dest cannot be combined with a positional DEST_ROOT" "Pass the destination once: --dest <path> or SOURCE_ROOT DEST_ROOT"
 fi
 
-[ -n "${source_root:-}" ] || fail "could not resolve the main worktree" "Pass the main worktree path explicitly: seed-worktree-target.sh <main-worktree> <worktree>"
-source_root=$(cd "$source_root" && pwd)
-dest_root=$(cd "$dest_root" && pwd)
+current_root=$(git rev-parse --show-toplevel 2>/dev/null) || fail "not inside a Git worktree" "Run this from a worktree: just seed-worktree-target"
+if [ -n "$dest_opt" ]; then
+  dest_root=$dest_opt
+elif [ "${#positional[@]}" -ge 2 ]; then
+  dest_root=${positional[1]}
+else
+  dest_root=$current_root
+fi
+dest_root=$(cd "$dest_root" && pwd) || fail "destination does not exist ($dest_root)" "Run this from an existing worktree: just seed-worktree-target"
+
+main_root=$(git -C "$dest_root" worktree list --porcelain 2>/dev/null | sed -n '1s/^worktree //p') || true
+[ -n "$main_root" ] || fail "could not resolve the main worktree" "Run this from a registered Git worktree"
+seed_base="$main_root/.claude/worktrees/_seed-base"
+
+if [ "$mode" = 'print-base' ]; then
+  printf '%s\n' "$seed_base"
+  exit 0
+fi
+
+source_root=''
+source_kind=''
+source_problem=''
+if [ "${#positional[@]}" -ge 1 ] && [ -n "${positional[0]:-}" ]; then
+  source_root=${positional[0]}
+  source_kind='explicit'
+elif [ -n "${NSESSION_SEED_SOURCE:-}" ]; then
+  source_root=$NSESSION_SEED_SOURCE
+  source_kind='env'
+  case "$source_root" in
+    /*) ;;
+    *) source_problem="NSESSION_SEED_SOURCE must be an absolute path ($source_root)" ;;
+  esac
+  if [ -z "$source_problem" ] && [ ! -d "$source_root" ]; then
+    source_problem="configured seed source does not exist ($source_root)"
+  fi
+elif [ -d "$seed_base/target" ] && seed_worktree_is_registered "$main_root" "$seed_base"; then
+  source_root=$seed_base
+  source_kind='seed-base'
+else
+  source_root=$main_root
+  source_kind='main'
+fi
+
+if [ "$mode" = 'print-source' ]; then
+  printf 'seed_source=%s\n' "${source_root:-}"
+  printf 'seed_source_kind=%s\n' "${source_kind:-unknown}"
+  printf 'seed_base=%s\n' "$seed_base"
+  if [ -d "$seed_base/target" ]; then
+    printf 'seed_base_target=yes\n'
+  else
+    printf 'seed_base_target=no\n'
+  fi
+  if seed_worktree_is_registered "$main_root" "$seed_base"; then
+    printf 'seed_base_registered=yes\n'
+  else
+    printf 'seed_base_registered=no\n'
+  fi
+  if [ -n "$source_problem" ]; then
+    printf 'seed_source_problem=%s\n' "$source_problem"
+  fi
+  exit 0
+fi
+
+if [ -n "$source_problem" ]; then
+  fail "$source_problem" "Unset NSESSION_SEED_SOURCE or point it at a compatible worktree; create/refresh the dedicated base with: just seed-worktree-base"
+fi
+
+[ -n "${source_root:-}" ] || fail "could not resolve a seed source" "Pass a source explicitly or create the dedicated base: just seed-worktree-base"
+source_root=$(cd "$source_root" && pwd) || fail "seed source does not exist ($source_root)" "Pass an existing worktree or create the dedicated base: just seed-worktree-base"
 dest_target="$dest_root/target"
 
 if [ "$source_root" = "$dest_root" ]; then
@@ -98,7 +184,17 @@ fi
 source_target="$source_root/target"
 
 if [ ! -d "$source_target" ]; then
-  skip "source has no target/ ($source_target)" "Nothing to fix: Cargo will build a fresh private target in this worktree"
+  case "$source_kind" in
+    seed-base)
+      skip "source has no target/ ($source_target)" "Build the dedicated warm seed base: just seed-worktree-base"
+      ;;
+    env)
+      skip "source has no target/ ($source_target)" "Build the configured NSESSION_SEED_SOURCE worktree or point it at a warm source"
+      ;;
+    *)
+      skip "source has no target/ ($source_target)" "Create the dedicated warm seed base with: just seed-worktree-base"
+      ;;
+  esac
 fi
 
 if [ -e "$dest_target" ] && [ "$replace_existing" -ne 1 ]; then
@@ -108,7 +204,17 @@ fi
 for compatibility_file in Cargo.lock rust-toolchain.toml; do
   if [ -f "$source_root/$compatibility_file" ] || [ -f "$dest_root/$compatibility_file" ]; then
     if ! cmp -s "$source_root/$compatibility_file" "$dest_root/$compatibility_file"; then
-      skip "$compatibility_file differs between source and destination" "Nothing to fix: incompatible build inputs must start with a private cold target"
+      case "$source_kind" in
+        seed-base)
+          skip "$compatibility_file differs between source and destination" "The dedicated seed base is stale; refresh it to origin/main: just seed-worktree-base"
+          ;;
+        env)
+          skip "$compatibility_file differs between source and destination" "The configured NSESSION_SEED_SOURCE is incompatible; refresh it or unset the variable"
+          ;;
+        *)
+          skip "$compatibility_file differs between source and destination" "Nothing to fix: incompatible build inputs must start with a private cold target. Create/refresh the dedicated base with: just seed-worktree-base"
+          ;;
+      esac
     fi
   fi
 done
@@ -295,6 +401,8 @@ fi
 
 published=1
 status_line seeded "published a private CoW-backed dependency target via $copy_strategy"
+printf 'seed_source=%s\n' "$source_root"
+printf 'seed_source_kind=%s\n' "$source_kind"
 printf 'seed_strategy=%s\n' "$copy_strategy"
 printf 'seed_logical_kib=%s\n' "$source_logical_kb"
 printf 'seed_allocated_kib=%s\n' "$allocated_kb"

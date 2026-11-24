@@ -8,6 +8,7 @@ web-test-unit
 protocol-integrity
 protocol-codegen-drift
 protocol-integrity-selftest
+websocket-route-inventory
 server-handler-locality
 server-handler-locality-selftest
 server-handler-concurrency-selftest
