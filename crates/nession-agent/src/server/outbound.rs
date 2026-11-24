@@ -75,6 +75,8 @@ use tracing::debug;
 
 use nession_runtime::outbound::{Limits, Outbound};
 
+use crate::stream::OutboundStreamClass;
+
 /// The one frame type and the three verdicts, re-exported so a call site names
 /// this runtime's outbound path rather than the shared crate's.
 pub use nession_runtime::outbound::{OutboundError, QueuedFrame};
@@ -232,6 +234,28 @@ impl P2pOutbound {
             OutboundError::Saturated => self.note_no_room(),
             e => e,
         })
+    }
+
+    /// Send one frame on the lane its **stream class** requires (#4435).
+    ///
+    /// This is the class-aware seam over the lanes above, not a fourth policy:
+    /// each arm delegates to the same method a caller used to name directly.
+    /// Naming the class instead of the mechanic is what keeps a wire's loss
+    /// policy with its stream owner rather than at every call site.
+    pub async fn send_for_class(
+        &self,
+        class: OutboundStreamClass,
+        msg: WsFrame,
+    ) -> Result<(), OutboundError> {
+        match class {
+            OutboundStreamClass::OrderedOutput => self.send_terminal(msg).await,
+            // Stream bookkeeping is not a reply the peer awaits forever, and
+            // it must not be dropped: the terminal lane gives it the same
+            // bounded wait and stall verdict as output.
+            OutboundStreamClass::FlowControl => self.send_terminal(msg).await,
+            OutboundStreamClass::LatestState => self.try_send_state(msg),
+            OutboundStreamClass::Reply => self.send_reply(msg).await,
+        }
     }
 
     /// Stop writing to this connection and drop the socket.
@@ -396,6 +420,54 @@ mod tests {
         assert_eq!(snapshot.dropped_state, 1);
         assert_eq!(snapshot.queued_frames, 1);
         assert_eq!(snapshot.queued_bytes, OUTBOUND_BYTE_BUDGET);
+    }
+
+    /// The class-aware seam must not invent a fourth lane: each stream class
+    /// lands on exactly the existing mechanic it names.
+    #[tokio::test]
+    async fn class_aware_send_uses_the_existing_lanes() {
+        let (outbound, _rx) = P2pOutbound::new();
+
+        outbound
+            .send_for_class(
+                OutboundStreamClass::Reply,
+                WsFrame::Text("reply".to_owned()),
+            )
+            .await
+            .expect("a reply is queued");
+        outbound
+            .send_for_class(
+                OutboundStreamClass::OrderedOutput,
+                WsFrame::Text("output".to_owned()),
+            )
+            .await
+            .expect("ordered output is queued");
+        outbound
+            .send_for_class(
+                OutboundStreamClass::FlowControl,
+                WsFrame::Text("ack".to_owned()),
+            )
+            .await
+            .expect("stream bookkeeping is queued");
+        assert_eq!(outbound.snapshot().queued_frames, 3);
+
+        // Latest-state is the droppable lane. On an otherwise empty queue the
+        // first enormous level fits exactly, and the second must report
+        // saturation exactly as `try_send_state` does.
+        let (levels, _levels_rx) = P2pOutbound::new();
+        let full = WsFrame::Text("y".repeat(OUTBOUND_BYTE_BUDGET));
+        levels
+            .send_for_class(OutboundStreamClass::LatestState, full.clone())
+            .await
+            .expect("the first level fits");
+        assert_eq!(
+            levels
+                .send_for_class(OutboundStreamClass::LatestState, full)
+                .await
+                .expect_err("the lane is full"),
+            OutboundError::Saturated
+        );
+        assert_eq!(levels.snapshot().dropped_state, 1);
     }
 
     /// `close` is a fact every handle can read, which is what a caller checks

@@ -34,6 +34,7 @@ pub mod server;
 pub mod session;
 pub mod session_created;
 pub mod session_env;
+pub mod stream;
 pub mod sync;
 pub mod tmux;
 pub mod token;

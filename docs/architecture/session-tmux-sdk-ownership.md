@@ -323,8 +323,18 @@ The runtime lifetime is Agent-owned, not WebSocket-owned.
   - the stream history ring (bounded replay window);
   - one bounded output queue and byte budget per subscriber, with independent
     ACK/credit;
+  - one finite input window per sender, admitted before any PTY write;
   - one ordered source-event consumer per attachment;
   - no unbounded task per message and no map lock across backend I/O.
+- The stream **classes**, the per-stream/input window numbers and the latest
+  state coalescence predicate are owned by
+  `crates/nession-agent/src/stream.rs`. They are separate from the connection's
+  general RPC lanes, so a stream admission never parks the physical reader.
+- Admission captures the stream epoch, input epoch and stated lease
+  generation; the Session owner re-checks the resource incarnation after the
+  backend await before advancing the input cursor or recording a resize, so a
+  kill/recreate cannot receive a retired resource's input or resize (#4435;
+  see `../design/terminal/ahp-inspired-terminal-consistency.md` §10).
 
 ## Delivery record
 
