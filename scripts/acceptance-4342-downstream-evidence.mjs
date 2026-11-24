@@ -18,6 +18,17 @@ const BOUND=Object.freeze({
   writer_path:'.github/workflows/metrics-agent-telemetry.yml',
   raw:'raw/workflows/agent-provider-smoke/2026-11-23/45167810720-1-issue-1556-staging-claude-code.json',
 });
+// Independently observed successful Reviewer -> immutable Metrics -> Store wake.
+// The old N/A snapshot was valid at its observation time, not forever.
+const REVIEW=Object.freeze({
+  source:45305892186,writer:45306383053,
+  sha:'60100b48efe1fd15b790a34f8d4139ed3f576a52',
+  source_path:'.github/workflows/agent-review.yml',
+  writer_path:BOUND.writer_path,
+  raw:'raw/workflows/agent-review/2026-11-24/45305892186-1-issue-4424-review.json',
+  source_artifact:'agent-telemetry-reviewer-slice-45305892186-1',
+  receipt_artifact:'run-store-receipt-45306383053-1-agent',
+});
 function reject(x){throw Error('4342 post-Store preservation: '+x);}
 function positive(x){return Number.isSafeInteger(x)&&x>0;}
 function runs(r,id,workflow,event) {
@@ -44,8 +55,68 @@ function receiptFromLog(log) {
   try{return JSON.parse(found[0].slice(start));}
   catch{reject('malformed Store receipt');}
 }
+export function attest4342Reviewer({source,writer,sourceArtifacts,writerArtifacts,
+  jobs,log,raw,recordCommits,ancestry}){
+  const trusted=(run,id,workflow,event)=>run?.id===id&&run.run_attempt===1&&
+    run.path===workflow&&run.event===event&&run.head_branch==='main'&&
+    run.head_sha===REVIEW.sha&&run.repository?.full_name===REPO&&
+    run.head_repository?.full_name===REPO&&run.status==='completed'&&
+    run.conclusion==='success';
+  if(ancestry!==true||!trusted(source,REVIEW.source,REVIEW.source_path,'workflow_dispatch')||
+     !trusted(writer,REVIEW.writer,REVIEW.writer_path,'repository_dispatch')||
+     !['BestNathan','github-actions[bot]'].includes(source.actor?.login)||
+     writer.actor?.login!=='github-actions[bot]'||
+     !Number.isFinite(Date.parse(source.created_at??''))||
+     Date.parse(source.created_at)<Date.parse(BOUND.merged_at))
+    reject('untrusted Reviewer source/writer provenance');
+  const sourceArtifact=artifacts(sourceArtifacts,REVIEW.source_artifact);
+  const receiptArtifact=artifacts(writerArtifacts,REVIEW.receipt_artifact);
+  if(!Array.isArray(jobs?.jobs)||jobs.jobs.length>100)reject('unbounded Reviewer writer jobs');
+  const matches=jobs.jobs.filter(j=>j.name==='ingest');
+  const job=matches[0];
+  if(matches.length!==1||!positive(job.id)||job.run_id!==writer.id||
+     job.run_attempt!==1||job.status!=='completed'||job.conclusion!=='success')
+    reject('untrusted Reviewer writer job');
+  const steps=['Validate and append immutable telemetry','Commit metrics history',
+    'Verify immutable Git bytes before uploading Run Store receipts',
+    'Notify Store of durable Reviewer evidence'].map(name=>{
+      const found=(job.steps??[]).filter(s=>s.name===name&&s.conclusion==='success');
+      if(found.length!==1||!positive(found[0].number))
+        reject('Reviewer post-Store notification/commit did not execute: '+name);
+      return found[0].number;
+    });
+  if(steps.some((n,i)=>i>0&&n<=steps[i-1]))
+    reject('Reviewer notification must follow immutable Store write/readback');
+  if(!log.includes('SOURCE_RUN_ID: '+source.id+'\n')&&
+     !log.includes('SOURCE_RUN_ID: '+source.id+'\r\n'))
+    reject('Reviewer source Run binding absent');
+  if(!log.includes('EXPECTED_WORKFLOW_ID: agent-review'))
+    reject('Reviewer source group binding absent');
+  const receipt=receiptFromLog(log);
+  // repository_dispatch receipts bind the writer Run; the source is bound
+  // independently by REST, the source step log and the canonical raw record.
+  if(receipt.kind!=='run_store_receipt_readback'||receipt.schema_version!==1||
+     receipt.store!=='metrics'||!SHA.test(receipt.commit_sha??'')||
+     receipt.ingester_run_id!==String(writer.id)||receipt.source_run_id!==String(writer.id)||
+     !positive(receipt.checked_records)||!positive(receipt.changed_records))
+    reject('untrusted Reviewer immutable Store receipt');
+  validateAgentWorkflowTelemetry(raw);
+  if(raw.identity.github_run_id!==source.id||raw.identity.github_run_attempt!==1||
+     raw.identity.repository!==REPO||raw.identity.event!==source.event||
+     raw.identity.workflow_id!=='agent-review'||telemetryStoragePath(raw)!==REVIEW.raw||
+     raw.task?.issue!==4424||raw.task?.pr!==4426||
+     !Array.isArray(recordCommits)||recordCommits.length!==1||
+     recordCommits[0]?.sha!==receipt.commit_sha)
+    reject('immutable Reviewer raw record/path history mismatch');
+  return {reviewer_notification:'posted_after_store_commit',reviewer_source_run_id:source.id,
+    reviewer_writer_run_id:writer.id,reviewer_writer_job_id:job.id,
+    reviewer_source_artifact:sourceArtifact,reviewer_receipt_artifact:receiptArtifact,
+    reviewer_metrics_commit_sha:receipt.commit_sha,reviewer_raw_path:REVIEW.raw,
+    reviewer_immutable_path_commit_count:recordCommits.length,
+    reviewer_source_sha:REVIEW.sha};
+}
 export function attest4342Downstream({source,writer,sourceArtifacts,writerArtifacts,
-  jobs,log,raw,recordCommits,reviewListing}) {
+  jobs,log,raw,recordCommits,reviewListing,reviewerEvidence}) {
   if(!runs(source,BOUND.source,BOUND.source_path,'push')||
      !runs(writer,BOUND.writer,BOUND.writer_path,'workflow_run'))
     reject('source/writer provenance mismatch');
@@ -97,6 +168,10 @@ export function attest4342Downstream({source,writer,sourceArtifacts,writerArtifa
     reject('missing unique immutable Store path history/commit');
   // A Reviewer launched after the original fix would require its own true
   // post-persistence Store notification. No eligible source => explicit N/A.
+  let reviewer;
+  if(reviewerEvidence){
+    reviewer=attest4342Reviewer(reviewerEvidence);
+  }else{
   if(!Number.isSafeInteger(reviewListing?.total_count)||reviewListing.total_count<0||
      reviewListing.total_count>100||
      !Array.isArray(reviewListing.workflow_runs)||
@@ -108,6 +183,12 @@ export function attest4342Downstream({source,writer,sourceArtifacts,writerArtifa
     Number.isFinite(Date.parse(r.created_at??''))&&
     Date.parse(r.created_at)>=Date.parse(BOUND.merged_at));
   if(eligible.length)reject('Reviewer post-Store applicability requires its own readback');
+  reviewer={
+    reviewer_notification:'not_applicable_no_reviewer_source_since_fix',
+    reviewer_scope_start:BOUND.merged_at,reviewer_sources_checked:reviewListing.total_count,
+    reviewer_scope_end:new Date().toISOString(),
+  };
+  }
   return Object.freeze({
     kind:'verified_4342_poststore_delivery',status:'authenticated',
     source_sha:BOUND.sha,provider_source_run_id:source.id,
@@ -116,10 +197,7 @@ export function attest4342Downstream({source,writer,sourceArtifacts,writerArtifa
     metrics_commit_sha:receipt.commit_sha,raw_path:BOUND.raw,
     immutable_path_commit_count:recordCommits.length,
     provider_notification:'posted_after_store_commit',
-    reviewer_notification:'not_applicable_no_reviewer_source_since_fix',
-    reviewer_scope_start:BOUND.merged_at,
-    reviewer_sources_checked:reviewListing.total_count,
-    reviewer_scope_end:new Date().toISOString(),
+    ...reviewer,
     business_outcome:'unobserved_not_inferred',
   });
 }
@@ -134,7 +212,12 @@ export function verified4342DownstreamCriterion(context,normalized){
     p.source_sha===BOUND.sha&&p.provider_source_run_id===BOUND.source&&
     p.provider_writer_run_id===BOUND.writer&&
     p.provider_notification==='posted_after_store_commit'&&
-    p.reviewer_notification==='not_applicable_no_reviewer_source_since_fix'&&
+    (p.reviewer_notification==='not_applicable_no_reviewer_source_since_fix'||
+     (p.reviewer_notification==='posted_after_store_commit'&&
+      p.reviewer_source_run_id===REVIEW.source&&p.reviewer_writer_run_id===REVIEW.writer&&
+      p.reviewer_source_sha===REVIEW.sha&&p.reviewer_immutable_path_commit_count===1&&
+      positive(p.reviewer_source_artifact)&&positive(p.reviewer_receipt_artifact)&&
+      positive(p.reviewer_writer_job_id)&&SHA.test(p.reviewer_metrics_commit_sha??'')))&&
     p.immutable_path_commit_count===1&&SHA.test(p.metrics_commit_sha??'');
   if(!ok){
     if(item.result==='Pass')reject('SC-08 Pass lacks authenticated post-Store proof');
@@ -142,11 +225,17 @@ export function verified4342DownstreamCriterion(context,normalized){
   }
   if(item.result==='Fail'||item.result==='N/A')return normalized;
   return {...normalized,criteria:normalized.criteria.map(x=>x.criterion!=='SC-08'?x:{
-    ...x,result:'Pass',summary:'Provider notification followed immutable Metrics Store commit; no eligible Reviewer Run in independently scoped source listing; no Approval/SC outcome inferred',
+    ...x,result:'Pass',summary:p.reviewer_notification==='posted_after_store_commit'?
+      'Provider and Reviewer notifications independently followed immutable Metrics Store commits; no Approval/SC outcome inferred':
+      'Provider notification followed immutable Metrics Store commit; no eligible Reviewer Run in independently scoped source listing; no Approval/SC outcome inferred',
     evidence:[{type:'authenticated-poststore',
       value:'Provider '+p.provider_source_run_id+' -> writer '+p.provider_writer_run_id+
         ', job '+p.provider_writer_job_id+', receipt '+p.provider_receipt_artifact+
-        ', immutable Git '+p.metrics_commit_sha+', Reviewer N/A as of '+p.reviewer_scope_end}],
+        ', immutable Git '+p.metrics_commit_sha+(p.reviewer_notification==='posted_after_store_commit'?
+          '; Reviewer '+p.reviewer_source_run_id+' -> writer '+p.reviewer_writer_run_id+
+          ', job '+p.reviewer_writer_job_id+', Artifact '+p.reviewer_source_artifact+
+          ', receipt '+p.reviewer_receipt_artifact+', immutable Git '+p.reviewer_metrics_commit_sha:
+          ', Reviewer N/A as of '+p.reviewer_scope_end)}],
   })};
 }
 function gh(endpoint){
@@ -193,13 +282,31 @@ function collect(file,sha){
   const receipt=receiptFromLog(log);
   const raw=gitJsonBlob(BOUND.raw,receipt.commit_sha);
   const recordCommits=gh('commits?sha=metrics&path='+BOUND.raw+'&per_page=10');
-  const reviewListing=gh('actions/workflows/agent-review.yml/runs?created=2026-11-23..'+
-    new Date().toISOString().slice(0,10)+'&per_page=100');
+  let reviewerEvidence,reviewListing;
+  let reviewerAncestor=false;
+  try{execFileSync('git',['-C',workspace,'merge-base','--is-ancestor',REVIEW.sha,sha],
+      {stdio:'ignore',timeout:20000});reviewerAncestor=true;}catch{}
+  if(reviewerAncestor){
+    const rs=gh('actions/runs/'+REVIEW.source),rw=gh('actions/runs/'+REVIEW.writer);
+    const rj=gh('actions/runs/'+REVIEW.writer+'/attempts/1/jobs?per_page=100');
+    const ij=rj.jobs?.filter(j=>j.name==='ingest')??[];
+    if(ij.length!==1||!positive(ij[0].id))reject('no unique Reviewer writer');
+    const rl=ghText('actions/jobs/'+ij[0].id+'/logs');
+    const rr=receiptFromLog(rl);
+    reviewerEvidence={source:rs,writer:rw,jobs:rj,log:rl,ancestry:true,
+      sourceArtifacts:gh('actions/runs/'+REVIEW.source+'/artifacts?per_page=100'),
+      writerArtifacts:gh('actions/runs/'+REVIEW.writer+'/artifacts?per_page=100'),
+      raw:gitJsonBlob(REVIEW.raw,rr.commit_sha),
+      recordCommits:gh('commits?sha=metrics&path='+REVIEW.raw+'&per_page=10')};
+  }else{
+    reviewListing=gh('actions/workflows/agent-review.yml/runs?created=2026-11-23..'+
+      new Date().toISOString().slice(0,10)+'&per_page=100');
+  }
   const proof=attest4342Downstream({source,writer,sourceArtifacts,writerArtifacts,
-    jobs,log,raw,recordCommits,reviewListing});
+    jobs,log,raw,recordCommits,reviewListing,reviewerEvidence});
   fs.writeFileSync(file,JSON.stringify({...evidence,
     verified_4342_poststore_delivery:{...proof,target_sha:sha}},null,2)+'\n');
-  console.log('SC-08 post-Store Provider delivery authenticated; Reviewer not applicable in bounded source window');
+  console.log('SC-08 post-Store Provider delivery authenticated; Reviewer '+proof.reviewer_notification);
 }
 function selfTest(){
   assert.deepEqual(ghTextArgs4342('actions/jobs/137670055701/logs'),[
@@ -280,7 +387,44 @@ function selfTest(){
       repository:{full_name:REPO},created_at:'2026-11-23T11:45:00Z'
     }]
   }}),/Reviewer post-Store applicability/);
-  console.log('4342 source-bound post-Store Provider and Reviewer N/A positive/adversarial fixtures passed');
+  const reviewerRaw=buildAgentWorkflowTelemetry({
+    workflow_id:'agent-review',github_run_id:REVIEW.source,github_run_attempt:1,
+    repository:REPO,event:'workflow_dispatch',github_workflow:'Agent / Review',
+    unique_run_name:'45305892186-1-issue-4424-review',
+    task:{id:'issue-4424-review',type:'review',issue:4424,pr:4426,
+      target_ref:'a70bb885185a7c582ebea1be7d474d01ad9dbd1f'},
+    agent:{provider:'claude-code',id:'legacy-acceptance-claude-code',
+      role:'reviewer',status:'finished'},
+    timing:{started_at:'2026-11-24T01:33:21Z'},
+    result:{status:'completed'},
+  });
+  const rrun=(id,p,event)=>({...run(id,p,event),head_sha:REVIEW.sha,
+    actor:{login:'github-actions[bot]'},created_at:'2026-11-24T01:33:21Z'});
+  const reviewerEvidence={ancestry:true,
+    source:rrun(REVIEW.source,REVIEW.source_path,'workflow_dispatch'),
+    writer:rrun(REVIEW.writer,REVIEW.writer_path,'repository_dispatch'),
+    sourceArtifacts:{total_count:1,artifacts:[{id:31,name:REVIEW.source_artifact,expired:false,size_in_bytes:100}]},
+    writerArtifacts:{total_count:1,artifacts:[{id:32,name:REVIEW.receipt_artifact,expired:false,size_in_bytes:100}]},
+    jobs:{jobs:[{id:33,name:'ingest',run_id:REVIEW.writer,run_attempt:1,
+      status:'completed',conclusion:'success',steps:['Validate and append immutable telemetry',
+      'Commit metrics history','Verify immutable Git bytes before uploading Run Store receipts',
+      'Notify Store of durable Reviewer evidence'].map((name,i)=>({name,number:i+1,conclusion:'success'}))}]},
+    log:'SOURCE_RUN_ID: '+REVIEW.source+'\nEXPECTED_WORKFLOW_ID: agent-review\n'+JSON.stringify({
+      schema_version:1,kind:'run_store_receipt_readback',store:'metrics',commit_sha:commit,
+      source_run_id:String(REVIEW.writer),ingester_run_id:String(REVIEW.writer),
+      checked_records:5,changed_records:5}),
+    raw:reviewerRaw,recordCommits:[{sha:commit}]};
+  const real=attest4342Downstream({...args,reviewerEvidence});
+  assert.equal(real.reviewer_notification,'posted_after_store_commit');
+  assert.equal(verified4342DownstreamCriterion({...context,ci_evidence:{
+    verified_4342_poststore_delivery:{...real,target_sha:BOUND.sha}}},pending).criteria[0].result,'Pass');
+  assert.throws(()=>attest4342Reviewer({...reviewerEvidence,ancestry:false}),/provenance/);
+  assert.throws(()=>attest4342Reviewer({...reviewerEvidence,source:{...reviewerEvidence.source,
+    head_repository:{full_name:'attacker/fork'}}}),/provenance/);
+  assert.throws(()=>attest4342Reviewer({...reviewerEvidence,jobs:{jobs:[{
+    ...reviewerEvidence.jobs.jobs[0],steps:reviewerEvidence.jobs.jobs[0].steps.map(s=>
+      s.name==='Notify Store of durable Reviewer evidence'?{...s,number:1}:s)}]}}),/must follow/);
+  console.log('4342 source-bound post-Store Provider and actual Reviewer/N/A positive/adversarial fixtures passed');
 }
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){
   if(process.argv[2]==='collect'&&process.argv[3]&&process.argv[4])

@@ -236,7 +236,7 @@ jobs:
       # both collectors; #4117 adds a single bounded original-PR browser repair receipt.
       # Other PR-stage SCs have no GitHub evidence cost.
       - name: Collect trusted GitHub Actions evidence
-        if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117'))
+        if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117' || inputs.issue_number == '4448'))
         working-directory: trusted
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -255,6 +255,9 @@ jobs:
                 "${GITHUB_WORKSPACE}/workspace" \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
               4117) node scripts/acceptance-4117-pr-evidence.mjs collect \
+                "${GITHUB_WORKSPACE}/workspace" \
+                "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
+              4448) node scripts/acceptance-pr-pages-migration-evidence.mjs collect \
                 "${GITHUB_WORKSPACE}/workspace" \
                 "${RUNNER_TEMP}/acceptance-ci-evidence.json" ;;
               *) echo "Unsupported PR-stage collector Issue: ${ISSUE_NUMBER}" >&2; exit 1 ;;
@@ -285,7 +288,7 @@ jobs:
         run: |
           set -euo pipefail
           ci_evidence_file="-"
-          if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 4117 ]]; then
+          if [[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 4117 || "${ISSUE_NUMBER}" == 4448 ]]; then
             ci_evidence_file="${RUNNER_TEMP}/acceptance-ci-evidence.json"
           fi
           node scripts/acceptance-executor.mjs prepare \

@@ -4,6 +4,8 @@
 // issue prose, an agent assertion and a green unrelated commit are not.
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import {validPagesMigrationReceipt}
+  from './acceptance-pr-pages-migration-evidence.mjs';
 
 const REPO = 'BestNathan/nession';
 const SHA = /^[a-f0-9]{40}$/i;
@@ -50,6 +52,14 @@ export function requiresPrCiTriadCriterion(criterion) {
 export function requiresPrCiTriad(context) {
   return context?.stage === 'pr' &&
     (context.criteria ?? []).some(requiresPrCiTriadCriterion);
+}
+
+// #4448: a criterion that explicitly names the standalone CI / Pages lane is
+// proven by the trusted Pages migration receipt, not by the product E2E
+// browser_design job (which is correctly not-required for Pages-only work).
+export function isPagesMigrationCriterion(criterion) {
+  const text = String(criterion?.text ?? '');
+  return /\bCI \/ Pages\b/i.test(text) || /\bPages (?:browser|parity)\b/i.test(text);
 }
 
 function matchingRun(spec, sha, payload) {
@@ -172,13 +182,26 @@ export function enforcePrCiTriad(context, result) {
   const valid = source?.status === 'pass' &&
     (!needsVisual || source.receipt?.variant === 'visual') &&
     validPrCiTriadReceipt(source.receipt, context.target_ref);
+  const pages = validPagesMigrationReceipt(context.pr_pages_migration?.receipt,
+    context.target_ref) ? context.pr_pages_migration.receipt : null;
+  const pagesCriteria = new Set((context.criteria ?? [])
+    .filter(isPagesMigrationCriterion).map((criterion) => criterion.criterion));
   return {...result,criteria:result.criteria.map(item => {
     if (!required.has(item.criterion) || item.result !== 'Pass') return item;
-    if (!valid) return {...item,result:'Pending',
-      summary:'Authenticated exact-head PR Quality/E2E/Case Smoke CI not verified: ' +
-        String(source?.reason ?? 'missing source-bound receipt').slice(0,200),
-      evidence:[{type:'quality-gate', value:'Pending: Quality/E2E/Case Smoke receipt at '+
-        context.target_ref}]};
+    if (!valid) {
+      if (pages && pagesCriteria.has(item.criterion)) {
+        return {...item,evidence:[...item.evidence,{type:'pages-ci',
+          value:'CI / Pages run ' + pages.pages_run.id + '/' +
+            pages.pages_run.run_attempt + ' exact HEAD ' + context.target_ref +
+            '; parity artifact ' + pages.parity_artifact.id + ' sha256 ' +
+            pages.parity_artifact.sha256}]};
+      }
+      return {...item,result:'Pending',
+        summary:'Authenticated exact-head PR Quality/E2E/Case Smoke CI not verified: ' +
+          String(source?.reason ?? 'missing source-bound receipt').slice(0,200),
+        evidence:[{type:'quality-gate', value:'Pending: Quality/E2E/Case Smoke receipt at '+
+          context.target_ref}]};
+    }
     return {...item,evidence:[...item.evidence, ...source.receipt.checks.map(c => ({
       type:'quality-gate',value:c.key + ' workflow run ' + c.run_id + '/' +
       c.run_attempt + ' job ' + c.job_id + ' exact HEAD ' + context.target_ref,

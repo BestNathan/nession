@@ -33,6 +33,8 @@ import {enforceConvergenceWriter4059,mayProjectConvergenceWriter4059}
 import {collectPrCiTriad, requiresPrCiTriad, requiresPrVisualEvidenceCriterion,
   validPrCiTriadReceipt, enforcePrCiTriad, selfTestPrCiTriad}
   from './acceptance-pr-ci-triad.mjs';
+import {validPagesMigrationReceipt}
+  from './acceptance-pr-pages-migration-evidence.mjs';
 
 export { normalizeAcceptanceResult };
 import {
@@ -959,6 +961,13 @@ function prepareCommand(issueNumber, stage, targetRef, outFile, deployment, ciEv
   // A green accepted source whose SAME PR advanced is re-evaluated at the
   // merged head; the updater re-attests the lineage before projecting (#4204).
   context = recoverAdvancedGreenPrCriteria(issue, context);
+  // #4448: expose the trusted-main CI / Pages Run/Job/Step and bounded
+  // frozen-baseline parity artifact receipt. Evidence only; the Agent and the
+  // normalizer still decide each criterion.
+  if (context.stage === 'pr' && ciEvidence?.kind === 'verified_pr_pages_migration_v1' &&
+      validPagesMigrationReceipt(ciEvidence, context.target_ref)) {
+    context.pr_pages_migration = {status: 'pass', receipt: ciEvidence};
+  }
   if (replacement) {
     const selected = context.criteria.map(x=>x.criterion).sort();
     if (JSON.stringify(selected) !== JSON.stringify(replacement.criteria))

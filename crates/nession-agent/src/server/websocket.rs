@@ -63,7 +63,7 @@ use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_runtime::frame::WsFrame;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
-use nession_runtime::lane::{KeyedLane, Work};
+use nession_runtime::lane::{AdmitError, KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -4277,8 +4277,46 @@ impl AgentServer {
                                         break;
                                     }
                                 }
-                                Query => lanes.query(lane_work(frame)).await,
-                                Key(key) => lanes.key(key, lane_work(frame)).await,
+                                Query => {
+                                    let frame_id = frame.id.clone();
+                                    let frame_connection = Arc::clone(&frame.connection);
+                                    match lanes.try_query(lane_work(frame)) {
+                                        Ok(()) => {}
+                                        Err(AdmitError::Saturated) => {
+                                            let Ok(reply) = serde_json::to_string(&make_error(
+                                                &frame_id,
+                                                "overloaded",
+                                                "the connection is at its execution bound; retry after in-flight work completes",
+                                            )) else {
+                                                break;
+                                            };
+                                            if !write_frame(&frame_connection, Some(reply)).await {
+                                                break;
+                                            }
+                                        }
+                                        Err(AdmitError::Closed) => break,
+                                    }
+                                }
+                                Key(key) => {
+                                    let frame_id = frame.id.clone();
+                                    let frame_connection = Arc::clone(&frame.connection);
+                                    match lanes.try_key(key, lane_work(frame)).await {
+                                        Ok(()) => {}
+                                        Err(AdmitError::Saturated) => {
+                                            let Ok(reply) = serde_json::to_string(&make_error(
+                                                &frame_id,
+                                                "overloaded",
+                                                "the connection is at its execution bound; retry after in-flight work completes",
+                                            )) else {
+                                                break;
+                                            };
+                                            if !write_frame(&frame_connection, Some(reply)).await {
+                                                break;
+                                            }
+                                        }
+                                        Err(AdmitError::Closed) => break,
+                                    }
+                                }
                             }
                         }
                     }
