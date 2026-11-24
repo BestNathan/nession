@@ -168,6 +168,30 @@ test.describe('standalone Pages Knowledge Explorer',()=>{
   await expect(entries).toBeVisible();
  });
 
+ test('compact category search remains accessible with 100 tags',async({page})=>{
+  await page.setViewportSize({width:390,height:844});
+  await page.route('**/data/knowledge.json',async route=>{
+   const response=await route.fetch();const data=await response.json();
+   data.categories=Array.from({length:100},(_,i)=>'category-'+String(i+1).padStart(3,'0'));
+   data.articles[0].categories=[data.categories[99]];
+   await route.fulfill({json:data});
+  });
+  await page.goto(site.origin+'/#/knowledge');
+  const search=page.getByRole('searchbox',{name:'Search categories'});
+  const category=page.getByLabel('CATEGORIES',{exact:true});
+  await search.fill('category-100');
+  await expect(category.locator('option')).toHaveCount(2);
+  await category.selectOption('category-100');
+  await expect(page.locator('.knowledge-entry')).toHaveCount(1);
+  await page.locator('.knowledge-entry').first().click();
+  await expect(page.getByRole('region',{name:'Knowledge article reader'})).toBeVisible();
+  await page.getByRole('link',{name:'← All articles'}).click();
+  await expect(category).toHaveValue('category-100');
+  await category.selectOption('all');
+  await expect(page.locator('.knowledge-entry')).toHaveCount(2);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ });
+
  test('deep-link reader, relative article link, pinned sources, history and browser navigation',async({page})=>{
   await page.goto(site.origin+'/#/knowledge?article='+encodeURIComponent(first));
   const reader=page.locator('.knowledge-reader');
