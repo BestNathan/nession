@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "issue": 4424,
+  "version": 6,
+  "phase": "review",
+  "target_sha": "a70bb885185a7c582ebea1be7d474d01ad9dbd1f",
+  "repair_attempts": 0,
+  "transitions": [
+    {
+      "key": "945c87aca2bc9ebfff165e7f383da2baeb3102fa99838abb7c81f0ac6001d20e",
+      "kind": "publisher",
+      "run_id": 45305604196,
+      "attempt": 1,
+      "target_sha": "a70bb885185a7c582ebea1be7d474d01ad9dbd1f",
+      "outcome": "published"
+    }
+  ],
+  "assignments": {
+    "developer": "dev-qwen-01",
+    "reviewer": "review-qwen-01",
+    "acceptor": "accept-qwen-01"
+  },
+  "outbox": [
+    {
+      "id": "ce2ec61a2e12c3f1733084ccce58786f9844eae9f4369ee0a7a51885cf6a542f",
+      "task": {
+        "type": "dispatch",
+        "role": "reviewer",
+        "task": "review",
+        "sha": "a70bb885185a7c582ebea1be7d474d01ad9dbd1f",
+        "agent_id": "review-qwen-01"
+      },
+      "status": "dispatched",
+      "attempts": 1,
+      "receipt": {
+        "status": "verified",
+        "dispatch_id": "ce2ec61a2e12c3f1733084ccce58786f9844eae9f4369ee0a7a51885cf6a542f",
+        "source_run_id": 45305892186
+      }
+    }
+  ]
+}
