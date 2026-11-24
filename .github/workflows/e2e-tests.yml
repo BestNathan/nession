@@ -453,15 +453,21 @@ jobs:
                   provision_log="$RUNNER_TEMP/issue-e2e/provision.log"
                   : > "$provision_log"
                   rm -f "$E2E_PLAYWRIGHT_REPORT_FILE" "$E2E_PLAYWRIGHT_ASSERTIONS_FILE"
+                  # #4483: the selected plan shares ONE provisioned runtime
+                  # across every spec file. Run its files serially so a spec
+                  # that restarts the Agent cannot kill a sibling file's
+                  # session; the periodic Full lane keeps the measured default.
                   if [[ -f trusted/scripts/issue-e2e-assertion-reporter.cjs ]]; then
-                    E2E_RUNTIME_PROVISION_LOG="$provision_log" \
+                    E2E_WORKERS=1 \
+                      E2E_RUNTIME_PROVISION_LOG="$provision_log" \
                       NESSION_E2E_ASSERTIONS_OUTPUT_FILE="$E2E_PLAYWRIGHT_ASSERTIONS_FILE" \
                       PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
                       CI=true ./e2e/run test "${args[@]}"
                   else
                     # Compatibility until the trusted assertion reporter source lands.
                     # Old results remain unproven rather than being promoted to Pass.
-                    E2E_RUNTIME_PROVISION_LOG="$provision_log" \
+                    E2E_WORKERS=1 \
+                      E2E_RUNTIME_PROVISION_LOG="$provision_log" \
                       PLAYWRIGHT_JSON_OUTPUT_FILE="$E2E_PLAYWRIGHT_REPORT_FILE" \
                       CI=true ./e2e/run test "${args[@]}"
                   fi

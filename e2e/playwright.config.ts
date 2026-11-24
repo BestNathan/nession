@@ -15,6 +15,26 @@ import { FIXTURE_SCREENSHOT } from './helpers/fixtureVisual';
  * launching Playwright.
  */
 
+/**
+ * File-level parallelism for this config.
+ *
+ * Independent spec files run concurrently against one shared full-stack
+ * runtime, so a file that restarts the Agent (`restartAgent()` in
+ * `terminal-consistency-faults.spec.ts`) can kill a sibling file's session
+ * (#4483). The Issue-selected lane therefore runs with `E2E_WORKERS=1`
+ * (serial across files); the periodic Full lane keeps the measured default.
+ * An invalid override fails closed rather than silently falling back.
+ */
+function e2eWorkers(): number {
+  const raw = process.env.E2E_WORKERS;
+  if (raw === undefined || raw === '') return 2;
+  const workers = Number(raw);
+  if (!Number.isInteger(workers) || workers < 1 || workers > 32) {
+    throw new Error(`E2E_WORKERS must be an integer in [1, 32]; got ${raw}`);
+  }
+  return workers;
+}
+
 export default defineConfig({
   testDir: './tests/browser',
   fullyParallel: false,
@@ -24,7 +44,7 @@ export default defineConfig({
   // on ubuntu-24.04 (#2470): the full suite drops from 11m21s to 8m17s of job
   // time with zero failed/skipped/flaky tests. Tests inside a file stay
   // serial (fullyParallel: false), preserving their shared-session semantics.
-  workers: 2,
+  workers: e2eWorkers(),
   reporter: 'html',
   snapshotPathTemplate: '{testDir}/__snapshots__/{testFilePath}/{arg}-{platform}{ext}',
 
