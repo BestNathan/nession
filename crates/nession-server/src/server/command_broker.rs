@@ -1,4 +1,5 @@
 use nession_runtime::frame::WsFrame;
+use nession_runtime::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -150,6 +151,22 @@ impl PendingCounters {
             PendingOutcome::Disconnected => &self.disconnected,
         };
         counter.fetch_add(1, Ordering::Relaxed);
+        let (result, reason) = match outcome {
+            PendingOutcome::Response => (ResultKind::Completed, ReasonKind::None),
+            PendingOutcome::Timeout => (ResultKind::Timeout, ReasonKind::None),
+            PendingOutcome::Cancelled => (ResultKind::Cancelled, ReasonKind::None),
+            PendingOutcome::DeliveryFailed => (ResultKind::Failed, ReasonKind::WriteError),
+            PendingOutcome::Replaced => (ResultKind::Failed, ReasonKind::Replacement),
+            PendingOutcome::Disconnected => (ResultKind::Closed, ReasonKind::Disconnect),
+        };
+        metrics::counter(
+            "ws_pending_outcome",
+            Labels::new()
+                .domain(Domain::Control)
+                .direction(Direction::Internal)
+                .result(result)
+                .reason(reason),
+        );
     }
 
     pub fn snapshot(&self) -> PendingCounterSnapshot {
@@ -1464,5 +1481,56 @@ mod tests {
             json!(true)
         );
         assert_eq!(broker.pending_counters().late, 1);
+    }
+
+    /// Every terminal pending outcome is observable through the bounded metric
+    /// contract, not only the internal counter snapshot.
+    #[tokio::test]
+    async fn pending_outcomes_emit_bounded_telemetry() {
+        struct Capture(std::sync::Mutex<Vec<&'static str>>);
+        impl nession_runtime::metrics::MetricSink for Capture {
+            fn record(&self, metric: nession_runtime::metrics::Metric) {
+                if let Ok(mut names) = self.0.lock() {
+                    names.push(metric.name);
+                }
+            }
+        }
+
+        let capture = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+        nession_runtime::metrics::set_sink(Some(capture.clone()));
+
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker
+            .claim_agent("a1", broker.new_connection_generation(), sender)
+            .await;
+        let _expired = broker
+            .send_command("a1", "agent.session.create", "req-timeout", json!({}))
+            .await;
+        assert!(broker.expire_pending("a1", "req-timeout").await);
+        let _resolved = broker
+            .send_command("a1", "agent.session.create", "req-ok", json!({}))
+            .await;
+        assert!(
+            broker
+                .resolve_command("a1", "req-ok", json!({ "success": true }))
+                .await
+        );
+        assert!(
+            !broker
+                .resolve_command("a1", "req-late", json!({ "success": false }))
+                .await
+        );
+
+        let names = capture
+            .0
+            .lock()
+            .map(|names| names.clone())
+            .unwrap_or_default();
+        assert!(
+            names.contains(&"ws_pending_outcome"),
+            "terminal pending outcomes must be counted: {names:?}"
+        );
+        nession_runtime::metrics::set_sink(None);
     }
 }
