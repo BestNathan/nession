@@ -69,7 +69,10 @@ jobs:
   pages-browser:
     name: Pages browser smoke (Chromium only)
     runs-on: ubuntu-24.04
-    timeout-minutes: 12
+    # The suite now also executes the frozen-baseline parity matrix (19 routes
+    # × 7 viewports × light/dark plus interactions). Keep headroom above the
+    # measured ~10 minutes without turning a slow runner into a false failure.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
