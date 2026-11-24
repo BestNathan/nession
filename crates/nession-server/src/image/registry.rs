@@ -16,14 +16,24 @@
 //! # Compatibility window and cutover criterion
 //!
 //! The proprietary `/images/blobs/{digest}` route ([`super::http`]) stays
-//! mounted alongside `/v2/` for the compatibility window. Both serve the same
-//! verified CAS bytes; `/v2/` adds repository-scoped reachability so possessing
-//! a digest is never authorization. The proprietary route may be removed only
-//! once every Agent Image preparation consumes standard `/v2/` grants and a
-//! staging Case proves no regression in Session prepare timeout behavior,
-//! resume, digest verification or upstream-credential privacy. Until that
-//! cutover receipt exists the two routes coexist; this module never deletes the
-//! compatibility path on its own.
+//! mounted alongside `/v2/` for the bounded compatibility window. Both serve the
+//! same verified CAS bytes; `/v2/` adds repository-scoped reachability so
+//! possessing a digest is never authorization. Since the #4250 cutover a
+//! Tag-reachable catalog image acquires through `/v2/` only; untagged builds and
+//! digest-only legacy rows keep the proprietary route as a documented bounded
+//! compatibility obligation.
+//!
+//! The mount is gated by the protected operator toggle
+//! `ServerConfig::legacy_blob_route` (default `true`), applied by the Server
+//! ingress `http_router`. Setting it to `false` is the staged removal: the
+//! proprietary route is unmounted, a migrated client holding only `/v2/` grants
+//! is unaffected, and a caller still asking for `/images/blobs/{digest}` gets a
+//! 404. Flipping it back to `true` is the fail-closed rollback — the supported
+//! legacy reader returns without relaxing the Server Token or digest checks. The
+//! toggle deletes no durable blob and rewrites no Manifest identity. The #4250
+//! SC-03 staging Case proves the removal negatives, persistent Agent cache and
+//! active-mount preservation, and the fail-closed rollback against the real
+//! `http_router`.
 
 use std::sync::Arc;
 

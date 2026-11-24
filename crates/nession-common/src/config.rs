@@ -158,6 +158,22 @@ pub struct ServerConfig {
     /// root (#3334). Published blob bytes and active work are never touched.
     #[serde(default = "default_image_build_retention_secs")]
     pub image_build_retention_secs: u64,
+    /// Protected compatibility toggle for the proprietary `/images/blobs/{digest}`
+    /// transport route (#4250).
+    ///
+    /// `true` (the default) keeps the legacy route mounted for the bounded
+    /// compatibility window: untagged builds and digest-only legacy rows still
+    /// resolve to it, while Tag-reachable catalog images already acquire through
+    /// the standard OCI `/v2/` routes. Setting it to `false` is the staged
+    /// cutover/removal action — the legacy route is no longer mounted, so a
+    /// migrated client that only holds `/v2/` grants is unaffected and a caller
+    /// that still asks for `/images/blobs/{digest}` gets a 404. Flipping it back
+    /// to `true` is the fail-closed rollback: the supported legacy reader returns
+    /// without relaxing the Server Token or digest checks. This is an operator
+    /// configuration, never a client-negotiated capability; it deletes no durable
+    /// blob and rewrites no Manifest identity.
+    #[serde(default = "default_legacy_blob_route")]
+    pub legacy_blob_route: bool,
     /// How long a relayed terminal frame may wait for room in a client's
     /// outbound queue before the Server gives up on that client (#961).
     ///
@@ -527,6 +543,7 @@ impl Default for ServerConfig {
             image_build_stage_timeout_secs: default_image_build_stage_timeout_secs(),
             image_build_log_max_bytes: default_image_build_log_max_bytes(),
             image_build_retention_secs: default_image_build_retention_secs(),
+            legacy_blob_route: default_legacy_blob_route(),
             terminal_stall_grace_secs: default_terminal_stall_grace(),
             query_concurrency_per_connection: default_query_concurrency(),
             max_pending_ws_auth: default_max_pending_ws_auth(),
@@ -605,6 +622,11 @@ fn default_image_build_log_max_bytes() -> u64 {
 
 fn default_image_build_retention_secs() -> u64 {
     7 * 24 * 60 * 60
+}
+
+/// The bounded compatibility window keeps the legacy route mounted (#4250).
+fn default_legacy_blob_route() -> bool {
+    true
 }
 
 fn default_db_path() -> String {
@@ -862,6 +884,57 @@ mod tests {
         assert_eq!(config.listen_address, "0.0.0.0:8443");
         assert_eq!(config.heartbeat_timeout_secs, 30);
         assert_eq!(config.db_path, "./nession-server.db");
+    }
+
+    /// The protected compatibility toggle (#4250) defaults to keeping the bounded
+    /// compatibility window open, and an operator can explicitly disable it (the
+    /// staged removal) or re-enable it (the fail-closed rollback). A config file
+    /// written before the toggle existed still defaults rather than failing.
+    #[test]
+    fn legacy_blob_route_defaults_true_and_parses_operator_override() {
+        assert!(default_legacy_blob_route());
+        assert!(ServerConfig::default().legacy_blob_route);
+
+        let absent: ServerConfig = toml::from_str(
+            r#"
+            listen_address = "127.0.0.1:0"
+            tls_cert_path = ""
+            tls_key_path = ""
+            auth_token = "secret"
+        "#,
+        )
+        .unwrap();
+        assert!(
+            absent.legacy_blob_route,
+            "an older config keeps the window open"
+        );
+
+        let removed: ServerConfig = toml::from_str(
+            r#"
+            listen_address = "127.0.0.1:0"
+            tls_cert_path = ""
+            tls_key_path = ""
+            auth_token = "secret"
+            legacy_blob_route = false
+        "#,
+        )
+        .unwrap();
+        assert!(
+            !removed.legacy_blob_route,
+            "the operator can stage the removal"
+        );
+
+        let rollback: ServerConfig = toml::from_str(
+            r#"
+            listen_address = "127.0.0.1:0"
+            tls_cert_path = ""
+            tls_key_path = ""
+            auth_token = "secret"
+            legacy_blob_route = true
+        "#,
+        )
+        .unwrap();
+        assert!(rollback.legacy_blob_route, "the operator can roll back");
     }
 
     #[test]
