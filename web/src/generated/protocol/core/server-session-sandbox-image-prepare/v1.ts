@@ -299,7 +299,10 @@ export type ManagedImageGrant = { role: ManagedImageRole,
  */
 digest: string, 
 /**
- * Authorized route, `/images/blobs/<digest>`.
+ * Authorized route. A Tag-reachable catalog Manifest (#4250) uses the
+ * standard OCI `/v2/<repo>/manifests/<digest>`; an untagged build or
+ * digest-only legacy row keeps the bounded compatibility route
+ * `/images/blobs/<digest>`.
  */
 path: string, 
 /**
@@ -325,7 +328,11 @@ media_type: string,
  */
 size_bytes: number, 
 /**
- * Authorized route, `/images/blobs/<digest>`.
+ * Authorized route. A Tag-reachable catalog object (#4250) carries a
+ * repository-scoped standard OCI route, `/v2/<repo>/blobs/<digest>` (a
+ * Manifest object uses `/v2/<repo>/manifests/<digest>`); an untagged build or
+ * digest-only legacy row keeps the bounded compatibility route
+ * `/images/blobs/<digest>`.
  */
 path: string, };
 export type ManagedImageRole = "base" | "workspace" | "toolchain";

@@ -251,6 +251,51 @@ pub async fn fetch_composite_image(
     server_auth_token: &str,
     route_prefix: &str,
 ) -> Result<FetchedComposite> {
+    fetch_composite_image_with_route(cache, objects, origin, server_auth_token, &|object| {
+        format!("{route_prefix}{}", object.digest)
+    })
+    .await
+}
+
+/// Fetch one referenced Composite Manifest closure through a Server-hosted
+/// standard OCI `/v2/` Registry (#4250), with no proprietary download URL.
+///
+/// The grant names one authorized `repository`; the Manifest is fetched by its
+/// immutable digest through `/v2/{repository}/manifests/{digest}` and the
+/// Config/Composite descriptor/metadata/device objects through
+/// `/v2/{repository}/blobs/{digest}`. The Server's repository reachability fence
+/// already expands the Composite closure, so every device is repository-scoped.
+/// The verified cache mechanics, descriptor validation and pin semantics are
+/// identical to the proprietary path: this is the same SDK/cache fetch, only the
+/// authorized route shape changes for the cutover.
+pub async fn fetch_composite_image_v2(
+    cache: &ErofsCache,
+    objects: &[ImageObjectGrant],
+    origin: &str,
+    server_auth_token: &str,
+    repository: &str,
+) -> Result<FetchedComposite> {
+    crate::contracts::validate_repository_name(repository)?;
+    fetch_composite_image_with_route(cache, objects, origin, server_auth_token, &|object| {
+        if object.media_type == MEDIA_TYPE_MANIFEST {
+            format!("/v2/{repository}/manifests/{}", object.digest)
+        } else {
+            format!("/v2/{repository}/blobs/{}", object.digest)
+        }
+    })
+    .await
+}
+
+/// The one verified Composite fetch implementation shared by the proprietary and
+/// `/v2/` route shapes. `expected_route` computes the authorized route for each
+/// object; a grant whose path disagrees is refused before any network request.
+async fn fetch_composite_image_with_route(
+    cache: &ErofsCache,
+    objects: &[ImageObjectGrant],
+    origin: &str,
+    server_auth_token: &str,
+    expected_route: &(dyn Fn(&ImageObjectGrant) -> String + Sync),
+) -> Result<FetchedComposite> {
     let manifest_grant = exactly_one(objects, MEDIA_TYPE_MANIFEST, "Manifest")?;
     let config_grant = exactly_one(objects, MEDIA_TYPE_CONFIG, "Config")?;
     let composite_grant = exactly_one(objects, MEDIA_TYPE_COMPOSITE, "Composite descriptor")?;
@@ -262,7 +307,7 @@ pub async fn fetch_composite_image(
         if !crate::digest::is_valid_digest(&object.digest) {
             anyhow::bail!("invalid authorized object digest {:?}", object.digest);
         }
-        let expected = format!("{route_prefix}{}", object.digest);
+        let expected = expected_route(object);
         if object.path != expected {
             anyhow::bail!(
                 "authorized route {:?} is not the blob route for {}",
@@ -807,6 +852,107 @@ mod tests {
             assert!(path.is_file());
         }
         assert_eq!(cache.fetch_count(), 6);
+    }
+
+    #[tokio::test]
+    async fn a_composite_fetches_its_closure_over_v2_routes() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, config, composite_document, devices, _) = composite_fixture();
+        let repository = "team/app";
+        let v2_path = |document: &RawDocument, media_type: &str| {
+            if media_type == MEDIA_TYPE_MANIFEST {
+                format!("/v2/{repository}/manifests/{}", document.digest())
+            } else {
+                format!("/v2/{repository}/blobs/{}", document.digest())
+            }
+        };
+        let mut grants = vec![
+            ImageObjectGrant {
+                digest: manifest.digest().to_string(),
+                media_type: MEDIA_TYPE_MANIFEST.to_string(),
+                size_bytes: manifest.size().unwrap(),
+                path: v2_path(&manifest, MEDIA_TYPE_MANIFEST),
+            },
+            ImageObjectGrant {
+                digest: config.digest().to_string(),
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                size_bytes: config.size().unwrap(),
+                path: v2_path(&config, MEDIA_TYPE_CONFIG),
+            },
+            ImageObjectGrant {
+                digest: composite_document.digest().to_string(),
+                media_type: MEDIA_TYPE_COMPOSITE.to_string(),
+                size_bytes: composite_document.size().unwrap(),
+                path: v2_path(&composite_document, MEDIA_TYPE_COMPOSITE),
+            },
+        ];
+        for device in &devices {
+            grants.push(ImageObjectGrant {
+                digest: device.digest().to_string(),
+                media_type: MEDIA_TYPE_EROFS.to_string(),
+                size_bytes: device.size().unwrap(),
+                path: v2_path(device, MEDIA_TYPE_EROFS),
+            });
+        }
+        let server = Server::run();
+        for grant in &grants {
+            server.expect(
+                Expectation::matching(request::method_path("GET", grant.path.clone()))
+                    .times(1)
+                    .respond_with(
+                        httptest::http::Response::builder()
+                            .status(200)
+                            .body(
+                                [&manifest, &config, &composite_document]
+                                    .into_iter()
+                                    .chain(devices.iter())
+                                    .find(|document| document.digest() == grant.digest)
+                                    .unwrap()
+                                    .bytes()
+                                    .to_vec(),
+                            )
+                            .unwrap(),
+                    ),
+            );
+        }
+        let cache = cache(dir.path()).await;
+        let fetched = fetch_composite_image_v2(
+            &cache,
+            &grants,
+            server.url("/").to_string().trim_end_matches('/'),
+            TOKEN,
+            repository,
+        )
+        .await
+        .unwrap();
+        assert_eq!(fetched.manifest_digest, manifest.digest());
+        assert_eq!(fetched.composite_digest, composite_document.digest());
+        assert_eq!(fetched.metadata.digest, devices.first().unwrap().digest());
+        assert_eq!(fetched.device_paths.len(), 2);
+        assert_eq!(cache.fetch_count(), 6);
+    }
+
+    #[tokio::test]
+    async fn a_composite_v2_grant_on_the_proprietary_route_fails_before_network() {
+        let dir = tempfile::tempdir().unwrap();
+        let (manifest, config, composite_document, devices, _) = composite_fixture();
+        // The grant carries the legacy compatibility route, but the caller asks
+        // for the `/v2/` fetch: the route mismatch is refused before any request.
+        let grants = composite_grants(&manifest, &config, &composite_document, &devices);
+        let server = Server::run();
+        let cache = cache(dir.path()).await;
+        let error = fetch_composite_image_v2(
+            &cache,
+            &grants,
+            server.url("/").to_string().trim_end_matches('/'),
+            TOKEN,
+            "team/app",
+        )
+        .await
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("is not the blob route"), "{error}");
+        assert_eq!(cache.fetch_count(), 0);
     }
 
     #[tokio::test]
