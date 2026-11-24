@@ -29,7 +29,9 @@ export function requiredContexts(branch, rules) {
     if (Array.isArray(classic.checks) && classic.checks.length) {
       for (const c of classic.checks) add(c.context, c.app_id ?? null);
     } else if (Array.isArray(classic.contexts)) {
-      for (const name of classic.contexts) add(name, null);
+      // Names alone do not reveal whether an App source is pinned.
+      // A context-only view is insufficient for SC-01 provenance.
+      throw Error('CLASSIC_CHECK_APP_UNVERIFIED');
     } else throw Error('CLASSIC_CHECKS_UNREADABLE');
   }
   for (const rule of rules) {
@@ -109,7 +111,7 @@ export function inspectProtectedCandidate(s) {
         problems.push('WRONG_STATUS_SHA:' + context);
       else if (c.state !== 'success')
         problems.push('FAILED_STATUS:' + context);
-      if (appId !== null && !checks.length)
+      if (appId !== null)
         problems.push('STATUS_APP_PROVENANCE_UNVERIFIED:' + context);
     }
   }
@@ -193,6 +195,9 @@ function selfTest() {
     headEvidence:good.headEvidence}).problems.includes('MISSING_REQUIRED_CONTEXT:rust-check'),
     'green HEAD must not mask missing test-merge checks');
   assert.ok(evaluate({rules:null}).problems.includes('PROTECTION_UNVERIFIED'));
+  assert.ok(evaluate({branch:{...branch,protection:{required_status_checks:{
+    enforcement_level:'everyone',contexts:['rust-check','web-check']}}}})
+    .problems.includes('CLASSIC_CHECK_APP_UNVERIFIED'));
   assert.ok(evaluate({branch:{...branch,protected:false}})
     .problems.includes('PROTECTION_UNVERIFIED'));
   assert.ok(evaluate({mergeEvidence:{checks:[check('rust-check'),check('web-check')],
