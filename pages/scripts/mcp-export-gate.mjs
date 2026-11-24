@@ -8,7 +8,7 @@ const BOUNDED_FILES=300;
 const BOUNDED_COMMITS=100;
 const sourceInputs=new Set([
   'Cargo.toml','Cargo.lock','rust-toolchain.toml','rust-toolchain',
-  'pages/scripts/build.mjs','pages/scripts/mcp-semantic.mjs',
+  'pages/scripts/build.mjs','pages/scripts/build-data.mjs','pages/scripts/mcp-semantic.mjs',
   'pages/scripts/mcp-reconcile.mjs','pages/scripts/mcp-upstream.mjs',
   'pages/scripts/mcp-export-gate.mjs',
 ]);

@@ -2,17 +2,25 @@
 
 Independent public site for project introduction, AI workflow Agents, repository engineering indicators, active GitHub Issues/PRs, and metadata-only orphan Run Store inventory. See [Issue #1782](https://github.com/BestNathan/nession/issues/1782).
 
-This is **not** the authenticated product Web UI. No product Web components, shared themes/tokens, auth, WebSocket or runtime endpoint is used. The Pages design is authored entirely under \`pages/\`; Node 24 is the base build requirement with no npm dependencies; pinned Protocol generation additionally requires Rust/Cargo.
+This is **not** the authenticated product Web UI. No product Web components, shared themes/tokens, auth, WebSocket or runtime endpoint is used. The Pages design is authored entirely under \`pages/\`. The UI is a React 19 + TypeScript Vite MPA with its own locked (\`pages/package-lock.json\`) and minimal runtime dependencies (\`react\`, \`react-dom\`); Node 24 is the base build requirement, and pinned Protocol generation additionally requires Rust/Cargo.
 
 ## Build locally (sanitized / offline-capable)
 
 \`\`\`bash
 cd pages
+npm ci
+npm run dev      # public-safe local fixtures; no token, Rust or server
+npm run check    # TypeScript + Node projection/security tests
 npm test
-npm run check
-npm run build
-# output: pages/dist/
+npm run build    # UI + public data -> pages/dist/
+
+# individual inputs
+npm run build:ui
+npm run build:data
+npm run preview
 \`\`\`
+
+Three independent inputs are assembled: a credential-free Vite UI build, the trusted Node/Rust public data projection, and the curated prototype publisher. Vite writes only to an isolated \`.build/ui\` directory and can never empty \`dist/data\` or \`dist/prototypes\`. The build also writes \`dist/artifact-manifest.json\`, the trusted closure of both HTML entrypoints and every compiled JS/CSS/static asset with exact SHA-256 digests; the publisher readback verifies anonymous HTTPS bytes against it, so a matching main SHA alone is not publication proof.
 
 The build reads \`METRICS_DIR/metrics.json\` and \`METRICS_DIR/agent-metrics.json\` from a read-only, pinned checkout of the canonical \`metrics\` orphan branch. It reads the AI Role/Instance registry from \`automation/agents/registry.json\` in trusted main. With \`GITHUB_TOKEN\`, it additionally queries the GitHub Issues/PRs and orphan ref metadata APIs at **build time**. Only strictly selected public fields are written into \`dist/data/site.json\`.
 
@@ -30,7 +38,7 @@ The source-backed Workflow explorer lives at `workflows.html`. The build reads a
 
 The public entrypoint is [Workflows](https://bestnathan.github.io/nession/workflows.html) (separate from the product Web UI). Every static build records the exact checked-out `SOURCE_MAIN_SHA` in `data/workflows.json`; its 27 curated workflow nodes and their source-file links are pinned to that revision. An edge indicates only a declared `workflow_run` or `workflow_call`, never a verified execution chain, Acceptance verdict or Issue ownership.
 
-Publishing has a stricter proof than a successful artifact upload or matching main SHA alone. The **Deploy / Public Pages** main-push job validates the graph shape and SHA at build time, records independent SHA-256 digests for `workflows.html` and `data/workflows.json`, then compares those digests against the **anonymous HTTPS responses** inside the same bounded deployment-readback loop used by `site.json`. A wrong graph revision, missing route, stale CDN response, altered HTML or JSON, or mismatched digest keeps the deployment job failed. The successful deployment emits a `Public Workflow topology verified` log line containing the main SHA, node count and both digests. The authenticated workflow Run/Attempt and log, not this README or browser output, are the post-merge publication evidence; Success Criteria are independently evaluated by the trusted Acceptance flow.
+Publishing has a stricter proof than a successful artifact upload or matching main SHA alone. The **Deploy / Public Pages** workflow compiles the UI in a credential-isolated job, then the trusted main-push build validates the graph shape and SHA, records independent SHA-256 digests for `workflows.html` and `data/workflows.json`, and writes the trusted compiled-artifact manifest. The deploy job compares those digests and every manifest-listed compiled file against the **anonymous HTTPS responses** in bounded readback loops alongside `site.json`. A wrong graph revision, missing route, stale CDN response, altered HTML/JS/CSS or JSON, or mismatched digest keeps the deployment job failed. The successful deployment emits a `Public Workflow topology verified` log line containing the main SHA, node count and both digests. The authenticated workflow Run/Attempt and log, not this README or browser output, are the post-merge publication evidence; Success Criteria are independently evaluated by the trusted Acceptance flow.
 
 
 The static UI uses hash navigation (\`#/agents\`, \`#/work\`, etc.) so direct deep links work under the repository's GitHub Pages base path without rewrite rules. Deployment is owned by a **separate, trusted, main-based workflow PR** per \`.github/AGENTS.md\`; it must not build, deploy, or modify \`web/\`.
@@ -89,9 +97,10 @@ provenance. The Rust generator runs at the pinned main checkout; failure
 blocks a trusted public build. The current main source Cargo version is
 development metadata, never a statement of released availability.
 
-The base Pages build requires Node 24 with no npm dependencies. Trusted
-Protocol projection additionally needs Rust/Cargo and Git (for historical
-tag reconstruction). Set `PAGES_PROTOCOL_CACHE_DIR` to a persistent,
+The base Pages build requires Node 24 and the locked UI dependencies
+installed with `npm ci`; the trusted data-projection scripts themselves remain
+independent of frontend packages. Trusted Protocol projection additionally
+needs Rust/Cargo and Git (for historical tag reconstruction). Set `PAGES_PROTOCOL_CACHE_DIR` to a persistent,
 trusted build cache to reuse previously compiled tag snapshots. Deterministic
 fixtures may provide `PAGES_PROTOCOL_SCHEMA_FILE` instead of invoking Cargo
 for the current main revision; `PAGES_OFFLINE=1` disables GitHub history reads.
