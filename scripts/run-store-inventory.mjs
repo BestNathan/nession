@@ -307,6 +307,9 @@ export function checkInventory(manifest,workflows){
       // These are the ONLY two privileged bot-only dispatch types permitted
       // by the Store inventory. History must be post-CAS, non-recursive and
       // independently authenticate the real writer Run/Attempt/Store steps.
+      // Only the ingest job owns Metrics writes; a separate observer's
+      // trusted checkout cannot establish the privileged writer's source.
+      const metricsWriterJob=(body.split(/^  ingest:\s*$/m)[1]??'').split(/^  [a-z][a-z0-9_-]*:\s*$/m)[0];
       const reviewerWake=writer.workflow==='.github/workflows/metrics-agent-telemetry.yml'&&
         /^  repository_dispatch:\s*\n    types: \[nession-agent-review-completed, nession-agent-metrics-history-recover\]\s*$/m.test(triggers)&&
         body.includes(metricsTrustedReviewerGuard)&&
@@ -326,9 +329,9 @@ export function checkInventory(manifest,workflows){
         body.includes('.head_sha == $sha')&&
         body.includes('.run_attempt == $attempt')&&
         body.includes('.path == ".github/workflows/agent-review.yml"')&&
-        body.includes('ref: main')&&
-        body.includes('node scripts/agent-telemetry-ingest.mjs stage')&&
-        body.includes('run-store-cas-push.mjs');
+        metricsWriterJob.includes('ref: main')&&
+        metricsWriterJob.includes('node scripts/agent-telemetry-ingest.mjs stage')&&
+        metricsWriterJob.includes('run-store-cas-push.mjs');
       // Exception for the default-branch-only Case repository_dispatch.
       // This is an untrusted source Run locator until Main independently
       // verifies original GitHub Run/Attempt, pre-checkout human source, and Case tree.
@@ -371,7 +374,8 @@ export function checkInventory(manifest,workflows){
       const trustedSource=writer.workflow==='.github/workflows/metrics-repository.yml'
         ? body.includes('ref: ${{ github.sha }}')&&
           body.includes("github.ref == 'refs/heads/main'")
-        : body.includes('ref: main');
+        : writer.workflow==='.github/workflows/metrics-agent-telemetry.yml'
+          ? metricsWriterJob.includes('ref: main') : body.includes('ref: main');
       if(!trustedSource)
         fail('privileged Store writer must checkout trusted main without persisted credentials: '+writer.workflow);
       if(writer.workflow==='.github/workflows/metrics-repository.yml'){

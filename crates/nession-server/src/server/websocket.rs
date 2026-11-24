@@ -12,7 +12,7 @@ use axum::routing::{any, get};
 use axum::Router;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
 
-use super::handler::{ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
+use super::handler::{overload_reply, ConnectionHandler, ConnectionHandlerDeps, HandlerAction};
 use crate::db::Database;
 use crate::env::EnvService;
 use crate::image::{ImageHttpService, ImageManager, ImageManagerOptions};
@@ -29,7 +29,7 @@ use nession_common::config::ServerConfig;
 use nession_common::readiness::Readiness;
 use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::ProtocolMessage;
-use nession_runtime::lane::KeyedLane;
+use nession_runtime::lane::{AdmitError, KeyedLane};
 
 pub struct WebSocketServer {
     config: ServerConfig,
@@ -462,6 +462,7 @@ impl WebSocketServer {
                         image_manager: Arc::clone(&self.image_manager),
                         image_http: Arc::clone(&self.image_http),
                         image_registry: Arc::clone(&self.image_registry),
+                        legacy_blob_route: self.config.legacy_blob_route,
                         allowed_origins: Arc::clone(&allowed_origins),
                         server_auth: server_auth.clone(),
                         heartbeat_interval_secs,
@@ -566,6 +567,14 @@ struct ServerContext {
     image_http: Arc<ImageHttpService>,
     /// The standard OCI `/v2/` Registry service mounted on this ingress (#4090).
     image_registry: Arc<crate::image::registry::ServerRegistry>,
+    /// Whether the proprietary `/images/blobs/{digest}` route is mounted (#4250).
+    ///
+    /// The protected compatibility toggle (`ServerConfig::legacy_blob_route`).
+    /// `true` keeps the bounded compatibility window for untagged builds and
+    /// digest-only legacy rows; `false` is the staged removal — migrated clients
+    /// hold only `/v2/` grants and never need this route. The standard `/v2/`
+    /// Registry is mounted regardless; this gates only the legacy reader.
+    legacy_blob_route: bool,
     /// Browser origins allowed to open the protocol WebSocket (#4066).
     ///
     /// Empty refuses every upgrade that presents an `Origin`; requests without
@@ -658,6 +667,11 @@ fn http_router(
     pending_auth: Arc<tokio::sync::Semaphore>,
 ) -> Router {
     let mcp_path = ctx.mcp.as_ref().map(|mcp| mcp.path().to_string());
+    // The protected compatibility toggle (#4250): the legacy blob route is
+    // mounted only while the bounded compatibility window is open. The standard
+    // `/v2/` Registry below is mounted regardless, so a migrated client holding
+    // only `/v2/` grants is unaffected when the legacy reader is removed.
+    let legacy_blob_route = ctx.legacy_blob_route;
     // The standard `/v2/` Registry router (#4090) is stateless once built; it is
     // merged below so its requests share the same admission-slot backstop as the
     // WebSocket and proprietary blob routes.
@@ -667,9 +681,10 @@ fn http_router(
         slot: slot.clone(),
         pending_auth,
     };
-    let mut router = Router::new()
-        .route("/ws", get(ws_upgrade))
-        .route(&crate::image::http::blob_route(), get(image_blob));
+    let mut router = Router::new().route("/ws", get(ws_upgrade));
+    if legacy_blob_route {
+        router = router.route(&crate::image::http::blob_route(), get(image_blob));
+    }
     if let Some(path) = mcp_path.as_deref() {
         router = router.route(path, any(mcp_http));
     }
@@ -816,6 +831,7 @@ async fn handle_ws_stream(
         mcp_path,
         image_http: _,
         image_registry: _,
+        legacy_blob_route: _,
         allowed_origins: _,
         server_auth,
     } = ctx;
@@ -1051,14 +1067,28 @@ async fn handle_ws_stream(
                     // agent's control channel, and a query may reach for the broker
                     // as soon as its task is scheduled.
                     claim_agent_channel(&handler, &command_broker, &sender).await;
-                    // `query` waits here when the connection's lane is
-                    // full. That wait is the bound the requirement asks for: the
-                    // frame that would exceed the lane is not *read* until there is
-                    // room for it, so a connection cannot grow tasks with its
-                    // message count.
-                    lanes
-                        .query(answer(handler.clone(), msg, sender.clone(), "a query"))
-                        .await;
+                    // Admission is non-blocking (`#4433`): a full lane is answered
+                    // with an explicit overload, so the reader never parks on a
+                    // business permit and heartbeat/control keep moving.
+                    let reply_wire = msg.msg_type.clone();
+                    let reply_id = msg.id.clone();
+                    match lanes.try_query(answer(handler.clone(), msg, sender.clone(), "a query")) {
+                        Ok(()) => {}
+                        Err(AdmitError::Saturated) => {
+                            if sender
+                                .send_reply(overload_reply(&reply_wire, &reply_id))
+                                .await
+                                .is_err()
+                            {
+                                close_reason = "outbound-closed";
+                                break;
+                            }
+                        }
+                        Err(AdmitError::Closed) => {
+                            close_reason = "lane-closed";
+                            break;
+                        }
+                    }
                     continue;
                 }
                 ExecutionPolicy::Key(key) => {
@@ -1067,16 +1097,34 @@ async fn handle_ws_stream(
                     // and the claim is about *this* connection rather than about the
                     // frame that prompted it.
                     claim_agent_channel(&handler, &command_broker, &sender).await;
-                    // Waits only when that resource's own queue is at its depth. The
-                    // wait parks the reader, which is the backpressure — see
-                    // `server::execution`. A mutation for another resource is not
-                    // behind it.
-                    lanes
-                        .key(
+                    // Atomic non-blocking admission at both bounds: the per-key
+                    // depth and this connection's mutation slots. A refusal
+                    // reserves nothing and is answered explicitly (#4433).
+                    let reply_wire = msg.msg_type.clone();
+                    let reply_id = msg.id.clone();
+                    match lanes
+                        .try_key(
                             key,
                             Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
                         )
-                        .await;
+                        .await
+                    {
+                        Ok(()) => {}
+                        Err(AdmitError::Saturated) => {
+                            if sender
+                                .send_reply(overload_reply(&reply_wire, &reply_id))
+                                .await
+                                .is_err()
+                            {
+                                close_reason = "outbound-closed";
+                                break;
+                            }
+                        }
+                        Err(AdmitError::Closed) => {
+                            close_reason = "lane-closed";
+                            break;
+                        }
+                    }
                     continue;
                 }
                 ExecutionPolicy::Ordered => {
@@ -2492,19 +2540,44 @@ async fn answer_server_unit(
     // the claim is about an *agent's* control channel — which is every
     // connection that reaches a relay.
     claim_agent_channel(handler, command_broker, sender).await;
+    let reply_wire = msg.msg_type.clone();
+    let reply_id = msg.id.clone();
     match policy_for_wire(&msg.msg_type, &msg.payload) {
         ExecutionPolicy::Query => {
-            lanes
-                .query(answer(handler.clone(), msg, sender.clone(), "a query"))
-                .await;
+            match lanes.try_query(answer(handler.clone(), msg, sender.clone(), "a query")) {
+                Ok(()) => {}
+                Err(AdmitError::Saturated) => {
+                    if sender
+                        .send_reply(overload_reply(&reply_wire, &reply_id))
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+                Err(AdmitError::Closed) => return false,
+            }
         }
         ExecutionPolicy::Key(key) => {
-            lanes
-                .key(
+            match lanes
+                .try_key(
                     key,
                     Box::pin(answer(handler.clone(), msg, sender.clone(), "a mutation")),
                 )
-                .await;
+                .await
+            {
+                Ok(()) => {}
+                Err(AdmitError::Saturated) => {
+                    if sender
+                        .send_reply(overload_reply(&reply_wire, &reply_id))
+                        .await
+                        .is_err()
+                    {
+                        return false;
+                    }
+                }
+                Err(AdmitError::Closed) => return false,
+            }
         }
         // The barrier an ordered unit waits behind is what makes it
         // deterministic on a connection that is no longer serial, so it is
@@ -4375,6 +4448,499 @@ mod tests {
         assert!(
             queued.is_ok(),
             "expected the agent's frame to be queued for the client"
+        );
+    }
+
+    // -----------------------------------------------------------------------
+    // #4250 SC-03: legacy route removal + protected compatibility rollback.
+    //
+    // Exercises the real `http_router` mount decision (the owner of the toggle)
+    // rather than a re-composed router: with `legacy_blob_route = false` the
+    // proprietary route is unmounted while `/v2/` still serves the verified
+    // closure and denies wrong principal/repository/forged digest; the persistent
+    // Agent cache and an active mount survive the removal because acquisition is
+    // `/v2/`-only; flipping the toggle back to `true` restores the supported legacy
+    // reader without relaxing the Server Token or digest checks.
+    // -----------------------------------------------------------------------
+
+    const SC03_TOKEN: &str = "sc03-server-token";
+
+    fn sc03_descriptor(
+        media_type: &str,
+        document: &nession_erofs::oci::RawDocument,
+    ) -> nession_erofs::oci::descriptor::Descriptor {
+        nession_erofs::oci::descriptor::Descriptor {
+            media_type: media_type.to_string(),
+            digest: document.digest().to_string(),
+            size: document.size().unwrap(),
+            urls: None,
+            annotations: None,
+            platform: None,
+            artifact_type: None,
+            data: None,
+            extra: serde_json::Map::new(),
+        }
+    }
+
+    struct Sc03Fixture {
+        manifest: nession_erofs::oci::RawDocument,
+        config: nession_erofs::oci::RawDocument,
+        layer: nession_erofs::oci::RawDocument,
+    }
+
+    fn sc03_fixture(payload: &[u8]) -> Sc03Fixture {
+        use nession_erofs::oci::annotation::{
+            MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+        };
+        use nession_erofs::oci::config::{ImageConfig, RootFs, RuntimeConfig};
+        use nession_erofs::oci::manifest::Manifest;
+        use nession_erofs::oci::{to_bytes, RawDocument};
+        let layer = RawDocument::from_bytes(payload.to_vec());
+        let config = ImageConfig {
+            created: None,
+            author: None,
+            architecture: "amd64".to_string(),
+            os: "linux".to_string(),
+            os_version: None,
+            os_features: Some(vec!["erofs".to_string()]),
+            variant: None,
+            config: RuntimeConfig::default(),
+            rootfs: RootFs {
+                fs_type: "layers".to_string(),
+                diff_ids: vec![layer.digest().to_string()],
+                extra: serde_json::Map::new(),
+            },
+            history: Vec::new(),
+            extra: serde_json::Map::new(),
+        };
+        let config = RawDocument::from_bytes(to_bytes(&config).unwrap());
+        let manifest = Manifest {
+            schema_version: 2,
+            media_type: Some(MEDIA_TYPE_MANIFEST.to_string()),
+            config: sc03_descriptor(MEDIA_TYPE_CONFIG, &config),
+            layers: vec![sc03_descriptor(MEDIA_TYPE_EROFS, &layer)],
+            subject: None,
+            artifact_type: None,
+            annotations: None,
+            extra: serde_json::Map::new(),
+        };
+        let manifest = RawDocument::from_bytes(to_bytes(&manifest).unwrap());
+        Sc03Fixture {
+            manifest,
+            config,
+            layer,
+        }
+    }
+
+    async fn sc03_manager(
+        dir: &std::path::Path,
+    ) -> (
+        Arc<ImageManager>,
+        nession_erofs::blob::store::FsBlobStore,
+        sea_orm::DatabaseConnection,
+    ) {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let blobs = nession_erofs::blob::store::FsBlobStore::new(dir.join("cas")).unwrap();
+        let builder = Arc::new(
+            nession_erofs::ErofsBuilder::new(
+                Arc::new(nession_erofs::ProcessGitRunner::default()),
+                Arc::new(nession_erofs::ProcessMkfsRunner::default()),
+                blobs.clone(),
+                dir.join("build"),
+            )
+            .unwrap(),
+        );
+        let manager = Arc::new(
+            ImageManager::new(
+                Arc::clone(&db),
+                builder,
+                blobs.clone(),
+                ImageManagerOptions {
+                    max_concurrent_builds: 1,
+                    build_root: dir.join("build"),
+                    source_root: None,
+                    build_stage_timeout: None,
+                    build_log_max_bytes: 1024 * 1024,
+                    build_retention_secs: 3600,
+                },
+            )
+            .unwrap(),
+        );
+        (manager, blobs, db.connection().clone())
+    }
+
+    async fn sc03_seed(
+        conn: &sea_orm::DatabaseConnection,
+        blobs: &nession_erofs::blob::store::FsBlobStore,
+        repository: &str,
+        tag: &str,
+        fixture: &Sc03Fixture,
+    ) {
+        use nession_erofs::catalog::reference::{
+            record_object, record_reference, ObjectKind, StoredObject,
+        };
+        use nession_erofs::catalog::tag::{set_tag, TagExpectation};
+        use nession_erofs::oci::annotation::{
+            MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+        };
+        for (document, kind, media_type) in [
+            (&fixture.layer, ObjectKind::Erofs, MEDIA_TYPE_EROFS),
+            (&fixture.config, ObjectKind::Config, MEDIA_TYPE_CONFIG),
+            (&fixture.manifest, ObjectKind::Manifest, MEDIA_TYPE_MANIFEST),
+        ] {
+            blobs.put_bytes(document.bytes()).unwrap();
+            record_object(
+                conn,
+                &StoredObject {
+                    digest: document.digest().to_string(),
+                    media_type: media_type.to_string(),
+                    size_bytes: document.size().unwrap(),
+                    kind,
+                },
+                1,
+            )
+            .await
+            .unwrap();
+        }
+        record_reference(
+            conn,
+            fixture.manifest.digest(),
+            fixture.config.digest(),
+            "config",
+            1,
+        )
+        .await
+        .unwrap();
+        record_reference(
+            conn,
+            fixture.manifest.digest(),
+            fixture.layer.digest(),
+            "layer",
+            1,
+        )
+        .await
+        .unwrap();
+        set_tag(
+            conn,
+            repository,
+            tag,
+            fixture.manifest.digest(),
+            &TagExpectation::Absent,
+            1,
+        )
+        .await
+        .unwrap();
+    }
+
+    /// A minimal `ServerContext` whose only exercised routes are the image read
+    /// routes; the registries share a fresh in-memory database unrelated to the
+    /// seeded image catalog the manager owns.
+    async fn sc03_context(
+        manager: Arc<ImageManager>,
+        auth: nession_protocol::TokenVerifier,
+        legacy_blob_route: bool,
+    ) -> ServerContext {
+        let db = Arc::new(Database::new(":memory:").await.unwrap());
+        let agent_registry = Arc::new(AgentRegistry::new(30, Arc::clone(&db)));
+        let session_registry = Arc::new(SessionRegistry::new(Arc::clone(&db)));
+        let command_broker = Arc::new(CommandBroker::new());
+        let extension_tools = Arc::new(
+            crate::server::extension_tools::ExtensionToolCatalog::new(
+                Arc::clone(&agent_registry),
+                Arc::clone(&command_broker),
+            )
+            .unwrap(),
+        );
+        let image_http = Arc::new(ImageHttpService::new(Arc::clone(&manager), auth.clone()));
+        let image_registry =
+            crate::image::registry::build_registry(&manager, auth.clone()).unwrap();
+        ServerContext {
+            agent_registry,
+            session_registry,
+            command_broker,
+            client_registry: Arc::new(ClientRegistry::new()),
+            web_client_registry: Arc::new(WebClientRegistry::new()),
+            env_service: EnvService::new(Arc::clone(&db)),
+            db,
+            mutations: mutation_scheduler(),
+            mcp: None,
+            extension_tools,
+            mcp_enabled: false,
+            mcp_path: String::new(),
+            image_manager: manager,
+            image_http,
+            image_registry,
+            legacy_blob_route,
+            allowed_origins: Arc::new(Vec::new()),
+            server_auth: auth,
+            heartbeat_interval_secs: 10,
+            terminal_cols: 80,
+            terminal_web_font_size: 14.0,
+            terminal_stall_grace: std::time::Duration::from_secs(5),
+            query_concurrency: 4,
+            ws_auth_timeout: std::time::Duration::from_secs(10),
+        }
+    }
+
+    fn sc03_slot() -> AdmissionSlot {
+        AdmissionSlot::new(
+            Arc::new(tokio::sync::Semaphore::new(1))
+                .try_acquire_owned()
+                .unwrap(),
+        )
+    }
+
+    async fn sc03_send(
+        router: &Router,
+        method: Method,
+        uri: &str,
+        auth: Option<&str>,
+    ) -> (StatusCode, HeaderMap, Vec<u8>) {
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let mut builder = axum::http::Request::builder().method(method).uri(uri);
+        if let Some(token) = auth {
+            builder = builder.header("authorization", token);
+        }
+        let request = builder.body(axum::body::Body::empty()).unwrap();
+        let response = router.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, headers, bytes.to_vec())
+    }
+
+    async fn sc03_serve_loopback(router: Router) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let handle = tokio::spawn(async move {
+            axum::serve(listener, router).await.unwrap();
+        });
+        (format!("http://{addr}"), handle)
+    }
+
+    #[tokio::test]
+    async fn sc03_legacy_route_removed_with_protected_rollback() {
+        use nession_erofs::cache::fetch::{fetch_manifest_image_v2, ImageObjectGrant};
+        use nession_erofs::cache::ErofsCache;
+        use nession_erofs::catalog::reference::v2_repository_for_manifest;
+        use nession_erofs::oci::annotation::{
+            MEDIA_TYPE_CONFIG, MEDIA_TYPE_EROFS, MEDIA_TYPE_MANIFEST,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, blobs, conn) = sc03_manager(dir.path()).await;
+        nession_erofs::catalog::migrate(&conn).await.unwrap();
+        let fixture = sc03_fixture(b"4250 retirement layer");
+        sc03_seed(&conn, &blobs, "team/app", "v1", &fixture).await;
+        let repository = v2_repository_for_manifest(&conn, fixture.manifest.digest())
+            .await
+            .unwrap()
+            .expect("a tagged Manifest is /v2/-addressable");
+        assert_eq!(repository, "team/app");
+
+        let auth = nession_protocol::TokenVerifier::new(SC03_TOKEN);
+        let good = format!("Bearer {SC03_TOKEN}");
+        let legacy_layer = format!(
+            "{}{}",
+            nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX,
+            fixture.layer.digest()
+        );
+        let forged = format!("sha256:{}", "e".repeat(64));
+
+        // --- Removal state: the protected toggle is OFF ---
+        let ctx_off = sc03_context(Arc::clone(&manager), auth.clone(), false).await;
+        let router_off = http_router(
+            ctx_off,
+            sc03_slot(),
+            Arc::new(tokio::sync::Semaphore::new(8)),
+        );
+
+        // The proprietary route is unavailable to a migrated client...
+        let (status, _, _) = sc03_send(&router_off, Method::GET, &legacy_layer, Some(&good)).await;
+        assert_eq!(status, StatusCode::NOT_FOUND, "removed legacy route is 404");
+        // ...while standard /v2/ still serves the approved complete closure.
+        let (status, _, body) = sc03_send(
+            &router_off,
+            Method::GET,
+            &format!("/v2/{repository}/manifests/{}", fixture.manifest.digest()),
+            Some(&good),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, fixture.manifest.bytes());
+        let (status, _, body) = sc03_send(
+            &router_off,
+            Method::GET,
+            &format!("/v2/{repository}/blobs/{}", fixture.layer.digest()),
+            Some(&good),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, fixture.layer.bytes());
+        // Wrong repository: possession of the digest is not authorization.
+        let (status, _, _) = sc03_send(
+            &router_off,
+            Method::GET,
+            &format!("/v2/other/app/blobs/{}", fixture.layer.digest()),
+            Some(&good),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        // Wrong principal: no credential challenges, a bad token denies.
+        let (status, _, _) = sc03_send(&router_off, Method::GET, "/v2/", None).await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+        let (status, _, _) =
+            sc03_send(&router_off, Method::GET, "/v2/", Some("Bearer wrong")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        // Forged digest: absent from the reachable closure.
+        let (status, _, _) = sc03_send(
+            &router_off,
+            Method::GET,
+            &format!("/v2/{repository}/blobs/{forged}"),
+            Some(&good),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+
+        // --- Persistent Agent cache + active mount survive the removal ---
+        // The Agent fetches the verified closure over /v2/ only; the legacy route
+        // being unmounted cannot disturb its durable cache or a held pin.
+        let (base, server) = sc03_serve_loopback(router_off.clone()).await;
+        let agent_dir = tempfile::tempdir().unwrap();
+        let cache = Arc::new(
+            ErofsCache::open(agent_dir.path(), "agent-registry", false)
+                .await
+                .unwrap(),
+        );
+        let grants = vec![
+            ImageObjectGrant {
+                digest: fixture.manifest.digest().to_string(),
+                media_type: MEDIA_TYPE_MANIFEST.to_string(),
+                size_bytes: fixture.manifest.size().unwrap(),
+                path: format!("/v2/{repository}/manifests/{}", fixture.manifest.digest()),
+            },
+            ImageObjectGrant {
+                digest: fixture.config.digest().to_string(),
+                media_type: MEDIA_TYPE_CONFIG.to_string(),
+                size_bytes: fixture.config.size().unwrap(),
+                path: format!("/v2/{repository}/blobs/{}", fixture.config.digest()),
+            },
+            ImageObjectGrant {
+                digest: fixture.layer.digest().to_string(),
+                media_type: MEDIA_TYPE_EROFS.to_string(),
+                size_bytes: fixture.layer.size().unwrap(),
+                path: format!("/v2/{repository}/blobs/{}", fixture.layer.digest()),
+            },
+        ];
+        let cold = fetch_manifest_image_v2(&cache, &grants, &base, SC03_TOKEN, &repository)
+            .await
+            .expect("authorized /v2/ fetch with the legacy route removed");
+        assert_eq!(cold.manifest_digest, fixture.manifest.digest());
+        assert_eq!(
+            tokio::fs::read(&cold.layer_path).await.unwrap(),
+            fixture.layer.bytes()
+        );
+        let cold_transfers = cache.fetch_count();
+        assert_eq!(
+            cold_transfers, 3,
+            "cold fetch transfers Manifest/Config/EROFS"
+        );
+        let warm = fetch_manifest_image_v2(&cache, &grants, &base, SC03_TOKEN, &repository)
+            .await
+            .unwrap();
+        assert_eq!(warm.layer_path, cold.layer_path);
+        assert_eq!(
+            cache.fetch_count(),
+            cold_transfers,
+            "warm reuse re-transfers nothing"
+        );
+        let restarted = ErofsCache::open(agent_dir.path(), "agent-registry", false)
+            .await
+            .unwrap();
+        let adopted = fetch_manifest_image_v2(&restarted, &grants, &base, SC03_TOKEN, &repository)
+            .await
+            .unwrap();
+        assert_eq!(
+            tokio::fs::read(&adopted.layer_path).await.unwrap(),
+            fixture.layer.bytes()
+        );
+        assert_eq!(
+            restarted.fetch_count(),
+            0,
+            "restart adopts the verified blob"
+        );
+        // An active mount (pin) refuses eviction and stays byte-identical.
+        let pin = cache.pin(fixture.layer.digest()).unwrap();
+        assert!(
+            !cache.evict(fixture.layer.digest()).unwrap(),
+            "a pinned blob refuses eviction"
+        );
+        assert_eq!(
+            tokio::fs::read(&cold.layer_path).await.unwrap(),
+            fixture.layer.bytes()
+        );
+        drop(pin);
+        assert!(
+            cache.evict(fixture.layer.digest()).unwrap(),
+            "the released blob is reclaimed"
+        );
+        server.abort();
+
+        // --- Protected rollback: the toggle ON restores the supported reader ---
+        let ctx_on = sc03_context(Arc::clone(&manager), auth.clone(), true).await;
+        let router_on = http_router(
+            ctx_on,
+            sc03_slot(),
+            Arc::new(tokio::sync::Semaphore::new(8)),
+        );
+        let (status, _, body) =
+            sc03_send(&router_on, Method::GET, &legacy_layer, Some(&good)).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "rollback restores the legacy reader"
+        );
+        assert_eq!(body, fixture.layer.bytes());
+        // Fail-closed: the rollback relaxes no digest/grant check.
+        let (status, _, _) =
+            sc03_send(&router_on, Method::GET, &legacy_layer, Some("Bearer wrong")).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _, _) = sc03_send(&router_on, Method::GET, &legacy_layer, None).await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+        let (status, _, _) = sc03_send(
+            &router_on,
+            Method::GET,
+            &format!(
+                "{}{forged}",
+                nession_protocol::contracts::image::v1::IMAGE_BLOB_PATH_PREFIX
+            ),
+            Some(&good),
+        )
+        .await;
+        assert_eq!(status, StatusCode::NOT_FOUND);
+        // /v2/ continues to serve the approved closure after the rollback.
+        let (status, _, body) = sc03_send(
+            &router_on,
+            Method::GET,
+            &format!("/v2/{repository}/manifests/{}", fixture.manifest.digest()),
+            Some(&good),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body, fixture.manifest.bytes());
+
+        println!(
+            "#4250 SC-03 measured: with legacy_blob_route=false the proprietary route {} is 404 \
+             while /v2/{repository} serves Manifest {} and the EROFS layer byte-identical; foreign \
+             repository 404, no-cred 401, bad-token 403, forged digest 404; Agent cold fetch \
+             transferred {cold_transfers} objects over /v2/ only, warm reuse and restart adoption \
+             re-transferred 0, pinned layer {} refused eviction and was reclaimed on release; \
+             rollback legacy_blob_route=true restores the legacy reader (200 exact bytes) while \
+             bad/absent token stay 403 and unknown digest 404, with /v2/ still serving the closure",
+            legacy_layer,
+            fixture.manifest.digest(),
+            fixture.layer.digest(),
         );
     }
 }

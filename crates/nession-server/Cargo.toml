@@ -56,6 +56,10 @@ nession-agent = { path = "../nession-agent" }
 # #4090: drive the mounted `/v2/` Registry router in source-aligned adapter tests.
 tower = { version = "0.5", features = ["util"] }
 http-body-util = "0.1"
+# #4250 SC-03: prove the legacy-route removal/rollback preserves the persistent
+# Agent cache and an active mount. Test-only feature unification; the production
+# Server build keeps its own `catalog` (+default) feature set unchanged.
+nession-erofs = { path = "../nession-erofs", features = ["cache", "mount"] }
 
 [lints]
 workspace = true

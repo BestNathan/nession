@@ -1347,6 +1347,28 @@ fn env_list_reply(id: &str, payload: ClientEnvListResponsePayload) -> HandlerAct
     )
 }
 
+/// The reply for a request the connection refused **before admission**
+/// (`#4433`).
+///
+/// A new, additive `overloaded` outcome on the existing envelope shape,
+/// correlated by the request's own wire and `id`. The reader sends it on the
+/// reply lane; if that lane is gone the connection is over and the caller
+/// stops rather than leaving the request unanswered.
+pub(crate) fn overload_reply(wire: &str, id: &str) -> WsFrame {
+    WsFrame::Text(
+        json!({
+            "msg_type": wire,
+            "id": id,
+            "timestamp": current_timestamp(),
+            "payload": {
+                "error": "overloaded",
+                "message": "the connection is at its execution bound; retry after in-flight work completes",
+            },
+        })
+        .to_string(),
+    )
+}
+
 fn reply_json(id: &str, msg_type: &str, payload: serde_json::Value) -> HandlerAction {
     HandlerAction::Reply(Some(WsFrame::Text(
         json!({
