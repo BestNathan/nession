@@ -78,6 +78,7 @@ import {collectSandbox3145,shouldCollectSandbox3145,selfTestSandbox3145} from '.
 import {collectPublicPagesE2E,selfTestPublicPagesE2E,shouldCollectPublicPagesE2E} from './acceptance-pages-e2e-readback.mjs';
 import {collectPublicPagesLineage,selfTestPublicPagesLineage,shouldCollectPublicPagesLineage} from './acceptance-pages-lineage-readback.mjs';
 import {collectPublicWorkflowPublications,selfTestPublicWorkflowPublication,shouldCollectPublicWorkflowPublication} from './acceptance-pages-workflow-receipt.mjs';
+import {collectPagesMigrationPublications,selfTestPagesMigrationPublication,shouldCollectPagesMigrationPublication} from './acceptance-pages-migration-publication.mjs';
 import {collectStagingAcrEvidence,shouldCollectStagingAcr,selfTestStagingAcrEvidence} from './acceptance-staging-acr-readback.mjs';
 import {collectDevelopmentReadback} from './acceptance-development-readback.mjs';
 import {collectIssueAuditReadback,selfTestIssueAuditReadback,SIDEBAR_AUDIT_REPAIR_PROOF,ISSUE_AUDIT_3843_PROOF} from './acceptance-issue-audit-readback.mjs';
@@ -230,7 +231,7 @@ function compactRuns(runs, expectedSha) {
 }
 
 export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null,
-  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedToolchain4241 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, authenticatedQwen4174Recovery = null, authenticatedQwen4192PremodelRecovery = null, authenticatedCompositeReviewer4012 = null, verifiedConflictProbe4124 = null, authenticatedConvergenceWriter4059 = null }) {
+  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesMigrationPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedToolchain4241 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, authenticatedQwen4174Recovery = null, authenticatedQwen4192PremodelRecovery = null, authenticatedCompositeReviewer4012 = null, verifiedConflictProbe4124 = null, authenticatedConvergenceWriter4059 = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -300,6 +301,7 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     verified_public_pages_agent_observations: publicPagesObservations,
     verified_public_pages_e2e_observations: publicPagesE2EObservations,
     verified_public_pages_workflow_publications: publicWorkflowPublications,
+    verified_public_pages_migration_publications: publicPagesMigrationPublications,
     verified_public_pages_lineage_observations: publicPagesLineageObservations,
     verified_metrics_replay_denials: replayDenials,
     authenticated_metrics_replay_lineage: authenticatedMetricsReplayLineage,
@@ -1987,6 +1989,12 @@ async function collectCommand(workspace, outFile) {
     shouldCollectPublicWorkflowPublication(process.env.ACCEPTANCE_STAGE,process.env.ISSUE_NUMBER)
       ?await collectPublicWorkflowPublications(repo,sha,directRuns,githubGet,githubJobLog)
       :[];
+  // #4448: exact-main Deploy / Public Pages Run/Attempt plus independent
+  // anonymous HTTPS manifest/closure readback. Evidence only, never a verdict.
+  const publicPagesMigrationPublications=
+    shouldCollectPagesMigrationPublication(process.env.ACCEPTANCE_STAGE,process.env.ISSUE_NUMBER)
+      ?await collectPagesMigrationPublications(repo,sha,directRuns,githubGet,githubJobLog)
+      :[];
   // A post-E2E Agent cannot prove its own Waker has completed. Read the
   // bounded, exact-attempt, SHA256-bound prior cycle independently instead.
   const postE2eWakeReceipts=process.env.ACCEPTANCE_STAGE==='post-merge'&&
@@ -2247,7 +2255,7 @@ async function collectCommand(workspace, outFile) {
     fullGateProvisionReceipts, selectedRunReceipts, targetPushE2eRuns });
   const evidence = normalizeCiEvidence({ authenticatedConvergenceWriter4059, targetSha: sha, directRuns, pulls: selectedPulls,
     pullRunsBySha, sourceAncestry, historicalE2EByPr, linkedIssueE2E, implementationPulls, targetMergeProof, declaredMergeCommits, providerWakeEvidence, historicalAncestry, historicalOrchestratorRuns, historicalProviderChains, historicalRecovery, historicalRegressions, exactHeadE2eSteps, historicalReporterE2eRerun, verifiedHistoricalCaseReplays, verifiedCaseReceipts, relatedAcceptance, relatedBugCompletion, verifiedReplacement4253, targetPushE2eRuns, postE2eWakeReceipts, acceptanceRoutingProof, replayDenials,
-    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, verifiedLiveFullFailurePublication, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, authenticatedIssueAudit3843Readback, deferredAcceptanceReplays,
+    authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, verifiedLiveFullFailurePublication, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesMigrationPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, authenticatedIssueAudit3843Readback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
     authenticatedQwenChainFixture,authenticatedQwen3433Recovery,
     authenticatedQwen4174Recovery,authenticatedQwen4192PremodelRecovery,
@@ -2361,6 +2369,7 @@ async function selfTest() {
   await selfTestDevelopmentReadback();
   selfTestPublicPagesObservation();
   selfTestPublicWorkflowPublication();
+  await selfTestPagesMigrationPublication();
   await selfTestPublicPagesE2E();
   await selfTestPublicPagesLineage();
   // Security evidence cannot inherit the target's main SHA from an off-main
