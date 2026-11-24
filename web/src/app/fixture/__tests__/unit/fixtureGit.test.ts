@@ -376,18 +376,82 @@ describe('fixture git surface', () => {
       const control = fakeWindow.fixtureGitHistoryOverlap as {
         olderRequests: () => number;
         olderSettled: () => boolean;
-        releaseOlder: (fail?: boolean) => void;
+        releaseOlder: (outcome?: 'page' | 'reject' | 'not_a_repository') => void;
       };
       expect(control.olderRequests()).toBe(1);
       expect(control.olderSettled()).toBe(false);
 
-      control.releaseOlder(true);
+      control.releaseOlder('reject');
       await expect(held).rejects.toThrow('the held older page failed');
       await new Promise((resolve) => setTimeout(resolve, 0));
       expect(control.olderSettled()).toBe(true);
 
       // The retry is a fresh older request from the same retained cursor; the
       // fixture answers it with the page the failed read never delivered.
+      const retry = await surface.request<GitLogResponse>('git.log', {
+        session,
+        before: cursor,
+      });
+      expect(retry.state).toBe('ok');
+      if (retry.state === 'ok') {
+        expect(retry.history.commits).toHaveLength(50);
+        expect(retry.history.commits[0]?.subject).toContain('A older page 1 commit 1');
+        expect(retry.history.end_of_history).toBe(true);
+      }
+      expect(control.olderRequests()).toBe(2);
+    } finally {
+      if (hadWindow) {
+        globalRecord.window = previousWindow;
+      } else {
+        delete globalRecord.window;
+      }
+    }
+  });
+
+  /**
+   * #4116: a continuation can also resolve with a normal non-ok answer — the
+   * repository or Session directory went away — and that is a domain answer,
+   * not a transport failure. The fixture must be able to produce it so the
+   * rendered explanation/retry is provable in the browser.
+   */
+  it('answers the held older page with a fulfilled non-ok domain answer (#4116)', async () => {
+    const globalRecord = globalThis as unknown as { window?: unknown };
+    const hadWindow = 'window' in globalRecord;
+    const previousWindow = globalRecord.window;
+    const fakeWindow: Record<string, unknown> = {};
+    globalRecord.window = fakeWindow;
+    try {
+      const surface = fixtureGitSurface('?capability=git&git=history-overlap');
+      const session = 'devbox-01:fix-terminal-reconnect';
+
+      const first = await surface.request<GitLogResponse>('git.log', { session });
+      expect(first.state).toBe('ok');
+      if (first.state !== 'ok') {
+        return;
+      }
+      const cursor = first.history.next_cursor;
+
+      const held = surface.request<GitLogResponse>('git.log', {
+        session,
+        before: cursor,
+      });
+      const control = fakeWindow.fixtureGitHistoryOverlap as {
+        olderRequests: () => number;
+        olderSettled: () => boolean;
+        releaseOlder: (outcome?: 'page' | 'reject' | 'not_a_repository') => void;
+      };
+      expect(control.olderRequests()).toBe(1);
+
+      control.releaseOlder('not_a_repository');
+      await expect(held).resolves.toEqual({
+        state: 'not_a_repository',
+        message: 'the Session directory is no longer a git repository',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(control.olderSettled()).toBe(true);
+
+      // The retained cursor still addresses the page the unavailable answer
+      // never delivered: retry is the next older request, answered normally.
       const retry = await surface.request<GitLogResponse>('git.log', {
         session,
         before: cursor,
