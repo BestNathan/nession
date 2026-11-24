@@ -12,6 +12,7 @@ const checkSha = value => typeof value === 'string' && SHA.test(value);
 export function requiredContexts(branch, rules) {
   if (branch?.protected !== true || !Array.isArray(rules))
     throw Error('PROTECTION_UNVERIFIED');
+  if (rules.length >= 100) throw Error('EFFECTIVE_RULESET_INVENTORY_UNBOUNDED');
   const classic = branch.protection?.required_status_checks;
   if (classic && classic.enforcement_level !== 'everyone')
     throw Error('PROTECTION_NOT_ENFORCED');
@@ -143,7 +144,7 @@ function audit(prNumber) {
   const branch = api('repos/' + REPO + '/branches/' + pr.base.ref);
   // This is the effective ruleset readback, not merely workflow display names.
   // 403/404 is Pending, never an inferred absence of rules.
-  const rules = api('repos/' + REPO + '/rules/branches/' + pr.base.ref);
+  const rules = api('repos/' + REPO + '/rules/branches/' + pr.base.ref + '?per_page=100');
   const mergeCommit = api('repos/' + REPO + '/git/commits/' + pr.merge_commit_sha);
   const snapshot = {pr,branch,rules,mergeCommit,
     headEvidence:commitEvidence(pr.head.sha),
@@ -195,6 +196,8 @@ function selfTest() {
     headEvidence:good.headEvidence}).problems.includes('MISSING_REQUIRED_CONTEXT:rust-check'),
     'green HEAD must not mask missing test-merge checks');
   assert.ok(evaluate({rules:null}).problems.includes('PROTECTION_UNVERIFIED'));
+  assert.ok(evaluate({rules:Array(100).fill({type:'other'})})
+    .problems.includes('EFFECTIVE_RULESET_INVENTORY_UNBOUNDED'));
   assert.ok(evaluate({branch:{...branch,protection:{required_status_checks:{
     enforcement_level:'everyone',contexts:['rust-check','web-check']}}}})
     .problems.includes('CLASSIC_CHECK_APP_UNVERIFIED'));
