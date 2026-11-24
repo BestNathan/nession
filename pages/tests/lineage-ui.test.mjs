@@ -7,9 +7,10 @@ import {makeProjection,validateProjection} from '../scripts/project.mjs';
 // The browser is intentionally an anonymous static snapshot reader. Its
 // source may display canonical verified edges, but it must never create them
 // from Issue Timeline mentions, Agent metrics, or arbitrary network calls.
-const app=await readFile(new URL('../app.js',import.meta.url),'utf8');
-const detail=app.slice(app.indexOf('function renderLineageDetail('),
-  app.indexOf('function renderWorkDetail('));
+const app=await readFile(new URL('../src/features/collaboration/CollaborationPage.tsx',import.meta.url),'utf8');
+const links=await readFile(new URL('../src/components/Links.tsx',import.meta.url),'utf8');
+const detail=app.slice(app.indexOf('export function LineageDetail('),
+  app.indexOf('export function WorkDetailPage('));
 const sha='a'.repeat(40),ref='b'.repeat(40);
 const e={
  issue:6,pr_number:7,pr_head_sha:sha,role:'developer',agent_id:'dev-cursor-01',
@@ -24,20 +25,20 @@ const projection=(attested)=>validateLineageProjection(projectLineage({
  issueNumbers:[6],pulls:[{number:7,head_sha:sha}],attested,
 }));
 test('both Work detail routes use the identical exact-source lineage panel',()=>{
- assert.match(app,/function renderLineageDetail\(kind, number\)/);
- assert.match(app,/renderLineageDetail\(kind,number\);/);
- assert.match(detail,/kind==='issue'\?e\.issue===number:e\.pr_number===number/);
+ assert.match(app,/export function LineageDetail\(/);
+ assert.match(app,/<LineageDetail snapshot=\{snapshot\} kind=\{kind\} number=\{number\} \/>/);
+ assert.match(detail,/kind === 'issue' \? edge\.issue === number : edge\.pr_number === number/);
  assert.match(detail,/source\?\.edges/);
- assert.match(detail,/e\.run_id.*e\.attempt/);
- assert.match(detail,/e\.source_url/);
- assert.match(detail,/e\.source_ref_sha/);
+ assert.match(detail,/edge\.run_id.*edge\.attempt/);
+ assert.match(detail,/edge\.source_url/);
+ assert.match(detail,/edge\.source_ref_sha/);
  assert.match(detail,/Logical Slice:/);
- assert.match(detail,/e\.slice_id/);
+ assert.match(detail,/edge\.slice_id/);
  assert.match(detail,/Acceptance SC: Unknown/);
  assert.match(detail,/historical PR HEAD/);
  assert.match(detail,/Lineage window is truncated/);
- assert.doesNotMatch(detail,/innerHTML|\bfetch\(|\bXMLHttpRequest\b|cross.reference|agent_run_source/);
- assert.ok(app.includes("if (parsed.protocol === 'https:' && parsed.hostname === 'github.com')"));
+ assert.doesNotMatch(detail,/innerHTML|dangerouslySetInnerHTML|\bfetch\(|\bXMLHttpRequest\b|cross.reference|agent_run_source/);
+ assert.ok(links.includes("parsed.protocol === 'https:' && parsed.hostname === 'github.com'"));
 });
 test('missing producer remains explicitly Unlinked and no edge is inferred',()=>{
  const absent=validateProjection(makeProjection({}));
@@ -83,8 +84,8 @@ test('historical authenticated Work detail outlives Open Issue/PR windows',()=>{
  assert.equal(p.work.lineage.edges.length,1);
  assert.match(app,/SOURCE-AUTHENTICATED HISTORY/);
  assert.match(app,/Verified historical Agent lineage/);
- assert.match(app,/historical\.edges\?\.some/);
- assert.match(app,/renderLineageDetail\(kind,number\);/);
+ assert.match(app,/historical\?\.edges\?\.some/);
+ assert.match(app,/<LineageDetail snapshot=\{snapshot\} kind=\{kind\} number=\{number\} \/>/);
  assert.match(app,/current Review: Unknown · Acceptance SC: Unknown/);
  assert.match(app,/Logical Slice:/);
  assert.match(app,/source_url/);

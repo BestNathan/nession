@@ -26,6 +26,7 @@ gate_check() {
   gate_run_invariant node scripts/acceptance-4342-historical-evidence.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-pr-pages-e2e-evidence.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-pr-pages-migration-evidence.mjs self-test || return $?
+  gate_run_invariant node scripts/acceptance-pages-migration-publication.mjs self-test || return $?
   gate_run_invariant node scripts/acceptance-4117-pr-evidence.mjs self-test || return $?
 }
 gate_main "$@"
