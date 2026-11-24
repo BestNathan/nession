@@ -77,7 +77,7 @@ use crate::connection::outbox::{Outbox, OutboxFrames};
 use crate::connection::sync_intent::{SyncIntent, SyncToken};
 // The lanes' boxed work is the shared type: the lane that carries it knows
 // nothing about this connection, which is the point of `nession-runtime`.
-use nession_runtime::lane::Work;
+use nession_runtime::lane::{AdmitError, Work};
 // The three policies by name, because the `core_routes!` invocation at the
 // bottom of this file declares one per unit and the names are the column there.
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
@@ -1125,10 +1125,12 @@ impl ServerClient {
 
     /// Read this connection's frames and dispatch them, until the stream ends.
     ///
-    /// The reading half of a live connection, and the only half that may park:
-    /// a lane at its bound is enforced by the reader not reading, which is the
-    /// bound `#961` asks for. It never writes to the socket — answers go to
-    /// `responses`, which `run_connection` drains.
+    /// The reading half of a live connection. It never writes to the socket —
+    /// answers go to `responses`, which `run_connection` drains.
+    ///
+    /// Admission is non-blocking (`#4433`): a lane at its bound is refused
+    /// explicitly and answered `overloaded`, so the reader never parks on a
+    /// business permit and heartbeat/control keep moving.
     ///
     /// The split is what keeps the two regressions this stage exists around
     /// from being traded for one another: dispatch is bounded, and the heartbeat
@@ -1189,6 +1191,8 @@ impl ServerClient {
                         None => self.extension_policy(&msg),
                     };
 
+                    let reply_wire = msg.msg_type.clone();
+                    let reply_id = msg.id.clone();
                     let this = Arc::clone(&self);
                     let tx = responses.clone();
                     let work: Work = Box::pin(async move {
@@ -1199,8 +1203,40 @@ impl ServerClient {
 
                     match policy {
                         Inline => work.await,
-                        Query => lanes.query(work).await,
-                        Key(key) => lanes.key(key, work).await,
+                        Query => match lanes.try_query(work) {
+                            Ok(()) => {}
+                            Err(AdmitError::Saturated) => {
+                                if responses
+                                    .try_send(WsMessage::Text(overload_message(
+                                        &reply_wire,
+                                        &reply_id,
+                                    )))
+                                    .is_err()
+                                {
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                            }
+                            Err(AdmitError::Closed) => {
+                                break ConnectionOutcome::Disconnected;
+                            }
+                        },
+                        Key(key) => match lanes.try_key(key, work).await {
+                            Ok(()) => {}
+                            Err(AdmitError::Saturated) => {
+                                if responses
+                                    .try_send(WsMessage::Text(overload_message(
+                                        &reply_wire,
+                                        &reply_id,
+                                    )))
+                                    .is_err()
+                                {
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                            }
+                            Err(AdmitError::Closed) => {
+                                break ConnectionOutcome::Disconnected;
+                            }
+                        },
                     }
                 }
                 Some(Ok(WsMessage::Ping(data))) => {
@@ -4032,6 +4068,46 @@ esac"#,
         responses
     }
 
+    /// Collect command outcomes **and** explicit overload answers in one pass.
+    ///
+    /// `responses_within` deliberately filters to command responses; an
+    /// overload answer travels under the request's own wire name (`#4433`), so
+    /// it needs its own counter. Reading both in one pass is what keeps the
+    /// overloads from being discarded while the test waits for the blocked
+    /// commands to finish.
+    async fn collect_outcomes(
+        msg_rx: &mut mpsc::Receiver<String>,
+        responses_expected: usize,
+        overloads_expected: usize,
+        within: Duration,
+    ) -> (Vec<serde_json::Value>, usize) {
+        let mut responses = Vec::new();
+        let mut overloaded = 0;
+        let deadline = std::time::Instant::now() + within;
+        while responses.len() < responses_expected || overloaded < overloads_expected {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "only {} response(s) and {overloaded} overload(s) arrived",
+                responses.len()
+            );
+            if let Ok(Some(text)) =
+                tokio::time::timeout(remaining.min(Duration::from_millis(200)), msg_rx.recv()).await
+            {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&text).expect("the agent sends JSON");
+                if parsed.get("msg_type").and_then(|v| v.as_str())
+                    == Some("server.agent.command-response")
+                {
+                    responses.push(parsed);
+                } else if parsed["payload"]["error"] == "overloaded" {
+                    overloaded += 1;
+                }
+            }
+        }
+        (responses, overloaded)
+    }
+
     /// A `ServerClient` connected to the mock server, using `tmux`.
     async fn connected_client(
         addr: std::net::SocketAddr,
@@ -4190,13 +4266,14 @@ esac"#,
     /// lane from a `tokio::spawn`. Stage A's own note on this test said exactly
     /// that the number moves only if the bound is above it.
     ///
-    /// The three phases are the whole policy: the lane fills (positive), a
-    /// twelfth command does not start while it is full (the bound), and
-    /// releasing it lets every remaining command through, each answering its own
-    /// request (a bound that drops would show up as a missing id).
+    /// The three phases are the whole policy: the lane fills (positive), the
+    /// commands that exceed it are **refused explicitly** rather than waiting in
+    /// the reader (`#4433`), and releasing the lane lets no refused command run
+    /// later. The refusal is visible: every excess command gets an `overloaded`
+    /// answer, so a bound that silently dropped would show up as a missing reply.
     #[cfg(unix)]
     #[tokio::test]
-    async fn the_central_connection_holds_at_its_bound_and_then_drains() {
+    async fn the_central_connection_refuses_past_its_bound_and_drains() {
         const CONCURRENT_COMMANDS: usize = 12;
         let bound = crate::connection::execution::DEFAULT_QUERY_CONCURRENCY;
 
@@ -4216,8 +4293,8 @@ esac"#,
             "the lane did not fill: {started} of {bound} commands ran"
         );
 
-        // The bound is what the reader waits on: the command that would exceed
-        // it is not read, so no twelfth invocation can exist.
+        // The bound is what the reader refuses on: a command that would exceed
+        // it is not admitted, and it does not run later when the lane frees.
         let started = tmux
             .started_within(CONCURRENT_COMMANDS, Duration::from_millis(500))
             .await;
@@ -4232,13 +4309,23 @@ esac"#,
             .started_within(CONCURRENT_COMMANDS, Duration::from_secs(15))
             .await;
         assert_eq!(
-            started, CONCURRENT_COMMANDS,
-            "only {started} of {CONCURRENT_COMMANDS} commands ever ran: the bound \
-             turned into a loss rather than a delay"
+            started, bound,
+            "{started} of {CONCURRENT_COMMANDS} commands ever ran: a refused request \
+             was admitted later instead of being answered `overloaded`"
         );
 
-        let responses =
-            collect_responses(&mut msg_rx, CONCURRENT_COMMANDS, Duration::from_secs(20)).await;
+        let (responses, overloaded) = collect_outcomes(
+            &mut msg_rx,
+            bound,
+            CONCURRENT_COMMANDS - bound,
+            Duration::from_secs(20),
+        )
+        .await;
+        assert_eq!(
+            overloaded,
+            CONCURRENT_COMMANDS - bound,
+            "the refused commands were not all answered explicitly"
+        );
         let mut answered: Vec<&str> = responses
             .iter()
             .filter_map(|r| r["payload"]["request_id"].as_str())
@@ -4248,9 +4335,7 @@ esac"#,
         // numeric: `req-10` sorts before `req-2`, and comparing a sorted list
         // against an unsorted one would fail on the ordering of the *test's*
         // own generator rather than on anything the agent did.
-        let mut expected: Vec<String> = (0..CONCURRENT_COMMANDS)
-            .map(|n| format!("req-{n}"))
-            .collect();
+        let mut expected: Vec<String> = (0..bound).map(|n| format!("req-{n}")).collect();
         expected.sort_unstable();
         assert_eq!(
             answered,
@@ -4433,6 +4518,22 @@ fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
 /// descriptor, and a descriptor is an offer this agent would be making — so the
 /// reader reads the category here, beside the constants that name it, rather
 /// than adding a column for something that is not a unit.
+/// The explicit overload reply for a request refused before admission
+/// (`#4433`). Additive `overloaded` outcome on the existing envelope shape,
+/// correlated by the request's own wire and `id`.
+fn overload_message(wire: &str, id: &str) -> String {
+    serde_json::json!({
+        "msg_type": wire,
+        "id": id,
+        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+        "payload": {
+            "error": "overloaded",
+            "message": "the connection is at its execution bound; retry after in-flight work completes",
+        },
+    })
+    .to_string()
+}
+
 fn is_control(wire: &str) -> bool {
     matches!(
         wire,
