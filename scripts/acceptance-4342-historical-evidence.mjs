@@ -284,7 +284,26 @@ function collect(file,targetSha){
   console.log('Verified genuine historical Agent source '+proof.selected_source_run_id+
     ' via authenticated Metrics history Run '+proof.history_writer_run_id);
 }
+// The existing read-only metrics checkout must precede the post-merge
+// collector for #4342. This is a routing invariant, not a second proof owner.
+function assertHistoryCheckout(workflow){
+  const start=workflow.indexOf('      - name: Checkout immutable authenticated Provider evidence');
+  const end=workflow.indexOf('      - name: Collect trusted GitHub Actions evidence');
+  const next=workflow.indexOf('\n      - ',start+1);
+  const step=workflow.slice(start,next);
+  if(start<0||next<0||end<=next||
+     !step.includes("if: inputs.provider_source_run_id != '' || (inputs.stage == 'post-merge' && (inputs.issue_number == 1749 || inputs.issue_number == 2817 || inputs.issue_number == 4342))")||
+     !step.includes('ref: metrics')||!step.includes('path: provider-metrics')||
+     !step.includes('persist-credentials: false'))
+    reject('post-merge #4342 must have read-only Metrics checkout before collector');
+}
 function selfTest(){
+  const workflow=fs.readFileSync('.github/workflows/agent-sc-acceptance.yml','utf8');
+  assertHistoryCheckout(workflow);
+  assert.throws(()=>assertHistoryCheckout(workflow.replace(' || inputs.issue_number == 4342','')),
+    /read-only Metrics checkout before collector/);
+  assert.throws(()=>assertHistoryCheckout(workflow.replace('path: provider-metrics','path: wrong-metrics')),
+    /read-only Metrics checkout before collector/);
   const source=[...sources.values()].find(s=>s.file==='agent-issue-audit.yml');
   assert.ok(source);
   const target='a'.repeat(40);
