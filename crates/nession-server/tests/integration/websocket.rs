@@ -3444,7 +3444,16 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
     // the next one: the attach reply is also forwarded once the relay is live,
     // and which of the two the client sees first is not what is being asserted.
     let forwarded = loop {
-        let frame = next_json(&mut client).await?;
+        // Transport control (a keepalive Ping/Pong, a Close) is not a
+        // protocol frame, and it may interleave with the bootstrap under load.
+        let frame = client
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("the client stream ended before the bootstrap"))??;
+        let tokio_tungstenite::tungstenite::Message::Text(text) = frame else {
+            continue;
+        };
+        let frame: serde_json::Value = serde_json::from_str(&text)?;
         if frame.get("msg_type").and_then(serde_json::Value::as_str)
             == Some("agent.terminal.output")
         {
