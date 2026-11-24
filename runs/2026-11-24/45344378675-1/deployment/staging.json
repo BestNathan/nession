@@ -1,0 +1,166 @@
+{
+  "schema_version": 1,
+  "kind": "nession_deployment_attestation",
+  "status": "Attested",
+  "environment_id": "staging",
+  "namespace": "nession",
+  "cluster_context": "ci",
+  "gitops_revision": "baaf4199da15271ee508a01d713122f9713c8ddc",
+  "observed_at": "2026-11-24T07:01:14.000Z",
+  "source_sha": "293f418790be0ebd8557bd8902c62b26da65a736",
+  "images": [
+    {
+      "role": "agent",
+      "repository": "ghcr.io/bestnathan/nession",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "tag": "agent-293f418",
+      "digest": "sha256:0afc702f35157decbd0b7e05bec42db055691833ca6ae57bfb42c97f42e725e8"
+    },
+    {
+      "role": "server",
+      "repository": "ghcr.io/bestnathan/nession",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "tag": "server-293f418",
+      "digest": "sha256:fa38b93fa287d95fb27d14314a50aa8f839cc1b668d2adcded387f8d1db961c9"
+    },
+    {
+      "role": "ui",
+      "repository": "ghcr.io/bestnathan/nession",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "tag": "ui-293f418",
+      "digest": "sha256:06178e11d64a286d7b573380e2a9ead198402fd7622adba097b8b53ace00fd84"
+    }
+  ],
+  "workloads": [
+    {
+      "role": "agent",
+      "name": "nession-agent-staging",
+      "namespace": "nession",
+      "uid": "174d2b8e-4f21-4073-9cff-14cc64cd4957",
+      "generation": 1540,
+      "observed_generation": 1540,
+      "ready": true,
+      "image": "ghcr.io/bestnathan/nession:agent-293f418",
+      "image_id": "ghcr.io/bestnathan/nession@sha256:0afc702f35157decbd0b7e05bec42db055691833ca6ae57bfb42c97f42e725e8",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "repository": "ghcr.io/bestnathan/nession",
+      "digest": "sha256:0afc702f35157decbd0b7e05bec42db055691833ca6ae57bfb42c97f42e725e8"
+    },
+    {
+      "role": "server",
+      "name": "nession-server-staging",
+      "namespace": "nession",
+      "uid": "8184f763-44eb-4c32-9581-7646575371ea",
+      "generation": 1533,
+      "observed_generation": 1533,
+      "ready": true,
+      "image": "ghcr.io/bestnathan/nession:server-293f418",
+      "image_id": "ghcr.io/bestnathan/nession@sha256:fa38b93fa287d95fb27d14314a50aa8f839cc1b668d2adcded387f8d1db961c9",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "repository": "ghcr.io/bestnathan/nession",
+      "digest": "sha256:fa38b93fa287d95fb27d14314a50aa8f839cc1b668d2adcded387f8d1db961c9"
+    },
+    {
+      "role": "ui",
+      "name": "nession-ui-staging",
+      "namespace": "nession",
+      "uid": "277efca1-748c-40c6-acd2-affd581c2e2e",
+      "generation": 1546,
+      "observed_generation": 1546,
+      "ready": true,
+      "image": "ghcr.io/bestnathan/nession:ui-293f418",
+      "image_id": "ghcr.io/bestnathan/nession@sha256:06178e11d64a286d7b573380e2a9ead198402fd7622adba097b8b53ace00fd84",
+      "declared_repository": "ghcr.io/bestnathan/nession",
+      "repository": "ghcr.io/bestnathan/nession",
+      "digest": "sha256:06178e11d64a286d7b573380e2a9ead198402fd7622adba097b8b53ace00fd84"
+    }
+  ],
+  "remote_observation": {
+    "schema_version": 1,
+    "kind": "nession_remote_staging_observation",
+    "profile": "remote-staging",
+    "status": "Observed",
+    "evaluation": null,
+    "environment_id": "staging",
+    "source_sha": "293f418790be0ebd8557bd8902c62b26da65a736",
+    "gitops_revision": "baaf4199da15271ee508a01d713122f9713c8ddc",
+    "attestation_observed_at": "2026-11-24T07:01:14.000Z",
+    "samples": [
+      {
+        "at": "2026-11-24T07:01:18.020Z",
+        "offset_ms": 3498,
+        "workloads": [
+          {
+            "role": "agent",
+            "uid": "174d2b8e-4f21-4073-9cff-14cc64cd4957",
+            "generation": 1540,
+            "observed_generation": 1540,
+            "digest": "sha256:0afc702f35157decbd0b7e05bec42db055691833ca6ae57bfb42c97f42e725e8",
+            "ready": true
+          },
+          {
+            "role": "server",
+            "uid": "8184f763-44eb-4c32-9581-7646575371ea",
+            "generation": 1533,
+            "observed_generation": 1533,
+            "digest": "sha256:fa38b93fa287d95fb27d14314a50aa8f839cc1b668d2adcded387f8d1db961c9",
+            "ready": true
+          },
+          {
+            "role": "ui",
+            "uid": "277efca1-748c-40c6-acd2-affd581c2e2e",
+            "generation": 1546,
+            "observed_generation": 1546,
+            "digest": "sha256:06178e11d64a286d7b573380e2a9ead198402fd7622adba097b8b53ace00fd84",
+            "ready": true
+          }
+        ]
+      },
+      {
+        "at": "2026-11-24T07:01:22.214Z",
+        "offset_ms": 7690,
+        "workloads": [
+          {
+            "role": "agent",
+            "uid": "174d2b8e-4f21-4073-9cff-14cc64cd4957",
+            "generation": 1540,
+            "observed_generation": 1540,
+            "digest": "sha256:0afc702f35157decbd0b7e05bec42db055691833ca6ae57bfb42c97f42e725e8",
+            "ready": true
+          },
+          {
+            "role": "server",
+            "uid": "8184f763-44eb-4c32-9581-7646575371ea",
+            "generation": 1533,
+            "observed_generation": 1533,
+            "digest": "sha256:fa38b93fa287d95fb27d14314a50aa8f839cc1b668d2adcded387f8d1db961c9",
+            "ready": true
+          },
+          {
+            "role": "ui",
+            "uid": "277efca1-748c-40c6-acd2-affd581c2e2e",
+            "generation": 1546,
+            "observed_generation": 1546,
+            "digest": "sha256:06178e11d64a286d7b573380e2a9ead198402fd7622adba097b8b53ace00fd84",
+            "ready": true
+          }
+        ]
+      }
+    ]
+  },
+  "execution_id": "6128809da14c7688092920f9a1749a873d62fc7dd64678ec6d388a6d40f7e67b",
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45344378675,
+      "run_attempt": 1,
+      "workflow_id": 395306893,
+      "event": "workflow_run",
+      "head_sha": "a8242b6c84ba5edf8468601134581558e46ac025",
+      "head_branch": "main"
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45344378675",
+    "record_path": "runs/2026-11-24/45344378675-1/deployment/staging.json",
+    "source_record_sha256": "002b0f7efc200c59df5641dd2ee65b863592184129d491b21eebe32920230009"
+  }
+}
