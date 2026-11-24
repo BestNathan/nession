@@ -15,6 +15,8 @@ import {collectConflictProbe4124,shouldCollectConflictProbe4124,selfTestConflict
 import {collectQwen3433Recovery} from './acceptance-qwen-3433-recovery.mjs';
 import {collectQwen4174,selfTestQwen4174}
   from './acceptance-qwen-4174-recovery.mjs';
+import {collectQwen4192Premodel,selfTestQwen4192Premodel}
+  from './acceptance-qwen-4192-premodel-recovery.mjs';
 import {collectOriginalCompositeReviewer4012,selfTestOriginalCompositeReviewer4012}
   from './acceptance-qwen-4012-reviewer-history.mjs';
 import {collectConvergenceWriter4059,selfTestConvergenceWriter4137}
@@ -228,7 +230,7 @@ function compactRuns(runs, expectedSha) {
 }
 
 export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pullRunsBySha = new Map(), sourceAncestry = [], historicalE2EByPr = new Map(), linkedIssueE2E = [], implementationPulls = [], targetMergeProof = null, declaredMergeCommits = [], providerWakeEvidence = null, historicalAncestry = [], historicalOrchestratorRuns = [], historicalProviderChains = [], historicalRecovery = null, historicalRegressions = null, exactHeadE2eSteps = [], historicalReporterE2eRerun = null, verifiedHistoricalCaseReplays = [], verifiedCaseReceipts = [], relatedAcceptance = [], relatedBugCompletion = null,
-  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedToolchain4241 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, authenticatedQwen4174Recovery = null, authenticatedCompositeReviewer4012 = null, verifiedConflictProbe4124 = null, authenticatedConvergenceWriter4059 = null }) {
+  verifiedReplacement4253 = null, targetPushE2eRuns = [], postE2eWakeReceipts = [], acceptanceRoutingProof = null, replayDenials = [], authenticatedMetricsReplayLineage = null, authenticatedMetricsReplayAdmission = null, storePolicyObservability = [], ancestryRuns = [], acceptanceBatchReceipts = [], selectedRunReceiptsBySha = new Map(), selectedRunReceipts = [], notRequiredRunReceiptsBySha = new Map(), notRequiredRunReceipts = [], fullGateProvisionReceipts = [], fullRegressionReceipts = [], verifiedMainPeriodicFullReceipts = [], verifiedLiveFullFailurePublication = null, fullNotRequiredReceipts = [], verifiedCiCostStudy = null, historicalBrowserDesignProof = null, exactHeadStepsBySha = new Map(), batchReceiptsBySha = new Map(), ancestryReceipts = [], reuseComparison = null, publicPagesObservations = [], publicPagesE2EObservations = [], publicWorkflowPublications = [], publicPagesLineageObservations = [], developmentReadback = [], stagingAcrReadback = null, verifiedAgentTelemetryRecords = [], authenticatedIssueAuditReadback = null, authenticatedIssueAuditRepairReadback = null, authenticatedIssueAudit3843Readback = null, verifiedRunStoreFixtureEvidence = [], authenticatedAgentStoreFixture = null, authenticatedRunStoreCasMatrix = null, authenticatedRunStoreIntegrityAudit = null, verifiedRunStoreExternalCheckpoint = null, authenticatedRunStoreFiveModeReadback = null, verifiedKnowledgePublisherPublication = [], verifiedToolchain4160 = null, verifiedToolchain4241 = null, verifiedKnowledgeProposalCleanup = null, verifiedKnowledgeWriter2358 = [], verifiedSandbox3145 = [], deferredAcceptanceReplays = [], deploymentAttestationReceipts = [], stagingLaneAdmissionReceipts = [], historicalStagingBatchProof = null, authenticatedQwenChainFixture = null, authenticatedQwen3433Recovery = null, authenticatedQwen4174Recovery = null, authenticatedQwen4192PremodelRecovery = null, authenticatedCompositeReviewer4012 = null, verifiedConflictProbe4124 = null, authenticatedConvergenceWriter4059 = null }) {
   const sha = requireText(targetSha, 'targetSha');
   const associated = (Array.isArray(pulls) ? pulls : [])
     .filter((pull) => pull?.head?.sha)
@@ -276,6 +278,8 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
       ? {authenticated_qwen_3433_recovery: authenticatedQwen3433Recovery} : {}),
     ...(authenticatedQwen4174Recovery
       ? {verified_qwen_4174_source_recovery: authenticatedQwen4174Recovery} : {}),
+    ...(authenticatedQwen4192PremodelRecovery
+      ? {verified_qwen_4192_reviewer_premodel_recovery: authenticatedQwen4192PremodelRecovery} : {}),
     ...(authenticatedCompositeReviewer4012
       ? {verified_qwen_4012_composite_reviewer: authenticatedCompositeReviewer4012} : {}),
     ...(verifiedConflictProbe4124
@@ -1850,6 +1854,15 @@ async function collectCommand(workspace, outFile) {
     repo,issue:Number(process.env.ISSUE_NUMBER??0),
     stage:process.env.ACCEPTANCE_STAGE,targetSha:sha,get:githubGet,
   });
+  // #4192: the original Reviewer pre-model admission failure, its single
+  // owner-authenticated signed successor and the independently ingested
+  // Result live outside the target's recent Run window. Re-authenticate
+  // exact Runs/Jobs/Artifacts, immutable Store versions and the persisted
+  // Result; Issue prose is only a discovery hint, never a verdict.
+  const authenticatedQwen4192PremodelRecovery=await collectQwen4192Premodel({
+    repo,issue:Number(process.env.ISSUE_NUMBER??0),
+    stage:process.env.ACCEPTANCE_STAGE,targetSha:sha,get:githubGet,
+  });
   // #4012: a historical, pinned original #3919 Reviewer finding is a
   // real independent Result Ingest for SC-02 only. It is never an acceptance
   // projection, never proof of the later force-pushed/merged final HEAD,
@@ -2237,7 +2250,8 @@ async function collectCommand(workspace, outFile) {
     authenticatedMetricsReplayLineage, authenticatedMetricsReplayAdmission, storePolicyObservability, ancestryRuns, acceptanceBatchReceipts, selectedRunReceiptsBySha, selectedRunReceipts, notRequiredRunReceiptsBySha, notRequiredRunReceipts, fullGateProvisionReceipts, fullRegressionReceipts, verifiedMainPeriodicFullReceipts, verifiedLiveFullFailurePublication, fullNotRequiredReceipts, verifiedCiCostStudy, historicalBrowserDesignProof, exactHeadStepsBySha, batchReceiptsBySha, ancestryReceipts, reuseComparison, publicPagesObservations, publicPagesE2EObservations, publicWorkflowPublications, publicPagesLineageObservations, developmentReadback, stagingAcrReadback, verifiedAgentTelemetryRecords, authenticatedIssueAuditReadback, authenticatedIssueAuditRepairReadback, authenticatedIssueAudit3843Readback, deferredAcceptanceReplays,
     verifiedRunStoreFixtureEvidence, authenticatedAgentStoreFixture,
     authenticatedQwenChainFixture,authenticatedQwen3433Recovery,
-    authenticatedQwen4174Recovery,authenticatedCompositeReviewer4012,
+    authenticatedQwen4174Recovery,authenticatedQwen4192PremodelRecovery,
+    authenticatedCompositeReviewer4012,
     verifiedConflictProbe4124,
     authenticatedRunStoreCasMatrix,
     authenticatedRunStoreIntegrityAudit, verifiedRunStoreExternalCheckpoint,
@@ -2332,6 +2346,7 @@ async function selfTest() {
   selfTestConvergenceWriter4137();
   selfTestKnowledgePublication();
   selfTestQwen4174();
+  selfTestQwen4192Premodel();
   selfTestOriginalCompositeReviewer4012();
   selfTestToolchain4160();
   selfTestToolchain4241();
