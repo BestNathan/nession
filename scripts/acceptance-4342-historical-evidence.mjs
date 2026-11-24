@@ -187,6 +187,17 @@ function ancestor(root,source,target){
   try{execFileSync('git',['-C',root,'merge-base','--is-ancestor',source,target],
     {timeout:20000,stdio:'ignore'});return true;}catch{return false;}
 }
+// A successful bounded scan can legitimately have no selected historical gap.
+// Keep searching older authentic reports; a no-op cannot hide an earlier
+// actual recovery or be mistaken for a failed Acceptance infrastructure job.
+export function hasRecoveredHistoricalSelection(report){
+  if(report?.schema_version!==1||
+     report.kind!=='agent_metrics_historical_recovery_scope'||
+     report.repository!==REPO||report.start_date!==START)
+    reject('unexpected historical report envelope');
+  return positive(report.selected?.run_id)&&report.selected_persisted===true&&
+    report.recovered_count===1;
+}
 function reportFromArtifact(run,artifact){
   const dir=fs.mkdtempSync(path.join(os.tmpdir(),'nession-4342-history-'));
   try{
@@ -236,7 +247,16 @@ function collect(file,targetSha){
     const found=listing.artifacts.filter(a=>a.name===name);
     if(!found.length)continue;
     if(found.length!==1)reject('duplicate historical report Artifact');
-    selected={candidate,artifact:found[0]};
+    if(found[0].expired===true)continue;
+    // Authenticate candidate metadata before downloading anything.
+    checkGithubRun(candidate);
+    if(found[0].workflow_run?.id!==candidate.id||
+       !positive(found[0].id)||!positive(found[0].size_in_bytes)||
+       found[0].size_in_bytes>1048576||found[0].expired!==false)
+      reject('untrusted historical report Artifact metadata');
+    const read=reportFromArtifact(candidate,found[0]);
+    if(!hasRecoveredHistoricalSelection(read.report))continue;
+    selected={candidate,artifact:found[0],read};
     break;
   }
   if(!selected){
@@ -245,7 +265,7 @@ function collect(file,targetSha){
   }
   const writer=gh('actions/runs/'+selected.candidate.id);
   const jobs=gh('actions/runs/'+writer.id+'/attempts/'+writer.run_attempt+'/jobs?per_page=100');
-  const read=reportFromArtifact(writer,selected.artifact);
+  const read=selected.read;
   const chosen=read.report?.selected;
   if(!positive(chosen?.run_id))reject('selected historical source Run missing');
   const original=gh('actions/runs/'+chosen.run_id);
@@ -306,6 +326,13 @@ function selfTest(){
   const args={writer,jobs,artifact,report,original,originalArtifacts,
     storedCounts:new Map([[source.id+'/321/1',1]]),
     targetSha:target,ancestry:{writer:true,original:true}};
+  assert.equal(hasRecoveredHistoricalSelection(report),true);
+  assert.equal(hasRecoveredHistoricalSelection({...report,selected:null,
+    selected_persisted:false,recovered_count:0}),false);
+  assert.equal(hasRecoveredHistoricalSelection({...report,selected_persisted:false,
+    recovered_count:0}),false);
+  assert.throws(()=>hasRecoveredHistoricalSelection({...report,repository:'foreign/fork'}),
+    /unexpected historical report envelope/);
   const proof=attest4342History(args);
   assert.equal(proof.status,'authenticated');
   const context={issue:{number:4342},stage:'post-merge',target_ref:target,
