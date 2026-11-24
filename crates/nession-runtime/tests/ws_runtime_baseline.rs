@@ -261,7 +261,11 @@ async fn a_controlled_load_baseline_is_reproducible_and_settles() {
         "metrics": counts,
     });
 
-    let target_dir = std::env::var("CARGO_TARGET_DIR").unwrap_or_else(|_| "target".to_string());
+    // Write under the workspace target, not the crate-relative `target/` that
+    // `cargo test` uses as cwd — that path is not the workspace's ignored
+    // build directory and a previous run accidentally committed it (#4437).
+    let target_dir = std::env::var("CARGO_TARGET_DIR")
+        .unwrap_or_else(|_| concat!(env!("CARGO_MANIFEST_DIR"), "/../../target").to_string());
     let path = std::path::Path::new(&target_dir).join("ws-runtime-baseline.json");
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);

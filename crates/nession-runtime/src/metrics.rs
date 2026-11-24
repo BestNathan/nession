@@ -409,9 +409,9 @@ pub const METRIC_CATALOG: &[MetricDef] = &[
     def(
         "ws_stream_credit_lag",
         MetricKind::Gauge,
-        UnitKind::Count,
+        UnitKind::Byte,
         Domain::Stream,
-        "subscriber credit events not yet applied",
+        "subscriber credit bytes issued but not yet applied",
     ),
     def(
         "ws_stream_progress_lag",
@@ -602,6 +602,43 @@ impl MetricSink for NoopSink {
 }
 
 static SINK: OnceLock<RwLock<Option<Arc<dyn MetricSink>>>> = OnceLock::new();
+
+/// Serializes tests that install a process-wide capture sink. The sink is a
+/// process fact, so two tests setting it concurrently would observe each
+/// other's emissions or clear each other's sink.
+#[cfg(test)]
+pub(crate) static TEST_SINK_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// A capture sink for cross-module instrumentation tests.
+#[cfg(test)]
+pub(crate) struct TestCapture {
+    names: std::sync::Mutex<Vec<&'static str>>,
+}
+
+#[cfg(test)]
+impl TestCapture {
+    pub(crate) fn new() -> Self {
+        Self {
+            names: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    pub(crate) fn names(&self) -> Vec<&'static str> {
+        self.names
+            .lock()
+            .map(|names| names.clone())
+            .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+impl MetricSink for TestCapture {
+    fn record(&self, metric: Metric) {
+        if let Ok(mut names) = self.names.lock() {
+            names.push(metric.name);
+        }
+    }
+}
 /// Fast path: the hot message path checks one relaxed load and returns when
 /// collection is off, before building any labels.
 static ENABLED: AtomicBool = AtomicBool::new(false);
@@ -842,8 +879,9 @@ mod tests {
         }
     }
 
-    #[test]
-    fn an_unknown_metric_name_is_not_recorded() {
+    #[tokio::test]
+    async fn an_unknown_metric_name_is_not_recorded() {
+        let _guard = TEST_SINK_LOCK.lock().await;
         let capture = Arc::new(Capture::default());
         set_sink(Some(Arc::clone(&capture) as Arc<dyn MetricSink>));
         record("ws_not_a_metric", Labels::new(), 1.0);
