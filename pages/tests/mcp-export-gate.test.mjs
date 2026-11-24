@@ -37,6 +37,7 @@ test('all Tool, protocol, dependency and projection-owner edits demand reexport'
     'crates/nession-mcp/src/protocol.rs',
     'crates/nession-protocol/src/lib.rs','Cargo.lock','Cargo.toml',
     'rust-toolchain.toml','.cargo/config.toml','pages/scripts/build.mjs',
+    'pages/scripts/build-data.mjs',
     'pages/scripts/mcp-semantic.mjs','pages/scripts/mcp-export-gate.mjs'
   ]){
     assert.equal(affectsMcpSource(filename),true,filename);

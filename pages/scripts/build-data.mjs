@@ -1,0 +1,399 @@
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
+import { resolve, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { makeProjection, validateProjection } from './project.mjs';
+import { loadKnowledge, validatePublicKnowledge } from './knowledge-project.mjs';
+import {loadDocuments,projectProtocolSchema,validPublicDocuments}
+  from './documents-project.mjs';
+import {releaseProtocolHistory} from './protocol-release-history.mjs';
+import {cachedTaggedProtocolSchema} from './protocol-git-history.mjs';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
+import { WORKFLOW_IDS, projectWorkflowGraph } from './workflow-graph.mjs';
+import { loadIssueRunObservations } from './issue-runs.mjs';
+import {agentStoreReadiness} from './agent-store-readiness.mjs';
+import {loadPinnedAgentResultObservations} from './agent-result-observations.mjs';
+import {loadPinnedQwenLineage} from './qwen-lineage-reader.mjs';
+import {createHash} from 'node:crypto';
+import {reconcileMcpPublication,validLegacyMcpPublicationV1,validMcpPublication}
+  from './mcp-reconcile.mjs';
+import {loadStableMcpRelease} from './mcp-upstream.mjs';
+import {canReusePublishedMcp} from './mcp-export-gate.mjs';
+import { loadPinnedE2E } from './acceptance-e2e.mjs';
+import {selectScopedE2ERuns,scopedE2EPaths} from './e2e-run-window.mjs';
+
+const repo = 'BestNathan/nession';
+const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
+// Isolated data-projection staging directory. The Vite UI build owns a
+// different fresh directory; assembly validates and merges both into the
+// final PAGES_OUT_DIR without either step emptying the other's inputs.
+const out = resolve(process.env.PAGES_DATA_OUT_DIR || join(root,'.build/data'));
+const metrics = resolve(process.env.METRICS_DIR || join(root,'../metrics-store'));
+const acceptance = resolve(process.env.ACCEPTANCE_RESULTS_DIR || join(root,'../acceptance-store'));
+const acceptanceSha = process.env.ACCEPTANCE_RESULTS_SHA;
+const token = process.env.GITHUB_TOKEN || '';
+async function optionalJson(file){
+  try { return JSON.parse(await readFile(file,'utf8')); }
+  catch { return null; }
+}
+async function api(path) {
+  if (process.env.PAGES_OFFLINE === '1') throw new Error('offline fixture');
+  // Build-time, never browser-side. No token or trusted API access is deployed.
+  const headers = { 'accept':'application/vnd.github+json', 'x-github-api-version':'2022-11-28', 'user-agent':'nession-pages-projection' };
+  if(token) headers.authorization='Bearer '+token;
+  const response=await fetch('https://api.github.com/repos/'+repo+path,{headers,signal:AbortSignal.timeout(15000)});
+  if(response.status===404)return { missing:true };
+  if(!response.ok)throw new Error('GitHub API request failed: HTTP '+response.status);
+  return response.json();
+}
+async function officialMcpApi(path){
+  const headers={'accept':'application/vnd.github+json',
+    'x-github-api-version':'2022-11-28','user-agent':'nession-mcp-pages-spec'};
+  if(token)headers.authorization='Bearer '+token;
+  const response=await fetch('https://api.github.com/repos/modelcontextprotocol/modelcontextprotocol'+path,
+    {headers,signal:AbortSignal.timeout(15000)});
+  if(!response.ok)throw Error('Official MCP GitHub source unavailable: HTTP '+response.status);
+  return response.json();
+}
+async function optionalList(path) {
+  try {
+    const data=await api(path);
+    return Array.isArray(data)?data:null;
+  } catch (e) { console.error('Optional GitHub listing unavailable:',path,e.message);return null; }
+}
+async function optionalIssueTimelines(sourceIssues){
+  if(!Array.isArray(sourceIssues))return null;
+  // Match the public Pages Issue window, never enumerate all private/old Issues.
+  const selected=sourceIssues.filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
+    .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
+    .slice(0,12);
+  const entries=await Promise.all(selected.map(async issue=>{
+    try{
+      const events=await api('/issues/'+issue.number+'/timeline?per_page=100');
+      return [String(issue.number),Array.isArray(events)
+        ? {status:events.length>=100?'truncated':'available',events:events.slice(0,100)}
+        : {status:'unavailable',events:[]}];
+    }catch(err){
+      console.error('Optional Issue Timeline unavailable:',issue.number,err.message);
+      return [String(issue.number),{status:'unavailable',events:[]}];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+async function optionalPrReviews(sourcePulls){
+  if(!Array.isArray(sourcePulls))return null;
+  // Only the same 12 most recently updated public PRs shown in the projection.
+  const selected=sourcePulls.filter(x=>Number.isSafeInteger(x?.number)&&x.number>0)
+    .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
+    .slice(0,12);
+  const entries=await Promise.all(selected.map(async pr=>{
+    try{
+      const items=await api('/pulls/'+pr.number+'/reviews?per_page=100');
+      return [String(pr.number),Array.isArray(items)
+        ? {status:items.length>=100?'truncated':'available',items:items.slice(0,100)}
+        : {status:'unavailable',items:[]}];
+    }catch(err){
+      console.error('Optional PR reviews unavailable:',pr.number,err.message);
+      return [String(pr.number),{status:'unavailable',items:[]}];
+    }
+  }));
+  return Object.fromEntries(entries);
+}
+async function optionalRuns(){
+  try{
+    const result=await api('/actions/runs?per_page=100');
+    return Array.isArray(result?.workflow_runs)?result.workflow_runs:null;
+  }catch(error){console.error('Public CI Run snapshot unavailable:',error.message);return null;}
+}
+async function optionalScopedE2ERuns(){
+  const responses=await Promise.all(scopedE2EPaths.map(async path=>{
+    try { return await api('/actions/workflows/'+path.split('/').at(-1)+'/runs?per_page=100'); }
+    catch(error){
+      console.error('Optional trusted E2E Run window unavailable:',path,error.message);
+      return null;
+    }
+  }));
+  const scoped=selectScopedE2ERuns(responses);
+  if(!scoped)console.error('Independent E2E/Test Ingest Run identity window unavailable');
+  return scoped;
+}
+async function optionalRef(branch) {
+  try {
+    const result=await api('/git/ref/heads/'+encodeURIComponent(branch));
+    if(result?.missing)return {state:'missing'};
+    return {state:'present',sha:result?.object?.sha};
+  } catch(e){console.error('Optional ref unavailable:',branch,e.message);return {state:'unavailable'};}
+}
+// Bounded, read-only inventory facts for an existing store ref: the commit
+// timestamp and a capped blob count. The tree API's own truncation flag is
+// preserved, so the public site never presents a partial count as complete.
+async function optionalStoreMeta(ref){
+  if(ref?.state!=='present'||!/^[a-f0-9]{40}$/.test(ref.sha||''))
+    return {updated_at:null,records:null,truncated:false};
+  const [updatedAt,counts]=await Promise.all([
+    (async()=>{
+      try{
+        const commit=await api('/git/commits/'+ref.sha);
+        return typeof commit?.committer?.date==='string'?commit.committer.date:null;
+      }catch(error){
+        console.error('Optional store commit time unavailable:',ref.sha,error.message);
+        return null;
+      }
+    })(),
+    (async()=>{
+      try{
+        const tree=await api('/git/trees/'+ref.sha+'?recursive=1');
+        if(!Array.isArray(tree?.tree))return {records:null,truncated:false};
+        let records=0,truncated=tree.truncated===true;
+        for(const entry of tree.tree){
+          if(entry?.type!=='blob')continue;
+          if(records>=5000){truncated=true;break;}
+          records+=1;
+        }
+        return {records,truncated};
+      }catch(error){
+        console.error('Optional store tree count unavailable:',ref.sha,error.message);
+        return {records:null,truncated:false};
+      }
+    })(),
+  ]);
+  return {updated_at:updatedAt,...counts};
+}
+const [repository,agent,registry,issues,pulls,workflowRuns,allRefs] = await Promise.all([
+  optionalJson(join(metrics,'metrics.json')),
+  optionalJson(join(metrics,'agent-metrics.json')),
+  optionalJson(join(root,'../automation/agents/registry.json')),
+  optionalList('/issues?state=open&sort=updated&direction=desc&per_page=100'),
+  optionalList('/pulls?state=open&sort=updated&direction=desc&per_page=100'),
+  optionalRuns(),
+  Promise.all(['metrics','acceptance-results','task-results','agent-store'].map(optionalRef))
+]);
+// Pin the public Git tree to the exact original ref SHA, then re-read that
+// ref before classification. This is source-readiness ONLY (not writer trust).
+async function optionalAgentStoreReadiness(ref) {
+  if(ref?.state==='missing')return agentStoreReadiness(ref,null,null);
+  if(ref?.state!=='present')return agentStoreReadiness(ref,null,null);
+  try {
+    if(!/^[a-f0-9]{40}$/.test(ref.sha||''))return agentStoreReadiness(ref,null,null);
+    const entries=await api('/contents?ref='+ref.sha);
+    const again=await optionalRef('agent-store');
+    return agentStoreReadiness(ref,entries,again);
+  } catch (error) {
+    console.error('Pinned agent-store source unavailable:',error.message);
+    return agentStoreReadiness(ref,null,null);
+  }
+}
+const agentStoreSource=await optionalAgentStoreReadiness(allRefs[3]);
+const storeMeta=Object.fromEntries(await Promise.all(
+  ['metrics','acceptance-results','task-results','agent-store'].map(async (name,index)=>
+    [name,await optionalStoreMeta(allRefs[index])])
+));
+const generatedAt=new Date().toISOString();
+const knowledge=await loadKnowledge({directory:process.env.KNOWLEDGE_DIR,
+  sha:process.env.KNOWLEDGE_SHA,generatedAt});
+if(!validatePublicKnowledge(knowledge))throw Error('Invalid public Knowledge projection');
+const mainSha=process.env.SOURCE_MAIN_SHA;
+const releaseList=await optionalList('/releases?per_page=100');
+// PRIVILEGED PUBLICATION BOUNDARY: this process holds a read-only GitHub
+// token for the public snapshot. Never compile code from historical commits
+// here. The credential-free producer ran earlier, and the release-tag SHA
+// from GitHub is independently checked when reading its derived cache entry.
+const releases=await releaseProtocolHistory({api,releases:releaseList||[],
+  snapshotAtTag:process.env.PAGES_OFFLINE==='1'?null:async({tag,sha})=>
+    cachedTaggedProtocolSchema({tag,sha,
+      cacheDir:process.env.PAGES_PROTOCOL_CACHE_DIR})});
+const validMainSha=/^[a-f0-9]{40}$/.test(mainSha||'');
+const cargoText=await readFile(join(root,'../Cargo.toml'),'utf8');
+const sourceVersion=/\[workspace\.package\][\s\S]*?\bversion\s*=\s*"([0-9]+\.[0-9]+\.[0-9]+)"/
+  .exec(cargoText)?.[1]||null;
+let documents;
+if(validMainSha&&!process.env.PAGES_PROTOCOL_SCHEMA_FILE&&
+   process.env.PAGES_OFFLINE!=='1'){
+  // Compile the sole canonical Rust generator at the pinned main checkout.
+  // A failed generator aborts publication rather than serving stale contracts.
+  const {stdout}=await promisify(execFile)('cargo',
+    ['run','--quiet','-p','nession-protocol-codegen','--','--schema'],
+    {cwd:resolve(root,'..'),maxBuffer:8_000_000,timeout:600_000});
+  documents=projectProtocolSchema(JSON.parse(stdout),
+    {sha:mainSha,generatedAt,releases,sourceVersion});
+}else{
+  documents=await loadDocuments({schemaPath:process.env.PAGES_PROTOCOL_SCHEMA_FILE,
+    sha:validMainSha?mainSha:null,generatedAt,releases,sourceVersion});
+}
+if(!validPublicDocuments(documents))throw Error('Invalid public Documents projection');
+// MCP is generated from the exact registered Rust Tool handlers, never a
+// hand-maintained inventory or a running authenticated MCP endpoint.
+let mcp={schema_version:1,status:'unavailable',source:null,tools:[]};
+if(validMainSha&&process.env.PAGES_OFFLINE!=='1'){
+  const prevFile=process.env.PAGES_MCP_PREVIOUS_FILE;
+  const publication=process.env.PAGES_MCP_RECONCILE==='1';
+  if(publication&&!prevFile&&process.env.PAGES_MCP_BOOTSTRAP!=='1')
+    throw Error('MCP last-good publication state not checked');
+  let previous=null;
+  if(prevFile){
+    const stat=await (await import('node:fs/promises')).lstat(prevFile);
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>2_000_000||stat.size<10)
+      throw Error('Invalid last-good MCP publication file');
+    previous=JSON.parse(await readFile(prevFile,'utf8'));
+    if(!validMcpPublication(previous)&&!validLegacyMcpPublicationV1(previous))
+      throw Error('Published MCP catalog is malformed: refuse untrusted compare source');
+  }
+  // Query a verified official stable release every time, even on a no-op.
+  // Missing upstream evidence always aborts publication, preserving last-good.
+  const upstream={stable:await loadStableMcpRelease({api:officialMcpApi})};
+  let compare=null;
+  if(previous&&previous.source?.sha!==mainSha){
+    try{
+      compare=await api('/compare/'+previous.source.sha+'...'+mainSha+'?per_page=100');
+    }catch(error){
+      // Only the optimization fails open: rebuild the authoritative Rust
+      // catalog, then reconcile against the validated last-good snapshot.
+      console.warn('MCP Git compare unavailable; exporting registered Tools:',error.message);
+    }
+  }
+  if(previous&&canReusePublishedMcp({
+    previous,stable:upstream.stable,mainSha,comparison:compare
+  })){
+    mcp=previous;
+    console.log('MCP exporter skipped: unchanged pinned code and stable upstream',mcp.semantic_sha256);
+  }else{
+    const {stdout}=await promisify(execFile)('cargo',
+      ['run','--quiet','-p','nession-mcp','--bin','nession-mcp-schema','--no-default-features'],
+      {cwd:resolve(root,'..'),maxBuffer:2_000_000,timeout:600_000});
+    const parsed=JSON.parse(stdout);
+    if(parsed.schema_version!==1)throw Error('Unexpected MCP exporter schema version');
+    const reconciled=reconcileMcpPublication({
+      catalog:{...parsed,upstream},mainSha,previous
+    });
+    mcp=reconciled.document;
+    console.log('MCP document reconciliation:',reconciled.reason,mcp.semantic_sha256);
+  }
+}
+
+const selectedIssueNumbers=Array.isArray(issues)?issues
+  .filter(x=>Number.isSafeInteger(x?.number)&&x.number>0&&!x.pull_request)
+  .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||''))||a.number-b.number)
+  .slice(0,12).map(x=>x.number):[];
+const [issueTimelines,prReviews,issueRunSource,scopedE2ERuns]=await Promise.all([
+  optionalIssueTimelines(issues),optionalPrReviews(pulls),
+  loadIssueRunObservations({root:metrics,expectedSha:process.env.METRICS_SHA,
+    issues:selectedIssueNumbers,at:generatedAt}),
+  optionalScopedE2ERuns(),
+]);
+// Original Git blob bytes are checked against the pinned Store ref, but the
+// Store record is still an UNVERIFIED claim until a separate trusted
+// Producer/Publisher attester supplies the explicit lineageEvidence contract.
+// The original v2 is only a *candidate* until the separate Worker and
+// Publisher Actions ZIPs, exact PR and pinned Store Writer can be re-read.
+// Historical authenticated producers need their own bounded lookup: a merged
+// implementing PR exits the OPEN Work list. Untrusted Store bytes only locate
+// candidates; the original Worker/Publisher/Writer verifier still gates every
+// public edge. Missing/forged/expired artifacts stay Unknown/Unlinked.
+// Match the Worker ZIP transport cap, not the tiny extracted result.json.
+// Large encrypted native Session bytes are only hashed, never decoded or
+// published; no unbounded download is permitted by this read-only client.
+const MAX_SOURCE_ARTIFACT_ZIP_BYTES=32*1024*1024;
+async function optionalArtifactZip(artifactId){
+  if(process.env.PAGES_OFFLINE==='1'||!Number.isSafeInteger(artifactId)||
+     artifactId<1)throw Error('invalid read-only Publisher Artifact request');
+  const headers={Accept:'application/vnd.github+json',
+    'X-GitHub-Api-Version':'2022-11-28',
+    'User-Agent':'nession-pages-lineage-attester'};
+  if(token)headers.Authorization='Bearer '+token;
+  const response=await fetch(
+    'https://api.github.com/repos/'+repo+'/actions/artifacts/'+artifactId+'/zip',
+    {headers,signal:AbortSignal.timeout(20000)});
+  if(!response.ok)throw Error('original GitHub Artifact unavailable: '+response.status);
+  const size=Number(response.headers.get('content-length'));
+  if(Number.isFinite(size)&&size>MAX_SOURCE_ARTIFACT_ZIP_BYTES)
+    throw Error('GitHub Artifact exceeds safe budget');
+  if(!response.body)throw Error('GitHub Artifact missing response body');
+  const chunks=[];let total=0;
+  for await(const part of response.body){
+    total+=part.length;
+    if(total>MAX_SOURCE_ARTIFACT_ZIP_BYTES)throw Error('GitHub Artifact ZIP exceeds budget');
+    chunks.push(Buffer.from(part));
+  }
+  return Buffer.concat(chunks,total);
+}
+async function originalWriterStoreBytes(file,sha){
+  if(!/^[a-f0-9]{40}$/.test(sha)||!/^[a-zA-Z0-9/_-]+\.json$/.test(file)||
+     file.includes('..'))throw Error('unsafe committed Writer receipt path');
+  const response=await api('/contents/'+file+'?ref='+sha);
+  if(response?.encoding!=='base64'||response?.type!=='file'||
+     typeof response.content!=='string'||response.content.length>100000||
+     response.size>65536)throw Error('missing independently pinned Writer blob');
+  const raw=Buffer.from(response.content.replace(/\s/g,''),'base64');
+  if(raw.length!==response.size||
+     createHash('sha1').update('blob '+raw.length+'\0').update(raw).digest('hex')!==
+       response.sha)throw Error('Writer original Store object drift');
+  return raw;
+}
+const lineageEvidence=await loadPinnedQwenLineage({
+  ref:allRefs[3],issueNumbers:selectedIssueNumbers,
+  pulls:Array.isArray(pulls)?pulls
+    .filter(x=>Number.isSafeInteger(x.number)&&x.number>0&&
+      /^[a-f0-9]{40}$/.test(x.head?.sha??''))
+    .sort((a,b)=>String(b.updated_at||'').localeCompare(String(a.updated_at||'')))
+    .slice(0,12).map(x=>({number:x.number,head_sha:x.head.sha})):[],
+  maxRecords:2,includeHistorical:true,
+  getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
+  getBlob:sha=>api('/git/blobs/'+sha),
+  getOriginalStoreBytes:originalWriterStoreBytes,
+  getRun:id=>api('/actions/runs/'+id),
+  getArtifacts:id=>api('/actions/runs/'+id+'/artifacts?per_page=100'),
+  getArtifactZip:optionalArtifactZip,
+  getPull:id=>api('/pulls/'+id),
+  getCompare:(writer,store)=>api('/compare/'+writer+'...'+store),
+  getCurrentRef:()=>optionalRef('agent-store'),
+});
+const agentResultObservations=await loadPinnedAgentResultObservations({
+  ref:allRefs[3],issueNumbers:selectedIssueNumbers,maxFiles:16,
+  getTree:sha=>api('/git/trees/'+sha+'?recursive=1'),
+  getBlob:sha=>api('/git/blobs/'+sha),
+  getCurrentRef:()=>optionalRef('agent-store'),
+});
+const acceptanceE2E=await loadPinnedE2E({root:acceptance,expectedSha:acceptanceSha,
+  prHeads:Array.isArray(pulls)?pulls.slice(0,12).map(x=>x.head?.sha).filter(Boolean):[],
+  workflowRuns:scopedE2ERuns?.runs??null,
+  runWindowTruncated:scopedE2ERuns?.truncated??false,at:generatedAt});
+const refs=Object.fromEntries(['metrics','acceptance-results','task-results','agent-store'].map((name,index)=>[name,allRefs[index]]));
+const result=validateProjection(makeProjection({
+  repository,agent,registry,issues,pulls,workflowRuns,issueTimelines,prReviews,
+  issueRunSource,acceptanceE2E,agentStoreSource,agentResultObservations,
+  lineageEvidence,refs,storeMeta,
+  meta:{ generated_at:generatedAt,main_sha:process.env.SOURCE_MAIN_SHA,metrics_sha:process.env.METRICS_SHA,
+    acceptance_results_sha:acceptanceSha }
+}));
+// The topology is derived from exact checked-in YAML definitions, not the mutable
+// Actions API, a guessed diagram, or evidence of successful execution.
+const yamlFiles=await Promise.all(WORKFLOW_IDS.map(async id=>
+  [id,await readFile(join(root,'../.github/workflows',id+'.yml'),'utf8')]));
+const workflowGraph=projectWorkflowGraph(Object.fromEntries(yamlFiles),
+  /^[a-f0-9]{40}$/.test(process.env.SOURCE_MAIN_SHA||'')?process.env.SOURCE_MAIN_SHA:null,
+  generatedAt);
+await mkdir(join(out,'data'),{recursive:true});
+await writeFile(join(out,'data/site.json'),JSON.stringify(result,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/workflows.json'),JSON.stringify(workflowGraph,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/knowledge.json'),JSON.stringify(knowledge,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/documents.json'),JSON.stringify(documents,null,2)+'\n',{mode:0o644});
+await writeFile(join(out,'data/mcp.json'),JSON.stringify(mcp,null,2)+'\n',{mode:0o644});
+console.log('Public Pages data projection:',out);
+console.log(JSON.stringify({
+  source_main_sha:result.source.main_sha,
+  metrics_sha:result.source.metrics_sha,
+  repository:result.repository.available, agents:result.agents.available,
+  issues:result.work.issues_status,pulls:result.work.pulls_status,
+  agent_run_observation:result.work.agent_run_source,
+  acceptance_e2e:result.work.acceptance_e2e.status,
+  published_e2e_ids:result.work.acceptance_e2e.records.length,
+  lineage_status:result.work.lineage.status,
+  lineage_edges:result.work.lineage.edges.slice(0,12).map(e=>({issue:e.issue,
+    pr_number:e.pr_number,run_id:e.run_id,attempt:e.attempt})),
+  agent_store_readiness:result.work.agent_store_readiness.status,
+  agent_result_observations:result.work.agent_result_observations.status,
+  agent_result_count:result.work.agent_result_observations.records.length,
+  stores:result.evidence.stores.map(x=>[x.name,x.state]),
+  knowledge:{status:knowledge.status,articles:knowledge.articles.length,sha:knowledge.source?.sha||null},
+  documents:{status:documents.status,protocols:documents.protocols.length,sha:documents.source?.sha||null}
+}));
