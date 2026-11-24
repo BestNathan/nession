@@ -92,9 +92,10 @@ function isRuntime(file) {
 
 function isTooling(file) {
   if (file.endsWith('.md') || file.startsWith('docs/')) return true;
-  // Pages' Node.js test-only sources are not shipped by pages/scripts/build.mjs.
-  // Do not broaden this to pages/ assets or publisher build scripts: those
-  // may change the public runtime and must remain risk-bearing/unknown.
+  // Pages' Node.js test-only sources are not shipped by the compiled UI or
+  // pages/scripts/build.mjs. Do not broaden this to pages/ assets, React
+  // sources or publisher build scripts: those may change the public runtime
+  // and must remain risk-bearing/unknown.
   if (file.startsWith('pages/tests/')) return true;
   if (file.startsWith('gates/')) return true; // executor/suite paths handled first
   if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
@@ -310,7 +311,7 @@ function selfTest() {
     'NOT_REQUIRED');
   // Only the *test* subtree is recognized. Public Pages app assets and the
   // source-backed Pages build script are not safe to classify as tooling.
-  for(const file of ['pages/index.html','pages/app.js','pages/scripts/build.mjs']){
+  for(const file of ['pages/index.html','pages/src/app/App.tsx','pages/scripts/build.mjs']){
     assert.equal(categorizeChangedPath(file),'unknown',file+' must fail closed');
   }
   assert.equal(classifyChangedPaths([

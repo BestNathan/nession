@@ -34,6 +34,10 @@ web/dist/
 web/dist-ssr/
 *.tsbuildinfo
 
+# Independent Pages build outputs and isolated assembly inputs
+/pages/dist/
+/pages/.build/
+
 # ================================
 # IDE & Editors
 # ================================
