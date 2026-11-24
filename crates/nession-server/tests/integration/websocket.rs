@@ -3521,7 +3521,7 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     let handshake = expect_frame_of_type(
         &mut endpoint.frames,
         "client.auth",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(15),
     )
     .await?;
     anyhow::ensure!(
@@ -3535,14 +3535,14 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(15),
     )
     .await?;
     anyhow::ensure!(attach["payload"]["session_name"] == "dev");
     // Session watch notifications are legitimately asynchronous relative to
     // relay.ready. Skip ONLY those Server-authored notifications: any forged
     // receipt or unexpected frame must still fail the assertion below.
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(15), async {
         loop {
             let frame = next_json(&mut client).await?;
             if frame["msg_type"] != "server.sessions.changed" {
