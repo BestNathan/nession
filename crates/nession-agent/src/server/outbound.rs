@@ -1,155 +1,150 @@
-//! One peer-to-peer connection's outbound path: a bounded queue, and the policy
-//! that governs each class of message that goes through it (`#961-E`).
+//! One peer-to-peer connection's classified outbound path (`#4434`).
 //!
-//! This is the last of the three outbound paths `#961`'s backpressure section is
-//! about, and it was the one still missing a bound. The Server's write path got
-//! one in `#961-B` and the agent's *terminal fan-out* in `#961-D`; what remained
-//! was the socket a browser is attached to — a bare
-//! `Arc<Mutex<SplitSink>>` with no byte budget, no frame budget and no stall
-//! policy, where "backpressure" was whatever happened when a task parked on the
-//! mutex and the answer to a slow peer was to park one more producer behind it.
+//! The mechanism — three classes with reserved capacity, a bounded fair
+//! scheduler, exact accounting, process aggregates and the write deadline — is
+//! [`nession_runtime::outbound`] and [`nession_runtime::lifecycle`]. This module
+//! is this socket's *policy*: which producer's frame is which class, and what a
+//! refusal means here.
 //!
-//! The bound is one number and the interesting part is again what happens at it,
-//! and again that cannot be one answer, because the messages sharing this socket
-//! do not share a failure mode:
-//!
-//! | lane | what is on it | at the bound |
+//! | class | what is on it | at the bound |
 //! |---|---|---|
 //! | [`P2pOutbound::send_reply`] | an answer to a request the peer made | **wait** — it is never dropped |
-//! | [`P2pOutbound::send_terminal`] | `terminal.output` — a PTY chunk, or a scrollback prefill | **wait, then end the connection** |
+//! | [`P2pOutbound::send_attach_response`] | the bootstrap / atomic history prefix an attach asked for | **wait, then end the connection** — ordered with the attach reply |
+//! | [`P2pOutbound::send_terminal`] | `terminal.output` — a live PTY chunk | **wait, then end the connection** |
 //! | [`P2pOutbound::try_send_state`] | `terminal.resize`, a pong | **drop** — a level, and the peer restates it |
 //!
-//! ## The queue itself is shared
+//! ## Reserved capacity
 //!
-//! The queue, its two bounds, the three verdicts and the byte arithmetic are the
-//! same mechanism the Server's write path runs on, so they are one
-//! implementation rather than two: [`nession_runtime::outbound`]. What stays
-//! here is what is this socket's answer rather than the mechanism's — which lanes
-//! exist, what each does at the bound, the counters that record it, and
-//! [`P2pOutbound::close`].
+//! The previous queue shared one 4 MiB / 64-frame bound between all three
+//! lanes, so a scrollback prefill could occupy the byte budget and make the
+//! next resize or pong unsendable on a socket that was not unhealthy. The split
+//! here is:
+//!
+//! | class | bytes | frames |
+//! |---|---|---|
+//! | control | 512 KiB | 16 |
+//! | response | 2 MiB | 24 |
+//! | stream | 1.5 MiB | 24 |
+//!
+//! The totals still add up to [`OUTBOUND_BYTE_BUDGET`] / [`OUTBOUND_FRAME_SLOTS`].
+//! The stream class is deliberately above the 512 KiB scrollback ceiling's
+//! base64 expansion (~683 KiB), so a legitimate bootstrap is never refused as
+//! oversized.
 //!
 //! ## Why the terminal lane ends the connection rather than dropping
 //!
 //! Terminal bytes cannot be dropped — the emulator and the session would
-//! disagree about the screen — and they cannot be buffered without bound, which
-//! is the queue this replaces. What is left is the honest verdict: a client that
-//! has not drained `OUTBOUND_FRAME_SLOTS` terminal frames over
+//! disagree about the screen — and they cannot be buffered without bound. A
+//! client that has not drained [`STREAM_FRAME_SLOTS`] frames over
 //! [`DEFAULT_TERMINAL_STALL_GRACE`] is not attached in any useful sense. The
 //! caller ends the connection, and a client that was merely asleep re-attaches
 //! and is handed a redrawn screen.
 //!
-//! That is the same verdict, reached the same way, as the Server's
-//! `server::outbound::send_terminal` — and it is *also* what this socket's
-//! subscriber policy already said, one hop up: `server::websocket` detaches a
-//! subscriber whose `SUBSCRIBER_QUEUE_SLOTS` queue is full. That detach is only
-//! reachable if the forwarder ever gets to observe its receiver closing, and a
-//! forwarder parked on an unbounded socket write never does — so the stall
-//! verdict here is what makes the upper policy *effective* rather than merely
-//! stated.
+//! ## The writer and the read half
 //!
-//! ## The bound
-//!
-//! Bytes *and* frames, because they bind on different lanes: a reply is one big
-//! frame (a capture preview, or an extension read at its 1 MiB cap), so the byte
-//! budget binds first for it; a terminal frame is a few KiB, so the frame count
-//! binds first for it. Whichever is reached first is the effective bound, and
-//! both are stated rather than assumed.
-//!
-//! ## Who writes
-//!
-//! A task of its own, which owns the sink. That is not a detail of style: a
-//! producer that waits for room on a *queue* is cancel-safe, while a producer
-//! that waits for a socket under a mutex is not — a timed-out `send` on a
-//! half-written frame leaves the socket in a state nothing can repair. The
-//! writer is the only thing that touches the socket, so every lane above can
-//! have a timeout, a verdict, or a drop without one of them corrupting a frame.
+//! The writer is the only thing that touches the socket, so every lane above can
+//! have a timeout, a verdict or a drop without one of them corrupting a frame.
+//! It now runs each write under a finite deadline and settles the shared
+//! [`ConnectionLifecycle`] when one fails; the read loop races its stream
+//! against that settlement, which is what makes a stalled write end the reader
+//! too (#2179 was the half-open version of this).
 
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::{Sink, SinkExt};
+use futures_util::Sink;
 use nession_runtime::frame::WsFrame;
-use tokio::sync::{mpsc, Notify};
+use nession_runtime::lifecycle::{CloseReason, ConnectionLifecycle, WriteFailure, WriteTimeouts};
+use nession_runtime::outbound::{
+    ClassLimits, ClassifiedLimits, FrameClass, OutboundReceiver, SubmitOutcome, WaitPolicy,
+};
 use tracing::debug;
 
-use nession_runtime::outbound::{Limits, Outbound};
+use nession_runtime::outbound::Outbound;
 
-/// The one frame type and the three verdicts, re-exported so a call site names
-/// this runtime's outbound path rather than the shared crate's.
 pub use nession_runtime::outbound::{OutboundError, QueuedFrame};
 
-/// How many bytes one connection may have queued before its producers wait.
-///
-/// The largest legitimate single frame on this socket is an extension read at
-/// the contracts' 1 MiB cap, or a 2000-line scrollback capture; a budget of four
-/// of those plus a burst behind them is what one stalled browser may cost. Small
-/// on purpose: an agent serves one connection per attached client, and a node
-/// with twenty browsers is a node whose memory this multiplies by twenty.
+/// The total bytes one connection may have outstanding.
 pub const OUTBOUND_BYTE_BUDGET: usize = 4 * 1024 * 1024;
-
-/// How many frames one connection may have queued before its producers wait.
-///
-/// The byte budget alone would let a flood of tiny frames through, and the frame
-/// count alone would let four 1 MiB answers through; both are enforced. For the
-/// terminal lane it is this one that binds: 64 frames of the ~5.5 KiB a base64'd
-/// 4 KiB PTY chunk produces is ~350 KiB, well inside the budget, so the count is
-/// what a slow terminal client reaches first.
+/// The total frames one connection may have outstanding.
 pub const OUTBOUND_FRAME_SLOTS: usize = 64;
 
-/// The default stall grace: 64 terminal frames held for 15 s is a floor of
-/// ~23 KiB/s, below which a peer is not slow, it is gone. Long enough that a
-/// burst of backpressure is never mistaken for a verdict.
+/// Control's reserved byte budget: resize levels, pongs, close.
+pub const CONTROL_BYTE_BUDGET: usize = 512 * 1024;
+pub const CONTROL_FRAME_SLOTS: usize = 16;
+/// Response's byte budget: answers the peer is waiting for.
+pub const RESPONSE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
+pub const RESPONSE_FRAME_SLOTS: usize = 24;
+/// Stream's byte budget: terminal chunks and scrollback prefill.
+pub const STREAM_BYTE_BUDGET: usize = 1536 * 1024;
+pub const STREAM_FRAME_SLOTS: usize = 24;
+
+/// This socket's class bounds.
+pub const P2P_CLASS_LIMITS: ClassifiedLimits = ClassifiedLimits {
+    control: ClassLimits {
+        bytes: CONTROL_BYTE_BUDGET,
+        frames: CONTROL_FRAME_SLOTS,
+    },
+    response: ClassLimits {
+        bytes: RESPONSE_BYTE_BUDGET,
+        frames: RESPONSE_FRAME_SLOTS,
+    },
+    stream: ClassLimits {
+        bytes: STREAM_BYTE_BUDGET,
+        frames: STREAM_FRAME_SLOTS,
+    },
+};
+
+const _: () = assert!(
+    CONTROL_BYTE_BUDGET + RESPONSE_BYTE_BUDGET + STREAM_BYTE_BUDGET == OUTBOUND_BYTE_BUDGET
+);
+const _: () = assert!(
+    CONTROL_FRAME_SLOTS + RESPONSE_FRAME_SLOTS + STREAM_FRAME_SLOTS == OUTBOUND_FRAME_SLOTS
+);
+
+/// The default stall grace: 24 stream frames held for 15 s is a floor of
+/// ~20 KiB/s, below which a peer is not slow, it is gone.
 pub const DEFAULT_TERMINAL_STALL_GRACE: Duration = Duration::from_secs(15);
 
 /// The name this runtime's outbound path puts on its own log lines.
-///
-/// This agent runs two independent connections, and the Server's write path is a
-/// third: see `nession_runtime::outbound`'s module docs.
 const NAME: &str = "peer-to-peer outbound";
 
-/// What a caller can see about one connection's outbound path (#961: "metrics /
-/// logging can observe queue saturation, in-flight count, per-key queue depth").
-///
-/// The per-key half of that sentence lives with the keyed lane
-/// (`nession_runtime::lane`'s `KeySnapshot`), which is the only place a key
-/// exists. What is observable here is the *write* path: how much is queued, how
-/// often a producer had to wait for room, and how many frames each non-waiting
-/// lane refused.
+/// What a caller can see about one connection's outbound path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct OutboundSnapshot {
-    /// Bytes currently queued, including the frame being written.
     pub queued_bytes: usize,
-    /// Frames currently queued, including the frame being written.
     pub queued_frames: usize,
-    /// The bounds `queued_*` move within.
+    pub in_flight_frames: usize,
     pub byte_budget: usize,
     pub frame_slots: usize,
-    /// Reply-lane sends that found the queue full and waited for room.
+    pub control_bytes: usize,
+    pub control_frames: usize,
+    pub response_bytes: usize,
+    pub response_frames: usize,
+    pub stream_bytes: usize,
+    pub stream_frames: usize,
     pub awaited: u64,
-    /// Terminal-lane sends that hit the stall grace.
     pub stalled_terminals: u64,
     /// State-lane sends dropped because the queue was full.
     pub dropped_state: u64,
-    /// Whether this connection's write path has been closed.
+    /// Frames refused because they exceeded their class's supported maximum.
+    pub too_large: u64,
+    /// Whether this connection has been settled.
     pub closed: bool,
+    /// The settlement verdict, once there is one.
+    pub close_reason: Option<CloseReason>,
+    /// Process-wide aggregate accounting.
+    pub process: nession_runtime::outbound::ProcessSnapshot,
 }
 
 /// The sending half of one connection's outbound path.
-///
-/// Cloneable and shared: the reader, every lane's task, the terminal
-/// forwarders, the resize reporter and the control-mode output task all hold
-/// one. They are not interchangeable producers — which is why the constructor
-/// does not hand out a bare `send`, and why each caller has to say which *class*
-/// of message it is sending.
 #[derive(Clone)]
 pub struct P2pOutbound {
     queue: Outbound,
     counters: Arc<Counters>,
-    /// Signalled when the connection should stop being written to. See
-    /// [`Self::close`].
-    stop: Arc<Notify>,
-    closed: Arc<AtomicBool>,
+    lifecycle: Arc<ConnectionLifecycle>,
+    timeouts: WriteTimeouts,
 }
 
 #[derive(Default)]
@@ -159,131 +154,148 @@ struct Counters {
 
 impl P2pOutbound {
     /// A connection's outbound path, and the receiver its writer drains.
-    pub fn new() -> (Self, mpsc::Receiver<QueuedFrame>) {
+    pub fn new() -> (Self, OutboundReceiver) {
         Self::with_terminal_grace(DEFAULT_TERMINAL_STALL_GRACE)
     }
 
-    /// The same, with a different stall grace — the one policy number a test
-    /// needs to differ on, since waiting out the production grace is waiting out
-    /// the calendar.
-    pub fn with_terminal_grace(grace: Duration) -> (Self, mpsc::Receiver<QueuedFrame>) {
-        let (queue, rx) = Outbound::new(
-            NAME,
-            Limits {
-                bytes: OUTBOUND_BYTE_BUDGET,
-                frames: OUTBOUND_FRAME_SLOTS,
-            },
-            grace,
-        );
+    /// The same, with a different stall grace.
+    pub fn with_terminal_grace(grace: Duration) -> (Self, OutboundReceiver) {
+        Self::with_lifecycle(grace, ConnectionLifecycle::new(1))
+    }
+
+    /// The same, with an explicit lifecycle (a connection generation that the
+    /// broker and the relay can fence against).
+    pub fn with_lifecycle(
+        grace: Duration,
+        lifecycle: Arc<ConnectionLifecycle>,
+    ) -> (Self, OutboundReceiver) {
+        let (queue, rx) = Outbound::new(NAME, P2P_CLASS_LIMITS, grace);
         (
             Self {
                 queue,
                 counters: Arc::new(Counters::default()),
-                stop: Arc::new(Notify::new()),
-                closed: Arc::new(AtomicBool::new(false)),
+                lifecycle,
+                timeouts: WriteTimeouts::default(),
             },
             rx,
         )
     }
 
-    /// Send a frame the peer is waiting for: the answer to a request that
-    /// arrived on this connection.
-    ///
-    /// **Waits for room; never drops.** This is the lane #961 is emphatic about
-    /// — "不可丢的 command response 不允许静默 drop" — and waiting is what makes
-    /// that true rather than merely likely: there is no path through this method
-    /// that loses the frame. What the wait costs is bounded, and the bound is not
-    /// here: a task parked in this method holds its slot in whatever lane ran it
-    /// (`nession_runtime::lane`), so a peer that never drains eventually fills
-    /// its lane and stops the connection from reading — which is the
-    /// backpressure, one lane deeper.
+    /// Send a frame the peer is waiting for. Waits for room until the
+    /// connection closes; never silently drops.
     pub async fn send_reply(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_reply(msg).await
     }
 
-    /// Forward one chunk of terminal output.
-    ///
-    /// Same lane as [`Self::send_reply`] up to the point where waiting stops
-    /// being reasonable. Terminal output has the bottleneck a reply does not: it
-    /// is *steady* — a busy session produces it whether or not anybody is
-    /// watching — so a peer that has stopped draining does not park a producer
-    /// that was going to finish anyway, it pins one forwarder per attached
-    /// session indefinitely, and behind them the PTY readers.
-    ///
-    /// So this waits for room, and gives up after the stall grace. `Stalled` is
-    /// the caller's cue to end the connection — see this module's docs for why
-    /// that is the only honest answer left, and [`Self::close`] for how.
+    /// Forward one chunk of terminal output. Waits for room up to the stall
+    /// grace, then reports `Stalled`.
     pub async fn send_terminal(&self, msg: WsFrame) -> Result<(), OutboundError> {
         self.queue.send_terminal(msg).await
     }
 
-    /// Send a frame that reports a *level*: `terminal.resize`, and the pong that
-    /// answers a ping.
+    /// Send the one-off history a client asked for on attach.
     ///
-    /// **Dropped when there is no room.** A resize is a level, not an edge — a
-    /// client too far behind to accept one is too far behind to render the frame
-    /// it changes, and it restates its own size when its viewport moves or when
-    /// it re-attaches. `#961` names this class explicitly ("可合并的高频状态(如
-    /// resize)允许 coalesce"). A pong rides the same lane for the same reason:
-    /// the peer's next ping restates the question, and a connection that cannot
-    /// take a pong has nothing left to keep alive anyway.
+    /// The bootstrap (and the atomic output prefix that precedes it) is a
+    /// **response to the attach**, not live stream data: it must be written
+    /// before the attach's `ok` reply (`#321`), and the response class is the
+    /// only class that shares the attach reply's FIFO. Putting it on the stream
+    /// class lets the scheduler's response protection overtake it, which is the
+    /// regression this method exists to prevent.
+    ///
+    /// It keeps the terminal stall policy — a finite wait — because a client
+    /// that cannot drain its snapshot will not drain the session behind it.
+    pub async fn send_attach_response(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.send_response_class(msg).await
+    }
+
+    /// Send a terminal-input acknowledgement before its request's `ok` reply.
+    ///
+    /// The ACK is the frame a client's input cursor advances on. It shares its
+    /// exchange with the input request's reply, so it must stay in the same
+    /// FIFO: the response class's protection would otherwise overtake it and a
+    /// client reading in order would see the *previous* cursor. Same class as
+    /// the reply, still non-dropping and still bounded by the stall grace.
+    pub async fn send_input_ack(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.send_response_class(msg).await
+    }
+
+    /// Submit on the non-dropping response class with the terminal stall grace.
+    async fn send_response_class(&self, msg: WsFrame) -> Result<(), OutboundError> {
+        self.queue
+            .submit(
+                FrameClass::Response,
+                self.queue.current_generation(),
+                msg,
+                WaitPolicy::Finite(DEFAULT_TERMINAL_STALL_GRACE),
+            )
+            .await
+            .into_result()
+    }
+
+    /// Send a frame that reports a *level*: `terminal.resize`, a pong.
+    ///
+    /// **Dropped when there is no room.** A resize is a level, not an edge, and
+    /// the peer restates it. `#961` names this class explicitly.
     pub fn try_send_state(&self, msg: WsFrame) -> Result<(), OutboundError> {
-        self.queue.try_send(msg).map_err(|e| match e {
-            OutboundError::Saturated => self.note_no_room(),
-            e => e,
-        })
+        match self.queue.try_submit(FrameClass::Control, msg) {
+            SubmitOutcome::Accepted => Ok(()),
+            SubmitOutcome::Refused(OutboundError::Saturated) => {
+                self.counters.dropped_state.fetch_add(1, Ordering::Relaxed);
+                debug!(
+                    "{}: no room for a state frame ({} byte(s) outstanding of {}); \
+                     dropped — the peer restates it",
+                    NAME,
+                    self.queue.queued_bytes(),
+                    CONTROL_BYTE_BUDGET
+                );
+                Err(OutboundError::Saturated)
+            }
+            SubmitOutcome::Refused(error) => Err(error),
+            SubmitOutcome::Closed => Err(OutboundError::Closed),
+        }
+    }
+
+    /// Submit one classified frame with an explicit generation and wait policy.
+    /// The adapter's test and diagnostic seam.
+    pub async fn submit_classified(
+        &self,
+        class: FrameClass,
+        generation: u64,
+        msg: WsFrame,
+        wait: WaitPolicy,
+    ) -> SubmitOutcome {
+        self.queue.submit(class, generation, msg, wait).await
+    }
+
+    pub fn current_generation(&self) -> u64 {
+        self.queue.current_generation()
     }
 
     /// Stop writing to this connection and drop the socket.
     ///
-    /// The verdict a stalled terminal lane delivers, and the one place a
-    /// *caller* can end a connection whose socket it does not own. It is a drop
-    /// rather than a `Close` frame on purpose, and for the reason
-    /// `server::websocket` records for the same decision: a `Close` sent through
-    /// the queue would have to wait for room in exactly the queue this peer is
-    /// not draining, so the frame that says "you are not reading" would be the
-    /// one that never gets written.
-    ///
-    /// It lives here rather than in the shared queue because it is this socket's
-    /// policy: the Server has no such caller, and its connection ends by dropping
-    /// the socket (`#961-F`).
-    ///
-    /// The writer stops at its next opportunity — before its next frame, or when
-    /// the frame it is writing completes — and the peer sees the socket close.
-    ///
-    /// **The reader does not necessarily end with it.** This used to claim it
-    /// did ("its stream ends"), and that assumption is what left a relayed
-    /// subscriber half-open (#2179): the writer was parked in a socket write
-    /// the peer was not reading, so it could not stop and drop the sink, and
-    /// the read loop waited for a frame that was never coming. The connection
-    /// then delivered nothing and told nobody. The read loop therefore races
-    /// its stream against [`Self::wait_closed`], and its `serve` caller aborts
-    /// the writer — cancelling the parked write and dropping the socket is
-    /// what makes the close a fact the peer can observe.
+    /// A caller's way to end a connection whose socket it does not own. It is a
+    /// drop rather than a queued `Close`: a close frame would wait in exactly
+    /// the queue the peer is not draining. The writer stops at its next
+    /// opportunity and the peer sees the socket close; the read loop races its
+    /// stream against [`Self::wait_closed`], so it ends too.
     pub fn close(&self) {
-        self.closed.store(true, Ordering::SeqCst);
-        self.stop.notify_waiters();
+        self.queue.close();
+        self.lifecycle.settle(CloseReason::LocalClose);
     }
 
-    /// Resolve once [`Self::close`] has been called, including when it was
-    /// called before this future was first polled.
-    ///
-    /// The registration is enabled *before* the second check so a `close()`
-    /// landing between the two is not a lost wake-up — the same ordering
-    /// `run_writer` uses, for the same reason.
+    /// Resolve once the connection has been settled, including when it already
+    /// was.
     pub async fn wait_closed(&self) {
-        let stop = self.stop.notified();
-        tokio::pin!(stop);
-        stop.as_mut().enable();
-        if self.is_closed() {
-            return;
-        }
-        stop.await;
+        self.lifecycle.wait_cancelled().await;
     }
 
-    /// Whether [`Self::close`] has been called on this connection.
+    /// Whether this connection has been settled.
     pub fn is_closed(&self) -> bool {
-        self.closed.load(Ordering::SeqCst)
+        self.lifecycle.is_settled()
+    }
+
+    pub fn lifecycle(&self) -> &Arc<ConnectionLifecycle> {
+        &self.lifecycle
     }
 
     /// What this connection's outbound path is doing, for logging and tests.
@@ -292,77 +304,64 @@ impl P2pOutbound {
         OutboundSnapshot {
             queued_bytes: queue.queued_bytes,
             queued_frames: queue.queued_frames,
+            in_flight_frames: queue.in_flight_frames,
             byte_budget: queue.byte_budget,
             frame_slots: queue.frame_slots,
+            control_bytes: queue.control_bytes,
+            control_frames: queue.control_frames,
+            response_bytes: queue.response_bytes,
+            response_frames: queue.response_frames,
+            stream_bytes: queue.stream_bytes,
+            stream_frames: queue.stream_frames,
             awaited: queue.awaited,
             stalled_terminals: queue.stalled_terminals,
             dropped_state: self.counters.dropped_state.load(Ordering::Relaxed),
+            too_large: queue.too_large,
             closed: self.is_closed(),
+            close_reason: self.lifecycle.reason(),
+            process: queue.process,
         }
     }
 
-    fn note_no_room(&self) -> OutboundError {
-        self.counters.dropped_state.fetch_add(1, Ordering::Relaxed);
-        debug!(
-            "{}: no room for a state frame ({} byte(s) queued of {}); \
-             dropped — the peer restates it",
-            NAME,
-            self.queue.queued_bytes(),
-            OUTBOUND_BYTE_BUDGET
-        );
-        OutboundError::Saturated
+    fn settle_write(&self, failure: &WriteFailure) {
+        self.lifecycle.settle(match failure {
+            WriteFailure::Timeout => CloseReason::WriteTimeout,
+            WriteFailure::Sink(_) => CloseReason::WriteError,
+        });
     }
 }
 
-/// The only thing that touches the socket: drain the queue onto it, until the
-/// connection is closed or the socket fails.
+/// The only thing that touches the socket: drain the scheduler onto it until
+/// the connection is settled or the socket fails.
 ///
-/// Dropping this task drops the sink, which is what closes the peer's socket —
-/// so "the writer stopped" and "the connection ended" are the same event, and
-/// nothing else has to be told.
-///
-/// Generic over the sink rather than naming the connection's own type: what this
-/// function implements is a *policy* about a queue, and the socket it drains it
-/// onto is the caller's business. (`websocket.rs` splits the upgraded
-/// `AxumWebSocket` and hands the write half here; that transport does not have
-/// to be visible for this to work, and it is not.)
-///
-/// Not shared with the Server's writer, and deliberately: the Server's is a
-/// `select!` against a ping ticker it has to keep writing through a saturated
-/// business queue, which is a different job. What the two share is the queue
-/// ([`nession_runtime::outbound`]), and that is the part that had to be one
-/// thing.
-pub async fn run_writer<S>(mut sink: S, mut rx: mpsc::Receiver<QueuedFrame>, outbound: P2pOutbound)
+/// Dropping this task drops the sink, which is what closes the peer's socket, so
+/// "the writer stopped" and "the connection ended" are the same event.
+pub async fn run_writer<S>(mut sink: S, mut rx: OutboundReceiver, outbound: P2pOutbound)
 where
     S: Sink<WsFrame> + Unpin,
+    S::Error: std::fmt::Display,
 {
+    let timeouts = outbound.timeouts;
     loop {
         if outbound.is_closed() {
             break;
         }
-        // Registered before the check above is *repeated* below, so a `close`
-        // that lands between the two is not a lost wake-up.
-        let stop = outbound.stop.notified();
-        tokio::pin!(stop);
-        stop.as_mut().enable();
-
-        if outbound.is_closed() {
-            break;
-        }
-
         tokio::select! {
-            _ = &mut stop => break,
+            _ = outbound.lifecycle.wait_cancelled() => break,
             frame = rx.recv() => {
                 let Some(frame) = frame else { break };
                 // Split so the budget claim is released *after* the write, not
-                // before it: `budget` stays alive across the await and drops at
+                // before it: the permits stay alive across the await and drop at
                 // the end of the arm.
-                let QueuedFrame { message, budget } = frame;
-                let written = sink.send(message).await;
+                let QueuedFrame { message, budget, .. } = frame;
+                let written =
+                    nession_runtime::lifecycle::write_frame(&mut sink, message, timeouts.write)
+                        .await;
                 drop(budget);
-                if written.is_err() {
-                    // The peer is gone. Nothing to say to it, and the reading
-                    // half finds out when its own stream ends.
+                if let Err(failure) = written {
+                    // The peer is gone or unhealthy. Record why, and let the
+                    // read loop's cancellation race end that half.
+                    outbound.settle_write(&failure);
                     break;
                 }
             }
@@ -374,50 +373,54 @@ where
 mod tests {
     use super::*;
 
-    /// The sibling of `a_state_frame_is_dropped_when_the_queue_is_full` in the
-    /// Server's copy, and the half that is this runtime's: the state lane, the
-    /// counter that says it dropped, and whether the connection was closed.
-    ///
-    /// The mechanism — the two bounds, the three verdicts, the oversized frame,
-    /// the budget released by the writer — is tested where it lives
-    /// (`nession_runtime::outbound`).
-    #[tokio::test]
-    async fn a_state_frame_is_dropped_when_the_queue_is_full() {
-        let (outbound, _rx) = P2pOutbound::new();
-        let frame = WsFrame::Text("y".repeat(OUTBOUND_BYTE_BUDGET));
+    fn fills_control() -> WsFrame {
+        WsFrame::Text("y".repeat(CONTROL_BYTE_BUDGET - nession_runtime::outbound::FRAME_OVERHEAD))
+    }
 
-        assert_eq!(outbound.try_send_state(frame.clone()), Ok(()));
+    /// The state lane is this runtime's policy: dropped at its own class bound,
+    /// counted, and independent of the response/stream budgets.
+    #[tokio::test]
+    async fn a_state_frame_is_dropped_when_the_control_class_is_full() {
+        let (outbound, _rx) = P2pOutbound::new();
+
+        assert_eq!(outbound.try_send_state(fills_control()), Ok(()));
         assert_eq!(
-            outbound.try_send_state(frame),
-            Err(OutboundError::Saturated),
-            "the second frame cannot fit in a budget already charged in full"
+            outbound.try_send_state(fills_control()),
+            Err(OutboundError::Saturated)
         );
         let snapshot = outbound.snapshot();
         assert_eq!(snapshot.dropped_state, 1);
-        assert_eq!(snapshot.queued_frames, 1);
-        assert_eq!(snapshot.queued_bytes, OUTBOUND_BYTE_BUDGET);
+        assert_eq!(snapshot.control_frames, 1);
+        assert_eq!(snapshot.control_bytes, CONTROL_BYTE_BUDGET);
+        assert_eq!(snapshot.response_bytes, 0);
+        assert_eq!(snapshot.stream_bytes, 0);
     }
 
-    /// `close` is a fact every handle can read, which is what a caller checks
-    /// before deciding whether a failed send is worth retrying.
+    /// A frame beyond the class maximum is refused, not clamped.
     #[tokio::test]
-    async fn close_is_visible_to_every_handle() {
+    async fn an_oversized_state_frame_is_refused() {
+        let (outbound, _rx) = P2pOutbound::new();
+        let error = outbound
+            .try_send_state(WsFrame::Text("x".repeat(CONTROL_BYTE_BUDGET)))
+            .expect_err("a frame beyond the control maximum cannot be charged as if smaller");
+        assert!(matches!(error, OutboundError::TooLarge { .. }));
+        assert_eq!(outbound.snapshot().too_large, 1);
+    }
+
+    /// `close` is a fact every handle can read, and it carries a reason.
+    #[tokio::test]
+    async fn close_is_visible_to_every_handle_and_carries_a_reason() {
         let (outbound, _rx) = P2pOutbound::new();
         let clone = outbound.clone();
         assert!(!clone.is_closed());
         outbound.close();
         assert!(clone.is_closed());
+        assert_eq!(clone.lifecycle().reason(), Some(CloseReason::LocalClose));
         assert!(outbound.snapshot().closed);
     }
 
-    /// The read loop's wake-up (#2179).
-    ///
     /// `close` has to be observable by a task that is *waiting on something
-    /// else* — a socket read that may never produce a frame — or the
-    /// connection stays open after the writer could not stop. Two cases: a
-    /// close that arrives while the waiter is parked, and one that arrives
-    /// before the waiter ever polls. The second is the lost-wake-up case the
-    /// registration-before-check ordering exists for.
+    /// else* (#2179), including when it arrived before the waiter polled.
     #[tokio::test]
     async fn wait_closed_resolves_when_close_arrives_and_when_it_already_did() {
         let (outbound, _rx) = P2pOutbound::new();
@@ -436,8 +439,6 @@ mod tests {
             .expect("close must wake a parked reader")
             .expect("the waiter must not panic");
 
-        // Already closed: the first poll must return rather than wait for a
-        // second notification that will never come.
         tokio::time::timeout(Duration::from_millis(50), outbound.wait_closed())
             .await
             .expect("an already-closed outbound must resolve immediately");

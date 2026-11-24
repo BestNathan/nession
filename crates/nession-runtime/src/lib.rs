@@ -72,8 +72,16 @@
 //! permit-released-by-the-writer discipline. Its *policies* — which lane waits,
 //! which drops, which fails a request — stay with the two runtimes, and so do the
 //! counters those policies are observed by.
+//!
+//! `#4434` is the next step: [`outbound`] now has explicit Control / Response /
+//! Stream classes with reserved capacity, exact (unclamped) accounting, a
+//! bounded fair scheduler and process-wide aggregate counters; [`lifecycle`]
+//! owns the generation-fenced one-shot settlement and the finite write/flush
+//! close deadlines the writer runs under. The adapters still choose *which*
+//! class a given producer's frame is — that remains runtime policy.
 
 pub mod frame;
 pub mod ingress;
 pub mod lane;
+pub mod lifecycle;
 pub mod outbound;

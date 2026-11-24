@@ -40,20 +40,27 @@ pub struct ManagedImageObjectGrant {
     pub media_type: String,
     /// Exact byte count, verified by both sides.
     pub size_bytes: u64,
-    /// Authorized route, `/images/blobs/<digest>`.
+    /// Authorized route. A Tag-reachable catalog object (#4250) carries a
+    /// repository-scoped standard OCI route, `/v2/<repo>/blobs/<digest>` (a
+    /// Manifest object uses `/v2/<repo>/manifests/<digest>`); an untagged build or
+    /// digest-only legacy row keeps the bounded compatibility route
+    /// `/images/blobs/<digest>`.
     pub path: String,
 }
 
 /// One image the Agent must make ready in its authorized EROFS cache.
 ///
-/// `path` is the Server's authorized blob route for this digest. The Agent
-/// derives the absolute URL from its own configured Server address; the Server
-/// never guesses its public hostname.
+/// `path` is the Server's authorized route for this digest. The Agent derives
+/// the absolute URL from its own configured Server address; the Server never
+/// guesses its public hostname.
 ///
 /// A Manifest-aware grant sets `digest`/`path` to the resolved Manifest and
-/// fills `objects` with the Manifest, Config and EROFS descriptors it is
-/// allowed to fetch. A legacy grant leaves `objects` empty and its `digest` is
-/// the raw EROFS blob identity.
+/// fills `objects` with the Manifest, Config and EROFS (or Composite) descriptors
+/// it is allowed to fetch. A Tag-reachable catalog Manifest (#4250) is served
+/// through the standard OCI `/v2/<repo>/manifests/<digest>` route and its objects
+/// through `/v2/<repo>/blobs/<digest>`; an untagged build or digest-only legacy
+/// row keeps the bounded compatibility route `/images/blobs/<digest>`. A legacy
+/// grant leaves `objects` empty and its `digest` is the raw EROFS blob identity.
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -62,7 +69,10 @@ pub struct ManagedImageGrant {
     pub role: ManagedImageRole,
     /// `sha256:<64 lowercase hex>` of the exact bytes.
     pub digest: String,
-    /// Authorized route, `/images/blobs/<digest>`.
+    /// Authorized route. A Tag-reachable catalog Manifest (#4250) uses the
+    /// standard OCI `/v2/<repo>/manifests/<digest>`; an untagged build or
+    /// digest-only legacy row keeps the bounded compatibility route
+    /// `/images/blobs/<digest>`.
     pub path: String,
     /// `/opt/<name>` for a toolchain image; absent otherwise.
     #[serde(default, skip_serializing_if = "Option::is_none")]

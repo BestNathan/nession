@@ -9,17 +9,41 @@
 //! whose ordering is load-bearing for itself and hands the rest to one of two
 //! lanes:
 //!
-//! | lane | what is on it | at the bound |
-//! |---|---|---|
-//! | [`QueryLane`] | a read-only unit | **wait** — the reader stops reading until a slot frees |
-//! | [`KeyedLane`] | a mutation, keyed by the resource it mutates | **wait** — the reader stops reading until that key's queue frees a slot |
+//! | lane | what is on it | waiting API | non-blocking API (`#4433`) |
+//! |---|---|---|---|
+//! | [`QueryLane`] | a read-only unit | **wait** — the caller stops reading until a slot frees | **refuse** — [`QueryLane::try_dispatch`] returns [`AdmitError::Saturated`] |
+//! | [`KeyedLane`] | a mutation, keyed by the resource it mutates | **wait** — the caller stops reading until that key's queue frees a slot | **refuse** — [`KeyedLane::try_enqueue`] returns [`AdmitError::Saturated`] |
 //!
-//! Neither lane drops, and that is a property of what they carry rather than a
-//! preference: every frame on them is a request with an `id` and a caller
-//! waiting for an answer, and "the answer is never sent" is not a policy — it is
-//! a hang the peer cannot tell from a slow backend. What *is* droppable on these
-//! connections is coalesced elsewhere and deliberately (a resize, a state push;
-//! see the runtimes' outbound paths).
+//! Neither lane **silently** drops, and that is a property of what they carry
+//! rather than a preference: every frame on them is a request with an `id` and a
+//! caller waiting for an answer, and "the answer is never sent" is not a policy
+//! — it is a hang the peer cannot tell from a slow backend. What the
+//! non-blocking API refuses, it refuses *explicitly*: the caller answers the
+//! request with an overload outcome, or the connection ends if that answer
+//! cannot be delivered. What *is* droppable on these connections is coalesced
+//! elsewhere and deliberately (a resize, a state push; see the runtimes'
+//! outbound paths).
+//!
+//! ## Non-blocking admission and steady-state reaping (`#4433`)
+//!
+//! A reader must not park on a business permit: doing so stops heartbeat,
+//! control and stream processing behind an ordinary request. So the reader
+//! uses the `try_*` half, and a full lane is an outcome it answers rather than
+//! a reason it stops reading. Both halves remain available — the waiting API is
+//! still what a non-reader caller (an MCP command, a test) may use when it has
+//! nothing else to do.
+//!
+//! Three bookkeeping rules go with that:
+//!
+//! * **Reap in steady state.** A `JoinSet` keeps a finished task's record until
+//!   someone joins it. Every admission reaps what has finished, so retained
+//!   records track live work rather than the connection's message count.
+//! * **Record the end.** Panic and cancellation are counted where the task is
+//!   joined; a panicking mutation is caught inside its key's worker so the key
+//!   is released and the rest of its queue still runs.
+//! * **Refusal reserves nothing.** A refused query holds no permit; a refused
+//!   mutation holds no connection slot, no queue entry and no worker. The
+//!   shared-lane claim is released when the refusal is returned.
 //!
 //! ## Who owns the keyed lane
 //!
@@ -101,6 +125,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
+use futures_util::FutureExt;
 use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, warn};
@@ -130,6 +155,22 @@ pub struct LaneSnapshot {
     pub peak_in_flight: u64,
     /// Admissions that found the lane full and made the reader wait.
     pub admission_waits: u64,
+    /// Finished tasks the lane has reaped in steady state (`#4433`).
+    ///
+    /// A `JoinSet` keeps a finished task's record until someone joins it. A
+    /// reader that only joined at `drain`/`shutdown` retained one record per
+    /// query the connection had ever run; this is the count the steady-state
+    /// reap has removed.
+    pub reaped: u64,
+    /// Admissions refused because the caller would not wait.
+    pub refused: u64,
+    /// Tasks that ended by panicking, recorded where they were reaped.
+    pub panics: u64,
+    /// Task records still held: running plus finished-but-not-yet-reaped.
+    ///
+    /// This is the retention bound, not a count of running work. A lane that
+    /// reaps in steady state keeps it at or below `bound`.
+    pub retained: usize,
 }
 
 /// What a caller can see about a connection's keyed mutation lane.
@@ -161,6 +202,14 @@ pub struct KeySnapshot {
     /// Enqueues that found the key's queue full — or, when there is a worker
     /// budget, found it spent — and made the reader wait.
     pub admission_waits: u64,
+    /// Enqueues refused because the caller would not wait.
+    pub refused: u64,
+    /// Finished workers the lane has reaped in steady state (`#4433`).
+    pub reaped: u64,
+    /// Work that ended by panicking, recorded where it was reaped.
+    pub panics: u64,
+    /// Worker task records still held: running plus finished-but-not-yet-reaped.
+    pub retained: usize,
 }
 
 /// One line describing what a connection's lanes did, for the teardown log.
@@ -189,20 +238,44 @@ pub struct KeySnapshot {
 /// — the two together are the whole picture.
 pub fn summary(queries: &LaneSnapshot, keys: &KeySnapshot) -> String {
     format!(
-        "queries: started={} completed={} peak_in_flight={} of {} admission_waits={}; \
-         mutations: started={} completed={} queued={} deepest={} of {} admission_waits={}",
+        "queries: started={} completed={} peak_in_flight={} of {} admission_waits={} \
+         refused={} retained={} reaped={} panics={}; \
+         mutations: started={} completed={} queued={} deepest={} of {} admission_waits={} \
+         refused={} retained={} reaped={} panics={}",
         queries.started,
         queries.completed,
         queries.peak_in_flight,
         queries.bound,
         queries.admission_waits,
+        queries.refused,
+        queries.retained,
+        queries.reaped,
+        queries.panics,
         keys.started,
         keys.completed,
         keys.queued,
         keys.deepest,
         keys.depth,
         keys.admission_waits,
+        keys.refused,
+        keys.retained,
+        keys.reaped,
+        keys.panics,
     )
+}
+
+/// Why a lane refused work it did not accept (`#4433`).
+///
+/// `Saturated` is an outcome, not an error: the caller has a frame that must be
+/// answered, and the honest answer is an explicit overload rather than a
+/// reader parked on a business permit. `Closed` means the connection is over,
+/// so there is nothing left to answer.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdmitError {
+    /// The lane has no free slot/permit and this caller may not wait.
+    Saturated,
+    /// The lane's owner is gone; the connection must end.
+    Closed,
 }
 
 #[derive(Default)]
@@ -211,6 +284,9 @@ struct QueryCounters {
     completed: AtomicU64,
     peak_in_flight: AtomicU64,
     admission_waits: AtomicU64,
+    refused: AtomicU64,
+    reaped: AtomicU64,
+    panics: AtomicU64,
 }
 
 /// The read-only frames one connection has in flight.
@@ -252,13 +328,64 @@ impl QueryLane {
     where
         F: Future<Output = ()> + Send + 'static,
     {
+        self.reap();
         let permit = self.acquire().await;
+        self.start(work, permit);
+    }
+
+    /// Admit one query **without waiting**, or refuse it (`#4433`).
+    ///
+    /// This is the admission a reader uses: a full lane is an outcome the
+    /// caller answers explicitly, not a reason to stop reading. The work is
+    /// dropped on refusal, before it is polled, so nothing of it happens.
+    pub fn try_dispatch<F>(&mut self, work: F) -> Result<(), AdmitError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.reap();
+        let permit = match Arc::clone(&self.permits).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                self.counters.refused.fetch_add(1, Ordering::Relaxed);
+                debug!(
+                    "{}query lane is full ({} in flight of {}); refusing the frame explicitly",
+                    self.label,
+                    self.in_flight(),
+                    self.bound
+                );
+                return Err(AdmitError::Saturated);
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => return Err(AdmitError::Closed),
+        };
+        self.start(work, Some(permit));
+        Ok(())
+    }
+
+    /// Count and spawn one already-admitted query.
+    fn start<F>(&mut self, work: F, permit: Option<OwnedSemaphorePermit>)
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
         self.counters.started.fetch_add(1, Ordering::Relaxed);
         self.counters
             .peak_in_flight
             .fetch_max(self.in_flight() as u64, Ordering::Relaxed);
         self.tasks
             .spawn(run(work, permit, Arc::clone(&self.counters)));
+    }
+
+    /// Reap finished tasks without waiting (`#4433`).
+    ///
+    /// Called on every admission so the retained record count tracks live work
+    /// rather than the connection's message count. A panic is logged and
+    /// counted here, which is the only place it is visible.
+    fn reap(&mut self) {
+        while let Some(joined) = self.tasks.try_join_next() {
+            self.counters.reaped.fetch_add(1, Ordering::Relaxed);
+            if report(&joined, self.label, "query") == Outcome::Panicked {
+                self.counters.panics.fetch_add(1, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Wait for every query in flight.
@@ -269,7 +396,10 @@ impl QueryLane {
     /// frame ordered too.
     pub async fn drain(&mut self) {
         while let Some(joined) = self.tasks.join_next().await {
-            report(&joined, self.label, "query");
+            self.counters.reaped.fetch_add(1, Ordering::Relaxed);
+            if report(&joined, self.label, "query") == Outcome::Panicked {
+                self.counters.panics.fetch_add(1, Ordering::Relaxed);
+            }
         }
     }
 
@@ -301,6 +431,10 @@ impl QueryLane {
             completed: self.counters.completed.load(Ordering::Relaxed),
             peak_in_flight: self.counters.peak_in_flight.load(Ordering::Relaxed),
             admission_waits: self.counters.admission_waits.load(Ordering::Relaxed),
+            reaped: self.counters.reaped.load(Ordering::Relaxed),
+            refused: self.counters.refused.load(Ordering::Relaxed),
+            panics: self.counters.panics.load(Ordering::Relaxed),
+            retained: self.tasks.len(),
         }
     }
 
@@ -347,9 +481,25 @@ async fn run<F>(work: F, permit: Option<OwnedSemaphorePermit>, counters: Arc<Que
 where
     F: Future<Output = ()>,
 {
-    work.await;
+    // A query handler panicking must not turn its slot into a retained record
+    // forever: the slot is released and the query is counted as finished, with
+    // the panic recorded beside it (`#4433`).
+    match std::panic::AssertUnwindSafe(work).catch_unwind().await {
+        Ok(()) => {}
+        Err(_) => {
+            counters.panics.fetch_add(1, Ordering::Relaxed);
+        }
+    }
     drop(permit);
     counters.completed.fetch_add(1, Ordering::Relaxed);
+}
+
+/// How a joined task ended, for the counters at the reap.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Outcome {
+    Completed,
+    Cancelled,
+    Panicked,
 }
 
 /// Report a joined task, whichever way it ended.
@@ -357,11 +507,17 @@ where
 /// A panicked task is a bug in a handler, and the peer's own timeout is where it
 /// surfaces; this log line is the only place the panic is visible at all. A
 /// cancelled one is the connection ending, which is the design and not news.
-fn report(joined: &Result<(), tokio::task::JoinError>, label: &str, lane: &str) {
+fn report(joined: &Result<(), tokio::task::JoinError>, label: &str, lane: &str) -> Outcome {
     match joined {
-        Ok(()) => {}
-        Err(e) if e.is_panic() => error!("{label}{lane} lane: a task panicked: {e}"),
-        Err(e) => debug!("{label}{lane} lane: a task was cancelled: {e}"),
+        Ok(()) => Outcome::Completed,
+        Err(e) if e.is_panic() => {
+            error!("{label}{lane} lane: a task panicked: {e}");
+            Outcome::Panicked
+        }
+        Err(e) => {
+            debug!("{label}{lane} lane: a task was cancelled: {e}");
+            Outcome::Cancelled
+        }
     }
 }
 
@@ -446,6 +602,9 @@ struct KeyInner<K> {
     started: AtomicU64,
     completed: AtomicU64,
     admission_waits: AtomicU64,
+    refused: AtomicU64,
+    reaped: AtomicU64,
+    panics: AtomicU64,
     label: &'static str,
 }
 
@@ -491,6 +650,9 @@ where
                 started: AtomicU64::new(0),
                 completed: AtomicU64::new(0),
                 admission_waits: AtomicU64::new(0),
+                refused: AtomicU64::new(0),
+                reaped: AtomicU64::new(0),
+                panics: AtomicU64::new(0),
                 label,
             }),
             workers: Mutex::new(JoinSet::new()),
@@ -503,6 +665,7 @@ where
     /// the queue cannot grow with the message count. See this module's docs for
     /// why the waiter is the reader and what that costs.
     pub async fn enqueue(&self, key: K, work: Work) {
+        self.reap_workers().await;
         let mut work = Some(work);
         loop {
             // Register for the wake-up *before* looking, so a queue that frees
@@ -586,6 +749,82 @@ where
         }
     }
 
+    /// Queue one mutation **without waiting**, or refuse it (`#4433`).
+    ///
+    /// The atomic half of admission: the depth check, the worker-budget
+    /// reservation and the queue push happen under one lock, so a caller
+    /// either holds a slot for the whole claim or holds nothing. The work is
+    /// dropped on refusal before it is polled.
+    pub async fn try_enqueue(&self, key: K, work: Work) -> Result<(), AdmitError> {
+        self.reap_workers().await;
+        let mut work = Some(work);
+        let spawn = {
+            let mut queues = self.inner.queues.lock().await;
+            let queue = queues.entry(key.clone()).or_default();
+            if queue.pending.len() >= self.inner.depth {
+                self.inner.refused.fetch_add(1, Ordering::Relaxed);
+                debug!(
+                    "{}key lane: `{key}` is at its queue depth ({}); refusing the frame explicitly",
+                    self.inner.label, self.inner.depth
+                );
+                return Err(AdmitError::Saturated);
+            }
+            let needs_worker = !queue.worker;
+            let permit = match (&self.inner.budget, needs_worker) {
+                (Some(budget), true) => match Arc::clone(&budget.permits).try_acquire_owned() {
+                    Ok(permit) => Some(permit),
+                    Err(_) => {
+                        self.inner.refused.fetch_add(1, Ordering::Relaxed);
+                        debug!(
+                            "{}key lane: {} resources are already being mutated; refusing the \
+                             frame explicitly",
+                            self.inner.label, budget.bound
+                        );
+                        return Err(AdmitError::Saturated);
+                    }
+                },
+                _ => None,
+            };
+            let Some(queued) = work.take() else {
+                return Ok(());
+            };
+            queue.pending.push_back(queued);
+            if needs_worker {
+                queue.worker = true;
+                self.inner.started.fetch_add(1, Ordering::Relaxed);
+                Some(permit)
+            } else {
+                None
+            }
+        };
+
+        if let Some(permit) = spawn {
+            let inner = Arc::clone(&self.inner);
+            let worker_key = key;
+            let mut workers = self.workers.lock().await;
+            workers.spawn(async move {
+                let _permit = permit;
+                work_key(inner, worker_key).await
+            });
+        }
+        Ok(())
+    }
+
+    /// Reap finished workers without waiting (`#4433`).
+    ///
+    /// A worker's record otherwise lives until `drain`/`shutdown`; steady-state
+    /// reaping keeps retained records at the number of keys that are actually
+    /// active rather than every key the lane has ever served.
+    async fn reap_workers(&self) {
+        let mut workers = self.workers.lock().await;
+        while let Some(joined) = workers.try_join_next() {
+            self.inner.reaped.fetch_add(1, Ordering::Relaxed);
+            if report(&joined, self.inner.label, "key") == Outcome::Panicked {
+                self.inner.panics.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+    }
+
     /// Wait until every key's queue is empty and every worker has stopped.
     ///
     /// "Stopped" rather than "empty": a worker removes its key's entry as its
@@ -597,6 +836,18 @@ where
             tokio::pin!(room);
             room.as_mut().enable();
             if self.inner.queues.lock().await.is_empty() {
+                // The queue is empty, but the workers that emptied it may still
+                // hold finished task records. Join them: with no keys left they
+                // can only be returning, and a barrier that left retained
+                // bookkeeping behind would not be a barrier.
+                let inner = Arc::clone(&self.inner);
+                let workers = self.workers.get_mut();
+                while let Some(joined) = workers.join_next().await {
+                    inner.reaped.fetch_add(1, Ordering::Relaxed);
+                    if report(&joined, inner.label, "key") == Outcome::Panicked {
+                        inner.panics.fetch_add(1, Ordering::Relaxed);
+                    }
+                }
                 return;
             }
             room.await;
@@ -615,11 +866,15 @@ where
     /// queue (`#961-F`).
     pub async fn shutdown(&mut self, grace: Duration) {
         {
+            let inner = Arc::clone(&self.inner);
             let workers = self.workers.get_mut();
             workers.abort_all();
             let stopped = async {
                 while let Some(joined) = workers.join_next().await {
-                    report(&joined, self.inner.label, "key");
+                    inner.reaped.fetch_add(1, Ordering::Relaxed);
+                    if report(&joined, inner.label, "key") == Outcome::Panicked {
+                        inner.panics.fetch_add(1, Ordering::Relaxed);
+                    }
                 }
             };
             if tokio::time::timeout(grace, stopped).await.is_err() {
@@ -636,15 +891,27 @@ where
 
     /// What this lane is doing, for logging and tests.
     pub async fn snapshot(&self) -> KeySnapshot {
-        let queues = self.inner.queues.lock().await;
+        let (keys, queued, deepest) = {
+            let queues = self.inner.queues.lock().await;
+            (
+                queues.len(),
+                queues.values().map(|q| q.pending.len()).sum(),
+                queues.values().map(|q| q.pending.len()).max().unwrap_or(0),
+            )
+        };
+        let retained = self.workers.lock().await.len();
         KeySnapshot {
-            keys: queues.len(),
-            queued: queues.values().map(|q| q.pending.len()).sum(),
+            keys,
+            queued,
             depth: self.inner.depth,
-            deepest: queues.values().map(|q| q.pending.len()).max().unwrap_or(0),
+            deepest,
             started: self.inner.started.load(Ordering::Relaxed),
             completed: self.inner.completed.load(Ordering::Relaxed),
             admission_waits: self.inner.admission_waits.load(Ordering::Relaxed),
+            refused: self.inner.refused.load(Ordering::Relaxed),
+            reaped: self.inner.reaped.load(Ordering::Relaxed),
+            panics: self.inner.panics.load(Ordering::Relaxed),
+            retained,
         }
     }
 }
@@ -677,7 +944,16 @@ where
 
         match next {
             Some(work) => {
-                work.await;
+                // A panic in one mutation must not strand the rest of its key's
+                // queue or leave `worker: true` behind a dead task. Catch it
+                // here, record it, and continue draining the key.
+                match std::panic::AssertUnwindSafe(work).catch_unwind().await {
+                    Ok(()) => {}
+                    Err(_) => {
+                        inner.panics.fetch_add(1, Ordering::Relaxed);
+                        error!("{}key lane: `{key}` mutation panicked", inner.label);
+                    }
+                }
                 inner.completed.fetch_add(1, Ordering::Relaxed);
             }
             None => return,
@@ -734,6 +1010,8 @@ struct SharedKeys<K> {
     /// and a mutation is not something to run on behalf of someone who left.
     ended: Arc<Ended>,
     admission_waits: AtomicU64,
+    /// Refusals this connection saw, at its own slot or at the shared lane.
+    refused: AtomicU64,
     label: &'static str,
 }
 
@@ -798,6 +1076,45 @@ where
             drop(permit);
         });
         self.lane.enqueue(key, admitted).await;
+    }
+
+    /// Admit one mutation **without waiting**, or refuse it (`#4433`).
+    ///
+    /// The connection's slot is claimed first and then the shared lane's own
+    /// depth is checked atomically. A refusal at either bound drops the claim,
+    /// so a refused mutation reserves nothing — no slot, no queue entry, no
+    /// worker.
+    async fn try_enqueue(&self, key: K, work: Work) -> Result<(), AdmitError> {
+        let permit = match Arc::clone(&self.slots).try_acquire_owned() {
+            Ok(permit) => permit,
+            Err(tokio::sync::TryAcquireError::NoPermits) => {
+                self.refused.fetch_add(1, Ordering::Relaxed);
+                debug!(
+                    "{}key lane: this connection already has {} mutation(s) in flight; \
+                     refusing the frame explicitly",
+                    self.label, self.bound
+                );
+                return Err(AdmitError::Saturated);
+            }
+            Err(tokio::sync::TryAcquireError::Closed) => return Err(AdmitError::Closed),
+        };
+        let ended = Arc::clone(&self.ended);
+        let admitted: Work = Box::pin(async move {
+            if !ended.is_ended() {
+                tokio::select! {
+                    () = work => {}
+                    () = ended.wait() => {}
+                }
+            }
+            drop(permit);
+        });
+        match self.lane.try_enqueue(key, admitted).await {
+            Ok(()) => Ok(()),
+            Err(error) => {
+                self.refused.fetch_add(1, Ordering::Relaxed);
+                Err(error)
+            }
+        }
     }
 
     /// Take a slot, waiting for one if this connection has none left.
@@ -944,6 +1261,7 @@ where
                 bound,
                 ended: Arc::new(Ended::default()),
                 admission_waits: AtomicU64::new(0),
+                refused: AtomicU64::new(0),
                 label,
             }),
         }
@@ -964,6 +1282,25 @@ where
         match &self.keys {
             Keys::Own(lane) => lane.enqueue(key, work).await,
             Keys::Shared(shared) => shared.enqueue(key, work).await,
+        }
+    }
+
+    /// Admit one read-only frame **without waiting**, or refuse it (`#4433`).
+    ///
+    /// The reader's method: a full lane is an explicit outcome to answer, not a
+    /// reason to stop reading. The work is dropped on refusal, before it runs.
+    pub fn try_query<F>(&mut self, work: F) -> Result<(), AdmitError>
+    where
+        F: Future<Output = ()> + Send + 'static,
+    {
+        self.queries.try_dispatch(work)
+    }
+
+    /// Queue one mutation **without waiting**, or refuse it (`#4433`).
+    pub async fn try_key(&mut self, key: K, work: Work) -> Result<(), AdmitError> {
+        match &self.keys {
+            Keys::Own(lane) => lane.try_enqueue(key, work).await,
+            Keys::Shared(shared) => shared.try_enqueue(key, work).await,
         }
     }
 
@@ -2275,5 +2612,223 @@ behalf of a peer that is gone"
             "the neighbour's parked mutation did not finish once its gate opened: the \
 lane it is on was ended with the connection that left"
         );
+    }
+
+    // ── Non-blocking admission and steady-state reaping (#4433) ─────────────
+
+    /// SC-01: a long-lived lane must not retain one task record per query it
+    /// has ever run. The retained count tracks the bound, not the message count.
+    #[tokio::test]
+    async fn a_hundred_thousand_queries_settle_with_bounded_retained_records() {
+        within_patience("the stress lane never settled", async {
+            let mut lane = QueryLane::new(4, "stress ");
+            for _ in 0..100_000 {
+                lane.dispatch(async {}).await;
+            }
+            lane.drain().await;
+            let snapshot = lane.snapshot();
+            assert_eq!(snapshot.started, 100_000);
+            assert_eq!(snapshot.completed, 100_000);
+            assert_eq!(snapshot.retained, 0, "finished records were not reaped");
+            assert_eq!(snapshot.in_flight, 0);
+            assert!(snapshot.peak_in_flight <= 4);
+            assert!(snapshot.reaped >= 100_000);
+        })
+        .await;
+    }
+
+    /// SC-01: 100,000 keyed mutations across changing keys, including injected
+    /// panics and a cancellation, settle with bounded queues and records.
+    ///
+    /// The keyed half of the stress: the queue depth and connection budget stay
+    /// small while the mutation count and key count move, and every completed
+    /// record, key and permit is released after quiescence — including work that
+    /// panicked and work whose worker was cancelled.
+    #[tokio::test]
+    async fn a_hundred_thousand_keyed_mutations_and_panics_settle() {
+        let body = async {
+            let mut lane = KeyedLane::new(4, "stress-key ");
+            for n in 0..100_000u64 {
+                let key = session(&format!("k{}", n % 64));
+                let work: Work = if n % 10_000 == 0 {
+                    Box::pin(async { panic!("injected stress panic") })
+                } else {
+                    Box::pin(async {})
+                };
+                lane.enqueue(key, work).await;
+            }
+            lane.drain().await;
+
+            let snapshot = lane.snapshot().await;
+            assert_eq!(snapshot.completed, 100_000);
+            assert_eq!(snapshot.panics, 10);
+            assert_eq!(snapshot.keys, 0, "a key outlived quiescence");
+            assert_eq!(snapshot.queued, 0);
+            assert_eq!(snapshot.retained, 0, "a worker record outlived quiescence");
+            assert!(snapshot.deepest <= 4);
+
+            // Cancellation settlement: a blocked worker and queued work are
+            // both ended and released by `shutdown`.
+            let held = gate();
+            lane.enqueue(
+                session("cancelled"),
+                Box::pin({
+                    let held = Arc::clone(&held);
+                    async move { pass(&held).await }
+                }),
+            )
+            .await;
+            lane.enqueue(session("cancelled"), nothing()).await;
+            lane.shutdown(Duration::from_secs(2)).await;
+
+            let snapshot = lane.snapshot().await;
+            assert_eq!(snapshot.keys, 0);
+            assert_eq!(snapshot.queued, 0);
+            assert_eq!(snapshot.retained, 0);
+        };
+
+        tokio::time::timeout(Duration::from_secs(60), body)
+            .await
+            .expect("the keyed stress lane did not settle within 60 s");
+    }
+
+    /// SC-02: a full query lane is an outcome the reader can answer, not a
+    /// reason to stop reading. `try_dispatch` must return without waiting.
+    #[tokio::test]
+    async fn a_full_query_lane_refuses_without_waiting() {
+        let mut lane = QueryLane::new(1, "refuse ");
+        let held = gate();
+        lane.dispatch({
+            let held = Arc::clone(&held);
+            async move { pass(&held).await }
+        })
+        .await;
+
+        within_patience("refusing a full lane waited instead of returning", async {
+            assert_eq!(lane.try_dispatch(async {}), Err(AdmitError::Saturated));
+        })
+        .await;
+        assert_eq!(lane.snapshot().refused, 1);
+
+        held.add_permits(1);
+        lane.drain().await;
+        assert_eq!(lane.snapshot().retained, 0);
+        assert_eq!(lane.snapshot().in_flight, 0);
+    }
+
+    /// SC-02: one connection's mutation bound refuses *that* connection and
+    /// does not spend another connection's slots.
+    #[tokio::test]
+    async fn a_connections_mutation_bound_does_not_starve_another() {
+        let mutations = Arc::new(KeyedLane::new(8, "shared "));
+        let mut first = Lanes::shared(1, Arc::clone(&mutations), 1, "conn-a ");
+        let mut second = Lanes::shared(1, Arc::clone(&mutations), 1, "conn-b ");
+
+        let held = gate();
+        first
+            .try_key(
+                session("a"),
+                Box::pin({
+                    let held = Arc::clone(&held);
+                    async move { pass(&held).await }
+                }),
+            )
+            .await
+            .expect("the first connection's slot is free");
+
+        within_patience("the first connection refused past its bound", async {
+            assert_eq!(
+                first.try_key(session("a"), nothing()).await,
+                Err(AdmitError::Saturated)
+            );
+        })
+        .await;
+
+        // The second connection still has its own slot, even though the shared
+        // lane is busy with the first connection's mutation.
+        second
+            .try_key(session("b"), nothing())
+            .await
+            .expect("a peer's bound must not spend this peer's slot");
+
+        held.add_permits(1);
+        first.drain().await;
+        second.drain().await;
+    }
+
+    /// SC-02: a full key queue refuses atomically, and a different key is still
+    /// admitted — the refusal is about one resource, not the lane.
+    #[tokio::test]
+    async fn a_full_key_queue_refuses_and_a_different_key_is_still_admitted() {
+        let mut lane = KeyedLane::new(1, "depth ");
+        let running = gate();
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+
+        lane.try_enqueue(
+            session("s"),
+            Box::pin({
+                let running = Arc::clone(&running);
+                async move {
+                    let _ = started_tx.send(());
+                    pass(&running).await;
+                }
+            }),
+        )
+        .await
+        .expect("the key is empty");
+        started_rx
+            .await
+            .expect("the worker started the first mutation");
+
+        lane.try_enqueue(session("s"), nothing())
+            .await
+            .expect("one mutation may wait behind the running one");
+        assert_eq!(
+            lane.try_enqueue(session("s"), nothing()).await,
+            Err(AdmitError::Saturated),
+            "the per-key depth must refuse rather than queue past it"
+        );
+        lane.try_enqueue(session("t"), nothing())
+            .await
+            .expect("another key is not behind this key's depth");
+
+        running.add_permits(1);
+        lane.drain().await;
+        assert_eq!(lane.snapshot().await.refused, 1);
+        assert_eq!(lane.snapshot().await.retained, 0);
+    }
+
+    /// SC-01: a panicking query is recorded and leaves no retained record.
+    #[tokio::test]
+    async fn a_panicking_query_is_recorded_and_the_lane_continues() {
+        let mut lane = QueryLane::new(1, "panic ");
+        lane.try_dispatch(async { panic!("boom") })
+            .expect("the lane is empty");
+        lane.drain().await;
+        assert_eq!(lane.snapshot().panics, 1);
+
+        lane.try_dispatch(async {})
+            .expect("the lane admitted work after the panic");
+        lane.drain().await;
+        assert_eq!(lane.snapshot().completed, 2);
+        assert_eq!(lane.snapshot().retained, 0);
+    }
+
+    /// SC-01: a panicking mutation must not strand its key or its queued work.
+    #[tokio::test]
+    async fn a_panicking_mutation_releases_its_key_for_the_next_one() {
+        let mut lane = KeyedLane::new(4, "panic-key ");
+        lane.try_enqueue(session("s"), Box::pin(async { panic!("boom") }))
+            .await
+            .expect("the key is empty");
+        lane.drain().await;
+        assert_eq!(lane.snapshot().await.panics, 1);
+
+        lane.try_enqueue(session("s"), nothing())
+            .await
+            .expect("the key must be free again after the panic");
+        lane.drain().await;
+        assert_eq!(lane.snapshot().await.completed, 2);
+        assert_eq!(lane.snapshot().await.retained, 0);
     }
 }

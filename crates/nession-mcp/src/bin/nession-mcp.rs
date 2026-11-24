@@ -98,10 +98,15 @@ async fn run(
     tls: Option<TlsAcceptor>,
     service: Arc<McpService>,
 ) -> anyhow::Result<()> {
+    // Arm SIGINT/SIGTERM once for the listener lifetime. Reconstructing the
+    // signal future after every accept/completion drops its subscription and
+    // leaves a window in which a shutdown signal can be missed (#4392).
+    let shutdown = shutdown_signal();
+    tokio::pin!(shutdown);
     let mut connections = JoinSet::new();
     loop {
         tokio::select! {
-            _ = shutdown_signal() => {
+            _ = &mut shutdown => {
                 info!("shutdown signal received; no longer accepting MCP connections");
                 break;
             }

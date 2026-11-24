@@ -621,6 +621,74 @@ No child re-imposes full regression on another. Each stage keeps the accepted
 #3494–#3500 evidence intact; a decision change updates this document instead
 of spawning a competing explanation.
 
+## Proprietary Blob transport retirement (#4250)
+
+[#4250](https://github.com/BestNathan/nession/issues/4250) is the explicitly
+deferred #4090 cutover: supported Session image acquisition moves from the
+proprietary `/images/blobs/{digest}` transfer endpoint to the standard OCI
+Distribution `/v2/` API, and the legacy route is retired in a separately
+reviewable slice once parity is accepted. It is a transport-endpoint migration,
+not the #3496 legacy storage migration, and it adds no second CAS, SDK or token
+authority.
+
+**Cutover rule.** The `/v2/` Registry exposes an immutable digest only when a
+repository's Tags reach it through descriptor edges (including Index children
+and the referenced Composite closure). The Server therefore grants a
+repository-scoped `/v2/{repo}/manifests/{digest}` route (objects on
+`/v2/{repo}/blobs/{digest}`) exactly when the resolved Manifest is Tag-reachable
+in some repository, derived by `catalog::reference::v2_repository_for_manifest`
+from the same Tag roots and descriptor edges as the Registry's reachability
+fence. An untagged build or a digest-only legacy row has no such repository and
+keeps the bounded compatibility route `/images/blobs/{digest}`. The reachability
+fence itself is unchanged: a pin is still GC protection, not a `/v2/` root, and
+the cutover grants no access `/v2/` already denies.
+
+**Production caller inventory** (owners, not a volatile line list; the exact
+source is the #4250 delivery PR head):
+
+| Caller | Responsibility | Route after cutover |
+|---|---|---|
+| `nession-server::image::resolve_image_for` | Issues the Session/Project/Managed/Sandbox Manifest closure grant and object routes | `/v2/` when Tag-reachable; compatibility route otherwise |
+| `nession-server::image::legacy_image_resolution` | Digest-addressed ready EROFS row with no catalog identity | Bounded compatibility route (supported-client obligation) |
+| `nession-server::handler::server_session_sandbox_images` / `server_session_create_v1` | Project the resolved closure into the Server→Agent grant | Derive the grant route from the authorized Manifest object route |
+| `nession-agent::erofs_cache::resolve_grant_image` | Dispatch a grant to the verified SDK/cache fetch | `/v2/` Manifest **and** Composite closure; compatibility route for legacy grants |
+| `nession-erofs::cache::fetch::{fetch_manifest_image_v2, fetch_composite_image_v2}` | The one verified fetch over `/v2/` routes | Repository-scoped; same cache/pin/digest semantics as the legacy path |
+| `nession-erofs::registry::service` + `catalog::repository_store` | The `/v2/` pull surface and its Tag-reachability fence | Unchanged; already serves Manifest and Composite closures |
+
+Web/App, MCP, CLI and Sandbox have no runtime caller of the legacy route; the
+generated Web bindings carry only the grant `path` doc projection. The legacy
+route's auth (Server Token), single-Range/ETag/resume and GC-transfer guard
+semantics in `nession-server::image::http` are preserved for the compatibility
+window and are the rollback surface.
+
+**Removal and rollback guards (separate slice).** After the staging parity Case
+(SC-02) is accepted, the legacy route mount is gated by the protected operator
+toggle `ServerConfig::legacy_blob_route` (`[server] legacy_blob_route`, default
+`true`), applied by the Server ingress `http_router` — the single owner of the
+mount decision. The standard `/v2/` Registry is mounted regardless of the toggle.
+
+- `legacy_blob_route = true` (default) keeps the bounded compatibility window:
+  untagged builds and digest-only legacy rows still resolve to the proprietary
+  route, while Tag-reachable catalog images already acquire through `/v2/` only.
+- `legacy_blob_route = false` is the staged removal. The proprietary route is
+  unmounted, so a migrated client holding only `/v2/` grants is unaffected and a
+  caller still asking for `/images/blobs/{digest}` receives a 404. `/v2/` continues
+  to serve approved complete closures and to deny wrong principal, wrong
+  repository and forged digest.
+- Flipping back to `true` is the fail-closed rollback: the supported legacy reader
+  returns without relaxing the Server Token or digest checks (absent/wrong token
+  stays 403, an unknown digest stays 404).
+
+The toggle is an operator configuration, never a client-negotiated capability. It
+deletes no durable blob and rewrites no Manifest identity; Session pins, resume
+and digest verification never regress. Because acquisition is `/v2/`-only, the
+persistent Agent cache and an active mount (pin) survive the removal unchanged.
+The #4250 SC-03 staging Case
+(`sc03_legacy_route_removed_with_protected_rollback`,
+`nession-server::server::websocket`) drives the real `http_router` in both toggle
+states and proves these negatives, the cache/mount preservation and the
+fail-closed rollback.
+
 ## Composition and mount delivery (#3693)
 
 The Image-Compose and runtime-composition children are separate Requirements so

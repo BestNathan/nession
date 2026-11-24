@@ -79,6 +79,15 @@ type FixtureGitHistoryRequest = {
 type FixtureGitHistoryDiffRequest = FixtureGitHistoryRequest & { path: string };
 
 /**
+ * How the held older read settles: the page it was going to answer with, a
+ * transport rejection, or a fulfilled non-ok domain answer. The last is a
+ * normal answer — the directory that was a repository no longer is — and the
+ * hook must treat it as `describeUnavailable` copy rather than a rejection
+ * (#4116).
+ */
+type HistoryOverlapRelease = 'page' | 'reject' | 'not_a_repository';
+
+/**
  * Deterministic controls the `git=history-overlap` scenario exposes (#3751),
  * extended with request evidence for the selection-ownership Case (#3767)
  * and a rejected continuation for the failure-feedback Case (#4116).
@@ -88,9 +97,11 @@ type FixtureGitHistoryDiffRequest = FixtureGitHistoryRequest & { path: string };
  * nothing — no timer decides when the stale continuation settles. Detail and
  * diff reads are recorded with the target they were addressed to and the OID
  * they named, so a Case can prove the successor was never asked about the
- * predecessor's commit. Releasing with `fail` rejects the held read instead of
- * answering it, so a Case can prove a continuation failure is visible and
- * retryable without an unhandled rejection.
+ * predecessor's commit. Releasing with `reject` rejects the held read instead
+ * of answering it, and `not_a_repository` answers it with a fulfilled non-ok
+ * domain answer — the two failure shapes the hook must surface — so a Case can
+ * prove a continuation failure is visible and retryable without an unhandled
+ * rejection.
  */
 type FixtureGitHistoryOverlapWindow = Window & {
   fixtureGitHistoryOverlap?: {
@@ -98,7 +109,7 @@ type FixtureGitHistoryOverlapWindow = Window & {
     firstPageRequests: (session: string) => number;
     olderRequests: () => number;
     olderSettled: () => boolean;
-    releaseOlder: (fail?: boolean) => void;
+    releaseOlder: (outcome?: HistoryOverlapRelease) => void;
     /** Every `git.commit` read, in order, with its target and OID. */
     commitRequests: () => readonly FixtureGitHistoryRequest[];
     /** Every commit-sourced `git.diff` read, in order. */
@@ -853,16 +864,24 @@ function historyOverlapGitSurface(): PluginSurface {
       firstPageRequests: (session: string) => state.firstPageRequests.get(session) ?? 0,
       olderRequests: () => state.olderRequests,
       olderSettled: () => state.olderSettled,
-      releaseOlder: (fail = false) => {
+      releaseOlder: (outcome: HistoryOverlapRelease = 'page') => {
         const current = state.held;
         state.held = null;
         if (!current) {
           return;
         }
-        if (fail) {
+        if (outcome === 'reject') {
           // A transport failure is a rejected read, not an error-shaped answer:
           // the hook's catch path is what the Case must observe (#4116).
           current.reject(new Error('the held older page failed'));
+        } else if (outcome === 'not_a_repository') {
+          // A fulfilled non-ok answer is a domain answer — the directory that
+          // was a repository no longer is — and takes the hook's non-ok path,
+          // not its catch path (#4116).
+          current.resolve({
+            state: 'not_a_repository',
+            message: 'the Session directory is no longer a git repository',
+          });
         } else {
           current.resolve(
             rememberHistoryOverlapPage(

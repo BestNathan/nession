@@ -738,4 +738,106 @@ describe('GitHistoryView', () => {
     expect(screen.queryByTestId('git-history-older-error')).toBeNull();
     expect(screen.getAllByTestId('git-commit-row')).toHaveLength(3);
   });
+
+  // #4116: a fulfilled non-ok answer is a domain answer, not a transport
+  // failure. It describes no page, so the loaded list and cursor stay and the
+  // same Load Older control is the retry; the reason is shown beside it.
+  it('shows a fulfilled non-OK older-page answer as a retryable error (#4116)', async () => {
+    let repositoryGone = true;
+    mockedLog.mockImplementation((request) => {
+      if (request.before === 'cursor-a') {
+        return repositoryGone
+          ? Promise.resolve({
+              state: 'not_a_repository' as const,
+              message: 'the Session directory is no longer a git repository',
+            })
+          : Promise.resolve(paged([labeled('a older', 1)]));
+      }
+      return Promise.resolve(paged([labeled('a', 1), labeled('a', 2)], 'cursor-a'));
+    });
+
+    render(<GitHistoryView ctx={ctx()} />);
+    expect(await screen.findByText('a 1')).toBeInTheDocument();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(2);
+
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(await screen.findByTestId('git-history-older-error')).toHaveTextContent(
+      'This Session is not in a git repository',
+    );
+
+    // The first page and the cursor it handed out survive the answer that
+    // described no page; the control is enabled and is itself the retry.
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(2);
+    expect(screen.getByText('a 1')).toBeInTheDocument();
+    expect(screen.getByText('a 2')).toBeInTheDocument();
+    expect(screen.getByTestId('git-history-load-more')).toBeEnabled();
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent('Load older commits');
+
+    repositoryGone = false;
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+
+    expect(await screen.findByText('a older 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('git-history-older-error')).toBeNull();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(3);
+  });
+
+  // #4116 SC-02 shape: the non-ok path reaches the same fence as rejection. A
+  // late answer for a replaced target may neither publish its copy nor clear
+  // the successor's loading state.
+  it('a late non-OK older-page answer for a stale target cannot publish into the successor (#4116)', async () => {
+    const heldOlder = deferred<GitLogResponse>();
+    const heldSuccessor = deferred<GitLogResponse>();
+    mockedLog.mockImplementation((request) => {
+      if (request.session === session.session_id && request.before === 'cursor-a') {
+        return heldOlder.promise;
+      }
+      if (request.session === otherSession.session_id) {
+        return request.before
+          ? heldSuccessor.promise
+          : Promise.resolve(paged([labeled('b', 1), labeled('b', 2)], 'cursor-b'));
+      }
+      return Promise.resolve(paged([labeled('a', 1), labeled('a', 2)], 'cursor-a'));
+    });
+
+    const view = render(<GitHistoryView ctx={ctx()} />);
+    await screen.findByTestId('git-commit-list');
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent(
+      'Loading older commits…',
+    );
+
+    // The Session moves while A's older read is still in flight. B's first
+    // page establishes B's list and B's own continuation.
+    view.rerender(<GitHistoryView ctx={ctx(otherSession)} />);
+    expect(await screen.findByText('b 1')).toBeInTheDocument();
+    await userEvent.click(screen.getByTestId('git-history-load-more'));
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent(
+      'Loading older commits…',
+    );
+
+    // A's continuation now fulfils with a non-ok answer. It belongs to A's
+    // list, not B's — B must see neither the copy nor a loading-state change.
+    await act(async () => {
+      heldOlder.resolve({
+        state: 'not_a_repository',
+        message: 'the Session directory is no longer a git repository',
+      });
+    });
+
+    expect(screen.queryByTestId('git-history-older-error')).toBeNull();
+    expect(screen.getByTestId('git-history-load-more')).toHaveTextContent(
+      'Loading older commits…',
+    );
+    expect(screen.getByTestId('git-history-load-more')).toBeDisabled();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(2);
+
+    // B's own continuation still appends normally after A's stale non-ok
+    // answer, with B's loading and cursor remaining independently owned.
+    await act(async () => {
+      heldSuccessor.resolve(paged([labeled('b older', 1)]));
+    });
+    expect(await screen.findByText('b older 1')).toBeInTheDocument();
+    expect(screen.queryByTestId('git-history-older-error')).toBeNull();
+    expect(screen.getAllByTestId('git-commit-row')).toHaveLength(3);
+  });
 });

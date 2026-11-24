@@ -3052,18 +3052,42 @@ impl ImageManager {
                         "resolved Manifest disappeared from the catalog".to_string(),
                     )
                 })?;
+        // #4250 cutover: a Manifest reachable from a repository's Tags is served
+        // through the standard OCI `/v2/` Registry; the grant and every object
+        // route are repository-scoped. An untagged build or digest-only legacy row
+        // has no such repository and keeps the bounded compatibility route. The
+        // repository is derived from the same Tag roots/descriptor edges as the
+        // Registry's reachability fence, so this grants no access `/v2/` denies.
+        let v2_repository = nession_erofs::catalog::reference::v2_repository_for_manifest(
+            conn,
+            &target.manifest_digest,
+        )
+        .await
+        .map_err(|error| {
+            ImageError::Unavailable(format!("image repository resolution failed: {error:#}"))
+        })?;
+        let object_route = |digest: &str, media_type: &str| -> String {
+            match &v2_repository {
+                Some(repository) if media_type == nession_erofs::oci::MEDIA_TYPE_MANIFEST => {
+                    format!("/v2/{repository}/manifests/{digest}")
+                }
+                Some(repository) => format!("/v2/{repository}/blobs/{digest}"),
+                None => format!("{IMAGE_BLOB_PATH_PREFIX}{digest}"),
+            }
+        };
+        let manifest_path = object_route(&target.manifest_digest, &manifest_object.media_type);
         let mut objects = vec![
             ImageObjectAccess {
                 digest: target.manifest_digest.clone(),
                 media_type: manifest_object.media_type,
                 size_bytes: manifest_object.size_bytes,
-                path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.manifest_digest),
+                path: manifest_path,
             },
             ImageObjectAccess {
                 digest: target.config_digest.clone(),
                 media_type: target.manifest.config.media_type.clone(),
                 size_bytes: target.manifest.config.size,
-                path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.config_digest),
+                path: object_route(&target.config_digest, &target.manifest.config.media_type),
             },
         ];
         match &target.composite {
@@ -3084,11 +3108,12 @@ impl ImageManager {
                                     descriptor.digest
                                 ))
                             })?;
+                    let path = object_route(&descriptor.digest, &object.media_type);
                     objects.push(ImageObjectAccess {
                         digest: descriptor.digest.clone(),
                         media_type: object.media_type,
                         size_bytes: object.size_bytes,
-                        path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", descriptor.digest),
+                        path,
                     });
                 }
             }
@@ -3096,7 +3121,7 @@ impl ImageManager {
                 digest: target.layer.digest.clone(),
                 media_type: target.layer.media_type.clone(),
                 size_bytes: target.layer.size,
-                path: format!("{IMAGE_BLOB_PATH_PREFIX}{}", target.layer.digest),
+                path: object_route(&target.layer.digest, &target.layer.media_type),
             }),
         }
         if let Some(session_id) = pin_session {
@@ -4691,11 +4716,15 @@ mod tests {
         assert_eq!(resolved_a.layer_digest, layer_digest);
         assert_eq!(resolved_b.layer_digest, layer_digest);
         assert_eq!(resolved_a.objects.len(), 3);
+        // #4250: a Tag-reachable Manifest is granted through repository-scoped
+        // standard OCI `/v2/` routes, not the proprietary compatibility prefix.
         for object in &resolved_a.objects {
-            assert_eq!(
-                object.path,
-                format!("{IMAGE_BLOB_PATH_PREFIX}{}", object.digest)
-            );
+            let expected = if object.media_type == nession_erofs::oci::MEDIA_TYPE_MANIFEST {
+                format!("/v2/nession/tools/manifests/{}", object.digest)
+            } else {
+                format!("/v2/nession/tools/blobs/{}", object.digest)
+            };
+            assert_eq!(object.path, expected);
         }
 
         // Project B references its own Manifest; resolving Project A's tag or

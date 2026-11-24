@@ -770,6 +770,11 @@ impl SessionRegistry {
             for session in &mut incoming {
                 if let Some(previous) = sessions.get(&session.session_id) {
                     preserve_activity(previous, session);
+                    // The same rule for the metadata summary (#4405): an
+                    // inventory-only refresh carries no replacement answer,
+                    // so the last summary for the same incarnation must
+                    // survive the bulk swap exactly as in `update_session`.
+                    preserve_metadata(previous, session);
                 }
                 // The refresh is an authoritative admission too: a level held
                 // for an incoming Session applies under the same fences, and
@@ -1032,6 +1037,63 @@ mod tests {
         assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
         replace(&reg, "a1", vec![replacement]).await;
         assert!(reg.get("a1:dev").await.unwrap().activity.is_none());
+    }
+
+    /// #4405: the bulk force-refresh admission must preserve the last
+    /// same-incarnation metadata summary exactly like `update_session` does;
+    /// an inventory-only row carries no replacement answer. A different
+    /// incarnation never inherits the predecessor's summary.
+    #[tokio::test]
+    async fn force_refresh_preserves_same_incarnation_metadata_summary() {
+        use nession_protocol::contracts::session::v1::{
+            SessionMetadataState, SessionMetadataSummary,
+        };
+        let reg = new_registry().await;
+        let mut first = make_session("a1", "dev");
+        first.instance_id = Some("inc-1".to_string());
+        first.metadata = Some(SessionMetadataAvailability::available(
+            SessionMetadataSummary {
+                revision: 3,
+                title: Some("work context".to_string()),
+                tags: vec!["ship".to_string()],
+            },
+        ));
+        reg.update_session(first).await;
+        let expected = reg.get("a1:dev").await.unwrap().metadata.unwrap();
+        assert_eq!(expected.state, SessionMetadataState::Available);
+
+        // An inventory-only force refresh: same incarnation, no metadata.
+        let mut refreshed = make_session("a1", "dev");
+        refreshed.instance_id = Some("inc-1".to_string());
+        refreshed.metadata = None;
+        replace(&reg, "a1", vec![refreshed.clone()]).await;
+        assert_eq!(
+            reg.get("a1:dev").await.unwrap().metadata,
+            Some(expected.clone()),
+            "a force refresh must not clear the same-incarnation summary"
+        );
+
+        // A repeated refresh must not erode the preserved summary either.
+        replace(&reg, "a1", vec![refreshed]).await;
+        assert_eq!(
+            reg.get("a1:dev").await.unwrap().metadata,
+            Some(expected.clone())
+        );
+
+        // The normal single-row path keeps the same preservation semantics.
+        let mut again = make_session("a1", "dev");
+        again.instance_id = Some("inc-1".to_string());
+        again.metadata = None;
+        reg.update_session(again).await;
+        assert_eq!(reg.get("a1:dev").await.unwrap().metadata, Some(expected));
+
+        // A recreated same-name Session never inherits the predecessor's
+        // answer; the successor reports its own.
+        let mut successor = make_session("a1", "dev");
+        successor.instance_id = Some("inc-2".to_string());
+        successor.metadata = None;
+        replace(&reg, "a1", vec![successor]).await;
+        assert!(reg.get("a1:dev").await.unwrap().metadata.is_none());
     }
 
     /// Capture the generation, then replace — the same sequence the
