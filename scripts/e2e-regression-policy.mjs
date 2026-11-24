@@ -89,13 +89,26 @@ export function mainScheduleDecision({now,intervalHours,lastFullCompletedAt=null
 const REPO='BestNathan/nession';
 const FULL_WORKFLOW_PATH='.github/workflows/e2e-full-regression.yml';
 
+// Convergence Full run names follow the pattern "Convergence Full {target_ref}@{sha}".
+// Staging-targeted runs must not corrupt Main cadence admission (#4042).
+const STAGING_TARGETED_RUN_NAME=/^Convergence Full staging@/;
+
+function isMainTargetedRun(run){
+  // Scheduled runs and default workflow_dispatch target main implicitly.
+  // The run-name encodes the actual target for workflow_dispatch runs.
+  if(run?.event==='schedule')return true;
+  const name=String(run?.name??'');
+  if(STAGING_TARGETED_RUN_NAME.test(name))return false;
+  return true;
+}
+
 function canonicalMainFullRun(run){
   return String(run?.path??'').replace(/@refs\/[^\s]+$/,'')===FULL_WORKFLOW_PATH&&
     run.repository?.full_name===REPO&&run.head_repository?.full_name===REPO&&
     run.head_branch==='main'&&isTrustedMainFullEvent(run.event)&&
     Number.isSafeInteger(run.id)&&run.id>0&&
     Number.isSafeInteger(run.run_attempt)&&run.run_attempt>0&&
-    SHA.test(run.head_sha??'');
+    SHA.test(run.head_sha??'')&&isMainTargetedRun(run);
 }
 
 // Only attempt-scoped GitHub job state counts. An admission-only successful
@@ -135,7 +148,8 @@ export async function inspectMainFullHistory({
       if(job.run_id!==run.id||job.run_attempt!==run.run_attempt||job.head_sha!==run.head_sha)
         throw Error('Full job/run attempt identity mismatch for workflow run '+run.id);
       // Even a manual/historical Full run blocks overlap while active.
-      if(job.status==='queued'||job.status==='in_progress'){
+      // GitHub reports 'pending' for queued runs waiting for a runner (#4042).
+      if(job.status==='pending'||job.status==='queued'||job.status==='in_progress'){
         return {lastScheduledFullCompletedAt,fullInFlight:true,
           inFlightRunId:run.id,inFlightRunAttempt:run.run_attempt,
           pagesInspected,runsInspected};
@@ -285,6 +299,34 @@ async function historySelfTest(){
   });
   assert.equal(mainPush.fullInFlight,true,'exact-Main-SHA push Full prevents periodic overlap');
   assert.equal(mainPush.inFlightRunId,902);
+  // Staging-targeted Convergence Full with pending job must not block Main cadence (#4042).
+  const stagingPendingRun=mkRun(44481564942,'workflow_dispatch','pending');
+  stagingPendingRun.name='Convergence Full staging@4774f3e9231b23c0770a532f0c1a6c3f44deb284';
+  const stagingPending=await inspectMainFullHistory({repo:REPO,currentRunId:44482825473,
+    get:async(requestPath)=>{
+      const url=new URL(requestPath,'https://api.github.com');
+      if(url.pathname.endsWith('/workflows/e2e-full-regression.yml/runs'))
+        return {workflow_runs:[stagingPendingRun]};
+      // Staging-targeted runs are filtered out before job inspection.
+      throw Error('staging-targeted run must not reach job inspection');
+    }
+  });
+  assert.equal(stagingPending.fullInFlight,false,'staging-targeted pending run cannot block Main admission');
+  assert.equal(stagingPending.lastScheduledFullCompletedAt,null,'no Main Full history found');
+  assert.equal(stagingPending.runsInspected,1,'staging-targeted run is counted but filtered');
+  // Main-targeted workflow_dispatch with pending status blocks overlap (#4042).
+  const mainPendingRun=mkRun(904,'workflow_dispatch','pending');
+  mainPendingRun.name='Convergence Full main@'+'a'.repeat(40);
+  const mainPending=await inspectMainFullHistory({repo:REPO,currentRunId:905,
+    get:async(requestPath)=>{
+      const url=new URL(requestPath,'https://api.github.com');
+      if(url.pathname.endsWith('/workflows/e2e-full-regression.yml/runs'))
+        return {workflow_runs:[mainPendingRun]};
+      return {jobs:[mkJob(904,'pending',null,null,null)]};
+    }
+  });
+  assert.equal(mainPending.fullInFlight,true,'pending Main-targeted Full blocks overlap');
+  assert.equal(mainPending.inFlightRunId,904);
   // Nine full pages of admission-only successful workflow runs must not be
   // mistaken for the initial no-history state and trigger extra Full work.
   let exhaustedPages=0;
@@ -308,7 +350,7 @@ async function historySelfTest(){
     'a real exhausted API list (rather than scan limit) permits first-run admission');
   await assert.rejects(()=>inspectMainFullHistory({repo:REPO,currentRunId:1,
     get:async()=>({workflow_runs:[]}),pageSize:21}));
-  console.log('Main Full schedule recovery: bounded pagination, skipped admission, failed-attempt cadence, and in-flight exclusion passed');
+  console.log('Main Full schedule recovery: bounded pagination, skipped admission, failed-attempt cadence, in-flight exclusion, and staging-targeted filtering passed');
 }
 
 
