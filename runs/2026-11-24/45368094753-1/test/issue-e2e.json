@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "c85f16e1ff172464eec753a94598c08150d32318",
+  "run_id": 45368094753,
+  "run_attempt": 1,
+  "plan_digest": "88169fde6879bed918c926d183b15cda88488ae930e9099fe8e17f6daf16bb5a",
+  "artifact_digest": "sha256:925041f5bc7fbde7340a0883015dde7e8eb9c89129cb93ffbe7c4b6a37d29016",
+  "results": [
+    {
+      "id": "terminal-attach-bootstrap",
+      "result": "Pass",
+      "discovered": 3,
+      "passed": 3,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 144
+    },
+    {
+      "id": "terminal-consistency-faults",
+      "result": "Pass",
+      "discovered": 17,
+      "passed": 17,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 690
+    }
+  ]
+}
