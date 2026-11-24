@@ -833,14 +833,7 @@ async fn real_tmux_resize_during_a_capture_never_enters_the_body() -> Result<()>
                 let pane = guard
                     .dep()
                     .cmd()
-                    .output(&[
-                        "capture-pane",
-                        "-p",
-                        "-t",
-                        guard.name(),
-                        "-S",
-                        "-20",
-                    ])
+                    .output(&["capture-pane", "-p", "-t", guard.name(), "-S", "-20"])
                     .await?;
                 if !pane.status.success() {
                     return Err(anyhow!(
