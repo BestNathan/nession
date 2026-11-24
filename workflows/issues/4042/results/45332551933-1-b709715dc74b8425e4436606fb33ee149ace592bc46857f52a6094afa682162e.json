@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "kind": "trusted_qwen_publisher_write_ahead_intent",
+  "repository": "BestNathan/nession",
+  "issue": 4042,
+  "action_id": "b709715dc74b8425e4436606fb33ee149ace592bc46857f52a6094afa682162e",
+  "worker_run_id": 45332551933,
+  "worker_run_attempt": 1,
+  "worker_sha": "6fb8fe59cfa32d795fcc930bee4297184810cc84",
+  "source_sha": "6fb8fe59cfa32d795fcc930bee4297184810cc84",
+  "worker_source_sha": "6fb8fe59cfa32d795fcc930bee4297184810cc84",
+  "checkpoint_version": 1,
+  "checkpoint_commit_sha": "1194e36cad0bef54bc469ae29a49778b0e2a2abe",
+  "checkpoint_ciphertext_sha256": "b5dcc1de465a117aabd28734b01a108caad9494ea95cef6ee01a51f27e48fa7d",
+  "patch_sha256": "6d6deb45923e2f3e3ba53b676341ba519aad62056b278300e0388e57d3c566ad",
+  "file_manifest_sha256": "ce4d1f008466d218353d862ba4ce0f7e12d83d63dfc5cf58ae97ac819ef9c563",
+  "file_count": 1,
+  "target_main_sha": "6fb8fe59cfa32d795fcc930bee4297184810cc84",
+  "branch": "agent/4042/qwen-b709715dc74b8425",
+  "publisher_run_id": 45333092629,
+  "publication": "not_yet_attested"
+}
