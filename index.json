@@ -154,6 +154,21 @@
         "updated_at": "2026-11-16T16:56:10Z"
       },
       {
+        "title": "Nession WebSocket runtime architecture and message dispatch",
+        "description": "One physical WebSocket carries three runtime dispatch domains — Control, Request and Stream — independent of the Protocol Kernel's Operation/Notification/Control wire categories, with one Reader, one Writer and one owner per resource",
+        "path": "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "websocket",
+          "runtime",
+          "protocol",
+          "server",
+          "agent"
+        ],
+        "updated_at": "2026-11-24T12:45:00Z"
+      },
+      {
         "title": "Project declaration and Workspace location ownership",
         "description": "First-class server-owned Project declaration of Git source, Existing Locations, Session defaults and an image digest reference, plus the Project maintenance UI, Project-aware Existing Session creation with Session-owned ENV bindings, durable Session→Project membership and the context-sensed Project capability",
         "path": "topics/engineering/project-declaration-and-workspace-location-ownership.md",
@@ -198,6 +213,52 @@
           "app"
         ],
         "updated_at": "2026-11-18T04:51:45Z"
+      },
+      {
+        "title": "WebSocket execution budgets and backpressure",
+        "description": "Non-blocking ingress admission with explicit overload and steady-state task reaping, plus classified outbound queues with reserved capacity, exact unclamped accounting, bounded fairness and finite write deadlines",
+        "path": "topics/engineering/websocket-execution-budgets-and-backpressure.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "websocket",
+          "runtime",
+          "backpressure",
+          "resource-ownership",
+          "server",
+          "agent"
+        ],
+        "updated_at": "2026-11-24T12:46:00Z"
+      },
+      {
+        "title": "WebSocket runtime observability and reliability",
+        "description": "Bounded, owner-emitted WS telemetry: closed label enums, unit-carrying counters/gauges/histograms, an optional non-blocking bounded exporter, versioned diagnostic dashboards and a reproducible controlled-load baseline",
+        "path": "topics/engineering/websocket-runtime-observability-and-reliability.md",
+        "status": "candidate",
+        "categories": [
+          "architecture",
+          "websocket",
+          "observability",
+          "telemetry",
+          "runtime",
+          "reliability"
+        ],
+        "updated_at": "2026-11-24T12:48:00Z"
+      },
+      {
+        "title": "WebSocket stream delivery and recovery",
+        "description": "Stream-domain classification independent of protocol category: reliable ordered input, recoverable sequenced output, latest-state coalescence, per-stream windows, and session resource fences that reject stale input",
+        "path": "topics/engineering/websocket-stream-delivery-and-recovery.md",
+        "status": "candidate",
+        "categories": [
+          "architecture",
+          "websocket",
+          "streaming",
+          "terminal",
+          "runtime",
+          "recovery"
+        ],
+        "updated_at": "2026-11-24T12:47:00Z"
       }
     ],
     "terminal": [
@@ -444,7 +505,9 @@
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
-      "topics/engineering/session-activity-ownership.md"
+      "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
+      "topics/engineering/session-activity-ownership.md",
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md"
     ],
     "agents": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md",
@@ -466,14 +529,21 @@
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-activity-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md",
+      "topics/engineering/websocket-runtime-observability-and-reliability.md",
+      "topics/engineering/websocket-stream-delivery-and-recovery.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md",
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
+    ],
+    "backpressure": [
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md"
     ],
     "capsule": [
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md"
@@ -559,6 +629,9 @@
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
+    "observability": [
+      "topics/engineering/websocket-runtime-observability-and-reliability.md"
+    ],
     "overlay": [
       "topics/web/unified-overlay-and-operation-surface-system.md"
     ],
@@ -600,6 +673,7 @@
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
+      "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-activity-ownership.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
@@ -615,6 +689,7 @@
       "topics/web/git-changes-read-only-worktree-preview-and-repository-scoped-file-read-authority.md"
     ],
     "recovery": [
+      "topics/engineering/websocket-stream-delivery-and-recovery.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md"
     ],
     "registry": [
@@ -625,12 +700,24 @@
       "topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md",
       "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
+    "reliability": [
+      "topics/engineering/websocket-runtime-observability-and-reliability.md"
+    ],
     "research": [
       "topics/engineering/karpathy-llm-wiki-principles-for-nession-project-knowledge.md"
+    ],
+    "resource-ownership": [
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md"
     ],
     "responsive": [
       "topics/web/session-and-project-operation-surface-presentation-by-experience.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
+    ],
+    "runtime": [
+      "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md",
+      "topics/engineering/websocket-runtime-observability-and-reliability.md",
+      "topics/engineering/websocket-stream-delivery-and-recovery.md"
     ],
     "safety": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
@@ -654,7 +741,9 @@
     "server": [
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
-      "topics/engineering/project-declaration-and-workspace-location-ownership.md"
+      "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
+      "topics/engineering/project-declaration-and-workspace-location-ownership.md",
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md"
     ],
     "session": [
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
@@ -674,8 +763,15 @@
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
+    "streaming": [
+      "topics/engineering/websocket-stream-delivery-and-recovery.md"
+    ],
+    "telemetry": [
+      "topics/engineering/websocket-runtime-observability-and-reliability.md"
+    ],
     "terminal": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/engineering/websocket-stream-delivery-and-recovery.md",
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md",
       "topics/terminal/terminal-tools-capsule-chord-and-command-ownership.md",
       "topics/terminal/web-terminal-emulator-engine-and-component-ownership.md"
@@ -704,6 +800,12 @@
       "topics/web/unified-overlay-and-operation-surface-system.md",
       "topics/web/web-primitive-focus-treatment-and-visual-vocabulary-ownership.md",
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
+    ],
+    "websocket": [
+      "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
+      "topics/engineering/websocket-execution-budgets-and-backpressure.md",
+      "topics/engineering/websocket-runtime-observability-and-reliability.md",
+      "topics/engineering/websocket-stream-delivery-and-recovery.md"
     ],
     "workflows": [
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",

@@ -913,3 +913,31 @@
 - Categories: delivery, knowledge, pages, security
 - Reason: Record the #4448 independent React 19 + TypeScript + Vite Pages UI, credential-free UI build and trusted assembly split, exact compiled-closure artifact manifest and anonymous HTTPS readback, frozen-baseline parity, and the post-merge publication receipt at main 45c513ac (Deploy run 45359395680)
 - Source: https://github.com/BestNathan/nession/issues/4448
+
+## 2026-11-24T12:45:00Z | create | Nession WebSocket runtime architecture and message dispatch
+- Path: topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md
+- Topic: engineering
+- Categories: architecture, websocket, runtime, protocol, server, agent
+- Reason: Establish the canonical WS runtime article: one reader/one writer, Control/Request/Stream dispatch domains orthogonal to the Protocol Kernel's wire categories, provider-owned dispatch metadata and the exact-source route inventory, distinguishing approved target from delivered behavior
+- Source: https://github.com/BestNathan/nession/issues/4436
+
+## 2026-11-24T12:46:00Z | create | WebSocket execution budgets and backpressure
+- Path: topics/engineering/websocket-execution-budgets-and-backpressure.md
+- Topic: engineering
+- Categories: architecture, websocket, runtime, backpressure, resource-ownership, server, agent
+- Reason: Record non-blocking ingress admission with explicit overload and steady-state reaping, classified outbound queues with reserved capacity, exact unclamped accounting, bounded fairness, finite write deadlines and generation-fenced settlement
+- Source: https://github.com/BestNathan/nession/issues/4436
+
+## 2026-11-24T12:47:00Z | create | WebSocket stream delivery and recovery
+- Path: topics/engineering/websocket-stream-delivery-and-recovery.md
+- Topic: engineering
+- Categories: architecture, websocket, streaming, terminal, runtime, recovery
+- Reason: Record the approved stream-domain target — reliable ordered input, recoverable sequenced output, latest-state coalescence, per-stream windows and Session resource fences — as distinct from the still-delivered epoch/ACK/replay contract
+- Source: https://github.com/BestNathan/nession/issues/4436
+
+## 2026-11-24T12:48:00Z | create | WebSocket runtime observability and reliability
+- Path: topics/engineering/websocket-runtime-observability-and-reliability.md
+- Topic: engineering
+- Categories: architecture, websocket, observability, telemetry, runtime, reliability
+- Reason: Record the approved bounded telemetry contract — closed label enums, owner-emitted units, optional non-blocking bounded exporter, versioned validated dashboards and a reproducible controlled-load baseline — as distinct from the current snapshot/log observability
+- Source: https://github.com/BestNathan/nession/issues/4436
