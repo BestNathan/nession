@@ -1,8 +1,13 @@
-# Durable GitHub Actions Agent — execution protocol (RFC v1)
+# Durable GitHub Actions Agent — execution protocol (RFC v1 + Workflow V2)
 
-**Owner:** [#1664](https://github.com/BestNathan/nession/issues/1664)  
+**Owner:** [#1664](https://github.com/BestNathan/nession/issues/1664), extended by
+[#4482](https://github.com/BestNathan/nession/issues/4482)
 **Scope:** Nession **GitHub Actions LLM Agent** workflow, not `crates/nession-agent` tmux/runtime.  
-**Status:** Proposed protocol; implementation and real GitHub evidence are **not** established by this document.
+**Status:** The sections below record the v1 durable execution protocol. The
+[Agent Workflow V2](#11-agent-workflow-v2--one-reconcile-owner) section describes
+the implemented lifecycle/reconcile layer (#4482). Its real main-owned canary
+(SC-06) remains **Pending** until the repository owner explicitly authorizes it;
+this document is not acceptance evidence for that criterion.
 
 ## 1. Decision and implementation baseline
 
@@ -205,9 +210,127 @@ Every positive **and** negative result must identify actual source Run/Attempt, 
 
 **Out of scope:** perfect replay of an interrupted individual LLM/tool call, exactly-once external network APIs, automatic merge, tamper-proof Git against owners with full write permissions, new message bus/state machine, and Rust tmux Agent lifecycle.
 
+## 11. Agent Workflow V2 — one Reconcile owner
+
+[#4482](https://github.com/BestNathan/nession/issues/4482) evolves the durable
+Agent workflow into one Issue-centric lifecycle coordinated by one Reconcile
+entrypoint. The executable owner is the `scripts/lib/agent/workflow/` subtree;
+the v1 orchestration modules remain the compatibility path for immutable
+`schema_version: 1` history.
+
+| Owner | Responsibility |
+| --- | --- |
+| `workflow/contract.mjs` | versioned v2 state/identity, phases, execution states, deterministic Thread/action/evidence IDs, strict validation |
+| `workflow/lifecycle.mjs` | **sole** business transition decision owner (`decideLifecycle`); execution-state transitions and owner fencing |
+| `workflow/ci-barrier.mjs` | freezes the applicable check obligation for the exact PR HEAD and classifies terminal results |
+| `workflow/feedback.mjs` | one immutable deduped repair bundle per HEAD + CI generation + Review result |
+| `workflow/migration.mjs` | explicit, readback-based v1 → v2 projection; unknown legacy state becomes a durable blocker |
+| `workflow/reconcile.mjs` | bounded observe → decide → CAS persist → scoped effect → readback → receipt loop |
+| `workflow/telemetry.mjs` | sanitized Reconcile observation projection (no prompts/native bytes/credentials) |
+| `orchestration/transition.mjs` | `advanceWorkflowV1` compatibility replay only; it rejects a v2 state |
+
+### 11.1 Lifecycle and execution state
+
+Business phases: `authorized → developing → publishing → ci_checking →
+reviewing → evaluating → accepting → waiting_merge → post_merge_acceptance →
+done`, plus durable `blocked` and authorized `cancelled`. Each phase has a
+verified entry/exit; `evaluating`/`accepting` may return to `developing` for a
+single repair round. A new execution attempt or repair never creates a new
+logical Thread.
+
+Execution states are separate from business phases:
+`pending → dispatching → dispatched → claimed → executing → result_available →
+committed/retired`, with `yielded`, `failed`, `cancelled` and `ambiguous`.
+`committed`/`retired` actions may be pruned from the live Outbox because the
+immutable Store versions retain the receipt history. A GitHub Run being
+queued/in_progress/completed is only an observation; it is never an accepted
+result or business completion.
+
+### 11.2 Ordering: CI before Review
+
+After the trusted Publisher confirms the exact PR HEAD, the lifecycle enters
+`ci_checking` **before** any Reviewer action. The CI barrier freezes the
+applicable required-check set for that HEAD:
+
+* pending → wait;
+* missing/cancelled/unknown/skipped-required → not a pass; bounded recovery
+  then a durable block;
+* source-owned failure → `actionable_fail`, but Review still runs;
+* infrastructure-only failure → recover/block, never blame source code;
+* every required check terminal-success → `pass`.
+
+Reviewer then runs as an **internal lifecycle action**, not a GitHub Check,
+required check context or branch-protection requirement. It receives the Issue
+and SC snapshot, exact PR diff/base/head, the verified CI summary and bounded
+failure evidence. A Reviewer runtime/invalid result is retried or blocked; it is
+never treated as `changes_requested`. Ordinary non-managed PRs never trigger an
+Agent Reviewer.
+
+`evaluating` aggregates the two independent outcomes deterministically:
+
+| CI | Review | Decision |
+| --- | --- | --- |
+| pass | approved | proceed to existing Acceptance |
+| actionable_fail | approved | one Developer repair with CI feedback |
+| pass | changes_requested | one Developer repair with Review feedback |
+| actionable_fail | changes_requested | one Developer repair with the combined, deduped bundle |
+| unresolved/missing evidence | any | recover or block, never an invented pass |
+| any | Reviewer runtime/invalid | retry Reviewer or block, not Developer repair |
+
+The repair action is created only after the bundle digest is fixed for the exact
+`(Issue, PR, HEAD, CI digest, Review digest, repair ordinal)`. A Reviewer verdict
+can never override CI failure, and a rerun that materially changes CI evidence
+invalidates the old aggregate/review before a new decision is bound.
+
+### 11.3 Wakes, persistence and recovery
+
+Three equivalent wake sources — authenticated GitHub events/completion hints, a
+GitHub schedule, and an explicitly authorized external/manual dispatch — all
+produce the same bounded `reconcileOnce` decision path. A wake may hint at
+Issues and carry a reason; it cannot start an arbitrary open Issue, select a
+role, approve a result or authorize merge/SC/Store writes. New lifecycles start
+only from the verified owner-authorized command/admission path.
+
+The sanitized observation projection (`workflow/telemetry.mjs`) carries
+phase/substate, stage age, reconcile source/outcome, unresolved dispatch, retry
+budget, checkpoint version binding, stale results, repair round and finding
+counts. It is emitted in the existing trusted-main workflow log/artifact
+boundary; it does not create a new metrics store, schema owner or public UI.
+
+State and receipts stay in the existing `agent-store` versioned Issue state;
+there is no second database or state engine. Every decision is persisted with
+expected-version CAS and deterministic action IDs before any external effect.
+External dispatch/publication uses write-ahead intent → external call →
+authenticated readback → receipt. A lost response is resolved by readback; a
+second POST/PR is never sent blindly. Ambiguous effects, stale fences, stale
+HEAD/evidence generations and duplicate/out-of-order results are rejected or
+idempotently replayed; retry budgets (infrastructure, model, repair rounds) are
+bounded and exhaustion produces an explicit owner-recovery blocker.
+
+V1 immutable history is preserved. A v1 state is migrated by an explicit
+projection that records its source version/digest; a state that cannot be
+projected safely (for example a post-Developer phase without a trusted PR
+readback) becomes a durable `blocked` diagnostic. The legacy engine remains the
+live production path until the V2 canary is separately authorized; a v2 state
+is never driven by the legacy engine, and a v1 state is never accepted by the
+V2 decision owner.
+
+### 11.4 Rollout boundary
+
+The #4482 PR-stage criteria (SC-01..SC-05, SC-07) are proven by deterministic
+exact-source fixtures in `scripts/lib/agent/workflow/*-selftest.mjs` and the
+`agent-provider-contract` Gate. The trusted-main read-only entrypoint is
+`node scripts/reconcile-agent-workflows.mjs --plan` (bounded Store read, PR/CI
+observation and a sanitized plan); it refuses `--apply`. SC-06 requires a real
+owner-authorized
+trusted-main canary through the existing controlled Agent/Store path,
+independently authenticated Run/Attempt/Artifact and Store receipts; it remains
+Pending until the owner authorizes that execution. No production canary, merge
+authorization or self-approval is inferred from this document or from fixtures.
+
 ### References
 
-* Current local contracts: `scripts/lib/agent/store/{checkpoint,ingest}.mjs`, `orchestration/{outbox,state-store,transition,github-dispatch,result-artifact,issue-thread}.mjs`, `providers/{cursor,claude-code}.mjs`.
+* Current local contracts: `scripts/lib/agent/workflow/*.mjs`, `scripts/lib/agent/store/{checkpoint,ingest}.mjs`, `orchestration/{outbox,state-store,transition,github-dispatch,result-artifact,issue-thread}.mjs`, `providers/{cursor,claude-code}.mjs`.
 * Cursor SDK TypeScript: https://cursor.com/docs/sdk/typescript (local Jsonl store and `Agent.resume`; configuration must be supplied again on resume).
 * Claude Code CLI reference: https://docs.anthropic.com/en/docs/claude-code/cli-usage (specified-session `--resume`).
 * [#1690](https://github.com/BestNathan/nession/issues/1690) retains deferred security-hardening requirements, without their Pending status being rewritten as Pass.
