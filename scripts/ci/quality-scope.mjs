@@ -38,6 +38,9 @@ export function selectQualityFamilies(paths) {
       if(/^scripts\/(?:check-coverage|filtered-test|rust-test-route|check-test-isolation|check-tmux-socket)/.test(p))r.rust=true;
       else if(/^scripts\/(?:check-design-tokens|filtered-web-test)/.test(p) || p.startsWith('scripts/ci/web-build-artifact'))r.web=true;
       else if(/^scripts\/protocol-gate/.test(p))r.rust=r.web=true;
+      else if(/^scripts\/ci\/seal-gitops-secret(?:\.test)?\.mjs$/.test(p)) {
+        // Deployment-only tooling; the canonical sealing self-test owns this contract.
+      }
       else if(/^scripts\/(?:ci\/quality-scope|ci\/case-smoke|acceptance-|issue-|e2e-|workflow-|gate-|lib\/agent\/|lib\/acceptance\/|lib\/e2e\/|lib\/issue\/|lib\/workflow\/|detector-selftest-coverage|collect-repo-health|repo-)/.test(p)) {
         // Tooling-only source, exercised through the full canonical tooling suite.
       } else r.rust=r.web=true;
