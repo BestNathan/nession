@@ -2043,19 +2043,38 @@ async function selfTest() {
     action: 'created', number: 333, integration_head: head4059, outcome: 'AUTO_MERGE_QUALIFIED' }];
   const transcript4059 = [JSON.stringify(plan4059, null, 2), JSON.stringify(decisions4059, null, 2)]
     .join('\n').split('\n').map(x => '2026-11-23T07:00:00.001Z ' + x).join('\n');
-  const pr4059 = { number: 333, state: 'closed', merged_at: '2026-11-23T07:30:00Z',
+  const pr4059 = { number: 333, state: 'closed', created_at: '2026-11-23T07:00:00Z',
+    merged_at: '2026-11-23T07:30:00Z',
     merge_commit_sha: merge4059, user: { login: 'nession-publisher[bot]' },
     base: { ref: 'staging', repo: { full_name: repo4059 } },
     head: { ref: 'chore/staging-sync-fixture', sha: head4059, repo: { full_name: repo4059 } },
-    body: 'Staging Convergence automated proposal (fixture)' };
+    body: 'Staging Convergence automated proposal (fixture)\n\n' +
+      '<!-- nession-convergence-pr:v1 branch=staging main=' + mainSha4059 +
+      ' lane=' + lane4059 + ' head=' + head4059 + ' digest=' + 'e'.repeat(64) + ' -->' };
   const commit4059 = { sha: head4059, parents: [{ sha: lane4059 }, { sha: mainSha4059 }] };
+  const workflowPaths4059 = {
+    'CI / Quality Gate': '.github/workflows/ci-quality.yml',
+    'E2E / Tests': '.github/workflows/e2e-tests.yml',
+    'Acceptance / Case Smoke': '.github/workflows/acceptance-case-smoke.yml',
+  };
   const ci4059 = required4059.map((name, i) => ({ id: 400 + i, run_attempt: 1, name,
+    path: workflowPaths4059[name], head_branch: pr4059.head.ref,
+    created_at: '2026-11-23T07:10:00Z',
     head_sha: head4059, event: 'pull_request', status: 'completed', conclusion: 'success',
+    repository: { full_name: repo4059 }, head_repository: { full_name: repo4059 },
     pull_requests: [{ number: 333 }] }));
   const compare4059 = { status: 'ahead', merge_base_commit: { sha: merge4059 } };
   const writerMock = ({ job = job4059, log = transcript4059 } = {}) => async (path) => {
     if (path.includes('/actions/runs?head_sha=' + mainSha4059)) return { workflow_runs: [run4059] };
+    if (path.includes('/actions/workflows/release-staging-convergence.yml/runs?head_sha=' +
+      mainSha4059)) return { workflow_runs: [run4059] };
     if (path.includes('/actions/runs?head_sha=' + head4059)) return { workflow_runs: ci4059 };
+    if (path.includes('/actions/workflows/ci-quality.yml/runs?head_sha=' + head4059))
+      return { workflow_runs: [ci4059[0]] };
+    if (path.includes('/actions/workflows/e2e-tests.yml/runs?head_sha=' + head4059))
+      return { workflow_runs: [ci4059[1]] };
+    if (path.includes('/actions/workflows/acceptance-case-smoke.yml/runs?head_sha=' + head4059))
+      return { workflow_runs: [ci4059[2]] };
     if (path.includes('/actions/runs/111/attempts/1/jobs')) return { jobs: [job] };
     if (path.endsWith('/pulls/333')) return pr4059;
     if (path.includes('/git/commits/' + head4059)) return commit4059;
