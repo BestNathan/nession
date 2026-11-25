@@ -948,3 +948,10 @@
 - Categories: architecture, agent, ci, security, workflows
 - Reason: Record the Agent Workflow V2 single Reconcile-owned durable lifecycle, CI-before-Review barrier, Reviewer as an internal phase rather than a GitHub Check, the four-way aggregate with one deduped repair bundle, agent-store CAS/readback recovery, explicit v1 migration and the still-Pending SC-06 canary
 - Source: https://github.com/BestNathan/nession/issues/4482
+
+## 2026-11-25T17:43:16Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, agent, ci, security, workflows
+- Reason: Record the #4525 production fact observer (authenticated Run/Attempt/Jobs/Claim/receipt/PR/checkpoint binding with typed unavailable/denied/un-ingested facts), deterministic fair active scan with malformed isolation and no auto-start, and the safe exported diagnostic whitelist; publication/verdict/acceptance/claim readers remain typed unavailable until their composition slices
+- Source: https://github.com/BestNathan/nession/issues/4525

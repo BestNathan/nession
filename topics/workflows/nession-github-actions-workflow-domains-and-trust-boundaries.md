@@ -5,8 +5,8 @@ topic: workflows
 categories: ["architecture","agent","ci","security","workflows"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-24T16:01:07Z
-sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
+updated_at: 2026-11-25T17:43:16Z
+sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/issues/4525","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/facts.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/scan.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/diagnostic.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
 ---
 
 # Nession GitHub Actions workflow domains and trust boundaries
@@ -78,8 +78,29 @@ projected by an explicit readback migration; an under-specified legacy state
 becomes a durable blocked diagnostic. The legacy `advanceWorkflow` adapter never
 drives a v2 state and V2 never accepts a v1 state.
 
-Executable owners: `workflow/{contract,lifecycle,ci-barrier,feedback,migration,reconcile,telemetry}.mjs`;
-canonical architecture: [agent-workflow-durability.md](https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md).
+**Production facts, fair scan and safe export (#4525).** The read-only
+coordinator now observes through `workflow/facts.mjs`: every role fact binds the
+exact action, Run ID/Attempt, source workflow, HEAD, fence and authenticated
+Store receipt. Completed work without an ingested receipt is
+`completed_uningested`, missing API/permission facts are `unavailable`, and a
+mismatched Run/source/receipt/claim is `denied`; only a fully bound terminal
+fact becomes a lifecycle observation. Publisher publication, Reviewer-verdict,
+Acceptance and Claim readers are typed `unavailable` until their composition
+slices wire them, so plan mode fails closed rather than inferring an effect from
+a job conclusion.
+
+`workflow/scan.mjs` scans only existing durable states. It excludes
+`done`/`cancelled` records without outstanding obligations, preserves
+blocked/legacy candidates, isolates malformed heads and rotates deterministically
+over the raw candidate set, so a stable set is covered within
+`ceil(candidateCount / maxIssues)` bounded ticks and no scan path starts a
+lifecycle. The exported CLI artifact uses `workflow/diagnostic.mjs`, an explicit
+whitelist; the private next-state plan, checkpoint binding, native session
+identity/bytes, prompts, transcripts and free-text findings never leave the
+trusted process.
+
+Executable owners: `workflow/{contract,lifecycle,ci-barrier,feedback,migration,reconcile,facts,scan,diagnostic,telemetry}.mjs`;
+canonical architecture: [agent-workflow-durability.md](https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md).
 PR-stage criteria are proven by exact-source fixtures in the
 `agent-provider-contract` Gate. The real main-owned SC-06 canary remains
 Pending until the repository owner separately authorizes it; documentation and
