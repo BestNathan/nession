@@ -105,6 +105,17 @@ pub enum FrameClass {
 impl FrameClass {
     pub const ALL: [FrameClass; 3] = [Self::Control, Self::Response, Self::Stream];
 
+    /// The dispatch domain this class belongs to, for telemetry. A refusal or
+    /// write timeout must be attributable to Control, Request or Stream rather
+    /// than all being reported as stream events (#4434).
+    pub const fn domain(self) -> Domain {
+        match self {
+            Self::Control => Domain::Control,
+            Self::Response => Domain::Request,
+            Self::Stream => Domain::Stream,
+        }
+    }
+
     pub fn index(self) -> usize {
         match self {
             Self::Control => 0,
@@ -644,7 +655,7 @@ impl OutboundInner {
         metrics::counter(
             "ws_outbound_refused",
             Labels::new()
-                .domain(Domain::Stream)
+                .domain(class.domain())
                 .direction(Direction::Outbound)
                 .result(ResultKind::Refused)
                 .reason(reason),
@@ -655,7 +666,7 @@ impl OutboundInner {
             metrics::record(
                 "ws_outbound_too_large",
                 Labels::new()
-                    .domain(Domain::Stream)
+                    .domain(class.domain())
                     .direction(Direction::Outbound)
                     .result(ResultKind::TooLarge)
                     .reason(ReasonKind::Capacity),
@@ -998,14 +1009,14 @@ impl Outbound {
                 metrics::counter(
                     "ws_outbound_accepted",
                     Labels::new()
-                        .domain(Domain::Stream)
+                        .domain(class.domain())
                         .direction(Direction::Outbound)
                         .result(ResultKind::Accepted),
                 );
                 metrics::gauge(
                     "ws_outbound_queued",
                     Labels::new()
-                        .domain(Domain::Stream)
+                        .domain(class.domain())
                         .direction(Direction::Outbound),
                     self.queued_bytes() as f64,
                 );
@@ -1086,14 +1097,14 @@ impl Outbound {
                 metrics::counter(
                     "ws_outbound_accepted",
                     Labels::new()
-                        .domain(Domain::Stream)
+                        .domain(class.domain())
                         .direction(Direction::Outbound)
                         .result(ResultKind::Accepted),
                 );
                 metrics::gauge(
                     "ws_outbound_queued",
                     Labels::new()
-                        .domain(Domain::Stream)
+                        .domain(class.domain())
                         .direction(Direction::Outbound),
                     self.queued_bytes() as f64,
                 );
