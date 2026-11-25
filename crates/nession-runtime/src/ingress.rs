@@ -463,6 +463,10 @@ mod tests {
     /// admission slot and is closed at the deadline, and the slot comes back.
     #[tokio::test]
     async fn a_silent_peer_is_closed_at_the_deadline_and_returns_its_slot() {
+        // The process-wide metric sink is shared by every test in this binary;
+        // serialize emitters with the sink-capture tests so their exact counts
+        // cannot be polluted by a concurrent connection.
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind a local listener");
@@ -512,6 +516,7 @@ mod tests {
     /// keep-alive connection is not closed by the pre-authentication bound.
     #[tokio::test]
     async fn a_completed_request_releases_the_slot_and_disarms_the_deadline() {
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind a local listener");
@@ -622,6 +627,7 @@ mod tests {
     /// socket (and its hyper task) would outlive the admission window forever.
     #[tokio::test]
     async fn an_idle_keep_alive_connection_is_closed_at_the_header_deadline() {
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind a local listener");
@@ -668,6 +674,7 @@ mod tests {
     /// connection is bounded by the same per-request header deadline.
     #[tokio::test]
     async fn a_partial_next_request_is_closed_at_the_header_deadline() {
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind a local listener");
@@ -728,6 +735,7 @@ mod tests {
     /// than the deadline must be delivered in full.
     #[tokio::test]
     async fn a_streaming_response_longer_than_the_header_deadline_is_not_cut() {
+        let _guard = crate::metrics::TEST_SINK_LOCK.lock().await;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("bind a local listener");

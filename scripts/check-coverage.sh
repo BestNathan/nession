@@ -105,15 +105,27 @@ done
 # Run llvm-cov with JSON output on just the target crates.
 # bash ≥5.0 exits on $(failing_cmd) with set -e (unlike bash 3.2 on macOS),
 # so we temporarily disable errexit around cargo llvm-cov.
-# stderr is saved so we can diagnose failures on CI.
+# The JSON stays in a private file (the gate's data channel). libtest progress
+# on stderr is tee'd to the job log and retained for failure diagnostics, so a
+# hung coverage run names the last test it started instead of silently holding
+# rust-check until the platform timeout.
 COV_STDERR=$(mktemp)
+COV_JSON=$(mktemp)
+COV_FIFO=$(mktemp -u)
+mkfifo "$COV_FIFO"
+tee "$COV_STDERR" <"$COV_FIFO" >&2 &
+COV_TEE_PID=$!
 set +e
 # Skip PTY/tmux timing-sensitive tests that are too slow under LLVM
     # instrumentation.  They pass fine with plain `cargo test`.
     SKIP_FLAGS="--skip terminal_io"
-    JSON=$(cargo llvm-cov $PACKAGE_FLAGS --json -- $SKIP_FLAGS 2>"$COV_STDERR")
+    cargo llvm-cov $PACKAGE_FLAGS --json -- $SKIP_FLAGS \
+        >"$COV_JSON" 2>"$COV_FIFO"
 COV_STATUS=$?
 set -e
+wait "$COV_TEE_PID" 2>/dev/null || true
+rm -f "$COV_FIFO"
+JSON=$(cat "$COV_JSON")
 
 if [ -z "$JSON" ]; then
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
@@ -145,10 +157,10 @@ if [ -z "$JSON" ]; then
         echo -e "${YELLOW}       rustup component add llvm-tools-preview${NC}"
     fi
     echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    rm -f "$COV_STDERR"
+    rm -f "$COV_STDERR" "$COV_JSON"
     exit 1
 fi
-rm -f "$COV_STDERR"
+rm -f "$COV_STDERR" "$COV_JSON"
 
 # Repository Metrics consumes the exact LLVM payload this canonical coverage
 # gate evaluates. Opt-in only: ordinary gate runs keep no generated state.
