@@ -1,14 +1,13 @@
 #!/usr/bin/env node
-// Issue #4482 — trusted-main Agent Workflow V2 Reconcile entrypoint.
+// Issue #4482/#4525 — trusted-main Agent Workflow V2 Reconcile entrypoint.
 //
-// Plan mode is read-only: it loads the existing durable Issue states, observes
-// bounded PR/CI facts with a read-only token and asks the canonical lifecycle
-// owner for the next eligible decision. It performs no Store write, dispatch,
-// publication, merge or Acceptance verdict.
+// Plan mode is read-only: it scans existing durable Issue states fairly,
+// observes authenticated facts through the production fact observer and asks
+// the canonical lifecycle owner for the next eligible decision. It performs no
+// Store write, dispatch, publication, merge or Acceptance verdict.
 //
-// `--apply` is deliberately rejected here. Executing the committed effects is
-// the separately authorized SC-06 canary through the existing controlled
-// Agent/Store path; this entrypoint must not grow a second privileged writer.
+// The exported artifact is a safe diagnostic projection only. The private
+// next-state plan is never serialized.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -19,11 +18,17 @@ import { githubFetcher } from './lib/agent/github-read.mjs';
 import { classifyCiResults, freezeCiObligation } from './lib/agent/workflow/ci-barrier.mjs';
 import { buildReconcileTelemetry } from './lib/agent/workflow/telemetry.mjs';
 import { normalizeReconcileWake, reconcileOnce } from './lib/agent/workflow/reconcile.mjs';
+import {
+  createFactObserver, createProductionObserverPorts,
+} from './lib/agent/workflow/facts.mjs';
+import { rotationSeed, scanLifecycleCandidates } from './lib/agent/workflow/scan.mjs';
+import {
+  assertSafeDiagnosticPayload, projectReconcileDiagnostic,
+} from './lib/agent/workflow/diagnostic.mjs';
 
 const REPO = 'BestNathan/nession';
 const REF = 'agent-store';
 const SHA40 = /^[a-f0-9]{40}$/;
-const MAX_ISSUES = 20;
 const MAX_CHECKS = 100;
 
 function fail(message) {
@@ -64,28 +69,6 @@ function cloneStore(remote) {
     fail('authenticated agent-store ref unavailable');
   }
 }
-function activeIssues(root) {
-  const directory = path.join(root, 'workflows', 'issues');
-  if (!fs.existsSync(directory)) return [];
-  const issues = [];
-  for (const name of fs.readdirSync(directory)) {
-    if (!/^[1-9][0-9]*$/.test(name)) continue;
-    const head = path.join(directory, name, 'head.json');
-    if (!fs.existsSync(head)) continue;
-    const stat = fs.lstatSync(head);
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 16 * 1024) continue;
-    let parsed;
-    try {
-      parsed = JSON.parse(fs.readFileSync(head, 'utf8'));
-    } catch {
-      continue;
-    }
-    if (!Number.isSafeInteger(parsed?.version) || parsed.version < 1) continue;
-    issues.push(Number(name));
-    if (issues.length >= MAX_ISSUES) break;
-  }
-  return issues.sort((a, b) => a - b);
-}
 function storePort(root) {
   return {
     async load(issue) {
@@ -116,96 +99,80 @@ function checkIdentity(run) {
     run.app.slug : 'github';
   return { workflow: owner, name: String(run.name ?? '').slice(0, 200) };
 }
-function createObserver({ token, now }) {
-  const fetchGitHub = githubFetcher(token, { repository: REPO });
-  return {
-    async legacyPr() {
-      // A legacy state does not record its PR; plan mode never guesses one.
-      return null;
-    },
-    async observe({ state, wake }) {
-      const patch = {
-        fencing_generation: state.thread.fencing_generation,
-      };
-      if (state.pr != null) {
-        const pull = await fetchGitHub('pulls/' + state.pr.number);
-        const merged = pull?.merged === true;
-        patch.pr = {
-          number: pull.number,
-          head_sha: pull.head?.sha,
-          base_sha: pull.base?.sha,
-          state: merged ? 'merged' : pull.state,
-          merged_sha: merged ? pull.merge_commit_sha : null,
-        };
-      }
-      if (SHA40.test(state.thread.head_sha ?? '') &&
-          ['ci_checking', 'reviewing', 'evaluating', 'accepting',
-            'waiting_merge', 'post_merge_acceptance'].includes(state.phase)) {
-        const runs = await fetchGitHub(
-          'commits/' + state.thread.head_sha + '/check-runs?per_page=' + MAX_CHECKS);
-        const checks = (runs?.check_runs ?? [])
-          .filter((run) => run?.name && !/^Agent \/ Review\b/.test(run.name))
-          .slice(0, MAX_CHECKS)
-          .map((run) => {
-            const identity = checkIdentity(run);
-            return {
-              name: identity.name,
-              workflow: identity.workflow,
-              conclusion: checkConclusion(run),
-              applicability: 'applicable',
-              // The trusted applicability policy is a canary input. Plan mode
-              // is deliberately fail-closed and treats every observed check as
-              // source-owned and required.
-              category: 'source',
-              required: true,
-            };
-          });
-        if (checks.length) {
-          const obligation = freezeCiObligation({
-            head_sha: state.thread.head_sha, checks,
-          });
-          patch.ci = {
-            verified: true,
-            ...classifyCiResults({
-              obligation,
-              head_sha: state.thread.head_sha,
-              results: checks.map((check) => ({
-                name: check.name, workflow: check.workflow,
-                conclusion: check.conclusion, evidence_ref: null,
-              })),
-              observed_at: now(),
-            }),
-          };
-        }
-      }
+async function collectCi({ fetchGitHub, state, now }) {
+  if (!SHA40.test(state.thread?.head_sha ?? '')) return null;
+  if (!['ci_checking', 'reviewing', 'evaluating', 'accepting',
+    'waiting_merge', 'post_merge_acceptance'].includes(state.phase)) return null;
+  const runs = await fetchGitHub(
+    'commits/' + state.thread.head_sha + '/check-runs?per_page=' + MAX_CHECKS);
+  const checks = (runs?.check_runs ?? [])
+    .filter((run) => run?.name && !/^Agent \/ Review\b/.test(run.name))
+    .slice(0, MAX_CHECKS)
+    .map((run) => {
+      const identity = checkIdentity(run);
       return {
-        issue: state.issue,
-        state_version: state.version,
-        observed_at: now(),
-        wake: { source: wake.source, reason: wake.reason, correlation_id: wake.correlation_id },
-        pr: null, developer: null, publisher: null, ci: null,
-        reviewer: null, acceptance: null, merge: null,
-        ...patch,
+        name: identity.name,
+        workflow: identity.workflow,
+        conclusion: checkConclusion(run),
+        applicability: 'applicable',
+        // The trusted applicability policy is owned by the CI-feedback slice.
+        // Plan mode is deliberately fail-closed: every observed check is
+        // source-owned and required.
+        category: 'source',
+        required: true,
       };
-    },
+    });
+  if (!checks.length) return null;
+  const obligation = freezeCiObligation({
+    head_sha: state.thread.head_sha, checks,
+  });
+  return {
+    verified: true,
+    ...classifyCiResults({
+      obligation,
+      head_sha: state.thread.head_sha,
+      results: checks.map((check) => ({
+        name: check.name, workflow: check.workflow,
+        conclusion: check.conclusion, evidence_ref: null,
+      })),
+      observed_at: now(),
+    }),
   };
+}
+
+function argValue(argv, name) {
+  const index = argv.indexOf(name);
+  if (index < 0) return null;
+  const value = argv[index + 1];
+  if (value == null || value.startsWith('--')) fail('missing value for ' + name);
+  return value;
 }
 
 async function realMain(argv) {
   if (argv.includes('--apply')) {
     fail('--apply is the separately authorized SC-06 canary, not this entrypoint');
   }
-  if (!argv.includes('--plan')) fail('usage: --plan [--issue N] [--wake-source SOURCE]');
-  const issueIndex = argv.indexOf('--issue');
-  const hint = issueIndex >= 0 ? Number(argv[issueIndex + 1]) : null;
+  if (!argv.includes('--plan')) {
+    fail('usage: --plan [--issue N] [--cursor N] [--max-issues N] [--wake-source SOURCE]');
+  }
+  const hintValue = argValue(argv, '--issue');
+  const hint = hintValue == null ? null : Number(hintValue);
   if (hint != null && (!Number.isSafeInteger(hint) || hint < 1)) fail('invalid Issue hint');
-  const sourceIndex = argv.indexOf('--wake-source');
-  const source = sourceIndex >= 0 ? argv[sourceIndex + 1] : 'manual';
-  const reasonIndex = argv.indexOf('--reason');
-  const reason = reasonIndex >= 0 ? argv[reasonIndex + 1] : 'operator_plan';
+  const cursorValue = argValue(argv, '--cursor');
+  const cursor = cursorValue == null ? null : Number(cursorValue);
+  if (cursor != null && (!Number.isSafeInteger(cursor) || cursor < 0)) {
+    fail('invalid scan cursor');
+  }
+  const maxIssuesValue = argValue(argv, '--max-issues');
+  const maxIssues = maxIssuesValue == null ? 20 : Number(maxIssuesValue);
+  if (!Number.isSafeInteger(maxIssues) || maxIssues < 1 || maxIssues > 100) {
+    fail('invalid max-issues');
+  }
+  const source = argValue(argv, '--wake-source') ?? 'manual';
+  const reason = argValue(argv, '--reason') ?? 'operator_plan';
   const wake = normalizeReconcileWake({ source, reason, correlation_id: null });
-  const storeRootArg = argv.indexOf('--store-root');
-  const storeRoot = storeRootArg >= 0 ? path.resolve(argv[storeRootArg + 1]) : null;
+  const storeRootArg = argValue(argv, '--store-root');
+  const storeRoot = storeRootArg == null ? null : path.resolve(storeRootArg);
   let checkout = null;
   let root = storeRoot;
   if (root == null) {
@@ -216,39 +183,68 @@ async function realMain(argv) {
   if (!token) fail('read-only GitHub token required');
   const now = () => Date.now();
   try {
-    const issues = hint ?? activeIssues(root);
+    const store = storePort(root);
+    const seed = cursor ?? rotationSeed(process.env.GITHUB_RUN_ID ?? 0);
+    const scan = hint == null ? scanLifecycleCandidates({
+      storeRoot: root,
+      loadState: (issue) => store.load(issue),
+      cursor: seed,
+      maxIssues,
+    }) : null;
+    const issues = hint != null ? [hint] : scan.issues.map((entry) => entry.issue);
     if (hint != null) {
-      const record = readIssueWorkflowState(root, hint);
+      const record = await store.load(hint);
       if (record.state == null) fail('Issue has no durable lifecycle state');
     }
-    const ports = {
-      store: storePort(root),
-      observer: createObserver({ token, now }),
-      effects: null,
+    const fetchGitHub = githubFetcher(token, { repository: REPO });
+    const factObserver = createFactObserver({
+      ports: createProductionObserverPorts({ token, storeRoot: root }),
+      now,
+    });
+    const observer = {
+      async observe({ issue, state, wake: activeWake }) {
+        const observation = await factObserver.observe({
+          issue, state, wake: activeWake,
+        });
+        observation.ci = await collectCi({ fetchGitHub, state, now });
+        return observation;
+      },
+      async legacyPr({ issue, state }) {
+        return factObserver.legacyPr({ issue, state });
+      },
     };
+    const ports = { store, observer, effects: null };
     const results = [];
     const telemetry = [];
-    for (const issue of Array.isArray(issues) ? issues : [issues]) {
-      const loaded = await ports.store.load(issue);
+    for (const issue of issues) {
+      const loaded = await store.load(issue);
       const summary = await reconcileOnce({
         issue, wake, ports, now: now(), apply: false,
       });
-      results.push(summary);
-      if (loaded.state?.schema_version === 2) {
+      results.push(projectReconcileDiagnostic({ summary, state: loaded.state }));
+      const telemetryState = loaded.state?.schema_version === 2 ? loaded.state :
+        summary.plan?.schema_version === 2 ? summary.plan : null;
+      if (telemetryState != null) {
         telemetry.push(buildReconcileTelemetry({
-          summary, state: loaded.state, now: now(),
+          summary, state: telemetryState, now: now(),
         }));
       }
     }
-    console.log(JSON.stringify({
+    const output = {
       schema_version: 1,
       kind: 'agent_workflow_v2_reconcile_plan',
       mode: 'plan',
       wake: { source: wake.source, reason: wake.reason },
+      cursor: {
+        requested: cursor,
+        next: scan == null ? null : scan.next_cursor,
+      },
       processes: results.length,
       results,
       telemetry,
-    }, null, 2));
+    };
+    assertSafeDiagnosticPayload(output);
+    console.log(JSON.stringify(output, null, 2));
   } finally {
     if (checkout != null) fs.rmSync(checkout.parent, { recursive: true, force: true });
   }
