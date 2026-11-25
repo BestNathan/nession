@@ -233,6 +233,15 @@ impl WebSocketServer {
     }
 
     pub async fn run(&mut self, ready: Readiness) -> anyhow::Result<()> {
+        // Hard process-wide outbound ceilings (#4504), derived from the class
+        // limits this Server serves over a bounded connection count. Installed
+        // before any connection exists so the first Outbound sees them.
+        nession_runtime::outbound::ProcessAccounting::install(
+            nession_runtime::outbound::ProcessLimits::for_connections(
+                crate::server::outbound::SERVER_CLASS_LIMITS,
+                64,
+            ),
+        );
         let listener = self
             .listener
             .take()
