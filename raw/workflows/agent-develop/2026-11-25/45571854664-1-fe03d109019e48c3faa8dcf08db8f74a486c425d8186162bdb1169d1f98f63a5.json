@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-develop",
+    "github_workflow": "Agent / Development",
+    "github_run_id": 45571854664,
+    "github_run_attempt": 1,
+    "job": "qwen-developer",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "45571854664-1-fe03d109019e48c3faa8dcf08db8f74a486c425d8186162bdb1169d1f98f63a5"
+  },
+  "task": {
+    "id": "fe03d109019e48c3faa8dcf08db8f74a486c425d8186162bdb1169d1f98f63a5",
+    "type": "develop",
+    "issue": 4514,
+    "target_ref": "b4d904f274d769b239df3ee66642194deb34b368"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "dev-qwen-01",
+    "role": "developer",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus"
+    },
+    "run_id": "a73d5c40-a24f-4957-bfa1-4411c0157476",
+    "request_id": null,
+    "status": "error",
+    "prompt": null
+  },
+  "execution": {
+    "turns": 10,
+    "model_requests": null,
+    "tools": {
+      "observed": true,
+      "total": 9,
+      "unique": 3,
+      "by_name": {
+        "Glob": 1,
+        "Grep": 4,
+        "Read": 4
+      }
+    }
+  },
+  "tokens": {
+    "input": 24,
+    "output": 4415,
+    "cache_read": 42661,
+    "cache_write": 30399,
+    "reasoning": null,
+    "total": 77499
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-25T07:55:24.602Z",
+    "finished_at": "2026-11-25T07:56:43.707Z",
+    "agent_duration_ms": 79105,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "error"
+  }
+}
