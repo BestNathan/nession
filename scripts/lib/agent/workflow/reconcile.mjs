@@ -293,6 +293,12 @@ async function executeIntent({ state, intent, ports, now }) {
       if (typeof ports.effects.retryCi !== 'function') reject('effects port requires retryCi');
       await ports.effects.retryCi({ state, intent });
       return state;
+    case 'reingest':
+      if (typeof ports.effects.reingest !== 'function') {
+        reject('effects port requires reingest');
+      }
+      await ports.effects.reingest({ state, intent });
+      return state;
     default:
       reject('unknown intent type');
   }
