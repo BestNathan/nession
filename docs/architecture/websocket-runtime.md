@@ -152,7 +152,12 @@ request.
   the provider's existing sequence/checkpoint and replay path.
 - **Latest-state coalescence** (state pushes): the newest value for one
   incarnation/key replaces older pending ones; a value from an incompatible
-  incarnation is never merged.
+  incarnation is never merged. The executing owners are the Agent resize lane
+  (`server/resize.rs`, which orders its two producers by an observation token)
+  and the central outbox (`connection/outbox.rs`); both apply the one
+  `classify_latest_state` predicate (`stream.rs`). A level whose producer states
+  no identity (heartbeat, address/session updates) is ordered by publish order,
+  so such a producer must publish monotonically.
 - Stream admission has its own finite window, separate from Request permits,
   so a blocked Request lane cannot block terminal input and a flooding stream
   cannot consume ordinary request capacity.

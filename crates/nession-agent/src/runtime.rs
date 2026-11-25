@@ -484,9 +484,17 @@ pub async fn run(
     if let Some(ref handle) = client_handle {
         let handle = handle.clone();
         tokio::spawn(async move {
-            while let Some((session_id, cols, rows)) = resize_updates.next().await {
+            while let Some((session_id, cols, rows, incarnation, generation)) =
+                resize_updates.next().await
+            {
                 if handle.is_connected() {
-                    let _ = handle.send_terminal_resize(&session_id, cols, rows);
+                    let _ = handle.send_terminal_resize_at(
+                        &session_id,
+                        cols,
+                        rows,
+                        incarnation,
+                        generation,
+                    );
                 }
             }
         });
