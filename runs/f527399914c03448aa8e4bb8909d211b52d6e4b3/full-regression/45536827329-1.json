@@ -1,0 +1,698 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_full_failure_observation",
+  "trust": "authenticated_github_run_and_artifact_digest",
+  "evaluation": "NOT_EVALUATED",
+  "agent_dispatch": "NOT_AUTHORIZED",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_path": ".github/workflows/e2e-full-regression.yml",
+    "workflow_id": 391374339,
+    "event": "schedule",
+    "branch": "main",
+    "run_id": 45536827329,
+    "run_attempt": 1,
+    "source_sha": "f527399914c03448aa8e4bb8909d211b52d6e4b3",
+    "conclusion": "failure",
+    "completed_at": "2026-11-25T03:19:40Z",
+    "run_url": "https://github.com/BestNathan/nession/actions/runs/45536827329"
+  },
+  "artifact": {
+    "id": 14987554216,
+    "name": "full-regression-45536827329-1",
+    "digest": "sha256:5b41e1a06840d77b378d9279d64efd1a819b1d60f2b92e33df6d6036d381753f",
+    "size_bytes": 2588689,
+    "expires_at": "2026-12-09T03:19:28Z",
+    "retention": "GitHub Actions artifact; time-limited"
+  },
+  "candidate": {
+    "status": "FAILED_TESTS_OBSERVED",
+    "observed_tests": 530,
+    "unknown_files": 0,
+    "results": [
+      {
+        "id": "agent-process-discovery",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "app-attach-presentation",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "app-session-operations",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "attach-critical-path",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-disclosure-app",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-disclosure-narrow",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-disclosure-web",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-list-state",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-live-scroll",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-motion",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-scroll",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "conversation-thread-state",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "design-renderer-boundary",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "files-context-create",
+        "total": 11,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 11,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-app",
+        "total": 20,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 20,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-canonical",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-env",
+        "total": 21,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 21,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-git",
+        "total": 17,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 17,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-matrix",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual",
+        "total": 14,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 14,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-app",
+        "total": 23,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 23,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-app-compact",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-app-landscape",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-visual-web-compact",
+        "total": 2,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 2,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "fixture-workspace",
+        "total": 10,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 10,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "git-github-context",
+        "total": 9,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 9,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "images-workspace-capability",
+        "total": 6,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 6,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "jsonl-preview-geometry",
+        "total": 7,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 7,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "login",
+        "total": 1,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "pages-documents",
+        "total": 4,
+        "failed": 4,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 0,
+        "other": 0,
+        "failures": [
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-documents.spec.ts:12:75",
+            "affected_invariant": "pages-documents",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-documents.spec.ts:69:63",
+            "affected_invariant": "pages-documents",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-documents.spec.ts:88:60",
+            "affected_invariant": "pages-documents",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-documents.spec.ts:109:57",
+            "affected_invariant": "pages-documents",
+            "environment_specific": false
+          }
+        ]
+      },
+      {
+        "id": "pages-evidence",
+        "total": 3,
+        "failed": 3,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 0,
+        "other": 0,
+        "failures": [
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-evidence.spec.ts:9:71",
+            "affected_invariant": "pages-evidence",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-evidence.spec.ts:17:74",
+            "affected_invariant": "pages-evidence",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-evidence.spec.ts:28:86",
+            "affected_invariant": "pages-evidence",
+            "environment_specific": false
+          }
+        ]
+      },
+      {
+        "id": "pages-mcp",
+        "total": 6,
+        "failed": 6,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 0,
+        "other": 0,
+        "failures": [
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-mcp.spec.ts:8:64",
+            "affected_invariant": "pages-mcp",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-mcp.spec.ts:39:23",
+            "affected_invariant": "pages-mcp",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-mcp.spec.ts:61:65",
+            "affected_invariant": "pages-mcp",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-mcp.spec.ts:105:81",
+            "affected_invariant": "pages-mcp",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-mcp.spec.ts:127:68",
+            "affected_invariant": "pages-mcp",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-mcp.spec.ts:147:8",
+            "affected_invariant": "pages-mcp",
+            "environment_specific": false
+          }
+        ]
+      },
+      {
+        "id": "pages-overview",
+        "total": 7,
+        "failed": 6,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 1,
+        "other": 0,
+        "failures": [
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-overview.spec.ts:10:66",
+            "affected_invariant": "pages-overview",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-overview.spec.ts:25:71",
+            "affected_invariant": "pages-overview",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-overview.spec.ts:50:70",
+            "affected_invariant": "pages-overview",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-overview.spec.ts:68:52",
+            "affected_invariant": "pages-overview",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-overview.spec.ts:92:87",
+            "affected_invariant": "pages-overview",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-overview.spec.ts:153:110",
+            "affected_invariant": "pages-overview",
+            "environment_specific": false
+          }
+        ]
+      },
+      {
+        "id": "pages-workflows",
+        "total": 3,
+        "failed": 3,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 0,
+        "other": 0,
+        "failures": [
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-workflows.spec.ts:11:62",
+            "affected_invariant": "pages-workflows",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-workflows.spec.ts:28:73",
+            "affected_invariant": "pages-workflows",
+            "environment_specific": false
+          },
+          {
+            "kind": "assertion_failed",
+            "assertion_code": "playwright_unexpected",
+            "stable_frame": "pages-workflows.spec.ts:46:108",
+            "affected_invariant": "pages-workflows",
+            "environment_specific": false
+          }
+        ]
+      },
+      {
+        "id": "project-management",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "project-session-binding",
+        "total": 5,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 5,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "project-session-create",
+        "total": 12,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 12,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "project-sidebar-detail",
+        "total": 4,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 4,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "sandbox-workspace-capability",
+        "total": 20,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 20,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "session-lifecycle",
+        "total": 5,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 5,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "session-metadata",
+        "total": 9,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 9,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "sidebar-navigation-rail",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "sidebar-session-first",
+        "total": 10,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 10,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "terminal-attach-bootstrap",
+        "total": 3,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 3,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "terminal-consistency-faults",
+        "total": 17,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 17,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "terminal-io",
+        "total": 35,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 35,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "transcript-geometry",
+        "total": 5,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 5,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "ui-contract-assertions",
+        "total": 30,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 30,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "ui-contract-matrix",
+        "total": 104,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 104,
+        "other": 0,
+        "failures": []
+      },
+      {
+        "id": "ui-contract-web",
+        "total": 65,
+        "failed": 0,
+        "skipped": 0,
+        "flaky": 0,
+        "expected": 65,
+        "other": 0,
+        "failures": []
+      }
+    ]
+  },
+  "evidence": {
+    "archive_sha256": "5b41e1a06840d77b378d9279d64efd1a819b1d60f2b92e33df6d6036d381753f",
+    "candidate_sha256": "5239751d5043fd67d60a548d9228fb9802f4bf53cab42ca3db48c2ba356bd4a5"
+  }
+}
