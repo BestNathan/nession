@@ -70,8 +70,12 @@ export const ROLE_ACTIONS = Object.freeze({
   acceptor: Object.freeze(['accept']),
 });
 
-// Notification/observation actions have no model role.
-export const SYSTEM_ACTIONS = Object.freeze(['merge_notify', 'block_notify', 'done_notify']);
+// Notification/observation actions have no model role. `ci_retry` is a durable
+// system Outbox action: its creation is the write-ahead intent, and its
+// committed receipt records the verified rerun Run/attempt.
+export const SYSTEM_ACTIONS = Object.freeze([
+  'merge_notify', 'block_notify', 'done_notify', 'ci_retry',
+]);
 
 export const CI_STATUSES = Object.freeze([
   'pending', 'pass', 'actionable_fail', 'infrastructure', 'missing',
@@ -436,7 +440,8 @@ function validateReview(review, state) {
 function validateFeedback(feedback, state) {
   if (feedback == null) return;
   onlyKeys(feedback, ['bundle_sha256', 'head_sha', 'ci_digest', 'review_digest',
-    'parent_sha256', 'repair_round', 'finding_ids', 'sources'], 'feedback bundle');
+    'parent_sha256', 'repair_round', 'finding_ids', 'sources', 'findings',
+    'prior_finding_ids'], 'feedback bundle');
   hex(feedback.bundle_sha256, 'feedback bundle');
   sha(feedback.head_sha, 'feedback HEAD');
   if (feedback.ci_digest != null) hex(feedback.ci_digest, 'feedback CI digest');
@@ -451,6 +456,30 @@ function validateFeedback(feedback, state) {
       feedback.sources.length > 8 ||
       feedback.sources.some((source) => !['ci', 'review', 'acceptance'].includes(source))) {
     reject('invalid feedback sources');
+  }
+  if (feedback.findings != null) {
+    if (!Array.isArray(feedback.findings) || feedback.findings.length > MAX_FINDINGS) {
+      reject('invalid feedback findings');
+    }
+    for (const finding of feedback.findings) {
+      onlyKeys(finding, ['id', 'severity', 'category', 'message', 'file', 'sc'],
+        'feedback finding');
+      if (typeof finding.id !== 'string' || finding.id.length < 1 || finding.id.length > 200 ||
+          !['blocking', 'nonblocking'].includes(finding.severity) ||
+          typeof finding.category !== 'string' || typeof finding.message !== 'string' ||
+          finding.message.length > 4000 ||
+          (finding.file != null && (typeof finding.file !== 'string' || finding.file.length > 500)) ||
+          (finding.sc != null && !/^SC-[0-9]{2}$/.test(finding.sc))) {
+        reject('invalid feedback finding');
+      }
+    }
+  }
+  if (feedback.prior_finding_ids != null) {
+    if (!Array.isArray(feedback.prior_finding_ids) ||
+        feedback.prior_finding_ids.length > MAX_FINDINGS ||
+        feedback.prior_finding_ids.some((id) => typeof id !== 'string' || id.length > 200)) {
+      reject('invalid prior feedback finding IDs');
+    }
   }
   if (state.pr != null && state.pr.head_sha !== feedback.head_sha) {
     reject('feedback bundle for a different PR HEAD');

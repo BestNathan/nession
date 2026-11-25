@@ -222,8 +222,11 @@ the v1 orchestration modules remain the compatibility path for immutable
 | --- | --- |
 | `workflow/contract.mjs` | versioned v2 state/identity, phases, execution states, deterministic Thread/action/evidence IDs, strict validation |
 | `workflow/lifecycle.mjs` | **sole** business transition decision owner (`decideLifecycle`); execution-state transitions and owner fencing |
-| `workflow/ci-barrier.mjs` | freezes the applicable check obligation for the exact PR HEAD and classifies terminal results |
-| `workflow/feedback.mjs` | one immutable deduped repair bundle per HEAD + CI generation + Review result |
+| `workflow/ci-barrier.mjs` | freezes the applicable check obligation for the exact PR HEAD/base and classifies terminal results; `neutral`/`skipped` pass only where the frozen policy allows |
+| `workflow/ci-policy.mjs` | composes the trusted CI policy: server-side required-check contexts, trusted-main Quality scope, Issue-selected E2E/Case applicability and the existing merge-admission owner |
+| `workflow/ci-evidence.mjs` | bounded, paginated exact-HEAD check collection that authenticates each result against its GitHub Run/attempt/Job/steps |
+| `workflow/feedback.mjs` | one immutable deduped repair bundle per HEAD + CI generation + Review result, carrying both receipts |
+| `workflow/worker-input.mjs` | renders the one signed Developer repair input bound to the Thread/checkpoint, unified bundle and both evidence receipts |
 | `workflow/migration.mjs` | explicit, readback-based v1 → v2 projection; unknown legacy state becomes a durable blocker |
 | `workflow/reconcile.mjs` | bounded observe → decide → CAS persist → scoped effect → readback → receipt loop |
 | `workflow/facts.mjs` | production fact observer over authenticated Run/Attempt/receipt/PR/checkpoint ports; typed unavailable/denied/un-ingested facts never become an outcome |
@@ -254,38 +257,66 @@ result or business completion.
 ### 11.2 Ordering: CI before Review
 
 After the trusted Publisher confirms the exact PR HEAD, the lifecycle enters
-`ci_checking` **before** any Reviewer action. The CI barrier freezes the
-applicable required-check set for that HEAD:
+`ci_checking` **before** any Reviewer action. The expected obligation is frozen
+**before observation** from existing trusted owners: server-side required-check
+contexts (never inferred from workflow YAML), the trusted-main Quality scope,
+the Issue-selected E2E/Case applicability, and authenticated producer
+identities. The merge-admission Convergence status is owned by its existing
+merge path and stays outside the source-CI barrier; the Reviewer is never a
+GitHub Check. No second check catalog is created.
+
+For each frozen check the adapter collects paginated exact-HEAD check runs and
+authenticates the Run (repository, HEAD, declared workflow path, PR event), the
+attempt and the completed Job/steps. A check-run name or app slug alone is not
+proof. Then:
 
 * pending → wait;
-* missing/cancelled/unknown/skipped-required → not a pass; bounded recovery
-  then a durable block;
+* missing-not-yet-created/cancelled/unknown → not a pass; a durable `ci_retry`
+  system action is the write-ahead intent, with bounded cumulative
+  infrastructure budgets;
+* skipped → not a pass unless the trusted owner proved the check not
+  applicable (excluded from the obligation before observation);
+* `neutral` → pass only when the canonical required-check policy declares it
+  acceptable;
 * source-owned failure → `actionable_fail`, but Review still runs;
 * infrastructure-only failure → recover/block, never blame source code;
 * every required check terminal-success → `pass`.
+
+A retry is never re-requested while its prior attempt is unresolved or a new
+attempt is queued/running. If the external response is lost, the executor reads
+back the exact rerun Run/attempt; an unknown effect stays pending/blocked until
+verified. A rerun that materially changes the check evidence (new check-run,
+attempt, Job or steps) is a new evidence generation and invalidates the old
+Review/feedback/aggregate.
 
 Reviewer then runs as an **internal lifecycle action**, not a GitHub Check,
 required check context or branch-protection requirement. It receives the Issue
 and SC snapshot, exact PR diff/base/head, the verified CI summary and bounded
 failure evidence. A Reviewer runtime/invalid result is retried or blocked; it is
-never treated as `changes_requested`. Ordinary non-managed PRs never trigger an
-Agent Reviewer.
+never treated as `changes_requested`. Ingesting a Reviewer result never
+schedules repair by itself. Ordinary non-managed PRs never trigger an Agent
+Reviewer.
 
 `evaluating` aggregates the two independent outcomes deterministically:
 
 | CI | Review | Decision |
 | --- | --- | --- |
 | pass | approved | proceed to existing Acceptance |
-| actionable_fail | approved | one Developer repair with CI feedback |
-| pass | changes_requested | one Developer repair with Review feedback |
-| actionable_fail | changes_requested | one Developer repair with the combined, deduped bundle |
+| actionable_fail | approved | one Developer repair with the unified bundle |
+| pass | changes_requested | one Developer repair with the unified bundle |
+| actionable_fail | changes_requested | one Developer repair with the unified bundle |
 | unresolved/missing evidence | any | recover or block, never an invented pass |
 | any | Reviewer runtime/invalid | retry Reviewer or block, not Developer repair |
 
-The repair action is created only after the bundle digest is fixed for the exact
-`(Issue, PR, HEAD, CI digest, Review digest, repair ordinal)`. A Reviewer verdict
-can never override CI failure, and a rerun that materially changes CI evidence
-invalidates the old aggregate/review before a new decision is bound.
+The bundle always includes **both** outcome receipts (including the passed
+side), concrete blocking findings, prior unresolved finding IDs and the CI
+generation; nonblocking suggestions never gate a repair. The repair action is
+created only after the bundle digest is fixed for the exact
+`(Issue, PR, HEAD, CI digest, Review digest, repair ordinal)`, and the single
+signed Developer input is rendered from the persisted bundle and the same
+Thread/checkpoint binding. A Reviewer verdict can never override CI failure, and
+a rerun that materially changes CI evidence invalidates the old
+aggregate/review before a new decision is bound.
 
 ### 11.3 Wakes, persistence and recovery
 
@@ -382,9 +413,15 @@ V2 decision owner.
 
 The #4482 PR-stage criteria (SC-01..SC-05, SC-07) are proven by deterministic
 exact-source fixtures in `scripts/lib/agent/workflow/*-selftest.mjs` and the
-`agent-provider-contract` Gate. The trusted-main read-only entrypoint is
-`node scripts/reconcile-agent-workflows.mjs --plan` (bounded Store read, PR/CI
-observation and a sanitized plan); it refuses `--apply`. SC-06 requires a real
+`agent-provider-contract` Gate. Child slices #4525 (facts/scan/diagnostics),
+#4526 (trusted apply composition/wake router), #4527 (generic recovery) and
+#4528 (exact-head CI policy/evidence, durable CI retry and unified Developer
+input) extend the same executable owner without authorizing activation. The
+trusted-main read-only entrypoint is
+`node scripts/reconcile-agent-workflows.mjs --plan` (bounded Store read, frozen
+CI policy, exact-head evidence observation and a sanitized plan); it refuses
+`--apply`. A policy/reader failure is recorded as an unavailable observation,
+never converted into a smaller obligation. SC-06 requires a real
 owner-authorized
 trusted-main canary through the existing controlled Agent/Store path,
 independently authenticated Run/Attempt/Artifact and Store receipts; it remains
