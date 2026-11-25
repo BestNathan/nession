@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45676430546,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4433-process-budget",
+    "target_sha": "f89344ee78e041cd6b49c051943d2b43c5621f80",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45676430546",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "874f51bfff43789a6594a5cb9f00c55fe8214e8d11ca9f1b5a2f28d02b81273d"
+  },
+  "record": "runs/2026-11-25/45676430546-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "97e3cc0357c284ea4a4cfe3b05b5d73d1cf900fad1ba30298bfc1363f440136e"
+}
