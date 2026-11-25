@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45600854306,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4433-overload-correlation",
+    "target_sha": "7fe53ae02e9a111cf681e110d250ae3c7e51f18b",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45600854306",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "9b13a43c6a7a579576c225643a3f0111569c44a1408e1d3bfc27ed0d92718ca5"
+  },
+  "record": "runs/2026-11-25/45600854306-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "9951d962d9e095b799ad86d95da9d6804089ea870bf27c836edab4a6f51ccb59"
+}
