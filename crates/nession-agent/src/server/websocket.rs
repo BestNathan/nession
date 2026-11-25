@@ -1252,6 +1252,17 @@ struct AgentIngress {
     session_created: Option<crate::session_created::SharedSessionCreatedHook>,
 }
 
+/// The connection-lifetime facts one P2P socket is served under.
+///
+/// Grouped rather than passed one by one so `serve_connection`'s parameter list
+/// stays within the workspace's argument bound; none of these is an independent
+/// decision at its call site.
+struct ConnectionOptions {
+    auth_timeout: Duration,
+    tls: bool,
+    shutdown: watch::Receiver<bool>,
+}
+
 /// Router state for one accepted P2P connection.
 #[derive(Clone)]
 struct P2pHttpState {
@@ -1272,6 +1283,9 @@ struct P2pHttpState {
     pending_auth: Arc<Semaphore>,
     /// The absolute deadline for the first successful `client.auth`.
     auth_timeout: Duration,
+    /// Whether this listener serves TLS, for the connection's metric identity
+    /// (#4437 SC-02).
+    tls: bool,
     /// The listener's owner of upgraded WebSocket tasks and their shutdown
     /// signal (`#3439` W3).
     supervisor: Arc<ConnectionSupervisor>,
@@ -1432,6 +1446,7 @@ async fn p2p_upgrade_or_not_found(
     let auth = Arc::clone(&state.auth);
     let addr = state.addr;
     let auth_timeout = state.auth_timeout;
+    let tls = state.tls;
     let ingress_context = state.ingress;
     let supervisor = Arc::clone(&state.supervisor);
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
@@ -1446,8 +1461,11 @@ async fn p2p_upgrade_or_not_found(
                         addr,
                         ingress_context,
                         pending_auth,
-                        auth_timeout,
-                        shutdown,
+                        ConnectionOptions {
+                            auth_timeout,
+                            tls,
+                            shutdown,
+                        },
                     )
                     .await
                     {
@@ -3916,6 +3934,7 @@ impl AgentServer {
                                     slot: AdmissionSlot::new(slot),
                                     addr,
                                     ingress: ingress_context.clone(),
+                                    tls: tls_acceptor.is_some(),
                                     auth: Arc::clone(&auth),
                                     mcp: mcp.clone(),
                                     registry: registry.clone(),
@@ -4000,12 +4019,22 @@ impl AgentServer {
         let deadline = state.deadline;
         let slot = state.slot.clone();
         let router = p2p_router(state);
+        let identity = nession_runtime::metrics::MetricsIdentity::new(
+            nession_runtime::metrics::RuntimeKind::AgentP2p,
+            nession_runtime::metrics::PeerKind::Browser,
+            if tls_acceptor.is_some() {
+                nession_runtime::metrics::TransportKind::Tls
+            } else {
+                nession_runtime::metrics::TransportKind::Plain
+            },
+        );
         ingress::serve(
             move || ingress::TcpOrTls::accept(stream, tls_acceptor),
             router,
             slot,
             deadline,
             ingress::HTTP_HEADER_READ_TIMEOUT,
+            Some(identity),
         )
         .await?;
         Ok(())
@@ -4022,9 +4051,13 @@ impl AgentServer {
         addr: SocketAddr,
         context: AgentIngress,
         pending_auth: tokio::sync::OwnedSemaphorePermit,
-        auth_timeout: Duration,
-        shutdown: watch::Receiver<bool>,
+        options: ConnectionOptions,
     ) -> Result<()> {
+        let ConnectionOptions {
+            auth_timeout,
+            tls,
+            shutdown,
+        } = options;
         let (ws_sink, ws_stream) = ws.split();
 
         // The outbound path: a bounded queue with a policy per lane, and one
@@ -4032,7 +4065,17 @@ impl AgentServer {
         // the reader — holds a handle to it and says which *class* of message it
         // is sending, because the classes do not share a failure mode; see
         // `server::outbound`.
+        let identity = nession_runtime::metrics::MetricsIdentity::new(
+            nession_runtime::metrics::RuntimeKind::AgentP2p,
+            nession_runtime::metrics::PeerKind::Browser,
+            if tls {
+                nession_runtime::metrics::TransportKind::Tls
+            } else {
+                nession_runtime::metrics::TransportKind::Plain
+            },
+        );
         let (outbound, outbound_rx) = P2pOutbound::new();
+        outbound.set_identity(identity);
         let mut writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
 
         // Both attach modes share the Agent-owned Session map.
@@ -4090,6 +4133,7 @@ impl AgentServer {
             ws_stream,
             connection,
             mutations,
+            identity,
             Some(pending_auth),
             auth_timeout,
             shutdown,
@@ -4167,6 +4211,7 @@ impl AgentServer {
         mut ws_stream: futures_util::stream::SplitStream<AxumWebSocket>,
         connection: Arc<Connection>,
         mutations: Arc<KeyedLane<ResourceKey>>,
+        identity: nession_runtime::metrics::MetricsIdentity,
         mut pending_auth: Option<tokio::sync::OwnedSemaphorePermit>,
         auth_timeout: Duration,
         mut shutdown: watch::Receiver<bool>,
@@ -4191,7 +4236,8 @@ impl AgentServer {
             mutations,
             DEFAULT_MUTATIONS_IN_FLIGHT,
             crate::server::execution::LANE_LABEL,
-        );
+        )
+        .with_metrics_identity(identity);
 
         loop {
             // The pending-auth budget is returned the moment this connection

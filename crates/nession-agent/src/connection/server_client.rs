@@ -1330,12 +1330,22 @@ impl ServerClient {
         // What stays this connection's is its **bound** on mutations in flight —
         // that is what a bound protects, one connection's ability to make
         // progress — and the lane it queues into is now shared by more than one.
+        let identity = nession_runtime::metrics::MetricsIdentity::new(
+            nession_runtime::metrics::RuntimeKind::AgentCentral,
+            nession_runtime::metrics::PeerKind::Agent,
+            if self.server_url.starts_with("wss://") {
+                nession_runtime::metrics::TransportKind::Tls
+            } else {
+                nession_runtime::metrics::TransportKind::Plain
+            },
+        );
         let mut lanes = Lanes::shared(
             execution::DEFAULT_QUERY_CONCURRENCY,
             Arc::clone(&self.mutations),
             crate::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT,
             execution::LANE_LABEL,
-        );
+        )
+        .with_metrics_identity(identity);
 
         let outcome = loop {
             // The write half's settlement is a fact this half must act on even
