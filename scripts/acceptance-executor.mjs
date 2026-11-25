@@ -27,6 +27,7 @@ import {
 } from './acceptance-pr-web-quality-receipt.mjs';
 import { acceptanceModelView } from './lib/agent/tasks/acceptance.mjs';
 import {enforceConvergenceWriter4059,mayProjectConvergenceWriter4059,
+  enforceNativeConvergenceAdmission4477,mayProjectNativeConvergenceAdmission4477,
   invalidatedConvergenceWriter4059Row}
   from './acceptance-convergence-writer-4137.mjs';
 
@@ -1055,11 +1056,12 @@ function normalizeCommand(contextFile, rawFile, outFile, source) {
         context, normalizeAcceptanceResult(context, raw, source))))));
   // The trusted normalizer—not the model—decides whether a claimed live
   // failed-Full publication has authenticated source/Store/Bug receipts.
-  const gated = enforceConvergenceWriter4059(context,
+  const gated = enforceNativeConvergenceAdmission4477(context,
+    enforceConvergenceWriter4059(context,
     enforcePrRequiredQuality(context,
       enforceLiveFullFailure(context,
         enforcePrRustQuality(context, enforcePrWebQuality(context,
-          enforcePrCiTriad(context, normalized))))));
+          enforcePrCiTriad(context, normalized)))))));
   // Trusted prepare-time source lineage is retained only as a locator;
   // the Issue writer re-authenticates it from independent GitHub REST.
   const frozen = {
@@ -1091,6 +1093,8 @@ function applyCommand(issueNumber, resultFile) {
   if (Number(normalized.issue) !== Number(issueNumber)) throw new Error('result targets issue #' + normalized.issue + ', not #' + issueNumber);
   if (!mayProjectConvergenceWriter4059(normalized))
     throw new Error('Convergence workflow-writer Pass lacks authenticated operation-level proof (#4137)');
+  if (!mayProjectNativeConvergenceAdmission4477(normalized))
+    throw new Error('Native convergence admission Pass lacks authenticated operation-level proof (#4477)');
   // A downloadable normalized result is not permission to project Pass. The
   // trusted Issue writer MUST independently re-read the latest exact-run
   // Quality status and compare its identity with the prepare-time receipt.

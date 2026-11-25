@@ -19,7 +19,8 @@ import {collectQwen4192Premodel,selfTestQwen4192Premodel}
   from './acceptance-qwen-4192-premodel-recovery.mjs';
 import {collectOriginalCompositeReviewer4012,selfTestOriginalCompositeReviewer4012}
   from './acceptance-qwen-4012-reviewer-history.mjs';
-import {collectConvergenceWriter4059,selfTestConvergenceWriter4137}
+import {collectConvergenceWriter4059,selfTestConvergenceWriter4137,
+  selfTestConvergenceWriterFetch}
   from './acceptance-convergence-writer-4137.mjs';
 import { collectRelatedBugCompletion } from './acceptance-bug-bootstrap-receipt.mjs';
 import { collectE2eWakeReceipts } from './acceptance-postrun-e2e-receipt.mjs';
@@ -291,7 +292,9 @@ export function normalizeCiEvidence({ targetSha, directRuns = [], pulls = [], pu
     authenticated_run_store_five_mode_readback: authenticatedRunStoreFiveModeReadback,
     verified_staging_acr_readback: stagingAcrReadback,
     ...(authenticatedConvergenceWriter4059 ? {
-      authenticated_convergence_writer_4059:authenticatedConvergenceWriter4059} : {}),
+      authenticated_convergence_writer_4059:authenticatedConvergenceWriter4059,
+      authenticated_native_convergence_admission:
+        authenticatedConvergenceWriter4059} : {}),
     verified_knowledge_publisher_publication: verifiedKnowledgePublisherPublication,
     verified_toolchain_4160_readback: verifiedToolchain4160,
     verified_toolchain_4241_readback: verifiedToolchain4241,
@@ -1731,9 +1734,11 @@ async function collectCommand(workspace, outFile) {
   const directRuns = await workflowRunsForSha(repo, sha);
   // #4137: only trusted, operation-level GitHub readback can satisfy #4059
   // workflow-writer authorization. A green Controller/Waker is not proof.
+  // #4477: the same receipt is the minimal observation for native convergence
+  // admission (sync PR created, qualified and merged at the target Main SHA).
   const authenticatedConvergenceWriter4059 =
     process.env.ACCEPTANCE_STAGE==='post-merge' &&
-    process.env.ISSUE_NUMBER==='4059'
+    ['4059','4477'].includes(process.env.ISSUE_NUMBER)
       ? await collectConvergenceWriter4059({repo,targetSha:sha,
           runs:directRuns,get:githubGet,getLog:githubJobLog})
       : null;
@@ -2352,6 +2357,7 @@ async function selfTest() {
   await selfTestAuthenticatedGithubRead();
   selfTestConflictProbe4124();
   selfTestConvergenceWriter4137();
+  await selfTestConvergenceWriterFetch();
   selfTestKnowledgePublication();
   selfTestQwen4174();
   selfTestQwen4192Premodel();
