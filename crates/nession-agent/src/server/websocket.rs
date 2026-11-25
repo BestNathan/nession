@@ -2894,10 +2894,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // than replaying stale intermediate ones. The
                                 // source forwarder never waits on it.
                                 while resize_rx.changed().await.is_ok() {
+                                    // Draw the token at *observation* time, before
+                                    // the read: a preemption between the read and
+                                    // the publish must not let this older size
+                                    // replace a newer pending level (#4499).
+                                    let generation =
+                                        crate::server::resize::next_generation();
                                     let (cols, rows) = *resize_rx.borrow_and_update();
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
-                                    resize_reporter.publish(&full_id, cols, rows);
+                                    resize_reporter.publish(
+                                        &full_id,
+                                        cols,
+                                        rows,
+                                        stream_epoch,
+                                        generation,
+                                    );
                                     let peers = sessions_for_resize
                                         .subscriber_sinks(&session_name_resize, stream_epoch);
                                     if peers.is_empty() {
@@ -3096,14 +3108,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // command response or coalesced away). The reporter is
                         // a per-session latest-size level; this is not a second
                         // Agent stream seq.
-                        if recorded.position.is_some() {
+                        if let Some((epoch, _)) = recorded.position {
                             let full_id = format!("{}:{}", ctx.agent_id, payload.session_name);
                             // The applied size, not the requested one: the
                             // Session keeps its fixed columns (#2487), and a
                             // relay observer must learn what the pane
-                            // actually became.
-                            ctx.resize
-                                .publish(&full_id, recorded.cols, recorded.rows);
+                            // actually became. The observation token is drawn
+                            // after the apply, so it orders against the tmux
+                            // observer's token (#4499).
+                            let generation = crate::server::resize::next_generation();
+                            ctx.resize.publish(
+                                &full_id,
+                                recorded.cols,
+                                recorded.rows,
+                                epoch,
+                                generation,
+                            );
                         }
 
                         // Compatibility only: an old attachment with no

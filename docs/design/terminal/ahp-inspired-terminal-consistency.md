@@ -318,7 +318,7 @@ Protocol Kernel category. The classification and the budgets it governs live in
 | --- | --- | --- |
 | Reliable input | `agent.terminal.input` | Ordered, loss-intolerant. A frame is admitted against a finite window before any PTY write; an overflow is an explicit refusal with the current input cursor restated, never a silent drop or partial write. |
 | Recoverable output | `agent.terminal.output`, recorded authoritative resize | Ordered. Loss is detected as a gap and repaired through the existing replay/checkpoint path; a slow subscriber is isolated, not a reason to stall the PTY or a healthy subscriber. |
-| Latest state | heartbeat, address/session updates, legacy level resize | Coalesced per `(incarnation, key)`. Only a newer generation replaces a pending level; an incompatible incarnation requires a resync rather than a merge. The central Agent outbox remains the canonical queue. |
+| Latest state | heartbeat, address/session updates, legacy level resize | Coalesced per `(incarnation, key)`. Only a newer generation replaces a pending level; an incompatible incarnation requires a resync rather than a merge. The resize lane (`server/resize.rs`) and the central Agent outbox (`connection/outbox.rs`) both enforce this through `classify_latest_state`; levels published without an identity are ordered by publish order and their producers publish monotonically. |
 | Stream flow control | input ACK, parser progress, reconcile notice | Per-stream bookkeeping, never general RPC work and never answered as a unit. |
 | Control | attach/detach, lease acquire, stream resume, resize request | Dependency-carrying; the Session owner serializes or rejects stale frames. |
 

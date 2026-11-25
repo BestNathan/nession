@@ -533,14 +533,25 @@ impl ServerClientHandle {
     /// `handle_agent_terminal_resize` looks up relay clients by `payload.session_id`
     /// (not the bare session name). It is also this lane's key, so one size per
     /// session is pending at a time.
-    pub fn send_terminal_resize(&self, session_id: &str, cols: u16, rows: u16) -> Result<()> {
+    /// The `incarnation`/`generation` pair is the level identity the resize
+    /// lane observed this size under; the outbox will not let an older
+    /// observation replace a newer pending one (#4499).
+    pub fn send_terminal_resize_at(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        incarnation: u64,
+        generation: u64,
+    ) -> Result<()> {
         let payload = AgentTerminalResizePayload {
             session_id: session_id.to_string(),
             cols,
             rows,
         };
         let msg = new_message("agent.terminal.resize", payload);
-        self.outbox.send_terminal_resize(session_id, frame(&msg)?)
+        self.outbox
+            .send_terminal_resize_at(session_id, incarnation, generation, frame(&msg)?)
     }
 
     /// Queue a git repository invalidation for the central server to fan out (#1008).
@@ -3172,10 +3183,10 @@ mod tests {
         let (handle, mut frames) = handle_with_outbox();
 
         handle
-            .send_terminal_resize("agent-1:sess-1", 120, 40)
+            .send_terminal_resize_at("agent-1:sess-1", 120, 40, 1, 1)
             .unwrap();
 
-        // `send_terminal_resize` is not `async` any more: it publishes into a
+        // `send_terminal_resize_at` is not `async` any more: it publishes into a
         // lane that never waits for room, so the frame is pending by the time it
         // returns and no await is needed to observe it.
         let msg = frames.try_next().expect("no message in the outbox");

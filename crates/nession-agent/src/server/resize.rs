@@ -39,9 +39,35 @@
 //! (`web/src/platform/terminal-runtime/ConnectionManager.ts`).
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex, Weak};
 
 use tokio::sync::Notify;
+
+use crate::stream::{classify_latest_state, LatestStateIdentity, LatestStateVerdict};
+
+/// Process-wide observation order for resize levels.
+///
+/// The two producers of one session's size — the request/attach path's
+/// authoritative resize and the tmux `%window-resize` observer — must be
+/// ordered by *when they observed* the size, not by when they happened to
+/// publish it. A producer draws this token immediately before it reads/applies
+/// the size, so a preemption between the read and the publish cannot let an
+/// older size replace a newer pending one (#4499).
+static RESIZE_OBSERVATION: AtomicU64 = AtomicU64::new(1);
+
+/// The next observation token for a resize publication.
+pub fn next_generation() -> u64 {
+    RESIZE_OBSERVATION.fetch_add(1, Ordering::Relaxed)
+}
+
+/// One session's latest authoritative size and the observation it belongs to.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PendingLevel {
+    cols: u16,
+    rows: u16,
+    identity: LatestStateIdentity,
+}
 
 /// The producer half: what the agent's peer-to-peer server holds.
 ///
@@ -66,7 +92,7 @@ pub struct ResizeUpdates {
     /// A clone of the slots themselves, for the same reason: a size that was
     /// published is still owed to the consumer that has not read it yet, and
     /// the last reporter going away is not a reason to forget it.
-    latest: Arc<StdMutex<HashMap<String, (u16, u16)>>>,
+    latest: Arc<StdMutex<HashMap<String, PendingLevel>>>,
     /// The producer half, by weak reference. This is *only* liveness — "is
     /// there anyone left who could publish again?" — and holding it strongly
     /// would keep the reporter alive for as long as the consumer waits, so the
@@ -84,7 +110,7 @@ struct Shared {
     /// and `publish` is called from a task that must never yield. Nothing here
     /// is held across an await — see [`ResizeUpdates::next`], where the guard is
     /// dropped in a block before the wait.
-    latest: Arc<StdMutex<HashMap<String, (u16, u16)>>>,
+    latest: Arc<StdMutex<HashMap<String, PendingLevel>>>,
     /// Signalled on every publish, and when the last reporter goes away.
     available: Arc<Notify>,
 }
@@ -126,10 +152,44 @@ impl ResizeReporter {
     /// nothing useful to do with it. The wake-up is what tells the consumer
     /// there is something new — it does not carry the value, because the value
     /// may already have been replaced by a newer one by the time it is read.
-    pub fn publish(&self, session_id: &str, cols: u16, rows: u16) {
+    ///
+    /// `incarnation` names the stream generation the size belongs to and
+    /// `generation` is the producer's observation token (see
+    /// [`next_generation`]). The rule is [`classify_latest_state`]: a publish
+    /// from the same incarnation with an older or equal generation cannot
+    /// replace a newer pending level, so a preemption between the observation
+    /// and this call cannot roll the lane back (#4499). A publish from another
+    /// incarnation replaces it and the Server re-derives its view, which is
+    /// the declared resync contract rather than a merge.
+    pub fn publish(
+        &self,
+        session_id: &str,
+        cols: u16,
+        rows: u16,
+        incarnation: u64,
+        generation: u64,
+    ) {
+        let incoming = LatestStateIdentity {
+            incarnation,
+            key: session_id.to_string(),
+            generation,
+        };
         {
             let mut latest = lock(&self.shared.latest);
-            latest.insert(session_id.to_string(), (cols, rows));
+            if let Some(pending) = latest.get(session_id) {
+                match classify_latest_state(Some(&pending.identity), &incoming) {
+                    LatestStateVerdict::Superseded => return,
+                    LatestStateVerdict::Coalesced | LatestStateVerdict::ResyncRequired => {}
+                }
+            }
+            latest.insert(
+                session_id.to_string(),
+                PendingLevel {
+                    cols,
+                    rows,
+                    identity: incoming,
+                },
+            );
         }
         self.shared.available.notify_waiters();
     }
@@ -152,7 +212,7 @@ impl ResizeUpdates {
     /// Draining before ending, in that order: a size published while a consumer
     /// existed is still owed to it, and the reporter going away says "there will
     /// be no more", not "forget the last one".
-    pub async fn next(&mut self) -> Option<(String, u16, u16)> {
+    pub async fn next(&mut self) -> Option<(String, u16, u16, u64, u64)> {
         loop {
             // Register before looking, so a publish that lands between the look
             // and the wait is not a lost wake-up.
@@ -163,10 +223,19 @@ impl ResizeUpdates {
 
             let taken = {
                 let mut latest = lock(&self.latest);
-                let next = latest.iter().next().map(|(k, v)| (k.clone(), *v));
-                if let Some((session_id, (cols, rows))) = &next {
+                let next = latest
+                    .iter()
+                    .next()
+                    .map(|(key, level)| (key.clone(), level.clone()));
+                if let Some((session_id, level)) = &next {
                     latest.remove(session_id);
-                    Some((session_id.clone(), *cols, *rows))
+                    Some((
+                        session_id.clone(),
+                        level.cols,
+                        level.rows,
+                        level.identity.incarnation,
+                        level.identity.generation,
+                    ))
                 } else {
                     None
                 }
@@ -190,8 +259,8 @@ impl ResizeUpdates {
 /// sizes it held, and refusing to read them would turn a panic somewhere else
 /// into a permanently stalled resize lane.
 fn lock(
-    map: &StdMutex<HashMap<String, (u16, u16)>>,
-) -> std::sync::MutexGuard<'_, HashMap<String, (u16, u16)>> {
+    map: &StdMutex<HashMap<String, PendingLevel>>,
+) -> std::sync::MutexGuard<'_, HashMap<String, PendingLevel>> {
     map.lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
@@ -208,9 +277,15 @@ mod tests {
     /// would report that as a hang instead of as a wrong value.
     async fn next_within(updates: &mut ResizeUpdates) -> Option<(String, u16, u16)> {
         match tokio::time::timeout(Duration::from_millis(500), updates.next()).await {
-            Ok(value) => value,
+            Ok(value) => value.map(|(session, cols, rows, _, _)| (session, cols, rows)),
             Err(_) => panic!("no update arrived within the window"),
         }
+    }
+
+    /// Publish one size with a fresh observation token, as a producer does.
+    fn publish(reporter: &ResizeReporter, session: &str, cols: u16, rows: u16) {
+        let generation = next_generation();
+        reporter.publish(session, cols, rows, 1, generation);
     }
 
     /// A session's intermediate sizes are superseded, not queued.
@@ -227,10 +302,10 @@ mod tests {
     #[tokio::test]
     async fn only_the_latest_size_of_a_session_survives() {
         let (reporter, mut updates) = ResizeReporter::new();
-        reporter.publish("a:s1", 80, 24);
-        reporter.publish("a:s1", 100, 30);
-        reporter.publish("a:s1", 120, 40);
-        reporter.publish("a:s2", 10, 5);
+        publish(&reporter, "a:s1", 80, 24);
+        publish(&reporter, "a:s1", 100, 30);
+        publish(&reporter, "a:s1", 120, 40);
+        publish(&reporter, "a:s2", 10, 5);
 
         let mut delivered = Vec::new();
         for _ in 0..2 {
@@ -266,8 +341,8 @@ mod tests {
     async fn two_sessions_do_not_coalesce_each_other() {
         let (reporter, mut updates) = ResizeReporter::new();
         for (cols, rows) in [(80, 24), (90, 25), (100, 26)] {
-            reporter.publish("a:s1", cols, rows);
-            reporter.publish("a:s2", cols + 1, rows + 1);
+            publish(&reporter, "a:s1", cols, rows);
+            publish(&reporter, "a:s2", cols + 1, rows + 1);
         }
 
         let mut delivered = Vec::new();
@@ -293,7 +368,7 @@ mod tests {
     async fn a_flood_of_publishes_holds_one_entry() {
         let (reporter, _updates) = ResizeReporter::new();
         for i in 0..10_000u32 {
-            reporter.publish("a:s1", (i % 1000) as u16, 24);
+            publish(&reporter, "a:s1", (i % 1000) as u16, 24);
         }
         assert_eq!(reporter.pending(), 1);
     }
@@ -307,7 +382,7 @@ mod tests {
     #[tokio::test]
     async fn the_consumer_drains_and_then_ends_when_the_last_reporter_is_dropped() {
         let (reporter, mut updates) = ResizeReporter::new();
-        reporter.publish("a:s1", 80, 24);
+        publish(&reporter, "a:s1", 80, 24);
         drop(reporter);
 
         assert_eq!(
@@ -344,5 +419,36 @@ mod tests {
             .expect("the parked consumer was never woken")
             .expect("the consumer's task panicked");
         assert_eq!(ended, None);
+    }
+
+    /// #4499: a producer that observed an older size cannot replace a newer
+    /// pending level, even when it publishes afterwards. This is the
+    /// preemption between `borrow_and_update` and `publish` the rule exists
+    /// for, and it fails against the unconditional-replace lane.
+    #[tokio::test]
+    async fn an_older_observation_cannot_replace_a_newer_pending_size() {
+        let (reporter, mut updates) = ResizeReporter::new();
+        let newer = next_generation();
+        reporter.publish("a:s1", 100, 30, 7, newer);
+        reporter.publish("a:s1", 80, 24, 7, newer.saturating_sub(1));
+        assert_eq!(
+            next_within(&mut updates).await,
+            Some(("a:s1".to_string(), 100, 30)),
+            "an older observation rolled the pending level back"
+        );
+    }
+
+    /// A level from a different incarnation is not merged into its successor:
+    /// it replaces the pending value, which is the declared resync contract.
+    #[tokio::test]
+    async fn a_different_incarnation_replaces_rather_than_merges() {
+        let (reporter, mut updates) = ResizeReporter::new();
+        let first = next_generation();
+        reporter.publish("a:s1", 100, 30, 7, first);
+        reporter.publish("a:s1", 120, 40, 8, next_generation());
+        assert_eq!(
+            next_within(&mut updates).await,
+            Some(("a:s1".to_string(), 120, 40)),
+        );
     }
 }
