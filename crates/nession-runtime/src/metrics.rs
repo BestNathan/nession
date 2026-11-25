@@ -1015,10 +1015,13 @@ mod tests {
                     ready = wake.wait(ready).expect("gate wait");
                 }
                 drop(ready);
-                if metric.name == "ws_exporter_dropped" {
+                let loss = metric.name == "ws_exporter_dropped";
+                // Record before notifying: a waiter that wakes must be able to
+                // read the metric it was told about.
+                self.recorded.lock().expect("recorded").push(metric);
+                if loss {
                     self.loss.notify_waiters();
                 }
-                self.recorded.lock().expect("recorded").push(metric);
             }
         }
 
