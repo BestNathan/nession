@@ -211,6 +211,16 @@ pub enum ExecutionPolicy {
     /// Every file mutation carries [`ResourceKey::Filesystem`] rather than a
     /// path — see that variant for why the key space is that coarse.
     Key(ResourceKey),
+    /// Real-time business work with its **own reserved execution domain**
+    /// (#4503): terminal input, resize and the legacy applied ACK.
+    ///
+    /// It is a `Key` in ordering terms (same-session FIFO) but not in capacity
+    /// terms: it admits into the process's separate Stream lane, so ordinary
+    /// Request/mutation saturation cannot refuse terminal input and a slow
+    /// stream cannot spend the ordinary lane's workers. The provider declares
+    /// this beside the unit, not from the wire name; `client.terminal.*`
+    /// bookkeeping notices are not operations and take no lane.
+    Stream(ResourceKey),
 }
 
 #[cfg(test)]

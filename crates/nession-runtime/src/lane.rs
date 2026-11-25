@@ -1438,6 +1438,10 @@ where
 pub struct Lanes<K> {
     queries: QueryLane,
     keys: Keys<K>,
+    /// The reserved Stream execution lane (#4503), when the provider declared
+    /// one. Real-time business work (terminal input, resize, progress) runs
+    /// here, so ordinary Request saturation cannot consume its admission.
+    streams: Option<SharedKeys<K>>,
 }
 
 impl<K> Lanes<K>
@@ -1455,6 +1459,7 @@ where
         Self {
             queries: QueryLane::new(query_bound, label),
             keys: Keys::Own(KeyedLane::new(key_depth, label)),
+            streams: None,
         }
     }
 
@@ -1471,6 +1476,7 @@ where
         Self {
             queries: QueryLane::new(query_bound, label),
             keys: Keys::Own(KeyedLane::with_worker_budget(key_depth, key_workers, label)),
+            streams: None,
         }
     }
 
@@ -1482,7 +1488,52 @@ where
             Keys::Own(lane) => lane.set_identity(Some(identity)),
             Keys::Shared(shared) => shared.set_identity(Some(identity)),
         }
+        if let Some(shared) = &mut self.streams {
+            shared.set_identity(Some(identity));
+        }
         self
+    }
+
+    /// Give this connection the provider's reserved Stream execution lane
+    /// (#4503): its own per-connection admission bound over a process lane whose
+    /// worker budget is separate from the mutation lane.
+    pub fn with_stream_lane(
+        mut self,
+        lane: Arc<KeyedLane<K>>,
+        bound: usize,
+        label: &'static str,
+    ) -> Self {
+        let bound = u32::try_from(bound).unwrap_or(u32::MAX).max(1);
+        self.streams = Some(SharedKeys {
+            lane,
+            slots: Arc::new(Semaphore::new(bound as usize)),
+            bound,
+            ended: Arc::new(Ended::default()),
+            admission_waits: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
+            label,
+            identity: None,
+        });
+        self
+    }
+
+    /// Queue one Stream unit behind its resource's Stream queue, waiting for
+    /// room. Falls back to the ordinary key lane only when the provider did not
+    /// declare a reserved lane (older adapters/tests).
+    pub async fn stream_key(&mut self, key: K, work: Work) {
+        if let Some(streams) = &self.streams {
+            streams.enqueue(key, work).await;
+            return;
+        }
+        self.key(key, work).await;
+    }
+
+    /// Admit one Stream unit without waiting, or refuse it explicitly.
+    pub async fn try_stream_key(&mut self, key: K, work: Work) -> Result<(), AdmitError> {
+        if let Some(streams) = &self.streams {
+            return streams.try_enqueue(key, work).await;
+        }
+        self.try_key(key, work).await
     }
 
     /// The lanes of a connection whose mutations are of the *runtime's*
@@ -1521,6 +1572,7 @@ where
                 label,
                 identity: None,
             }),
+            streams: None,
         }
     }
 
@@ -1569,6 +1621,9 @@ where
             Keys::Own(lane) => lane.drain().await,
             Keys::Shared(shared) => shared.drain().await,
         }
+        if let Some(streams) = &mut self.streams {
+            streams.drain().await;
+        }
     }
 
     /// End everything in flight, waiting at most `grace` for it to stop.
@@ -1588,6 +1643,9 @@ where
         match &mut self.keys {
             Keys::Own(lane) => lane.shutdown(grace).await,
             Keys::Shared(shared) => shared.shutdown(grace).await,
+        }
+        if let Some(streams) = &mut self.streams {
+            streams.shutdown(grace).await;
         }
     }
 
@@ -2129,6 +2187,85 @@ mod tests {
     /// so a refused *new* key left an empty queue that nothing removed: the map
     /// grew with every refusal and `drain()` waited on a key that could never be
     /// filled. Refusal now happens before the entry exists.
+    /// #4503: the reserved Stream lane is real execution isolation. Filling
+    /// the ordinary mutation lane's only worker does not delay a Stream unit,
+    /// and saturating the Stream lane does not consume query capacity.
+    #[tokio::test]
+    async fn a_reserved_stream_lane_is_independent_of_mutation_saturation() {
+        let mutations = Arc::new(KeyedLane::with_worker_budget(8, 1, "mut"));
+        let streams = Arc::new(KeyedLane::with_worker_budget(8, 1, "stream"));
+        let mut lanes = Lanes::shared(1, mutations, 8, "").with_stream_lane(streams, 8, "");
+        let mutation_gate = gate();
+        let stream_gate = gate();
+        let stream_done = Arc::new(AtomicUsize::new(0));
+
+        // The mutation lane's one worker is parked; ordinary Request capacity
+        // is fully consumed for this connection.
+        {
+            let gate = Arc::clone(&mutation_gate);
+            lanes
+                .try_key(
+                    session("busy"),
+                    Box::pin(async move { pass(&gate).await }) as Work,
+                )
+                .await
+                .expect("the first mutation fits the lane");
+        }
+
+        // A Stream unit is admitted on its own reserved worker and completes
+        // while the mutation lane is still blocked.
+        {
+            let gate = Arc::clone(&stream_gate);
+            let done = Arc::clone(&stream_done);
+            lanes
+                .try_stream_key(
+                    session("terminal"),
+                    Box::pin(async move {
+                        pass(&gate).await;
+                        done.fetch_add(1, Ordering::SeqCst);
+                    }) as Work,
+                )
+                .await
+                .expect("a Stream unit was refused while Request work was blocked");
+        }
+        stream_gate.add_permits(1);
+        within_patience("the reserved Stream unit never completed", async {
+            while stream_done.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+        // Saturating the Stream lane refuses explicitly without touching the
+        // query lane's independent capacity.
+        let stream_gate_2 = gate();
+        {
+            let gate = Arc::clone(&stream_gate_2);
+            lanes
+                .try_stream_key(
+                    session("terminal-2"),
+                    Box::pin(async move { pass(&gate).await }) as Work,
+                )
+                .await
+                .expect("the Stream worker was not free after the first unit");
+        }
+        assert_eq!(
+            lanes.try_stream_key(session("terminal-3"), nothing()).await,
+            Err(AdmitError::Saturated),
+            "a saturated Stream lane did not refuse explicitly"
+        );
+        lanes
+            .try_query(async {})
+            .expect("Stream saturation consumed the query lane's capacity");
+
+        mutation_gate.add_permits(1);
+        stream_gate_2.add_permits(1);
+        within_patience("the lanes did not settle", async {
+            lanes.drain().await;
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn a_budget_refusal_does_not_create_a_phantom_key() {
         let mut lane = KeyedLane::with_worker_budget(8, 1, "phantom");

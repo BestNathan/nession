@@ -126,3 +126,34 @@ pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
         crate::server::execution::LANE_LABEL,
     ))
 }
+
+/// The process's **reserved** Stream execution lane (#4503).
+///
+/// A second lane by construction, not a class inside the mutation one: real-time
+/// business work (terminal input, resize, legacy applied ACK) must complete
+/// while ordinary Request/mutation work is saturated, and ordinary work must not
+/// be able to spend the Stream workers. Its keys are the same
+/// [`ResourceKey`]s, so per-session order still holds.
+pub type StreamLane = Arc<KeyedLane<ResourceKey>>;
+
+/// How many resources this process may be executing Stream work for at once.
+///
+/// A process bound over the connections that share the lane; each connection
+/// states its own admission bound ([`DEFAULT_STREAM_IN_FLIGHT`]) so one peer
+/// cannot take them all.
+pub const DEFAULT_STREAM_WORKERS: usize = crate::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT * 2;
+
+/// How many Stream units one connection may have in flight.
+pub const DEFAULT_STREAM_IN_FLIGHT: usize = 8;
+
+/// The label the Stream lane's diagnostics carry.
+pub const STREAM_LANE_LABEL: &str = "stream";
+
+/// Build the process's reserved Stream lane.
+pub fn stream_scheduler() -> Arc<KeyedLane<ResourceKey>> {
+    Arc::new(KeyedLane::with_worker_budget(
+        crate::server::execution::DEFAULT_KEY_QUEUE_DEPTH,
+        DEFAULT_STREAM_WORKERS,
+        STREAM_LANE_LABEL,
+    ))
+}
