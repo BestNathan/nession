@@ -135,8 +135,20 @@ pub const DEFAULT_MUTATIONS_IN_FLIGHT: usize = 16;
 /// *connection's* admission bound ([`DEFAULT_MUTATIONS_IN_FLIGHT`]), which is
 /// where the waiter is. See `nession_runtime::lane`.
 pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
-    Arc::new(KeyedLane::new(DEFAULT_KEY_QUEUE_DEPTH, LANE_LABEL))
+    Arc::new(KeyedLane::with_worker_budget(
+        DEFAULT_KEY_QUEUE_DEPTH,
+        PROCESS_MUTATION_WORKERS,
+        LANE_LABEL,
+    ))
 }
+
+/// How many resources this Server may be mutating at once, across every
+/// connection that shares the lane (#4433 SC-02).
+///
+/// The per-connection admission bound is not a process bound. Four connections'
+/// worth of in-flight mutations is the process ceiling; the rest queue behind
+/// their resource or are refused by the connection's own bound.
+pub const PROCESS_MUTATION_WORKERS: usize = DEFAULT_MUTATIONS_IN_FLIGHT * 4;
 
 /// How many mutations one resource may have queued before the reader waits.
 ///
@@ -332,6 +344,16 @@ pub async fn answer(
 
 #[cfg(test)]
 mod tests {
+
+    /// #4433 SC-02: the shared lane carries a process-wide worker budget.
+    #[tokio::test]
+    async fn the_process_mutation_lane_is_worker_bounded() {
+        let lane = mutation_scheduler();
+        assert_eq!(
+            lane.snapshot().await.worker_budget,
+            Some(PROCESS_MUTATION_WORKERS),
+        );
+    }
     use super::*;
 
     /// A policy is read from the declaration, and an undeclared wire is not
