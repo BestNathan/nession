@@ -379,14 +379,14 @@ where
             _ = outbound.lifecycle.wait_cancelled() => break,
             frame = rx.recv() => {
                 let Some(frame) = frame else { break };
-                // Split so the budget claim is released *after* the write, not
-                // before it: the permits stay alive across the await and drop at
-                // the end of the arm.
-                let QueuedFrame { message, budget, .. } = frame;
+                // Every claim — class bytes, class frame slot and the process
+                // charge — stays alive across the await, so an in-flight frame
+                // is visible to both bounds (#4434).
+                let (message, charge) = frame.into_write_parts();
                 let written =
                     nession_runtime::lifecycle::write_frame(&mut sink, message, timeouts.write)
                         .await;
-                drop(budget);
+                drop(charge);
                 if let Err(failure) = written {
                     // The peer is gone or unhealthy. Record why, and let the
                     // read loop's cancellation race end that half.

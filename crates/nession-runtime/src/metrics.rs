@@ -23,7 +23,7 @@ use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock, RwLock};
 
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 
 /// Which runtime emitted the metric.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -425,7 +425,7 @@ pub const METRIC_CATALOG: &[MetricDef] = &[
         MetricKind::Counter,
         UnitKind::Count,
         Domain::Stream,
-        "output gaps observed",
+        "stream gaps observed; the direction label separates terminal input from output",
     ),
     def(
         "ws_stream_replay",
@@ -650,10 +650,18 @@ fn sink_slot() -> &'static RwLock<Option<Arc<dyn MetricSink>>> {
 /// Install (or remove) the process sink. Callers own this; the runtime only
 /// consumes it.
 pub fn set_sink(sink: Option<Arc<dyn MetricSink>>) {
-    if let Ok(mut slot) = sink_slot().write() {
-        ENABLED.store(sink.is_some(), Ordering::Release);
-        *slot = sink;
-    }
+    // Drop a replaced sink outside the process-wide write lock: a sink's Drop
+    // is arbitrary code and may block or take its own locks.
+    let previous = match sink_slot().write() {
+        Ok(mut slot) => {
+            ENABLED.store(sink.is_some(), Ordering::Release);
+            let previous = slot.take();
+            *slot = sink;
+            previous
+        }
+        Err(_) => None,
+    };
+    drop(previous);
 }
 
 /// Whether a sink is installed. Owners use this to skip building labels.
@@ -670,13 +678,17 @@ pub fn record(name: &'static str, labels: Labels, value: f64) {
     let Some(metric) = Metric::new(name, labels, value) else {
         return;
     };
-    let Ok(slot) = sink_slot().read() else {
-        return;
+    // Clone the sink under the read lock, then release the process-wide lock
+    // before calling sink code. A sink is arbitrary code and may block or
+    // acquire its own locks; holding the global slot lock across it can
+    // deadlock with `set_sink` (observed as the rust-coverage hang, #4515).
+    let sink = match sink_slot().read() {
+        Ok(slot) => slot.as_ref().cloned(),
+        Err(_) => None,
     };
-    let Some(sink) = slot.as_ref() else {
-        return;
-    };
-    sink.record(metric);
+    if let Some(sink) = sink {
+        sink.record(metric);
+    }
 }
 
 /// Record a counter increment.
@@ -697,23 +709,68 @@ pub fn gauge(name: &'static str, labels: Labels, value: f64) {
 pub struct BoundedExporter {
     tx: mpsc::Sender<Metric>,
     drops: Arc<AtomicU64>,
+    /// Wakes the forwarder when a drop occurred, so the loss metric is
+    /// published promptly instead of waiting for the next batch.
+    wake: Arc<Notify>,
 }
 
 impl BoundedExporter {
     /// Start a bounded exporter of `capacity` metrics into `inner`.
     ///
     /// Must be called inside a Tokio runtime (the forwarder is a task).
+    ///
+    /// The forwarder is also the **emit owner** for `ws_exporter_dropped`: it
+    /// publishes the delta of [`drops`](Self::drops) into `inner` directly
+    /// (never through the bounded queue, so the loss metric cannot itself be
+    /// dropped or counted twice). While the collector is stalled the loss
+    /// cannot be delivered — nothing can — but it is accrued and published in
+    /// full once the collector makes progress again.
     pub fn spawn(inner: Arc<dyn MetricSink>, capacity: usize) -> Arc<Self> {
         let (tx, mut rx) = mpsc::channel::<Metric>(capacity.max(1));
         let drops = Arc::new(AtomicU64::new(0));
         let exporter_drops = Arc::clone(&drops);
+        let wake = Arc::new(Notify::new());
+        let exporter_wake = Arc::clone(&wake);
         tokio::spawn(async move {
-            while let Some(metric) = rx.recv().await {
-                inner.record(metric);
+            let mut reported = 0u64;
+            loop {
+                tokio::select! {
+                    maybe = rx.recv() => match maybe {
+                        Some(metric) => inner.record(metric),
+                        None => break,
+                    },
+                    () = exporter_wake.notified() => {}
+                }
+                // Publish whatever was dropped since the last report. This is
+                // the owner `ws_exporter_dropped` was missing (#4501).
+                let total = exporter_drops.load(Ordering::Relaxed);
+                if total > reported {
+                    let delta = total - reported;
+                    reported = total;
+                    if let Some(metric) = Metric::new(
+                        "ws_exporter_dropped",
+                        Labels::new().domain(Domain::Lifecycle),
+                        delta as f64,
+                    ) {
+                        inner.record(metric);
+                    }
+                }
+            }
+            // A drop can land between the last observation and the senders
+            // going away; report it before the task ends.
+            let total = exporter_drops.load(Ordering::Relaxed);
+            if total > reported {
+                let delta = total - reported;
+                if let Some(metric) = Metric::new(
+                    "ws_exporter_dropped",
+                    Labels::new().domain(Domain::Lifecycle),
+                    delta as f64,
+                ) {
+                    inner.record(metric);
+                }
             }
         });
-        let _ = exporter_drops;
-        Arc::new(Self { tx, drops })
+        Arc::new(Self { tx, drops, wake })
     }
 
     /// Metrics dropped because the queue was full or closed.
@@ -726,9 +783,7 @@ impl MetricSink for BoundedExporter {
     fn record(&self, metric: Metric) {
         if self.tx.try_send(metric).is_err() {
             self.drops.fetch_add(1, Ordering::Relaxed);
-            // The exporter's own loss is a metric, but it must not use the
-            // same bounded path: count it locally and let the owner publish
-            // `ws_exporter_dropped` from `drops()`.
+            self.wake.notify_one();
         }
     }
 }
@@ -879,6 +934,45 @@ mod tests {
         }
     }
 
+    /// #4502: a byte counter must not be presented as a frame count, and the
+    /// gap metric's two surfaces must stay visibly separate in the panels.
+    #[test]
+    fn dashboards_keep_gap_directions_and_byte_units_honest() {
+        let doc: serde_json::Value =
+            serde_json::from_str(DASHBOARDS).expect("dashboards are valid JSON");
+        let dashboards = doc["dashboards"].as_array().expect("dashboards array");
+        let mut gap_directions = Vec::new();
+        for dashboard in dashboards {
+            for panel in dashboard["panels"].as_array().expect("panels array") {
+                let name = panel["metric"].as_str().expect("panel metric");
+                let def = metric_def(name).expect("panel names a catalogued metric");
+                let title = panel["title"]
+                    .as_str()
+                    .expect("panel title")
+                    .to_ascii_lowercase();
+                if def.unit == UnitKind::Byte {
+                    assert!(
+                        !title.contains("frame") || title.contains("byte"),
+                        "panel {name} measures bytes but its title claims frames: {title}"
+                    );
+                }
+                if name == "ws_stream_gap" {
+                    let direction = panel["labels"]["direction"]
+                        .as_str()
+                        .expect("a gap panel names its direction");
+                    gap_directions.push(direction.to_string());
+                }
+            }
+        }
+        gap_directions.sort();
+        gap_directions.dedup();
+        assert_eq!(
+            gap_directions,
+            vec!["inbound".to_string(), "outbound".to_string()],
+            "input and output gaps are not separately observable"
+        );
+    }
+
     #[tokio::test]
     async fn an_unknown_metric_name_is_not_recorded() {
         let _guard = TEST_SINK_LOCK.lock().await;
@@ -904,6 +998,11 @@ mod tests {
             .find(|metric| metric.name == "ws_admission_refused")
             .expect("the catalogued metric was not recorded");
         assert_eq!(recorded.kind, MetricKind::Counter);
+        // Release the capture lock before `set_sink` takes the global write
+        // lock. Holding it across `set_sink` deadlocks with a concurrent
+        // `record` that holds the sink read lock and waits for this mutex
+        // (#4515 rust-coverage hang).
+        drop(metrics);
         set_sink(None);
     }
 
@@ -931,5 +1030,79 @@ mod tests {
             );
         }
         assert!(exporter.drops() >= 8, "drops were not counted");
+    }
+
+    /// #4501: the exporter's own loss has a real emit owner. A stalled
+    /// collector accrues drops; once it makes progress the forwarder publishes
+    /// `ws_exporter_dropped` directly to it, and the deltas sum to the drop
+    /// counter without double counting.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn exporter_drops_are_published_to_the_inner_sink() {
+        use std::sync::{Condvar, Mutex as StdMutex};
+
+        struct Gated {
+            open: Arc<(StdMutex<bool>, Condvar)>,
+            recorded: StdMutex<Vec<Metric>>,
+            loss: Arc<Notify>,
+        }
+
+        impl MetricSink for Gated {
+            fn record(&self, metric: Metric) {
+                let (open, wake) = &*self.open;
+                let mut ready = open.lock().expect("gate");
+                while !*ready {
+                    ready = wake.wait(ready).expect("gate wait");
+                }
+                drop(ready);
+                let loss = metric.name == "ws_exporter_dropped";
+                // Record before notifying: a waiter that wakes must be able to
+                // read the metric it was told about.
+                self.recorded.lock().expect("recorded").push(metric);
+                if loss {
+                    self.loss.notify_waiters();
+                }
+            }
+        }
+
+        let gate = Arc::new((StdMutex::new(false), Condvar::new()));
+        let sink = Arc::new(Gated {
+            open: Arc::clone(&gate),
+            recorded: StdMutex::new(Vec::new()),
+            loss: Arc::new(Notify::new()),
+        });
+        let exporter = BoundedExporter::spawn(Arc::clone(&sink) as Arc<dyn MetricSink>, 2);
+
+        // The forwarder takes one metric and parks inside the stalled sink;
+        // the two-slot queue fills and the rest are dropped by `record`.
+        for _ in 0..10 {
+            exporter.record(
+                Metric::new("ws_admission_refused", Labels::new(), 1.0).expect("catalog name"),
+            );
+        }
+        let dropped = exporter.drops();
+        assert!(dropped >= 5, "the bounded queue did not drop: {dropped}");
+
+        let notified = sink.loss.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        {
+            let (open, wake) = &*gate;
+            *open.lock().expect("gate") = true;
+            wake.notify_all();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), notified)
+            .await
+            .expect("the loss metric was never published");
+
+        let recorded = sink.recorded.lock().expect("recorded");
+        let reported: f64 = recorded
+            .iter()
+            .filter(|metric| metric.name == "ws_exporter_dropped")
+            .map(|metric| metric.value)
+            .sum();
+        assert_eq!(
+            reported, dropped as f64,
+            "loss deltas do not sum to the drop counter"
+        );
     }
 }
