@@ -121,8 +121,8 @@ use std::fmt;
 use std::future::Future;
 use std::hash::Hash;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex as StdMutex};
 use std::time::Duration;
 
 use futures_util::FutureExt;
@@ -136,6 +136,42 @@ use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
 /// that owns the runtime identity adds `runtime`/`peer` when it emits its own.
 fn lane_labels(domain: Domain, direction: Direction) -> Labels {
     Labels::new().domain(domain).direction(direction)
+}
+
+// Process-wide task gauges (#4437).
+//
+// A per-lane gauge emitted under the same label set is last-writer-wins: one
+// connection's sample erases another's, and a sample emitted only at admission
+// never settles. These two counters are the process aggregate; every lane moves
+// them and the emitted sample is read from the atomic under one lock, so the
+// final emission after quiescence is the true zero.
+static TASKS_ACTIVE: AtomicI64 = AtomicI64::new(0);
+static TASKS_RETAINED: AtomicI64 = AtomicI64::new(0);
+static TASK_GAUGE_LOCK: StdMutex<()> = StdMutex::new(());
+
+/// Move both process task counters and emit the resulting aggregate.
+fn task_gauges(delta_active: i64, delta_retained: i64) {
+    let _guard = TASK_GAUGE_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let active = TASKS_ACTIVE.fetch_add(delta_active, Ordering::Relaxed) + delta_active;
+    let retained = TASKS_RETAINED.fetch_add(delta_retained, Ordering::Relaxed) + delta_retained;
+    let labels = lane_labels(Domain::Request, Direction::Internal);
+    metrics::gauge("ws_task_active", labels, active.max(0) as f64);
+    metrics::gauge("ws_task_retained", labels, retained.max(0) as f64);
+}
+
+/// One running query, counted in the process aggregate for its whole life.
+///
+/// A guard rather than a line in `run`: an aborted task's future is dropped
+/// without resuming, so the decrement must live in `Drop`. The permit is
+/// separate and still releases the slot at completion.
+struct ActiveTask;
+
+impl Drop for ActiveTask {
+    fn drop(&mut self) {
+        task_gauges(-1, 0);
+    }
 }
 
 /// A boxed unit of work, as the key lane carries it.
@@ -384,15 +420,13 @@ impl QueryLane {
         self.counters
             .peak_in_flight
             .fetch_max(self.in_flight() as u64, Ordering::Relaxed);
+        task_gauges(1, 1);
         self.tasks
-            .spawn(run(work, permit, Arc::clone(&self.counters)));
+            .spawn(run(work, permit, Arc::clone(&self.counters), ActiveTask));
         metrics::counter(
             "ws_admission_accepted",
             lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
         );
-        let labels = lane_labels(Domain::Request, Direction::Internal);
-        metrics::gauge("ws_task_active", labels, self.in_flight() as f64);
-        metrics::gauge("ws_task_retained", labels, self.tasks.len() as f64);
     }
 
     /// Reap finished tasks without waiting (`#4433`).
@@ -401,7 +435,9 @@ impl QueryLane {
     /// rather than the connection's message count. A panic is logged and
     /// counted here, which is the only place it is visible.
     fn reap(&mut self) {
+        let mut reaped = 0i64;
         while let Some(joined) = self.tasks.try_join_next() {
+            reaped += 1;
             self.counters.reaped.fetch_add(1, Ordering::Relaxed);
             metrics::counter(
                 "ws_task_reaped",
@@ -417,6 +453,9 @@ impl QueryLane {
                 );
             }
         }
+        if reaped > 0 {
+            task_gauges(0, -reaped);
+        }
     }
 
     /// Wait for every query in flight.
@@ -426,11 +465,16 @@ impl QueryLane {
     /// makes an identity or a mode transition ordered without making every other
     /// frame ordered too.
     pub async fn drain(&mut self) {
+        let mut drained = 0i64;
         while let Some(joined) = self.tasks.join_next().await {
+            drained += 1;
             self.counters.reaped.fetch_add(1, Ordering::Relaxed);
             if report(&joined, self.label, "query") == Outcome::Panicked {
                 self.counters.panics.fetch_add(1, Ordering::Relaxed);
             }
+        }
+        if drained > 0 {
+            task_gauges(0, -drained);
         }
     }
 
@@ -508,12 +552,28 @@ impl QueryLane {
     }
 }
 
+impl Drop for QueryLane {
+    fn drop(&mut self) {
+        let remaining = i64::try_from(self.tasks.len()).unwrap_or(i64::MAX);
+        if remaining > 0 {
+            // These records are going away with the lane. Their tasks are
+            // aborted by the JoinSet drop and counted by their `ActiveTask`
+            // guards; only the retained count is ours to settle here.
+            task_gauges(0, -remaining);
+        }
+    }
+}
+
 /// Run the work while holding its slot, and count it when it ends.
 ///
 /// The permit is dropped before the completion is counted, so `in_flight` means
 /// "running" rather than "admitted", and a slot is free the moment the work is.
-async fn run<F>(work: F, permit: Option<OwnedSemaphorePermit>, counters: Arc<QueryCounters>)
-where
+async fn run<F>(
+    work: F,
+    permit: Option<OwnedSemaphorePermit>,
+    counters: Arc<QueryCounters>,
+    _active: ActiveTask,
+) where
     F: Future<Output = ()>,
 {
     let started = std::time::Instant::now();
