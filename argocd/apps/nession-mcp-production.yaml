@@ -1,6 +1,6 @@
 # Independent production standalone MCP pilot (#4529).
-# Activate only after production inbound SealedSecret is published and
-# the candidate image manifest and origin TLS/routing are verified.
+# Internal-only first activation after protected production sealing and image checks.
+# Public Ingress remains unenrolled until TLS/origin routing is verified.
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
