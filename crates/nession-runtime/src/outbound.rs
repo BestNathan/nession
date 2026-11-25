@@ -339,6 +339,45 @@ impl QueuedFrame {
     fn mark_dequeued(&mut self) {
         self.marker.dequeue();
     }
+
+    /// Split the frame into its payload and the ownership the writer must hold
+    /// for the duration of the write.
+    ///
+    /// A plain `let QueuedFrame { message, budget, .. } = frame` drops the
+    /// class frame slot and the process charge at the end of that statement —
+    /// before the write — so the in-flight frame would be invisible to both
+    /// bounds and a writer parked in `send` would hold neither (#4434). The
+    /// returned [`FrameCharge`] keeps every claim alive until the caller drops
+    /// it after the write.
+    #[must_use = "the charge must be held across the write; dropping it releases the budgets early"]
+    pub fn into_write_parts(self) -> (WsFrame, FrameCharge) {
+        let QueuedFrame {
+            message,
+            budget,
+            slot,
+            _process,
+            ..
+        } = self;
+        (
+            message,
+            FrameCharge {
+                _budget: budget,
+                _slot: slot,
+                _process,
+            },
+        )
+    }
+}
+
+/// Every resource one in-flight frame holds, kept alive until the write ends.
+///
+/// The class byte permit, the class frame slot and the process charge are all
+/// released together on drop, which is the moment the frame is no longer
+/// in flight.
+pub struct FrameCharge {
+    _budget: OwnedSemaphorePermit,
+    _slot: OwnedSemaphorePermit,
+    _process: ProcessCharge,
 }
 
 /// What makes the in-channel count stop including a frame.
@@ -1462,6 +1501,39 @@ mod tests {
             outbound.snapshot().response_frames,
             LIMITS.response.frames - 1
         );
+        assert_eq!(outbound.snapshot().in_flight_frames, 0);
+    }
+
+    /// #4434: the split a real writer uses keeps every claim (class bytes,
+    /// class frame slot and process charge) alive until the write ends. A plain
+    /// `..` destructure released them at the end of the `let` statement, so
+    /// `in_flight_frames` read 0 while the writer was parked in `send`.
+    #[tokio::test]
+    async fn the_write_split_holds_the_in_flight_claim_until_dropped() {
+        let (outbound, mut rx) = outbound();
+        assert_eq!(
+            outbound
+                .submit_current(FrameClass::Response, text(1024), WaitPolicy::NoWait)
+                .await,
+            SubmitOutcome::Accepted
+        );
+        let frame = rx.recv().await.expect("the frame was queued");
+
+        let (message, charge) = frame.into_write_parts();
+        assert!(matches!(message, WsFrame::Text(_)));
+        assert_eq!(
+            outbound.snapshot().response_frames,
+            1,
+            "the class frame slot was released before the write"
+        );
+        assert_eq!(
+            outbound.snapshot().in_flight_frames,
+            1,
+            "the in-flight frame became invisible before the write"
+        );
+
+        drop(charge);
+        assert_eq!(outbound.snapshot().response_frames, 0);
         assert_eq!(outbound.snapshot().in_flight_frames, 0);
     }
 

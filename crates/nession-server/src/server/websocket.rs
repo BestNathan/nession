@@ -896,19 +896,18 @@ async fn handle_ws_stream(
                 maybe_msg = rx.recv() => {
                     match maybe_msg {
                         Some(frame) => {
-                            // Split so the budget claim is released *after* the
-                            // write, not before it: the permits stay alive
-                            // across the await and drop at the end of the arm.
-                            let crate::server::outbound::QueuedFrame {
-                                message, budget, ..
-                            } = frame;
+                            // Every claim — class bytes, class frame slot and
+                            // the process charge — stays alive across the
+                            // await; a plain `..` destructure dropped them
+                            // before the write (#4434).
+                            let (message, charge) = frame.into_write_parts();
                             let written = nession_runtime::lifecycle::write_frame(
                                 &mut write,
                                 message,
                                 write_timeouts.write,
                             )
                             .await;
-                            drop(budget);
+                            drop(charge);
                             if let Err(failure) = written {
                                 error!("Failed to send WebSocket message: {failure}");
                                 writer_lifecycle.settle(match failure {
@@ -1385,6 +1384,11 @@ async fn handle_ws_stream(
         );
     }
     debug!("connection closed — outbound: {:?}", sender.snapshot());
+
+    // Clean up: the web-client broadcast forwarder belongs to this connection.
+    // Settle it here rather than waiting for a later broadcast to make it exit
+    // (#4434).
+    handler.stop_web_client_subscription();
 
     // Clean up: release the agent's control channel, but only if this
     // connection still owns it. A connection that a reconnect has already
@@ -1897,6 +1901,13 @@ struct AgentWrite<AS>(AS);
 /// *reads* (#4065); this is the matching bound for a socket write the peer has
 /// stopped draining.
 const RELAY_WRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(10);
+/// The best-effort detach dial is a recovery path, not a work item. A dead
+/// agent pod's IP can blackhole SYNs for the OS connect timeout (~130s), and
+/// the browser connection's reader is waiting on this teardown before it can
+/// re-attach — the frozen-terminal shape #4065 exists to remove (#4434).
+const RELAY_DETACH_DIAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+/// The detach leg's writes get the same finite deadline as the attach leg.
+const RELAY_DETACH_WRITE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(2);
 
 impl<AS> AgentWrite<AS>
 where
@@ -2320,7 +2331,12 @@ where
     // The original agent WS was split+consumed, so we open a fresh connection
     // to the same URL that worked for the attach.
     if let Some(ref url) = connected_url {
-        if let Ok((mut detach_ws, _)) = tokio_tungstenite::connect_async(url).await {
+        if let Ok(Ok((mut detach_ws, _))) = tokio::time::timeout(
+            RELAY_DETACH_DIAL_TIMEOUT,
+            tokio_tungstenite::connect_async(url),
+        )
+        .await
+        {
             // The detach is a **second dial**, so it authenticates like the
             // first: the Agent Token as the first frame, never a URL parameter
             // (#3440). Sending detach on an unauthenticated socket would be the
@@ -2336,13 +2352,16 @@ where
                 "payload": { "auth_token": agent_token, "client_id": client_id },
             });
             let mut authenticated = false;
-            if detach_ws
-                .send(tokio_tungstenite::tungstenite::Message::Text(
-                    auth_msg.to_string(),
-                ))
-                .await
-                .is_ok()
-            {
+            if matches!(
+                tokio::time::timeout(
+                    RELAY_DETACH_WRITE_DEADLINE,
+                    detach_ws.send(tokio_tungstenite::tungstenite::Message::Text(
+                        auth_msg.to_string(),
+                    )),
+                )
+                .await,
+                Ok(Ok(()))
+            ) {
                 loop {
                     match tokio::time::timeout(std::time::Duration::from_secs(10), detach_ws.next())
                         .await
@@ -2377,11 +2396,13 @@ where
                         "session_name": session_name,
                     }
                 });
-                let _ = detach_ws
-                    .send(tokio_tungstenite::tungstenite::Message::Text(
+                let _ = tokio::time::timeout(
+                    RELAY_DETACH_WRITE_DEADLINE,
+                    detach_ws.send(tokio_tungstenite::tungstenite::Message::Text(
                         detach_msg.to_string(),
-                    ))
-                    .await;
+                    )),
+                )
+                .await;
                 info!(
                     "Sent client.detach for session '{}' (best-effort)",
                     session_name
