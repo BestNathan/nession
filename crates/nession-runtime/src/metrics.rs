@@ -650,10 +650,18 @@ fn sink_slot() -> &'static RwLock<Option<Arc<dyn MetricSink>>> {
 /// Install (or remove) the process sink. Callers own this; the runtime only
 /// consumes it.
 pub fn set_sink(sink: Option<Arc<dyn MetricSink>>) {
-    if let Ok(mut slot) = sink_slot().write() {
-        ENABLED.store(sink.is_some(), Ordering::Release);
-        *slot = sink;
-    }
+    // Drop a replaced sink outside the process-wide write lock: a sink's Drop
+    // is arbitrary code and may block or take its own locks.
+    let previous = match sink_slot().write() {
+        Ok(mut slot) => {
+            ENABLED.store(sink.is_some(), Ordering::Release);
+            let previous = slot.take();
+            *slot = sink;
+            previous
+        }
+        Err(_) => None,
+    };
+    drop(previous);
 }
 
 /// Whether a sink is installed. Owners use this to skip building labels.
@@ -670,13 +678,17 @@ pub fn record(name: &'static str, labels: Labels, value: f64) {
     let Some(metric) = Metric::new(name, labels, value) else {
         return;
     };
-    let Ok(slot) = sink_slot().read() else {
-        return;
+    // Clone the sink under the read lock, then release the process-wide lock
+    // before calling sink code. A sink is arbitrary code and may block or
+    // acquire its own locks; holding the global slot lock across it can
+    // deadlock with `set_sink` (observed as the rust-coverage hang, #4515).
+    let sink = match sink_slot().read() {
+        Ok(slot) => slot.as_ref().cloned(),
+        Err(_) => None,
     };
-    let Some(sink) = slot.as_ref() else {
-        return;
-    };
-    sink.record(metric);
+    if let Some(sink) = sink {
+        sink.record(metric);
+    }
 }
 
 /// Record a counter increment.
@@ -947,6 +959,11 @@ mod tests {
             .find(|metric| metric.name == "ws_admission_refused")
             .expect("the catalogued metric was not recorded");
         assert_eq!(recorded.kind, MetricKind::Counter);
+        // Release the capture lock before `set_sink` takes the global write
+        // lock. Holding it across `set_sink` deadlocks with a concurrent
+        // `record` that holds the sink read lock and waits for this mutex
+        // (#4515 rust-coverage hang).
+        drop(metrics);
         set_sink(None);
     }
 
