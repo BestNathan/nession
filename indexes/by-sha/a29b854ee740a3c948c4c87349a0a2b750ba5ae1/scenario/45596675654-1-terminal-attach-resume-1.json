@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45596675654,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4502-stream-gap-semantics",
+    "target_sha": "a29b854ee740a3c948c4c87349a0a2b750ba5ae1",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45596675654",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "60cd8895a8475984feb6af217dfc0c340021c2340b2fa141e037c5b9d723c915"
+  },
+  "record": "runs/2026-11-25/45596675654-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "d9e1dda6d3fb7e11d0d15a13dd36baeddf9419fe49806fcc2f793936cae28ebc"
+}
