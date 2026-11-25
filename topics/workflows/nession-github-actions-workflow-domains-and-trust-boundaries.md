@@ -5,8 +5,8 @@ topic: workflows
 categories: ["architecture","agent","ci","security","workflows"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-25T18:46:48Z
-sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/issues/4525","https://github.com/BestNathan/nession/issues/4526","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/scripts/lib/agent/workflow/apply.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/facts.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/scan.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/diagnostic.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
+updated_at: 2026-11-25T19:13:20Z
+sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/issues/4525","https://github.com/BestNathan/nession/issues/4526","https://github.com/BestNathan/nession/issues/4527","https://github.com/BestNathan/nession/blob/7f128a115d1278fa555877566664a0da037b6e2b/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/7f128a115d1278fa555877566664a0da037b6e2b/scripts/lib/agent/workflow/recovery.mjs","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/scripts/lib/agent/workflow/apply.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/facts.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/scan.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/diagnostic.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
 ---
 
 # Nession GitHub Actions workflow domains and trust boundaries
@@ -116,7 +116,24 @@ credentials never enter the coordinator or effect boundary. Production
 composition, activation and the real canary remain separately authorized under
 the parent SC-06 boundary.
 
-Executable owners: `workflow/{contract,lifecycle,ci-barrier,feedback,migration,reconcile,facts,scan,diagnostic,apply,telemetry}.mjs`;
+**Generic terminal recovery and checkpoint-preserving migration (#4527).**
+`workflow/recovery.mjs` classifies an authenticated fact as healthy/queued/
+claimed/executing, terminal result, completed-but-un-ingested,
+committed-not-advanced, ambiguous, missing-result, expired-artifact,
+denied-policy, terminal failure or unknown. A terminal failure with a verified
+Run identity retires the action with an immutable receipt and creates exactly
+one successor on the same logical Thread; an already-retired action cannot spawn
+a second successor. Infrastructure/model budgets are cumulative across
+successors and exhaustion blocks. A committed native checkpoint is retained on
+retry; an incompatible/corrupt checkpoint blocks instead of forking a new
+session; Reviewer failure recovers the Reviewer. Completed-but-un-ingested
+results request idempotent trusted ingestion rather than a model rerun, while
+ambiguous/unknown evidence blocks. V1 migration accepts authenticated PR,
+committed-checkpoint, lease/fencing and proven-Run readback; it never replaces a
+committed checkpoint with null or resets a fence, and an unproven ambiguous
+dispatch blocks with a diagnostic.
+
+Executable owners: `workflow/{contract,lifecycle,ci-barrier,feedback,migration,reconcile,facts,scan,diagnostic,apply,recovery,telemetry}.mjs`;
 canonical architecture: [agent-workflow-durability.md](https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md).
 PR-stage criteria are proven by exact-source fixtures in the
 `agent-provider-contract` Gate. The real main-owned SC-06 canary remains
