@@ -175,6 +175,28 @@ jobs:
       - run: rustup component add llvm-tools-preview
       - name: Verify Rust and Acceptance Gates
         run: ./gates/run --suite quality-rust
+      # #4437 SC-03: the baseline report must be durably bound to this exact
+      # head. The gate output is intentionally compact and the JSON would stay
+      # in the gitignored target directory, so run the baseline explicitly and
+      # publish both an artifact and the run summary the Acceptance reader can
+      # cite.
+      - name: Capture the WS runtime baseline for this exact head
+        run: cargo test -p nession-runtime --test ws_runtime_baseline --locked -- --nocapture
+      - name: Publish the WS runtime baseline artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ws-runtime-baseline-${{ github.event.pull_request.head.sha || github.sha }}
+          path: target/ws-runtime-baseline.json
+          if-no-files-found: error
+          retention-days: 90
+      - name: Record the WS runtime baseline in the run summary
+        run: |
+          {
+            echo '### WebSocket runtime baseline'
+            echo '```json'
+            cat target/ws-runtime-baseline.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
   tooling-check:
     needs: scope
