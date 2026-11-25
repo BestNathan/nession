@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45701384757,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "test/4431-mixed-load",
+    "target_sha": "9aaa08001e18faead56783cba3bccf28129073f3",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45701384757",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "9e8c164158374d923417d3c7867043cb4f66bcf792392392b6ca3fd3927db925"
+  },
+  "record": "runs/2026-11-25/45701384757-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "ad5123a23e056b54dc2f7cd1e73a1ef5a77ebb58b9529ff91027ae6cec939e26"
+}
