@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45670560025,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4437-runtime-labels",
+    "target_sha": "f69805430fa7037ea2c4d03a4d6059252a2ce818",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45670560025",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "92989de6ae122aca4055168c27cf74dfc76e8c0ffc9208e94e2f2a6ffe7d9a6c"
+  },
+  "record": "runs/2026-11-25/45670560025-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "fb3a4767c4275831eca8efe71f61420268bfe784292b0b4fc440af193de9d67a"
+}
