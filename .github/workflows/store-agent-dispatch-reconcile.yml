@@ -8,6 +8,9 @@ on:
     workflows: ["Agent / Development"]
     branches: [main]
     types: [completed]
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,13 +18,14 @@ permissions:
   issues: read
 
 concurrency:
-  group: store-agent-dispatch-reconcile-${{ github.event.workflow_run.id }}-${{ github.event.workflow_run.run_attempt }}
+  group: store-agent-dispatch-reconcile-${{ github.event.workflow_run.id || github.run_id }}-${{ github.event.workflow_run.run_attempt || github.run_attempt }}
   cancel-in-progress: false
 
 jobs:
   reconcile:
     if: >-
       github.repository == 'BestNathan/nession' &&
+      github.event_name == 'workflow_run' &&
       github.event.workflow_run.event == 'workflow_dispatch' &&
       github.event.workflow_run.head_branch == 'main' &&
       github.event.workflow_run.actor.login == 'github-actions[bot]' &&
@@ -118,3 +122,59 @@ jobs:
             # same Run ID and signed inputs after Store Run-ID CAS has committed.
             gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN_ID/rerun-failed-jobs" >/dev/null
           fi
+
+  # #4445: read existing exact-HEAD Quality evidence in either arrival order.
+  # One existing Store owner, no model dispatch and no acceptance/merge authority.
+  quality-reconcile:
+    if: >-
+      github.repository == 'BestNathan/nession' &&
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'schedule' ||
+       (github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner))
+    permissions:
+      contents: read
+      actions: read
+      issues: read
+      pull-requests: read
+    concurrency:
+      group: store-agent-quality-reconcile
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - name: Checkout pinned trusted main
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Require Quality reconciliation identity and CAS fixtures
+        run: node scripts/lib/agent/orchestration/quality-reconcile-selftest.mjs
+      - name: Mint existing scoped Store Writer App
+        id: writer
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
+        with:
+          app-id: ${{ vars.RUN_STORE_WRITER_APP_ID }}
+          private-key: ${{ secrets.RUN_STORE_WRITER_APP_PRIVATE_KEY }}
+          repositories: nession
+          permission-contents: write
+      - name: Reconcile authenticated required Quality through canonical Store CAS
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$STORE_APP_TOKEN"
+          export AGENT_STORE_CONTROLLER_REMOTE="https://x-access-token:${STORE_APP_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          node scripts/lib/agent/orchestration/quality-reconcile.mjs reconcile | tee "$RUNNER_TEMP/quality-reconcile.jsonl"
+          {
+            echo "## Exact-HEAD Quality reconciliation"
+            echo 'The Store transition does not grant acceptance or merge authority.'
+            echo '```json'
+            cat "$RUNNER_TEMP/quality-reconcile.jsonl"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
