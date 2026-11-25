@@ -483,7 +483,10 @@ export function startDevelopment(registry, request, authority) {
 }
 function expectedSource(state, result, source) {
   onlyKeys(result, ['kind','issue','run_id','run_attempt','target_sha','outcome','task_id'], 'task result');
-  const expected = SOURCE_WORKFLOW[result.kind];
+  const expected = result.kind==='acceptance'&&source?.event==='workflow_run'&&
+    source.path==='.github/workflows/acceptance-pr-quality-waker.yml'
+    ? {path:'.github/workflows/acceptance-pr-quality-waker.yml',name:'Acceptance / PR Quality Waker'}
+    : SOURCE_WORKFLOW[result.kind];
   if (!expected || !positive(result.run_id) || !positive(result.run_attempt) ||
       !isIssue(result.issue) || result.issue !== state.issue || !SHA.test(result.target_sha ?? '')) {
     reject('invalid result or source kind');
