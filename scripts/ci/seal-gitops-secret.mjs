@@ -8,6 +8,16 @@ import { X509Certificate, createPrivateKey } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 const TARGETS = Object.freeze({
+  production: Object.freeze({
+    NESSION_MCP_INBOUND_TOKEN: Object.freeze({
+      namespace: 'nession',
+      name: 'nession-mcp-inbound-production',
+      key: 'token',
+      type: 'Opaque',
+      resource: 'environments/production/mcp/sealed-inbound.json',
+      kustomization: 'environments/production/mcp/kustomization.yaml'
+    })
+  }),
   staging: Object.freeze({
     NESSION_MCP_INBOUND_TOKEN: Object.freeze({
       namespace: 'nession',
@@ -50,6 +60,7 @@ const TARGETS = Object.freeze({
 // The canonical environment release contract. Legacy full-TOML and TLS
 // resources have different owners and must never enter this batch.
 const REQUIRED_SECRETS = Object.freeze({
+  production: Object.freeze(['NESSION_MCP_INBOUND_TOKEN']),
   staging: Object.freeze([
     'NESSION_MCP_INBOUND_TOKEN',
     'NESSION_MCP_BACKEND_SERVER_TOKEN'
