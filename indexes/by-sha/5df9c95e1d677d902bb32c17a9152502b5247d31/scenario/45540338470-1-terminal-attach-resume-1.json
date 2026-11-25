@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45540338470,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4500-output-ack-frontier",
+    "target_sha": "5df9c95e1d677d902bb32c17a9152502b5247d31",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45540338470",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "66714be7b4a18b15b84145c8eefd9c01396fbadb33e5c55d7a33ba760abefe94"
+  },
+  "record": "runs/2026-11-25/45540338470-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "3c47372c9d35cb3a697552d24549b39482b6e43bb076c766579465ed9e66bf13"
+}
