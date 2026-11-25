@@ -45,6 +45,7 @@ export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[],
   if(!Number.isSafeInteger(prNumber)||prNumber<=0||!SHA.test(expectedHead)||
       !Array.isArray(workflowRuns)||workflowRuns.length>100)
     return fail('INVALID_RUN_INVENTORY');
+  const checks=[];
   for(const path of REQUIRED){
     const matches=workflowRuns.filter(run=>run.path?.split('@')[0]===path &&
       run.head_sha===expectedHead&&run.event==='pull_request'&&
@@ -55,10 +56,17 @@ export function requiredSourceRuns(prNumber,expectedHead,workflowRuns=[],
         historicalNativeRunAssociation(run,historicalNativePr,expectedHead)));
     const newest=matches.sort((a,b)=>(b.run_number??0)-(a.run_number??0)||
       (b.run_attempt??0)-(a.run_attempt??0)||(b.id??0)-(a.id??0))[0];
-    if(!newest||newest.status!=='completed'||newest.conclusion!=='success')
+    if(!newest||newest.status!=='completed'||newest.conclusion!=='success'||
+       !Number.isSafeInteger(newest.id)||newest.id<=0||
+       !Number.isSafeInteger(newest.run_attempt)||newest.run_attempt<=0)
       return fail('MISSING_EXACT_HEAD_PR_CHECK:'+path);
+    // The matched run identities are the same policy verdict, exposed so a
+    // trusted evidence collector can cite the exact Quality/Case/E2E runs
+    // instead of re-implementing this association rule.
+    checks.push({path,name:String(newest.name??''),run_id:newest.id,
+      run_attempt:newest.run_attempt});
   }
-  return okay({expectedHead});
+  return okay({expectedHead,checks});
 }
 
 export function evaluatePull({pr,action,plan,baseSha,workflowRuns=[],nativeAuto=false}) {

@@ -2,11 +2,13 @@
 // #4137/#4059: independent, operation-level attestation for workflow-bearing
 // staging integration. A green Controller or Waker is never a write receipt.
 import assert from 'node:assert/strict';
+import {requiredSourceRuns} from './staging-convergence-readiness.mjs';
 
 const REPO='BestNathan/nession';
 const SHA=/^[a-f0-9]{40}$/;
 const WORKFLOW='.github/workflows/release-staging-convergence.yml';
 const REQUIRED=['CI / Quality Gate','E2E / Tests','Acceptance / Case Smoke'];
+const REQUIRED_WORKFLOWS=['ci-quality.yml','e2e-tests.yml','acceptance-case-smoke.yml'];
 const ALLOWED_EVENTS=new Set(['push','workflow_run','schedule','issues']);
 
 function logDocuments(log) {
@@ -96,16 +98,17 @@ export function attestConvergenceWriter({repo,targetSha,run,job,log,pr,commit,
      !['ahead','identical'].includes(stagingComparison?.status))
     return null;
   if(!Array.isArray(ciRuns)||ciRuns.length>100)return null;
-  const checks=[];
-  for(const name of REQUIRED){
-    const matches=ciRuns.filter(x=>x.name===name&&x.head_sha===result.integration_head&&
-      x.event==='pull_request'&&x.status==='completed'&&x.conclusion==='success'&&
-      Array.isArray(x.pull_requests)&&x.pull_requests.some(y=>y.number===pr.number)&&
-      Number.isSafeInteger(x.id)&&x.id>0&&
-      Number.isSafeInteger(x.run_attempt)&&x.run_attempt>0);
-    if(matches.length===0)return null;
-    checks.push({name,run_id:matches[0].id,run_attempt:matches[0].run_attempt});
-  }
+  // Reuse the canonical exact-HEAD source-check policy, including its
+  // immutable orphan-association rule for an already-merged native sync PR
+  // (#3248: GitHub may empty run.pull_requests after the merge). Never
+  // re-implement or weaken that association here.
+  const source=requiredSourceRuns(pr.number,result.integration_head,ciRuns,pr);
+  if(!source.ready)return null;
+  const checks=(source.checks??[]).map(check=>({
+    name:check.name,run_id:check.run_id,run_attempt:check.run_attempt}));
+  if(checks.length!==REQUIRED.length||
+     !REQUIRED.every(name=>checks.some(check=>check.name===name)))
+    return null;
   return {kind:'authenticated_convergence_writer_v1',status:'verified',
     target_sha:targetSha,source_run_id:run.id,source_run_attempt:run.run_attempt,
     source_job_id:job.id,source_main_sha:targetSha,lane_sha:lane.sha,
@@ -170,6 +173,39 @@ export function mayProjectConvergenceWriter4059(result) {
     result.authenticated_convergence_writer_4059,result.target_ref);
 }
 
+// #4477 SC-03: the native convergence admission criterion may claim Pass only
+// with the same independently collected operation receipt. The Agent's prose
+// or a green run conclusion alone is not proof of the sync PR admission.
+export function enforceNativeConvergenceAdmission4477(context,normalized) {
+  if(context?.issue?.number!==4477||context?.stage!=='post-merge')
+    return normalized;
+  const proof=context?.ci_evidence?.authenticated_native_convergence_admission;
+  const valid=validConvergenceWriterReceipt(proof,context.target_ref);
+  const items=(normalized?.criteria??[]).map(item=>{
+    if(item.criterion!=='SC-03'||item.result!=='Pass')return item;
+    if(!valid)return {...item,result:'Pending',evidence:[],
+      summary:'Native convergence admission is unproven: no exact-source '+
+        'controller run, sync PR, protected merge and exact-HEAD CI readback'};
+    return {...item,summary:'Independently attested native convergence admission',
+      evidence:[{type:'authenticated-native-convergence-admission',value:
+        'Run '+proof.source_run_id+'/'+proof.source_run_attempt+
+        ', converge Job '+proof.source_job_id+', '+proof.controller_outcome+
+        ', sync PR #'+proof.integration_pr+', head '+proof.integration_head+
+        ', protected merge '+proof.protected_merge_sha+
+        ', exact-HEAD Quality/Case/E2E verified'}]};
+  });
+  return {...normalized,criteria:items,
+    ...(valid?{authenticated_native_convergence_admission:proof}:{})};
+}
+
+export function mayProjectNativeConvergenceAdmission4477(result) {
+  if(result?.issue!==4477||result?.stage!=='post-merge'||
+     !result?.criteria?.some(x=>x.criterion==='SC-03'&&x.result==='Pass'))
+    return true;
+  return validConvergenceWriterReceipt(
+    result.authenticated_native_convergence_admission,result.target_ref);
+}
+
 // #4137 lifecycle repair: the historically disproven #4059 SC-02 Pass cited a
 // green Post-Run Waker (Run 44678335169) and a BLOCKED/MERGE_CONFLICT converge
 // job (Run 44678377431) whose workflow-file writer mint was skipped. Those exact
@@ -190,11 +226,22 @@ export function invalidatedConvergenceWriter4059Row(issueNumber,criterion,eviden
 // is only a lookup candidate; authorization comes from independent Run, Step,
 // structured Controller result, PR ancestry, CI and protected merge witnesses.
 export async function collectConvergenceWriter4059({repo,targetSha,runs,get,getLog}={}) {
-  if(repo!==REPO||!SHA.test(targetSha??'')||!Array.isArray(runs)||
+  if(repo!==REPO||!SHA.test(targetSha??'')||
     typeof get!=='function'||typeof getLog!=='function')return null;
-  const choices=runs.filter(r=>r.path===WORKFLOW&&r.name==='Release / Staging Convergence'&&
+  // A target Main SHA can have more than 100 unrelated workflow runs, so the
+  // caller's bounded direct-run page may not contain this controller run.
+  // Ask the convergence workflow itself for its exact-SHA history.
+  const workflowRuns=await get('/repos/'+repo+'/actions/workflows/'+
+    encodeURIComponent('release-staging-convergence.yml')+
+    '/runs?head_sha='+targetSha+'&per_page=100');
+  const inventory=[...new Map([
+    ...(Array.isArray(runs)?runs:[]),
+    ...(Array.isArray(workflowRuns?.workflow_runs)?workflowRuns.workflow_runs:[]),
+  ].map(run=>[run.id,run])).values()];
+  const choices=inventory.filter(r=>r.path===WORKFLOW&&
+    r.name==='Release / Staging Convergence'&&
     ALLOWED_EVENTS.has(r.event)&&r.head_sha===targetSha&&r.head_branch==='main'&&
-    r.status==='completed'&&r.conclusion==='success').slice(0,12);
+    r.status==='completed'&&r.conclusion==='success').slice(0,40);
   for(const run of choices){
     const jobs=await get('/repos/'+repo+'/actions/runs/'+run.id+
       '/attempts/'+run.run_attempt+'/jobs?per_page=100');
@@ -209,20 +256,94 @@ export async function collectConvergenceWriter4059({repo,targetSha,runs,get,getL
     const row=t?.results?.find(x=>x.direction==='sync-main-to-lane'&&
       Number.isSafeInteger(x.number)&&x.number>0&&SHA.test(x.integration_head??''));
     if(!row)continue;
-    const [pr,commit,ci,stage]=await Promise.all([
+    // Fetch each required workflow's exact-HEAD history directly; the general
+    // run page is capped and can omit an older merged source's green run.
+    const ciPages=await Promise.all(REQUIRED_WORKFLOWS.map(file=>
+      get('/repos/'+repo+'/actions/workflows/'+encodeURIComponent(file)+
+        '/runs?head_sha='+row.integration_head+'&per_page=100')));
+    const ciRuns=[...new Map(ciPages.flatMap(page=>
+      Array.isArray(page?.workflow_runs)?page.workflow_runs:[])
+      .map(run=>[run.id,run])).values()];
+    const [pr,commit,stage]=await Promise.all([
       get('/repos/'+repo+'/pulls/'+row.number),
       get('/repos/'+repo+'/git/commits/'+row.integration_head),
-      get('/repos/'+repo+'/actions/runs?head_sha='+row.integration_head+'&per_page=100'),
       get('/repos/'+repo+'/branches/staging')
     ]);
     if(!SHA.test(pr?.merge_commit_sha??'')||!SHA.test(stage?.commit?.sha??''))continue;
     const compare=await get('/repos/'+repo+'/compare/'+pr.merge_commit_sha+
       '...'+stage.commit.sha);
     const proof=attestConvergenceWriter({repo,targetSha,run,job,log,pr,commit,
-      ciRuns:ci?.workflow_runs,stagingComparison:compare});
+      ciRuns,stagingComparison:compare});
     if(validConvergenceWriterReceipt(proof,targetSha))return proof;
   }
   return null;
+}
+
+export async function selfTestConvergenceWriterFetch() {
+  const sha='a'.repeat(40),lane='b'.repeat(40),head='c'.repeat(40),merge='d'.repeat(40);
+  const stageSha='e'.repeat(40);
+  const run={id:111,run_attempt:1,path:WORKFLOW,name:'Release / Staging Convergence',
+    head_branch:'main',head_sha:sha,event:'workflow_run',status:'completed',conclusion:'success'};
+  const job={id:222,name:'converge',status:'completed',conclusion:'success',steps:[
+    {name:'Mint workflow-file integration token from Publisher App',status:'completed',conclusion:'success'},
+    {name:'Idempotently prepare and arm protected GitHub Auto-merge',status:'completed',conclusion:'success'}
+  ]};
+  const plan={schema_version:1,main_sha:sha,branches:[{branch:'staging',sha:lane,
+    workflow_write_required:true,actions:['sync-main-to-lane']}]};
+  const decisions=[{branch:'staging',direction:'sync-main-to-lane',action:'created',
+    number:333,integration_head:head,outcome:'AUTO_MERGE_QUALIFIED'}];
+  const transcript=[JSON.stringify(plan,null,2),JSON.stringify(decisions,null,2)]
+    .join('\n').split('\n').map(line=>'2026-11-23T07:00:00.001Z '+line).join('\n');
+  const pr={number:333,state:'closed',created_at:'2026-11-23T07:00:00Z',
+    merged_at:'2026-11-23T07:30:00Z',merge_commit_sha:merge,
+    user:{login:'nession-publisher[bot]'},
+    base:{ref:'staging',repo:{full_name:REPO}},
+    head:{ref:'chore/staging-sync-fixture',sha:head,repo:{full_name:REPO}},
+    body:'Staging Convergence automated proposal (fixture)\n\n'+
+      '<!-- nession-convergence-pr:v1 branch=staging main='+sha+
+      ' lane='+lane+' head='+head+' digest='+'e'.repeat(64)+' -->'};
+  const commit={sha:head,parents:[{sha:lane},{sha}]};
+  const ciRuns=[
+    {name:'CI / Quality Gate',path:'.github/workflows/ci-quality.yml'},
+    {name:'E2E / Tests',path:'.github/workflows/e2e-tests.yml'},
+    {name:'Acceptance / Case Smoke',path:'.github/workflows/acceptance-case-smoke.yml'},
+  ].map((entry,index)=>({id:400+index,run_attempt:1,name:entry.name,
+    path:entry.path,head_branch:pr.head.ref,created_at:'2026-11-23T07:10:00Z',
+    head_sha:head,event:'pull_request',status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
+    pull_requests:[]}));
+  const get=async path=>{
+    if(path.includes('/actions/workflows/release-staging-convergence.yml/runs'))
+      return {workflow_runs:[run]};
+    if(path.includes('/actions/runs/111/attempts/1/jobs'))return {jobs:[job]};
+    if(path.includes('/actions/workflows/ci-quality.yml/runs'))
+      return {workflow_runs:[ciRuns[0]]};
+    if(path.includes('/actions/workflows/e2e-tests.yml/runs'))
+      return {workflow_runs:[ciRuns[1]]};
+    if(path.includes('/actions/workflows/acceptance-case-smoke.yml/runs'))
+      return {workflow_runs:[ciRuns[2]]};
+    if(path.endsWith('/pulls/333'))return pr;
+    if(path.endsWith('/git/commits/'+head))return commit;
+    if(path.endsWith('/branches/staging'))return {commit:{sha:stageSha}};
+    if(path.includes('/compare/'))
+      return {status:'ahead',merge_base_commit:{sha:merge}};
+    throw new Error('unexpected bounded readback route: '+path);
+  };
+  const getLog=async path=>{
+    if(path.endsWith('/actions/jobs/222/logs'))return transcript;
+    throw new Error('unexpected bounded log route: '+path);
+  };
+  // The target SHA's general run page may be exhausted by unrelated runs; the
+  // collector must discover the controller run from its workflow history.
+  const proof=await collectConvergenceWriter4059({repo:REPO,targetSha:sha,
+    runs:[],get,getLog});
+  assert.equal(validConvergenceWriterReceipt(proof,sha),true,
+    'workflow-specific convergence history must yield the exact receipt');
+  const missing=await collectConvergenceWriter4059({repo:REPO,targetSha:sha,
+    runs:[],get:async path=>path.includes(
+      '/actions/workflows/release-staging-convergence.yml/runs')
+      ?{workflow_runs:[]}:get(path),getLog});
+  assert.equal(missing,null,'no controller run is not admission evidence');
 }
 
 export function selfTestConvergenceWriter4137() {
@@ -239,19 +360,43 @@ export function selfTestConvergenceWriter4137() {
     number:333,integration_head:head,outcome:'AUTO_MERGE_QUALIFIED'}];
   const transcript=[JSON.stringify(plan,null,2),JSON.stringify(decisions,null,2)]
     .join('\n').split('\n').map(x=>'2026-11-23T07:00:00.001Z '+x).join('\n');
-  const pr={number:333,state:'closed',merged_at:'2026-11-23T07:30:00Z',
+  const pr={number:333,state:'closed',created_at:'2026-11-23T07:00:00Z',
+    merged_at:'2026-11-23T07:30:00Z',
     merge_commit_sha:merge,user:{login:'nession-publisher[bot]'},
     base:{ref:'staging',repo:{full_name:REPO}},
     head:{ref:'chore/staging-sync-fixture',sha:head,repo:{full_name:REPO}},
-    body:'Staging Convergence automated proposal (fixture)'};
+    body:'Staging Convergence automated proposal (fixture)\n\n'+
+      '<!-- nession-convergence-pr:v1 branch=staging main='+sha+
+      ' lane='+lane+' head='+head+' digest='+'e'.repeat(64)+' -->'};
   const commit={sha:head,parents:[{sha:lane},{sha}]};
+  const workflowPaths={
+    'CI / Quality Gate':'.github/workflows/ci-quality.yml',
+    'E2E / Tests':'.github/workflows/e2e-tests.yml',
+    'Acceptance / Case Smoke':'.github/workflows/acceptance-case-smoke.yml',
+  };
   const ciRuns=REQUIRED.map((name,i)=>({id:400+i,run_attempt:1,name,
+    path:workflowPaths[name]+'@refs/heads/main',head_branch:pr.head.ref,
+    created_at:'2026-11-23T07:10:00Z',
     head_sha:head,event:'pull_request',status:'completed',conclusion:'success',
+    repository:{full_name:REPO},head_repository:{full_name:REPO},
     pull_requests:[{number:333}]}));
   const valid={repo:REPO,targetSha:sha,run,job,log:transcript,pr,commit,ciRuns,
     stagingComparison:{status:'ahead',merge_base_commit:{sha:merge}}};
   const good=attestConvergenceWriter(valid);
   assert.equal(validConvergenceWriterReceipt(good,sha),true);
+  // #3248: GitHub may empty run.pull_requests after the native sync PR merges.
+  // The canonical exact-HEAD policy accepts only the immutable orphan shape
+  // (same source head/branch/repo, created during the PR's lifetime).
+  const orphanCiRuns=ciRuns.map(run=>({...run,pull_requests:[]}));
+  const orphanGood=attestConvergenceWriter({...valid,ciRuns:orphanCiRuns});
+  assert.equal(validConvergenceWriterReceipt(orphanGood,sha),true,
+    'a merged native sync PR may use immutable orphan run association');
+  assert.equal(attestConvergenceWriter({...valid,ciRuns:orphanCiRuns.map(run=>
+    run.name==='E2E / Tests'?{...run,head_branch:'someone-else'}:run)}),null,
+    'an orphan run on a different head branch is not this PR');
+  assert.equal(attestConvergenceWriter({...valid,ciRuns:orphanCiRuns.map(run=>
+    run.name==='E2E / Tests'?{...run,created_at:'2026-11-23T08:00:00Z'}:run)}),null,
+    'a run created after the merge is not source evidence');
 
   const context={issue:{number:4059},stage:'post-merge',target_ref:sha,
     ci_evidence:{authenticated_convergence_writer_4059:good}};
@@ -285,6 +430,29 @@ export function selfTestConvergenceWriter4137() {
   assert.equal(mayProjectConvergenceWriter4059({
     issue:4059,stage:'post-merge',target_ref:sha,
     criteria:[{criterion:'SC-02',result:'Pending'}]}),true);
+
+  // #4477 SC-03 uses the same receipt to gate native convergence admission.
+  const admissionContext={issue:{number:4477},stage:'post-merge',target_ref:sha,
+    ci_evidence:{authenticated_native_convergence_admission:good}};
+  const admissionClaim={criteria:[{criterion:'SC-03',result:'Pass',
+    evidence:[{type:'workflow',value:'green run'}],summary:'green run'}]};
+  const admitted=enforceNativeConvergenceAdmission4477(admissionContext,
+    admissionClaim);
+  assert.equal(admitted.criteria[0].result,'Pass');
+  assert.match(admitted.criteria[0].evidence[0].value,/AUTO_MERGE_QUALIFIED/);
+  const deniedAdmission=enforceNativeConvergenceAdmission4477(
+    {...admissionContext,ci_evidence:{authenticated_native_convergence_admission:null}},
+    admissionClaim);
+  assert.equal(deniedAdmission.criteria[0].result,'Pending');
+  assert.deepEqual(deniedAdmission.criteria[0].evidence,[]);
+  assert.equal(mayProjectNativeConvergenceAdmission4477({issue:4477,
+    stage:'post-merge',target_ref:sha,criteria:admitted.criteria,
+    authenticated_native_convergence_admission:good}),true);
+  assert.equal(mayProjectNativeConvergenceAdmission4477({issue:4477,
+    stage:'post-merge',target_ref:sha,criteria:admitted.criteria}),false);
+  assert.equal(mayProjectNativeConvergenceAdmission4477({issue:4477,
+    stage:'post-merge',target_ref:sha,
+    criteria:[{criterion:'SC-03',result:'Pending'}]}),true);
 
   assert.equal(enforceConvergenceWriter4059(context,{criteria:[{
     criterion:'SC-02',result:'Fail',evidence:[],summary:'observed denial'
