@@ -6,5 +6,19 @@ runtime: full-stack-local
 isolation: isolated
 verifiers:
   - type: runtime
-    entry: verify.cjs
+    entry: warmup-server-integration.cjs
+  - type: runtime
+    entry: server-integration.cjs
+  - type: runtime
+    entry: warmup-agent-integration.cjs
+  - type: runtime
+    entry: agent-integration.cjs
+  - type: runtime
+    entry: warmup-agent-lib.cjs
+  - type: runtime
+    entry: agent-lib.cjs
+  - type: runtime
+    entry: warmup-runtime-lib.cjs
+  - type: runtime
+    entry: runtime-lib.cjs
 result_policy: all-pass

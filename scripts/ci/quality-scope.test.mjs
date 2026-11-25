@@ -83,3 +83,14 @@ test('Web dist proof does not treat no-artifact as a failed attestation',()=>{
   }
   assert.ok(y.includes("printf -- '- Exact source SHA: "));
 });
+
+
+test('Secret sealing deployment changes are tooling-only, without weakening unknown or runtime routing',()=>{
+  const scripts=['scripts/ci/seal-gitops-secret.mjs','scripts/ci/seal-gitops-secret.test.mjs'];
+  const diff=['.github/workflows/deploy-seal-gitops-secret.yml',...scripts];
+  for(const file of scripts) assert.deepEqual(flags([file]),{...none,tooling:true});
+  assert.deepEqual(flags(diff),{...none,tooling:true,workflow:true});
+  assert.deepEqual(flags([...diff,'crates/nession-server/src/main.rs']),{...none,rust:true,tooling:true,workflow:true});
+  assert.deepEqual(flags([...diff,'web/src/main.tsx']),{...none,web:true,tooling:true,workflow:true});
+  assert.deepEqual(flags(['scripts/ci/seal-gitops-secret-unknown.mjs']),{...none,rust:true,web:true,tooling:true});
+});
