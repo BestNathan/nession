@@ -839,6 +839,35 @@ mod tests {
         }
     }
 
+    /// #4504 SC-03: the budget metrics declare the units their owners charge.
+    #[test]
+    fn budget_metrics_declare_their_units() {
+        assert_eq!(
+            metric_def("ws_outbound_queued").expect("catalogued").unit,
+            UnitKind::Byte
+        );
+        assert_eq!(
+            metric_def("ws_outbound_too_large")
+                .expect("catalogued")
+                .unit,
+            UnitKind::Byte
+        );
+        assert_eq!(
+            metric_def("ws_task_active").expect("catalogued").unit,
+            UnitKind::Count
+        );
+        assert_eq!(
+            metric_def("ws_stream_credit_lag").expect("catalogued").unit,
+            UnitKind::Byte
+        );
+        assert_eq!(
+            metric_def("ws_stream_progress_lag")
+                .expect("catalogued")
+                .unit,
+            UnitKind::Count
+        );
+    }
+
     #[test]
     fn the_catalog_is_unique_and_bounded() {
         let mut names: Vec<&str> = METRIC_CATALOG.iter().map(|def| def.name).collect();

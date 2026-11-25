@@ -1767,6 +1767,47 @@ mod tests {
         assert_eq!(snapshot.process.too_large, 1);
     }
 
+    /// #4504 SC-03: an aggregate process refusal charges no process or local
+    /// class capacity, and an oversized allocation is not silently undercounted.
+    #[tokio::test]
+    async fn a_process_reservation_refusal_charges_nothing() {
+        let process = Arc::new(ProcessAccounting::with_limits(ProcessLimits {
+            bytes: 256,
+            frames: 8,
+            control_bytes: 0,
+            control_frames: 0,
+        }));
+        let (outbound, _rx) = Outbound::with_process(
+            "process-refusal",
+            ROOMY,
+            Duration::from_millis(50),
+            SchedulerConfig::default(),
+            Arc::clone(&process),
+        );
+        let outcome = outbound
+            .submit_current(FrameClass::Stream, text(300), WaitPolicy::NoWait)
+            .await;
+        assert_eq!(
+            outcome,
+            SubmitOutcome::Refused(OutboundError::Saturated),
+            "a frame beyond the process byte ceiling was not refused"
+        );
+        let process_snapshot = process.snapshot();
+        assert_eq!(process_snapshot.bytes, 0, "a process refusal charged bytes");
+        assert_eq!(
+            process_snapshot.frames, 0,
+            "a process refusal charged a frame slot"
+        );
+        assert_eq!(process_snapshot.accepted, 0);
+        assert!(
+            process_snapshot.refused >= 1,
+            "the refusal was not counted at the process owner"
+        );
+        let local = outbound.snapshot();
+        assert_eq!(local.stream_bytes, 0, "the local class was charged");
+        assert_eq!(local.stream_frames, 0, "a local frame slot was consumed");
+    }
+
     /// Control's capacity is reserved: filling response and stream to their
     /// bounds does not make a keepalive or state push unsendable.
     #[tokio::test]
