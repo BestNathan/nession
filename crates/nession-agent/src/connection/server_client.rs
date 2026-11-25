@@ -1368,6 +1368,16 @@ impl ServerClient {
 
                     let reply_wire = msg.msg_type.clone();
                     let reply_id = msg.id.clone();
+                    // A brokered command carries the Server's own request id.
+                    // The refusal for it must be the wire the Server actually
+                    // correlates (`server.agent.command-response`), not the
+                    // command's own wire, or the Server drops it as unknown and
+                    // the browser caller waits out its broker timeout (#4433).
+                    let request_id = msg
+                        .payload
+                        .get("request_id")
+                        .and_then(|value| value.as_str())
+                        .map(str::to_string);
                     let this = Arc::clone(&self);
                     let tx = responses.clone();
                     let work: Work = Box::pin(async move {
@@ -1385,6 +1395,7 @@ impl ServerClient {
                                     .try_send(WsMessage::Text(overload_message(
                                         &reply_wire,
                                         &reply_id,
+                                        request_id.as_deref(),
                                     )))
                                     .is_err()
                                 {
@@ -1402,6 +1413,7 @@ impl ServerClient {
                                     .try_send(WsMessage::Text(overload_message(
                                         &reply_wire,
                                         &reply_id,
+                                        request_id.as_deref(),
                                     )))
                                     .is_err()
                                 {
@@ -4247,26 +4259,27 @@ esac"#,
 
     /// Collect command outcomes **and** explicit overload answers in one pass.
     ///
-    /// `responses_within` deliberately filters to command responses; an
-    /// overload answer travels under the request's own wire name (`#4433`), so
-    /// it needs its own counter. Reading both in one pass is what keeps the
-    /// overloads from being discarded while the test waits for the blocked
-    /// commands to finish.
+    /// Both travel as `server.agent.command-response` (`#4433`): the refusal
+    /// must use the wire the Server correlates, so the test distinguishes them
+    /// by the `overloaded` outcome rather than by the envelope name. Collecting
+    /// the refusal payloads (not just a count) lets the test assert they carry
+    /// the request id the Server keys on.
     async fn collect_outcomes(
         msg_rx: &mut mpsc::Receiver<String>,
         responses_expected: usize,
         overloads_expected: usize,
         within: Duration,
-    ) -> (Vec<serde_json::Value>, usize) {
+    ) -> (Vec<serde_json::Value>, Vec<serde_json::Value>) {
         let mut responses = Vec::new();
-        let mut overloaded = 0;
+        let mut overloads = Vec::new();
         let deadline = std::time::Instant::now() + within;
-        while responses.len() < responses_expected || overloaded < overloads_expected {
+        while responses.len() < responses_expected || overloads.len() < overloads_expected {
             let remaining = deadline.saturating_duration_since(std::time::Instant::now());
             assert!(
                 !remaining.is_zero(),
-                "only {} response(s) and {overloaded} overload(s) arrived",
-                responses.len()
+                "only {} response(s) and {} overload(s) arrived",
+                responses.len(),
+                overloads.len()
             );
             if let Ok(Some(text)) =
                 tokio::time::timeout(remaining.min(Duration::from_millis(200)), msg_rx.recv()).await
@@ -4276,13 +4289,15 @@ esac"#,
                 if parsed.get("msg_type").and_then(|v| v.as_str())
                     == Some("server.agent.command-response")
                 {
-                    responses.push(parsed);
-                } else if parsed["payload"]["error"] == "overloaded" {
-                    overloaded += 1;
+                    if parsed["payload"]["error"] == "overloaded" {
+                        overloads.push(parsed);
+                    } else {
+                        responses.push(parsed);
+                    }
                 }
             }
         }
-        (responses, overloaded)
+        (responses, overloads)
     }
 
     /// A `ServerClient` connected to the mock server, using `tmux`.
@@ -4491,7 +4506,7 @@ esac"#,
              was admitted later instead of being answered `overloaded`"
         );
 
-        let (responses, overloaded) = collect_outcomes(
+        let (responses, overloads) = collect_outcomes(
             &mut msg_rx,
             bound,
             CONCURRENT_COMMANDS - bound,
@@ -4499,9 +4514,29 @@ esac"#,
         )
         .await;
         assert_eq!(
-            overloaded,
+            overloads.len(),
             CONCURRENT_COMMANDS - bound,
             "the refused commands were not all answered explicitly"
+        );
+        // The Server settles a brokered waiter only on its own response wire,
+        // keyed by `payload.request_id`; a refusal on the command's wire would
+        // be discarded as unknown and the caller would time out (#4433).
+        let mut refused: Vec<&str> = overloads
+            .iter()
+            .filter_map(|r| r["payload"]["request_id"].as_str())
+            .collect();
+        refused.sort_unstable();
+        let mut expected_refused: Vec<String> = (bound..CONCURRENT_COMMANDS)
+            .map(|n| format!("req-{n}"))
+            .collect();
+        expected_refused.sort_unstable();
+        assert_eq!(
+            refused,
+            expected_refused
+                .iter()
+                .map(String::as_str)
+                .collect::<Vec<&str>>(),
+            "a refusal did not carry a brokered request id"
         );
         let mut answered: Vec<&str> = responses
             .iter()
@@ -4696,16 +4731,43 @@ fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
 /// reader reads the category here, beside the constants that name it, rather
 /// than adding a column for something that is not a unit.
 /// The explicit overload reply for a request refused before admission
-/// (`#4433`). Additive `overloaded` outcome on the existing envelope shape,
-/// correlated by the request's own wire and `id`.
-fn overload_message(wire: &str, id: &str) -> String {
+/// (`#4433`).
+///
+/// A brokered command (one carrying the Server's `request_id`) is answered on
+/// `server.agent.command-response` — the only shape
+/// `server_agent_command_response_v1` correlates — so the pending waiter
+/// settles immediately instead of timing out. A direct id-correlated request
+/// keeps the reply on its own wire and `id`.
+fn overload_message(wire: &str, id: &str, request_id: Option<&str>) -> String {
+    let Some(request_id) = request_id else {
+        return serde_json::json!({
+            "msg_type": wire,
+            "id": id,
+            "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+            "payload": {
+                "error": "overloaded",
+                "message": "the connection is at its execution bound; retry after in-flight work completes",
+            },
+        })
+        .to_string();
+    };
     serde_json::json!({
-        "msg_type": wire,
-        "id": id,
+        "msg_type": "server.agent.command-response",
+        "id": uuid::Uuid::new_v4().to_string(),
         "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
         "payload": {
+            "request_id": request_id,
+            "command": wire,
+            // Core broker handlers read `success`/`error` from the payload;
+            // extension callers unwrap `result`.
+            "success": false,
             "error": "overloaded",
+            "error_kind": "overloaded",
             "message": "the connection is at its execution bound; retry after in-flight work completes",
+            "result": {
+                "error": "overloaded",
+                "available": false,
+            },
         },
     })
     .to_string()
