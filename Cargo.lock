@@ -2012,7 +2012,7 @@ dependencies = [
 
 [[package]]
 name = "nession-agent"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2062,7 +2062,7 @@ dependencies = [
 
 [[package]]
 name = "nession-claude-code"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2086,7 +2086,7 @@ dependencies = [
 
 [[package]]
 name = "nession-cli"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2124,7 +2124,7 @@ dependencies = [
 
 [[package]]
 name = "nession-client"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "futures-util",
  "nession-agent",
@@ -2144,7 +2144,7 @@ dependencies = [
 
 [[package]]
 name = "nession-common"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2166,7 +2166,7 @@ dependencies = [
 
 [[package]]
 name = "nession-erofs"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2193,7 +2193,7 @@ dependencies = [
 
 [[package]]
 name = "nession-git"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2215,7 +2215,7 @@ dependencies = [
 
 [[package]]
 name = "nession-github"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2236,7 +2236,7 @@ dependencies = [
 
 [[package]]
 name = "nession-mcp"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2273,7 +2273,7 @@ dependencies = [
 
 [[package]]
 name = "nession-persistence-probes"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "nession-agent",
@@ -2289,7 +2289,7 @@ dependencies = [
 
 [[package]]
 name = "nession-protocol"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "schemars",
  "serde",
@@ -2300,7 +2300,7 @@ dependencies = [
 
 [[package]]
 name = "nession-protocol-codegen"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "nession-agent",
  "nession-claude-code",
@@ -2315,7 +2315,7 @@ dependencies = [
 
 [[package]]
 name = "nession-runtime"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "axum",
  "futures-util",
@@ -2330,7 +2330,7 @@ dependencies = [
 
 [[package]]
 name = "nession-sandbox"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "libc",
@@ -2347,7 +2347,7 @@ dependencies = [
 
 [[package]]
 name = "nession-server"
-version = "0.35.0"
+version = "0.37.0"
 dependencies = [
  "anyhow",
  "async-trait",
