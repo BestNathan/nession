@@ -670,13 +670,20 @@ pub fn record(name: &'static str, labels: Labels, value: f64) {
     let Some(metric) = Metric::new(name, labels, value) else {
         return;
     };
-    let Ok(slot) = sink_slot().read() else {
-        return;
+    // Clone the sink out and drop the registry read guard *before* calling it.
+    // A sink may block (a slow collector, or a test capture's mutex), and
+    // holding the read guard across that call blocks `set_sink` — and every
+    // other caller — behind it. That is a real deadlock under a sink that
+    // takes its own lock and an owner that then swaps the sink (#4437).
+    let sink = {
+        let Ok(slot) = sink_slot().read() else {
+            return;
+        };
+        slot.as_ref().map(Arc::clone)
     };
-    let Some(sink) = slot.as_ref() else {
-        return;
-    };
-    sink.record(metric);
+    if let Some(sink) = sink {
+        sink.record(metric);
+    }
 }
 
 /// Record a counter increment.
@@ -877,6 +884,67 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #4437: the registry lock must not be held across `sink.record`.
+    ///
+    /// A sink can block (a slow collector, or a test capture's own mutex). The
+    /// old code held the read guard across that call, so `set_sink` — teardown,
+    /// a sink swap, or another test's `set_sink(None)` — queued behind it and
+    /// could deadlock with a sink that takes its own lock. That exact cycle
+    /// hung the workspace unit route under parallel tests.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_blocking_sink_does_not_block_set_sink() {
+        use std::sync::{Condvar, Mutex as StdMutex};
+        use std::time::Duration;
+        use tokio::sync::Notify;
+
+        let _guard = TEST_SINK_LOCK.lock().await;
+
+        struct Gated {
+            open: Arc<(StdMutex<bool>, Condvar)>,
+            entered: Arc<Notify>,
+        }
+        impl MetricSink for Gated {
+            fn record(&self, _metric: Metric) {
+                self.entered.notify_waiters();
+                let (open, wake) = &*self.open;
+                let mut ready = open.lock().expect("gate");
+                while !*ready {
+                    ready = wake.wait(ready).expect("gate wait");
+                }
+            }
+        }
+
+        let gate = Arc::new((StdMutex::new(false), Condvar::new()));
+        let entered = Arc::new(Notify::new());
+        set_sink(Some(Arc::new(Gated {
+            open: Arc::clone(&gate),
+            entered: Arc::clone(&entered),
+        }) as Arc<dyn MetricSink>));
+
+        let notified = entered.notified();
+        tokio::pin!(notified);
+        notified.as_mut().enable();
+        let recorder = tokio::spawn(async {
+            record("ws_admission_refused", Labels::new(), 1.0);
+        });
+        tokio::time::timeout(Duration::from_secs(2), notified)
+            .await
+            .expect("the sink was never entered");
+
+        // With the registry read guard held across `record`, this blocks for
+        // as long as the sink does.
+        tokio::time::timeout(Duration::from_secs(2), async { set_sink(None) })
+            .await
+            .expect("set_sink deadlocked behind a blocking sink");
+
+        {
+            let (open, wake) = &*gate;
+            *open.lock().expect("gate") = true;
+            wake.notify_all();
+        }
+        recorder.await.expect("the recorder task panicked");
     }
 
     #[tokio::test]
