@@ -470,8 +470,28 @@ impl SessionRegistry {
         let Some(session) = guard.get_mut(session_name) else {
             return Err("not_attached");
         };
-        let head = session.stream.cursor();
-        accept_output_ack(&mut session.peers, client_id, peer_token, payload, head)
+        // The validation frontier is the subscriber's *own* issued position,
+        // never the session-global head: a fresh subscriber may legitimately
+        // trail the head, but a claim beyond what it was handed is not (#4500).
+        // This is the same rule `record_output_progress` enforces below.
+        let issued_head = {
+            let Some(peer) = session.peers.iter().find(|peer| {
+                peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
+            }) else {
+                return Err("not_current_subscriber");
+            };
+            peer.issued_flow
+                .lock()
+                .map_err(|_| "credit_state_unavailable")?
+                .issued_frontier()
+        };
+        accept_output_ack(
+            &mut session.peers,
+            client_id,
+            peer_token,
+            payload,
+            issued_head,
+        )
     }
 
     /// Apply one subscriber's one-way parser progress and return the exact
@@ -996,6 +1016,15 @@ async fn restate_input_cursor(session_name: &str, plan: &InputPlan) {
 /// every peer: across a takeover the client that needs the cursor is exactly
 /// the one that did not send the frame. A failed delivery is dropped; the
 /// cursor is restated by the next acknowledgement and by every attach.
+/// How long one peer may hold up a session-wide bookkeeping fan-out.
+///
+/// These fan-outs run on the session's shared keyed worker, so an unbounded
+/// wait for one stalled observer's outbound room would throttle the
+/// *controller's* input for as long as that observer's socket lives (#4435).
+/// A missed notification is safe by contract: the cursor is restated by the
+/// next acknowledgement and by every attach.
+const PEER_NOTIFICATION_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
 async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayload) {
     let msg = new_message(msg_types::TERMINAL_INPUT_ACK, payload);
     let Ok(json) = serde_json::to_string(&msg) else {
@@ -1005,13 +1034,19 @@ async fn notify_input_ack(peers: &[SessionPeer], payload: TerminalInputAckPayloa
         // Input ACK is flow control for this exchange, not live terminal
         // output: it must be written before the input request's `ok` reply, so
         // the class seam maps it onto the response FIFO (#4434/#4435).
-        let _ = peer
-            .outbound
-            .send_for_class(
+        let sent = tokio::time::timeout(
+            PEER_NOTIFICATION_TIMEOUT,
+            peer.outbound.send_for_class(
                 OutboundStreamClass::FlowControl,
                 WsFrame::Text(json.clone()),
-            )
-            .await;
+            ),
+        )
+        .await;
+        if !matches!(sent, Ok(Ok(()))) {
+            tracing::debug!(
+                "input ack was not delivered to one subscriber within the notification bound"
+            );
+        }
     }
 }
 
@@ -1023,13 +1058,19 @@ async fn notify_control_changed(peers: &[SessionPeer], payload: TerminalControlC
     for peer in peers {
         // A lease change is stream authority bookkeeping: non-dropping, with
         // the same bounded stall verdict the previous terminal-lane send had.
-        let _ = peer
-            .outbound
-            .send_for_class(
+        let sent = tokio::time::timeout(
+            PEER_NOTIFICATION_TIMEOUT,
+            peer.outbound.send_for_class(
                 OutboundStreamClass::FlowControl,
                 WsFrame::Text(json.clone()),
-            )
-            .await;
+            ),
+        )
+        .await;
+        if !matches!(sent, Ok(Ok(()))) {
+            tracing::debug!(
+                "a control-change notice was not delivered to one subscriber within the bound"
+            );
+        }
     }
 }
 
@@ -1063,15 +1104,80 @@ mod tests {
         }
     }
 
+    /// #4435: a stalled observer must not throttle the controller's input.
+    ///
+    /// The input ACK fan-out runs on the session's shared worker and awaits
+    /// every peer. Fill the observer's Response class exactly to its frame
+    /// bound and assert the fan-out returns inside the notification bound
+    /// instead of parking on the observer's room for the full stall grace.
+    #[tokio::test]
+    async fn a_stalled_observer_does_not_delay_the_controller_input_ack() {
+        fn peer(outbound: P2pOutbound) -> SessionPeer {
+            SessionPeer {
+                client_id: "peer".to_string(),
+                subscription_id: None,
+                peer_token: Arc::new(()),
+                output_ack: new_output_ack(1).expect("a fresh binding"),
+                issued_flow: Arc::new(StdMutex::new(SubscriberIssuedFlow::new())),
+                outbound,
+                output_tx: None,
+                queued_bytes: Arc::new(AtomicUsize::new(0)),
+                detached_for_not_draining: Arc::new(AtomicBool::new(false)),
+            }
+        }
+
+        let (observer_outbound, _observer_rx) = P2pOutbound::new();
+        // No writer drains either queue; fill the observer's Response class to
+        // its exact frame bound. The next submission has no room.
+        for _ in 0..crate::server::outbound::RESPONSE_FRAME_SLOTS {
+            observer_outbound
+                .send_input_ack(WsFrame::Text("ack".into()))
+                .await
+                .expect("the response class has room");
+        }
+        let (controller_outbound, _controller_rx) = P2pOutbound::new();
+        let peers = vec![peer(observer_outbound), peer(controller_outbound)];
+
+        let started = std::time::Instant::now();
+        tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            notify_input_ack(
+                &peers,
+                TerminalInputAckPayload {
+                    session_name: "s".to_string(),
+                    input_epoch: 1,
+                    applied_through: 1,
+                    control_generation: Some(1),
+                },
+            ),
+        )
+        .await
+        .expect("the fan-out waited on the stalled observer");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "a stalled observer delayed the controller's input ack by {:?}",
+            started.elapsed()
+        );
+    }
+
     fn insert(
         registry: &SessionRegistry,
         session_name: &str,
         subscription_id: &str,
         closed: &Arc<AtomicBool>,
     ) -> NewAttachment {
+        insert_with_token(registry, session_name, subscription_id, closed).0
+    }
+
+    fn insert_with_token(
+        registry: &SessionRegistry,
+        session_name: &str,
+        subscription_id: &str,
+        closed: &Arc<AtomicBool>,
+    ) -> (NewAttachment, Arc<()>) {
         let token = Arc::new(());
         let (outbound, _) = P2pOutbound::new();
-        registry
+        let attachment = registry
             .insert_new(
                 session_name,
                 Box::new(Idle {
@@ -1085,7 +1191,76 @@ mod tests {
                     outbound,
                 },
             )
-            .expect("a fresh subscription generation is available")
+            .expect("a fresh subscription generation is available");
+        (attachment, token)
+    }
+
+    /// #4500: `output.applied` validates against what *this subscriber* was
+    /// issued, not the session-global head. A fresh subscriber that has been
+    /// handed nothing above its cut cannot pin its ACK cursor at the global
+    /// head, and a genuine claim still advances after the refusal.
+    #[tokio::test]
+    async fn an_output_ack_cannot_claim_past_the_subscribers_issued_frontier() {
+        let registry = SessionRegistry::new();
+        let closed = Arc::new(AtomicBool::new(false));
+        let (attached, token) = insert_with_token(&registry, "s", "tab-a", &closed);
+        let epoch = attached.stream_epoch;
+        // The subscriber's forwarder has drained nothing, so its issued
+        // frontier stays at its base while the session head advances to 10.
+        for _ in 0..10 {
+            assert!(registry.record_output("s", epoch, b"x").is_some());
+        }
+        // What the forwarder would have issued if it had sent the first three
+        // events; the remaining seven are still the session's, not this peer's.
+        {
+            let mut guard = registry.lock();
+            let peer = guard
+                .get_mut("s")
+                .expect("the session is attached")
+                .peers
+                .iter_mut()
+                .find(|peer| peer.client_id == "browser")
+                .expect("the first subscriber is attached");
+            let mut issued = peer.issued_flow.lock().expect("credit state");
+            for seq in 1..=3 {
+                issued
+                    .issue(epoch, seq, 1)
+                    .expect("issue within the window");
+            }
+        }
+        let subscriber_generation = {
+            let mut guard = registry.lock();
+            let peer = guard
+                .get_mut("s")
+                .expect("the session is attached")
+                .peers
+                .iter()
+                .find(|peer| peer.client_id == "browser")
+                .expect("the first subscriber is attached");
+            peer.output_ack.binding().subscriber_generation
+        };
+        let mut payload = TerminalOutputAppliedPayload {
+            session_name: "s".into(),
+            subscriber_generation,
+            stream_epoch: epoch,
+            // A fresh subscriber pins its renderer on the first ACK.
+            renderer_generation: 1,
+            // The session-global head — but seven events beyond this peer's
+            // issued frontier of 3.
+            applied_through: 10,
+        };
+        assert_eq!(
+            registry.record_output_ack("s", "browser", &token, &payload),
+            Err("invalid_output_ack"),
+        );
+        payload.applied_through = 3;
+        assert_eq!(
+            registry.record_output_ack("s", "browser", &token, &payload),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 3,
+            }),
+        );
     }
 
     /// #2469 SC-06: a producer from a retired generation must not write into

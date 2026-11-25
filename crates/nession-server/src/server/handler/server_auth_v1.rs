@@ -39,9 +39,13 @@ impl ConnectionHandler {
             // echoed back only by the Agent, and only for the connection the
             // relay opens on its behalf.
             self.browser_client_id = payload.client_id;
-            // Subscribe web client for real-time push (server.agents.changed, etc.)
-            if let Some(ref sender) = self.client_sender {
-                self.web_client_registry.subscribe(sender.clone());
+            // Subscribe web client for real-time push (server.agents.changed,
+            // etc.). The handler owns the subscription; dropping it at
+            // teardown aborts the forwarder, so an idle disconnect does not
+            // leak a task and a retained queue (#4434). A re-authentication
+            // replaces the previous forwarder.
+            if let Some(sender) = self.client_sender.clone() {
+                self.web_client_subscription = Some(self.web_client_registry.subscribe(sender));
             }
             info!("Client authenticated successfully");
 

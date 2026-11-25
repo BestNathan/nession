@@ -7,10 +7,28 @@
 // evidence strings). It is deliberately not a registry of what any criterion
 // means — that stays in each Case's verifier.
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '../../..');
+
+/**
+ * Isolate a Case verifier that runs a test which starts a tmux-backed Agent.
+ *
+ * `full-stack-local` Cases already own a runtime Agent. A cargo test process
+ * that creates real tmux sessions gets a private socket and state home so the
+ * two runtimes cannot share one tmux server or one identity directory.
+ */
+function isolatedTmuxEnv(prefix = 'nession-control-mode-case') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix + '-'));
+  const home = path.join(dir, 'home');
+  fs.mkdirSync(home, { recursive: true });
+  return {
+    NESSION_TMUX_SOCKET: path.join(dir, 'tmux.sock'),
+    NESSION_HOME: home,
+  };
+}
 
 function targetSha() {
   const sha = String(process.env.NESSION_ACCEPTANCE_TARGET_SHA || '');
@@ -96,4 +114,4 @@ function run(fn) {
   }
 }
 
-module.exports = { run, targetSha, checked, crateTests, cargoTests, assertRan, tmuxVersion };
+module.exports = { run, targetSha, checked, crateTests, cargoTests, assertRan, tmuxVersion, isolatedTmuxEnv };
