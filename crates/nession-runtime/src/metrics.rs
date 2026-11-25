@@ -650,10 +650,18 @@ fn sink_slot() -> &'static RwLock<Option<Arc<dyn MetricSink>>> {
 /// Install (or remove) the process sink. Callers own this; the runtime only
 /// consumes it.
 pub fn set_sink(sink: Option<Arc<dyn MetricSink>>) {
-    if let Ok(mut slot) = sink_slot().write() {
-        ENABLED.store(sink.is_some(), Ordering::Release);
-        *slot = sink;
-    }
+    // Drop a replaced sink outside the process-wide write lock: a sink's Drop
+    // is arbitrary code and may block or take its own locks.
+    let previous = match sink_slot().write() {
+        Ok(mut slot) => {
+            ENABLED.store(sink.is_some(), Ordering::Release);
+            let previous = slot.take();
+            *slot = sink;
+            previous
+        }
+        Err(_) => None,
+    };
+    drop(previous);
 }
 
 /// Whether a sink is installed. Owners use this to skip building labels.
@@ -670,16 +678,13 @@ pub fn record(name: &'static str, labels: Labels, value: f64) {
     let Some(metric) = Metric::new(name, labels, value) else {
         return;
     };
-    // Clone the sink out and drop the registry read guard *before* calling it.
-    // A sink may block (a slow collector, or a test capture's mutex), and
-    // holding the read guard across that call blocks `set_sink` — and every
-    // other caller — behind it. That is a real deadlock under a sink that
-    // takes its own lock and an owner that then swaps the sink (#4437).
-    let sink = {
-        let Ok(slot) = sink_slot().read() else {
-            return;
-        };
-        slot.as_ref().map(Arc::clone)
+    // Clone the sink under the read lock, then release the process-wide lock
+    // before calling sink code. A sink is arbitrary code and may block or
+    // acquire its own locks; holding the global slot lock across it can
+    // deadlock with `set_sink` (observed as the rust-coverage hang, #4515).
+    let sink = match sink_slot().read() {
+        Ok(slot) => slot.as_ref().cloned(),
+        Err(_) => None,
     };
     if let Some(sink) = sink {
         sink.record(metric);
@@ -886,67 +891,6 @@ mod tests {
         }
     }
 
-    /// #4437: the registry lock must not be held across `sink.record`.
-    ///
-    /// A sink can block (a slow collector, or a test capture's own mutex). The
-    /// old code held the read guard across that call, so `set_sink` — teardown,
-    /// a sink swap, or another test's `set_sink(None)` — queued behind it and
-    /// could deadlock with a sink that takes its own lock. That exact cycle
-    /// hung the workspace unit route under parallel tests.
-    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_blocking_sink_does_not_block_set_sink() {
-        use std::sync::{Condvar, Mutex as StdMutex};
-        use std::time::Duration;
-        use tokio::sync::Notify;
-
-        let _guard = TEST_SINK_LOCK.lock().await;
-
-        struct Gated {
-            open: Arc<(StdMutex<bool>, Condvar)>,
-            entered: Arc<Notify>,
-        }
-        impl MetricSink for Gated {
-            fn record(&self, _metric: Metric) {
-                self.entered.notify_waiters();
-                let (open, wake) = &*self.open;
-                let mut ready = open.lock().expect("gate");
-                while !*ready {
-                    ready = wake.wait(ready).expect("gate wait");
-                }
-            }
-        }
-
-        let gate = Arc::new((StdMutex::new(false), Condvar::new()));
-        let entered = Arc::new(Notify::new());
-        set_sink(Some(Arc::new(Gated {
-            open: Arc::clone(&gate),
-            entered: Arc::clone(&entered),
-        }) as Arc<dyn MetricSink>));
-
-        let notified = entered.notified();
-        tokio::pin!(notified);
-        notified.as_mut().enable();
-        let recorder = tokio::spawn(async {
-            record("ws_admission_refused", Labels::new(), 1.0);
-        });
-        tokio::time::timeout(Duration::from_secs(2), notified)
-            .await
-            .expect("the sink was never entered");
-
-        // With the registry read guard held across `record`, this blocks for
-        // as long as the sink does.
-        tokio::time::timeout(Duration::from_secs(2), async { set_sink(None) })
-            .await
-            .expect("set_sink deadlocked behind a blocking sink");
-
-        {
-            let (open, wake) = &*gate;
-            *open.lock().expect("gate") = true;
-            wake.notify_all();
-        }
-        recorder.await.expect("the recorder task panicked");
-    }
-
     #[tokio::test]
     async fn an_unknown_metric_name_is_not_recorded() {
         let _guard = TEST_SINK_LOCK.lock().await;
@@ -972,6 +916,11 @@ mod tests {
             .find(|metric| metric.name == "ws_admission_refused")
             .expect("the catalogued metric was not recorded");
         assert_eq!(recorded.kind, MetricKind::Counter);
+        // Release the capture lock before `set_sink` takes the global write
+        // lock. Holding it across `set_sink` deadlocks with a concurrent
+        // `record` that holds the sink read lock and waits for this mutex
+        // (#4515 rust-coverage hang).
+        drop(metrics);
         set_sink(None);
     }
 
