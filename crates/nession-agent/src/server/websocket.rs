@@ -2445,7 +2445,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.attach" => "agent.attach" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.attach" => "agent.attach" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2980,7 +2980,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.detach" => "agent.detach" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.detach" => "agent.detach" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3041,7 +3041,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: TerminalStreamResumePayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
@@ -4560,6 +4560,9 @@ mod tests {
             msg_types::TERMINAL_INPUT,
             msg_types::TERMINAL_RESIZE,
             msg_types::TERMINAL_OUTPUT_APPLIED,
+            msg_types::CLIENT_ATTACH,
+            msg_types::CLIENT_DETACH,
+            msg_types::TERMINAL_STREAM_RESUME,
         ] {
             match p2p_policy(wire, &payload) {
                 Some(crate::server::execution::ExecutionPolicy::Stream(key)) => {
