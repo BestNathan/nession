@@ -1,7 +1,8 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 # #4529 pilot: initial CI-published staging candidate, not a production release.
-# No Argo Application until image readback and production inbound sealing pass.
+# Production inbound sealing and manifest checks passed; internal-only activation.
+# Enroll ingress.yaml only after operator-managed TLS/origin routing is verified.
 namespace: nession
 commonLabels:
   app: nession
@@ -10,7 +11,6 @@ resources:
 - sealed-inbound.json
 - deployment.yaml
 - service.yaml
-- ingress.yaml
 configMapGenerator:
 - files:
   - mcp.toml
