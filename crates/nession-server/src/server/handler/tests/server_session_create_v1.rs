@@ -733,6 +733,56 @@ async fn ambiguous_new_create_timeout_applies_the_staged_binding() {
     );
 }
 
+/// #4434 SC-03: the create deadline is a settlement trigger. The pending
+/// entry is removed when the caller is answered, so a late reply is counted
+/// `late` instead of being delivered to a request nobody waits on.
+#[tokio::test]
+async fn a_create_timeout_settles_its_pending_entry() {
+    let mut h = handler_with_online_agent().await;
+    let (sender, mut rx) = WsMessageSender::new();
+    let generation = h.command_broker.new_connection_generation();
+    h.command_broker.claim_agent("a1", generation, sender).await;
+    let broker = Arc::clone(&h.command_broker);
+
+    let create = h.handle_message(proto_msg(
+        "server.session.create",
+        json!({ "agent_id": "a1", "name": "timeout-entry", "env_files": json!([]) }),
+    ));
+    let agent = async move {
+        let text = rx
+            .recv()
+            .await
+            .expect("agent should receive session.create")
+            .message
+            .to_text()
+            .unwrap()
+            .to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let request_id = parsed["payload"]["request_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        // Stay silent past the caller's deadline.
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        request_id
+    };
+    let (action, request_id) = tokio::join!(create, agent);
+    let reply = parse_reply(action.unwrap());
+    assert_eq!(reply["payload"]["success"], false);
+
+    let (pending, counters) = broker.pending_snapshot("a1").await;
+    assert_eq!(pending, 0, "the timed-out create kept its pending entry");
+    assert_eq!(counters.timed_out, 1);
+
+    assert!(
+        !broker
+            .resolve_command("a1", &request_id, json!({ "success": true }))
+            .await,
+        "a late create reply revived a settled request"
+    );
+    assert_eq!(broker.pending_snapshot("a1").await.1.late, 1);
+}
+
 /// #3344 SC-02: an empty-profile ambiguous new create starts a genuinely new
 /// Session empty, so a stale same-named row is cleared as before.
 #[tokio::test]

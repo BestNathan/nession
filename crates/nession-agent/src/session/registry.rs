@@ -470,8 +470,28 @@ impl SessionRegistry {
         let Some(session) = guard.get_mut(session_name) else {
             return Err("not_attached");
         };
-        let head = session.stream.cursor();
-        accept_output_ack(&mut session.peers, client_id, peer_token, payload, head)
+        // The validation frontier is the subscriber's *own* issued position,
+        // never the session-global head: a fresh subscriber may legitimately
+        // trail the head, but a claim beyond what it was handed is not (#4500).
+        // This is the same rule `record_output_progress` enforces below.
+        let issued_head = {
+            let Some(peer) = session.peers.iter().find(|peer| {
+                peer.client_id == client_id && Arc::ptr_eq(&peer.peer_token, peer_token)
+            }) else {
+                return Err("not_current_subscriber");
+            };
+            peer.issued_flow
+                .lock()
+                .map_err(|_| "credit_state_unavailable")?
+                .issued_frontier()
+        };
+        accept_output_ack(
+            &mut session.peers,
+            client_id,
+            peer_token,
+            payload,
+            issued_head,
+        )
     }
 
     /// Apply one subscriber's one-way parser progress and return the exact
@@ -1146,9 +1166,18 @@ mod tests {
         subscription_id: &str,
         closed: &Arc<AtomicBool>,
     ) -> NewAttachment {
+        insert_with_token(registry, session_name, subscription_id, closed).0
+    }
+
+    fn insert_with_token(
+        registry: &SessionRegistry,
+        session_name: &str,
+        subscription_id: &str,
+        closed: &Arc<AtomicBool>,
+    ) -> (NewAttachment, Arc<()>) {
         let token = Arc::new(());
         let (outbound, _) = P2pOutbound::new();
-        registry
+        let attachment = registry
             .insert_new(
                 session_name,
                 Box::new(Idle {
@@ -1162,7 +1191,76 @@ mod tests {
                     outbound,
                 },
             )
-            .expect("a fresh subscription generation is available")
+            .expect("a fresh subscription generation is available");
+        (attachment, token)
+    }
+
+    /// #4500: `output.applied` validates against what *this subscriber* was
+    /// issued, not the session-global head. A fresh subscriber that has been
+    /// handed nothing above its cut cannot pin its ACK cursor at the global
+    /// head, and a genuine claim still advances after the refusal.
+    #[tokio::test]
+    async fn an_output_ack_cannot_claim_past_the_subscribers_issued_frontier() {
+        let registry = SessionRegistry::new();
+        let closed = Arc::new(AtomicBool::new(false));
+        let (attached, token) = insert_with_token(&registry, "s", "tab-a", &closed);
+        let epoch = attached.stream_epoch;
+        // The subscriber's forwarder has drained nothing, so its issued
+        // frontier stays at its base while the session head advances to 10.
+        for _ in 0..10 {
+            assert!(registry.record_output("s", epoch, b"x").is_some());
+        }
+        // What the forwarder would have issued if it had sent the first three
+        // events; the remaining seven are still the session's, not this peer's.
+        {
+            let mut guard = registry.lock();
+            let peer = guard
+                .get_mut("s")
+                .expect("the session is attached")
+                .peers
+                .iter_mut()
+                .find(|peer| peer.client_id == "browser")
+                .expect("the first subscriber is attached");
+            let mut issued = peer.issued_flow.lock().expect("credit state");
+            for seq in 1..=3 {
+                issued
+                    .issue(epoch, seq, 1)
+                    .expect("issue within the window");
+            }
+        }
+        let subscriber_generation = {
+            let mut guard = registry.lock();
+            let peer = guard
+                .get_mut("s")
+                .expect("the session is attached")
+                .peers
+                .iter()
+                .find(|peer| peer.client_id == "browser")
+                .expect("the first subscriber is attached");
+            peer.output_ack.binding().subscriber_generation
+        };
+        let mut payload = TerminalOutputAppliedPayload {
+            session_name: "s".into(),
+            subscriber_generation,
+            stream_epoch: epoch,
+            // A fresh subscriber pins its renderer on the first ACK.
+            renderer_generation: 1,
+            // The session-global head — but seven events beyond this peer's
+            // issued frontier of 3.
+            applied_through: 10,
+        };
+        assert_eq!(
+            registry.record_output_ack("s", "browser", &token, &payload),
+            Err("invalid_output_ack"),
+        );
+        payload.applied_through = 3;
+        assert_eq!(
+            registry.record_output_ack("s", "browser", &token, &payload),
+            Ok(OutputAckVerdict::Advanced {
+                previous: 0,
+                applied_through: 3,
+            }),
+        );
     }
 
     /// #2469 SC-06: a producer from a retired generation must not write into
