@@ -594,6 +594,18 @@ impl SessionStreamState {
                 .direction(Direction::Outbound)
                 .result(ResultKind::Replay),
         );
+        // The caller's stretch is not wholly retained: output it was owed has
+        // been evicted. This is the terminal *output* gap owner, distinct from
+        // the browser's inbound input-sequence gap (#4502).
+        if after_seq.saturating_add(1) < first_available_seq {
+            metrics::counter(
+                "ws_stream_gap",
+                Labels::new()
+                    .domain(Domain::Stream)
+                    .direction(Direction::Outbound)
+                    .result(ResultKind::Gap),
+            );
+        }
         Some(StreamReplay {
             first_available_seq,
             // The ring is contiguous, so the floor is the whole test: every
@@ -645,6 +657,19 @@ impl SessionStreamState {
         // oversized frame is never partially retained or silently skipped:
         // callers behind its seq get complete=false and the new replay floor.
         if self.max_events == 0 || size > self.max_bytes {
+            // An oversized event can never be replayed to anyone behind it.
+            // Only the oversized case is a gap: `max_events == 0` means the
+            // operator disabled replay for every event, which is policy, not
+            // observed loss.
+            if size > self.max_bytes {
+                metrics::counter(
+                    "ws_stream_gap",
+                    Labels::new()
+                        .domain(Domain::Stream)
+                        .direction(Direction::Outbound)
+                        .result(ResultKind::Gap),
+                );
+            }
             return;
         }
         self.retained_bytes = self.retained_bytes.saturating_add(size);
@@ -672,6 +697,80 @@ fn stream_seq(ev: &TerminalStreamEventPayload) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4502: a replay stretch that is no longer retained is terminal *output*
+    /// loss, and the catalog's direction label is what separates it from the
+    /// browser's inbound input-sequence gap.
+    #[test]
+    fn an_evicted_replay_stretch_is_observed_as_an_output_gap() {
+        use nession_runtime::metrics::MetricSink;
+        use std::sync::{Arc, Mutex};
+
+        struct Capture(Arc<Mutex<Vec<metrics::Metric>>>);
+        impl MetricSink for Capture {
+            fn record(&self, metric: metrics::Metric) {
+                self.0.lock().expect("capture").push(metric);
+            }
+        }
+
+        let mut stream = SessionStreamState::new();
+        stream.max_events = 2;
+        let epoch = stream.epoch;
+        for _ in 0..4 {
+            stream.record_output("s", "data".to_string());
+        }
+        assert!(stream.first_available_seq() > 1);
+
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        metrics::set_sink(Some(Arc::new(Capture(Arc::clone(&captured)))));
+        let replay = stream.replay_since(epoch, 0).expect("epoch matches");
+        metrics::set_sink(None);
+
+        assert!(!replay.complete);
+        let gaps = captured
+            .lock()
+            .expect("capture")
+            .iter()
+            .filter(|metric| {
+                metric.name == "ws_stream_gap"
+                    && metric.labels.direction == Some(Direction::Outbound)
+            })
+            .count();
+        assert_eq!(gaps, 1, "the output gap was not observed");
+    }
+
+    /// #4502: an event too large to ever enter replay is lost to every
+    /// subscriber behind it, so it is counted as an output gap at the owner.
+    #[test]
+    fn an_oversized_event_is_observed_as_an_output_gap() {
+        use nession_runtime::metrics::MetricSink;
+        use std::sync::{Arc, Mutex};
+
+        struct Capture(Arc<Mutex<Vec<metrics::Metric>>>);
+        impl MetricSink for Capture {
+            fn record(&self, metric: metrics::Metric) {
+                self.0.lock().expect("capture").push(metric);
+            }
+        }
+
+        let mut stream = SessionStreamState::new();
+        stream.max_bytes = 1;
+        let captured = Arc::new(Mutex::new(Vec::new()));
+        metrics::set_sink(Some(Arc::new(Capture(Arc::clone(&captured)))));
+        stream.record_output("s", "too large to retain".to_string());
+        metrics::set_sink(None);
+
+        let gaps = captured
+            .lock()
+            .expect("capture")
+            .iter()
+            .filter(|metric| {
+                metric.name == "ws_stream_gap"
+                    && metric.labels.direction == Some(Direction::Outbound)
+            })
+            .count();
+        assert_eq!(gaps, 1, "the oversized event was not counted as a gap");
+    }
 
     #[test]
     fn first_client_becomes_controller_on_ensure() {

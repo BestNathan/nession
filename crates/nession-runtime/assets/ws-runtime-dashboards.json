@@ -34,11 +34,12 @@
         { "id": "queued", "title": "Queued outbound bytes", "metric": "ws_outbound_queued", "kind": "gauge", "aggregation": "sum" },
         { "id": "outbound_accepted", "title": "Outbound accepted", "metric": "ws_outbound_accepted", "kind": "counter", "aggregation": "rate" },
         { "id": "outbound_refused", "title": "Outbound refused", "metric": "ws_outbound_refused", "kind": "counter", "aggregation": "rate" },
-        { "id": "too_large", "title": "Oversized frames", "metric": "ws_outbound_too_large", "kind": "counter", "aggregation": "rate" },
+        { "id": "too_large", "title": "Oversized frame bytes refused", "metric": "ws_outbound_too_large", "kind": "counter", "aggregation": "rate" },
         { "id": "write_timeouts", "title": "Write deadline misses", "metric": "ws_outbound_write_timeout", "kind": "counter", "aggregation": "rate" },
         { "id": "credit_lag", "title": "Subscriber credit lag", "metric": "ws_stream_credit_lag", "kind": "gauge", "aggregation": "max" },
         { "id": "progress_lag", "title": "Parser progress lag", "metric": "ws_stream_progress_lag", "kind": "gauge", "aggregation": "max" },
-        { "id": "gaps", "title": "Output gaps", "metric": "ws_stream_gap", "kind": "counter", "aggregation": "rate" },
+        { "id": "input_gaps", "title": "Input gaps", "metric": "ws_stream_gap", "kind": "counter", "aggregation": "rate", "labels": { "direction": "inbound" } },
+        { "id": "output_gaps", "title": "Output gaps", "metric": "ws_stream_gap", "kind": "counter", "aggregation": "rate", "labels": { "direction": "outbound" } },
         { "id": "replays", "title": "Replay windows", "metric": "ws_stream_replay", "kind": "counter", "aggregation": "rate" },
         { "id": "coalesced", "title": "Coalesced levels", "metric": "ws_stream_coalesced", "kind": "counter", "aggregation": "rate" }
       ]
