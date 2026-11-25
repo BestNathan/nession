@@ -19,7 +19,7 @@ const HEX64 = /^[a-f0-9]{64}$/;
 const AGENT_ID = /^[a-z][a-z0-9-]{1,80}$/;
 
 const REVIEW_RUN_STATUSES = ['queued', 'in_progress', 'completed'];
-const DEVELOPER_OUTCOMES = ['implementation_ready', 'yielded', 'failed', 'cancelled', 'timeout'];
+const DEVELOPER_OUTCOMES = ['implementation_ready', 'yielded', 'failed', 'cancelled', 'timeout', 'uningested'];
 const PUBLISHER_OUTCOMES = ['published', 'failed', 'ambiguous'];
 const TERMINAL_PHASES = new Set(['done', 'cancelled']);
 
@@ -237,6 +237,13 @@ function normalizeReviewer(raw) {
     reject('untrusted Reviewer observation');
   }
   if (raw.status === 'completed') {
+    if (raw.outcome === 'uningested') {
+      return {
+        action_id: raw.action_id, run_id: raw.run_id, attempt: raw.attempt,
+        status: 'completed', outcome: 'uningested', head_sha: null,
+        evidence_generation: null, digest: null, findings: [],
+      };
+    }
     if (![...REVIEW_OUTCOMES, ...REVIEWER_FAILURES].includes(raw.outcome)) {
       reject('invalid Reviewer outcome');
     }
@@ -565,6 +572,20 @@ function decideDeveloper(state, observation, config, now) {
       return wait(state, 'await_dispatch_readback', 'developer_dispatching');
     }
     return wait(state, 'await_developer', 'developer_running');
+  }
+  if (developer.status === 'completed' && developer.outcome === 'uningested') {
+    // The trusted Run completed but its accepted result is not committed yet.
+    // Reinvoke the existing idempotent ingestion instead of rerunning the model.
+    return {
+      decision: 'recover',
+      reason: 'result_not_ingested',
+      substate: state.substate,
+      nextState: null,
+      intents: [{
+        type: 'reingest', action_id: action.id,
+        run_id: developer.run_id, attempt: developer.attempt,
+      }],
+    };
   }
   if (developer.status === 'queued' || developer.status === 'in_progress') {
     if (action.run != null && (action.run.id !== developer.run_id ||
@@ -1121,6 +1142,18 @@ function decideReviewer(state, observation, config, now) {
   if (action.run.id !== reviewer.run_id ||
       action.run.attempt !== reviewer.attempt) {
     return stale(state, 'reviewer_result_run_mismatch');
+  }
+  if (reviewer.outcome === 'uningested') {
+    return {
+      decision: 'recover',
+      reason: 'result_not_ingested',
+      substate: state.substate,
+      nextState: null,
+      intents: [{
+        type: 'reingest', action_id: action.id,
+        run_id: reviewer.run_id, attempt: reviewer.attempt,
+      }],
+    };
   }
   if (!REVIEW_OUTCOMES.includes(reviewer.outcome)) {
     // Reviewer runtime/invalid/cancel/timeout is never a negative code verdict.

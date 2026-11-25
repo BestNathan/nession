@@ -335,7 +335,8 @@ function basePorts(overrides = {}) {
   const observed = await observer(basePorts()).observe({
     issue: 4525, state, wake: { source: 'manual', reason: 'x' },
   });
-  assert.equal(observed.developer, null);
+  assert.equal(observed.developer.outcome, 'uningested');
+  assert.equal(observed.developer.status, 'completed');
 
   const unavailableFacts = await observer(basePorts({
     readRun: async () => { throw new Error('GitHub 503'); },

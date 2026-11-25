@@ -114,15 +114,24 @@ pub type MutationLane = Arc<KeyedLane<ResourceKey>>;
 /// connection alike. See [`ResourceKey`] for what "the same resource" means and
 /// `nession_runtime::lane::Lanes::shared` for what a shared lane buys.
 ///
-/// No worker budget: what bounds how many resources are mutated at once is the
-/// *connection's* admission bound, which is where the waiter is.
+/// How many resources this process may be mutating at once, across **every**
+/// connection that shares the lane (#4433 SC-02).
+///
+/// The per-connection admission bound states how far ahead of the backend one
+/// peer may get; it is not a process bound (`Σ connections × slots` grows with
+/// the number of peers). Four connections' worth of in-flight mutations is the
+/// process ceiling: the rest queue behind their resource (or are refused by the
+/// connection's own bound), which is the same "the reader is what waits" rule
+/// one scope up.
+pub const PROCESS_MUTATION_WORKERS: usize =
+    crate::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT * 4;
+
+/// The process's one mutation lane, shared by the peer-to-peer and central
+/// connections.
 pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
-    // The bounds are the peer-to-peer path's, and deliberately unchanged: this
-    // lane used to be that path's alone, so keeping its numbers is what makes
-    // the sharing invisible to every existing connection. The central
-    // connection's own admission bound is what bounds it, exactly as before.
-    Arc::new(KeyedLane::new(
+    Arc::new(KeyedLane::with_worker_budget(
         crate::server::execution::DEFAULT_KEY_QUEUE_DEPTH,
+        PROCESS_MUTATION_WORKERS,
         crate::server::execution::LANE_LABEL,
     ))
 }
@@ -130,17 +139,13 @@ pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
 /// The process's **reserved** Stream execution lane (#4503).
 ///
 /// A second lane by construction, not a class inside the mutation one: real-time
-/// business work (terminal input, resize, legacy applied ACK) must complete
-/// while ordinary Request/mutation work is saturated, and ordinary work must not
-/// be able to spend the Stream workers. Its keys are the same
-/// [`ResourceKey`]s, so per-session order still holds.
+/// business work (terminal input, resize, legacy applied ACK and the session
+/// lifecycle ops they depend on) must complete while ordinary Request/mutation
+/// work is saturated, and ordinary work must not be able to spend the Stream
+/// workers. Its keys are the same [`ResourceKey`]s, so per-session order holds.
 pub type StreamLane = Arc<KeyedLane<ResourceKey>>;
 
 /// How many resources this process may be executing Stream work for at once.
-///
-/// A process bound over the connections that share the lane; each connection
-/// states its own admission bound ([`DEFAULT_STREAM_IN_FLIGHT`]) so one peer
-/// cannot take them all.
 pub const DEFAULT_STREAM_WORKERS: usize = crate::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT * 2;
 
 /// How many Stream units one connection may have in flight.
@@ -156,4 +161,30 @@ pub fn stream_scheduler() -> Arc<KeyedLane<ResourceKey>> {
         DEFAULT_STREAM_WORKERS,
         STREAM_LANE_LABEL,
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// #4433 SC-02: the shared lane carries a process-wide worker budget, not
+    /// only per-connection slots.
+    #[tokio::test]
+    async fn the_process_mutation_lane_is_worker_bounded() {
+        let lane = mutation_scheduler();
+        assert_eq!(
+            lane.snapshot().await.worker_budget,
+            Some(PROCESS_MUTATION_WORKERS),
+        );
+    }
+
+    /// #4503: the reserved Stream lane carries its own process worker budget.
+    #[tokio::test]
+    async fn the_stream_lane_is_worker_bounded() {
+        let lane = stream_scheduler();
+        assert_eq!(
+            lane.snapshot().await.worker_budget,
+            Some(DEFAULT_STREAM_WORKERS),
+        );
+    }
 }

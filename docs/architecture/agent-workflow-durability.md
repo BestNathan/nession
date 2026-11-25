@@ -229,6 +229,8 @@ the v1 orchestration modules remain the compatibility path for immutable
 | `workflow/facts.mjs` | production fact observer over authenticated Run/Attempt/receipt/PR/checkpoint ports; typed unavailable/denied/un-ingested facts never become an outcome |
 | `workflow/scan.mjs` | fair, bounded active-lifecycle scan with deterministic rotation, malformed isolation and no auto-start |
 | `workflow/diagnostic.mjs` | exported diagnostic whitelist; the private next-state plan never leaves the trusted process |
+| `workflow/apply.mjs` | trusted apply composition: real no-force agent-store CAS, scoped effect adapters, authorized start and one wake router; plan is the default and activation is fail-closed |
+| `workflow/recovery.mjs` | generic terminal recovery: fact classification, retirement receipt, exactly one successor, checkpoint retention and fail-closed blocks |
 | `workflow/telemetry.mjs` | sanitized Reconcile observation projection (no prompts/native bytes/credentials) |
 | `orchestration/transition.mjs` | `advanceWorkflowV1` compatibility replay only; it rejects a v2 state |
 
@@ -310,6 +312,44 @@ blocked and legacy candidates, isolates malformed heads and rotates
 deterministically over the raw candidate set. A stable set is covered within
 `ceil(candidateCount / maxIssues)` bounded ticks; no scan path creates or starts
 a lifecycle.
+
+The trusted apply composition (`workflow/apply.mjs`) keeps plan as the default.
+Apply requires an explicit, fail-closed activation and a complete scoped effect
+composition; a missing binding is refused, never replaced. Its remote Store port
+clones the existing `agent-store` orphan ref, re-reads it for every CAS and uses
+the existing non-force run-store publisher; a stale expected version, competing
+writer or lost acknowledgement is a conflict that forces reload and re-observe,
+never a local-only success. An authorized start requires an explicit owner
+selection and is mutually exclusive with an existing v1 or v2 lifecycle; a
+schedule or external wake cannot start, apply, merge or project an SC. The one
+wake router routes authenticated event, schedule, manual and external wakes
+through the same coordinator, rejects authorization fields on wake-only sources,
+coalesces redundant concurrent wakes and keeps the event path a latency
+optimization rather than a requirement. Model/provider credentials never enter
+the coordinator or effect boundary. Production composition, scheduling
+activation and the real canary remain separately authorized under the parent
+SC-06 boundary.
+
+Generic terminal recovery (`workflow/recovery.mjs`) classifies an authenticated
+fact into healthy/queued/claimed/executing, terminal result, completed-but-
+un-ingested, committed-not-advanced, ambiguous, missing-result, expired-artifact,
+denied-policy, terminal-failure or unknown. A terminal failure retires the
+action with an immutable failure receipt and creates exactly one successor for
+the same logical Thread after a verified Run identity; an already-retired action
+can never spawn a second successor. Infrastructure/model budgets are cumulative
+across successors and exhaustion blocks. A committed native checkpoint is always
+retained; an incompatible/corrupt checkpoint blocks instead of forking a new
+session. Reviewer failure recovers the Reviewer, never the Developer. A
+completed-but-un-ingested result requests idempotent trusted ingestion instead of
+rerunning the model; ambiguous or unknown evidence blocks rather than inventing a
+failure or a pass.
+
+V1 migration accepts authenticated readback rather than guessing: the trusted PR,
+committed checkpoint, lease/fencing generation and (for an ambiguous dispatch)
+the proven original Run are projected into the v2 state. A committed checkpoint
+is never replaced with null, a fence is never silently reset, an ambiguous
+dispatch without proof blocks with a diagnostic, and the immutable v1
+version/digest remains the source history.
 
 The sanitized observation projection (`workflow/telemetry.mjs`) carries
 phase/substate, stage age, reconcile source/outcome, unresolved dispatch, retry

@@ -245,6 +245,9 @@ pub struct KeySnapshot {
     pub queued: usize,
     /// The bound one key's queue moves within.
     pub depth: usize,
+    /// The lane-wide worker budget, when the runtime stated one (#4433 SC-02):
+    /// the process-wide bound on how many resources may be mutating at once.
+    pub worker_budget: Option<usize>,
     /// The deepest single key's queue: the per-key depth that is furthest ahead.
     ///
     /// `#961`'s backpressure section asks for per-key queue depth to be
@@ -1122,6 +1125,7 @@ where
             keys,
             queued,
             depth: self.inner.depth,
+            worker_budget: self.inner.budget.as_ref().map(|budget| budget.bound),
             deepest,
             started: self.inner.started.load(Ordering::Relaxed),
             completed: self.inner.completed.load(Ordering::Relaxed),
