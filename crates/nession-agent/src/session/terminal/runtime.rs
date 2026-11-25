@@ -498,6 +498,10 @@ pub(crate) fn build_terminal_resume_response(
 
 /// Socket identity and per-attach subscription generation are both required.
 /// Nothing here grants credit for queued/dequeued bytes.
+///
+/// `issued_head` is the **subscriber's own issued frontier**, never the
+/// session-global head (#4500). The production caller derives it from the
+/// peer's issued ledger, exactly as `accept_output_progress` does.
 pub(crate) fn accept_output_ack(
     peers: &mut [SessionPeer],
     client_id: &str,
