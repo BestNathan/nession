@@ -7,7 +7,7 @@
 // verified receipt. No model runs in this module and it holds no model
 // credentials. External effects are never blindly repeated.
 import {
-  DEFAULT_CONFIG, WAKE_SOURCES, activeAction, validateLifecycleState,
+  DEFAULT_CONFIG, WAKE_SOURCES, activeAction, transitionKey, validateLifecycleState,
 } from './contract.mjs';
 import { decideLifecycle, updateExecutionState } from './lifecycle.mjs';
 import { migrateV1State } from './migration.mjs';
@@ -241,6 +241,111 @@ async function executeNotify({ state, intent, store, now }) {
   return written?.conflict ? state : next;
 }
 
+function ciRetryMarker(state, action) {
+  return state.transitions.some((transition) =>
+    transition.kind === 'ci_retry' && transition.action_id === action.id);
+}
+
+// The retry intent must be durable BEFORE the external rerun request. The
+// action itself is created by the lifecycle decision; this transition records
+// that the executor is about to cross the external-effect boundary. A later
+// wake that sees the marker must read back, never blindly re-request.
+async function writeCiRetryMarker({ state, action, store, now }) {
+  const event = {
+    kind: 'ci_retry', outcome: 'requested',
+    action_id: action.id, run_id: null, attempt: null,
+    target_sha: action.sha, evidence_generation: action.evidence_generation,
+  };
+  const next = validateLifecycleState({
+    ...state,
+    version: state.version + 1,
+    updated_at: now,
+    transitions: [...state.transitions, {
+      ...event, key: transitionKey({ issue: state.issue, ...event }),
+      recorded_version: state.version + 1,
+    }],
+  });
+  const written = await store.cas(next, state.version);
+  return written?.conflict ? null : next;
+}
+
+function ciRetryCancelled(state, action, reason, now) {
+  return updateExecutionState(state, action.id, {
+    status: 'cancelled', receipt: { status: 'cancelled', reason },
+  }, now);
+}
+
+async function finishCiRetry({ state, action, result, store, now }) {
+  let next;
+  if (result?.status === 'accepted' && runBinding(result) != null) {
+    next = updateExecutionState(state, action.id, {
+      status: 'committed',
+      run: runBinding(result),
+      receipt: {
+        status: 'available', dispatch_id: action.id,
+        outcome: 'ci_retry_requested',
+        evidence_generation: action.evidence_generation,
+      },
+    }, now);
+  } else if (result?.status === 'failed') {
+    const code = typeof result.failure?.code === 'string' && result.failure.code.length > 0 ?
+      result.failure.code.slice(0, 200) : 'ci_retry_failed';
+    next = ciRetryCancelled(state, action, code, now);
+  } else {
+    // The response is uncertain and no verified rerun identity is available.
+    // Keep the durable pending action (and its marker); a later reconcile must
+    // read back instead of issuing a duplicate external request.
+    return state;
+  }
+  const written = await store.cas(next, state.version);
+  return written?.conflict ? state : next;
+}
+
+async function completeCiRetry({ state, action, effects, store, now }) {
+  if (action.status !== 'pending') return state;
+  if (action.action !== 'ci_retry' || action.role != null) reject('invalid CI retry action');
+  if (action.sha !== state.thread.head_sha) {
+    // A stale-head retry is never sent. Cancel it so the next decision can
+    // collect the new HEAD's obligation without an active-action conflict.
+    const next = ciRetryCancelled(state, action, 'ci_retry_stale_head', now);
+    const written = await store.cas(next, state.version);
+    return written?.conflict ? state : next;
+  }
+  let current = state;
+  let justMarked = false;
+  if (!ciRetryMarker(current, action)) {
+    current = await writeCiRetryMarker({ state: current, action, store, now });
+    if (current == null) return state;
+    justMarked = true;
+  }
+  let result = null;
+  if (!justMarked) {
+    // A prior attempt may have reached GitHub even if its response was lost.
+    if (typeof effects.readbackCiRetry !== 'function') return current;
+    const readback = await effects.readbackCiRetry({ state: current, action });
+    if (readback?.status === 'found' && runBinding(readback) != null) {
+      result = { status: 'accepted', run_id: readback.run_id, attempt: readback.attempt };
+    } else if (readback?.status !== 'absent') {
+      // Unknown effect: block until verified, never re-request.
+      return current;
+    }
+  }
+  if (result == null) {
+    if (typeof effects.retryCi !== 'function') reject('effects port requires retryCi');
+    result = await effects.retryCi({ state: current, action });
+  }
+  return finishCiRetry({ state: current, action, result, store, now });
+}
+
+// A pending retry may need readback even when the lifecycle has no new intent.
+async function resumeCiRetry({ state, ports, now }) {
+  const action = activeAction(state);
+  if (action == null || action.action !== 'ci_retry') return state;
+  return completeCiRetry({
+    state, action, effects: ports.effects, store: ports.store, now,
+  });
+}
+
 // A dispatching/ambiguous action may already have a real external effect whose
 // response was lost. The trusted reader is consulted before any new POST.
 async function recoverAmbiguousAction({ state, ports, now }) {
@@ -289,10 +394,13 @@ async function executeIntent({ state, intent, ports, now }) {
       return executeAccept({ state, intent, effects: ports.effects, store: ports.store, now });
     case 'notify':
       return executeNotify({ state, intent, store: ports.store, now });
-    case 'retry_ci':
-      if (typeof ports.effects.retryCi !== 'function') reject('effects port requires retryCi');
-      await ports.effects.retryCi({ state, intent });
-      return state;
+    case 'retry_ci': {
+      const action = state.outbox.find((entry) => entry.id === intent.action_id);
+      if (action == null) reject('retry intent has no committed action');
+      return completeCiRetry({
+        state, action, effects: ports.effects, store: ports.store, now,
+      });
+    }
     case 'reingest':
       if (typeof ports.effects.reingest !== 'function') {
         reject('effects port requires reingest');
@@ -413,6 +521,14 @@ export async function reconcileOnce({
     }
     if (decision.nextState == null && decision.intents.length === 0) {
       if (apply && ports.effects != null) {
+        const resumed = await resumeCiRetry({ state, ports, now });
+        if (resumed !== state) {
+          state = resumed;
+          version = state.version;
+          summary.store_version = version;
+          summary.phase = state.phase;
+          continue;
+        }
         const recovered = await recoverAmbiguousAction({ state, ports, now });
         if (recovered !== state) {
           state = recovered;
