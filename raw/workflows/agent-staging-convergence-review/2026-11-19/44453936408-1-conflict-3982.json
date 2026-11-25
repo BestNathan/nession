@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "agent-staging-convergence-review",
+    "github_workflow": "Agent / Staging Convergence Review",
+    "github_run_id": 44453936408,
+    "github_run_attempt": 1,
+    "job": "review",
+    "repository": "BestNathan/nession",
+    "event": "workflow_dispatch",
+    "unique_run_name": "44453936408-1-conflict-3982"
+  },
+  "task": {
+    "id": "conflict-3982",
+    "type": "staging-convergence-conflict-review",
+    "issue": 2953,
+    "pr": 3982,
+    "target_ref": "5a9fb12750b506fb7a97a93b518dac0c0767475e",
+    "fingerprint": "91b825212a1feac7e2920e1f55acc69be24e7e99:5a9fb12750b506fb7a97a93b518dac0c0767475e"
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "staging-convergence-reviewer",
+    "role": "analyst",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "f90ef1c1-ae4b-40e5-adea-01c7babcfa75",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "staging-convergence-conflict",
+      "version": "v1",
+      "sha256": "dda2e57ab2c5dad1ed3b11d69514a043008454036db09447b725cdb9c7b56f15"
+    }
+  },
+  "execution": {
+    "turns": 7,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 24,
+    "output": 2581,
+    "cache_read": 41338,
+    "cache_write": 22856,
+    "reasoning": null,
+    "total": 66799
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-19T03:49:08.737Z",
+    "finished_at": "2026-11-19T03:49:08.737Z",
+    "agent_duration_ms": 50370,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "completed"
+  }
+}
