@@ -969,3 +969,10 @@
 - Categories: architecture, agent, ci, security, workflows
 - Reason: Record the #4527 generic terminal recovery — explicit fact classes, one authenticated retirement and successor per logical Thread, cumulative budgets, committed-checkpoint retention and incompatible/corrupt blocking, completed-but-un-ingested re-ingestion, Reviewer self-recovery, and V1 migration with authenticated PR/checkpoint/lease/Run readback and unproven ambiguous-dispatch blocking
 - Source: https://github.com/BestNathan/nession/issues/4527
+
+## 2026-11-25T20:27:00Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, agent, ci, security, workflows
+- Reason: Record the #4528 exact-head CI barrier — expected obligations frozen from server-side required checks, Quality scope and Issue-selected browser applicability before observation; authenticated Run/attempt/Job/step evidence with bounded pagination and material rerun invalidation; durable `ci_retry` Outbox intent/receipt with readback, no duplicate request, cumulative budgets and stale-head cancellation; and the unified both-receipt feedback plus signed Developer repair input bound to the same Thread/checkpoint. SC-06 remains separately authorized
+- Source: https://github.com/BestNathan/nession/issues/4528

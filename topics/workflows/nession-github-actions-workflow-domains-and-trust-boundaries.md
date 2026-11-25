@@ -5,8 +5,8 @@ topic: workflows
 categories: ["architecture","agent","ci","security","workflows"]
 status: verified
 created_at: 2026-11-03T09:34:15Z
-updated_at: 2026-11-25T19:13:20Z
-sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/issues/4525","https://github.com/BestNathan/nession/issues/4526","https://github.com/BestNathan/nession/issues/4527","https://github.com/BestNathan/nession/blob/7f128a115d1278fa555877566664a0da037b6e2b/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/7f128a115d1278fa555877566664a0da037b6e2b/scripts/lib/agent/workflow/recovery.mjs","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/scripts/lib/agent/workflow/apply.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/facts.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/scan.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/diagnostic.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml"]
+updated_at: 2026-11-25T20:27:00Z
+sources: ["https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/.claude/skills/nession-workflows/SKILL.md","https://github.com/BestNathan/nession/blob/5eaaf2cf07d50ed805b8961a012127f60dba9111/scripts/workflow-conventions.mjs","https://github.com/BestNathan/nession/issues/1649","https://github.com/BestNathan/nession/issues/2953","https://github.com/BestNathan/nession/issues/4482","https://github.com/BestNathan/nession/issues/4525","https://github.com/BestNathan/nession/issues/4526","https://github.com/BestNathan/nession/issues/4527","https://github.com/BestNathan/nession/blob/7f128a115d1278fa555877566664a0da037b6e2b/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/7f128a115d1278fa555877566664a0da037b6e2b/scripts/lib/agent/workflow/recovery.mjs","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/a03b997b19207c2a0d5516f12ffce76d22469e57/scripts/lib/agent/workflow/apply.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/facts.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/scan.mjs","https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/scripts/lib/agent/workflow/diagnostic.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/docs/architecture/agent-workflow-durability.md","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/lifecycle.mjs","https://github.com/BestNathan/nession/blob/8783ecf6ab88322aa996e1614870a30d97f2ec58/scripts/lib/agent/workflow/reconcile.mjs","https://github.com/BestNathan/nession/blob/8352d3abb6f3c73b07db2fed1357566aa17f74b2/scripts/staging-convergence-batch.mjs","https://github.com/BestNathan/nession/blob/4c4e903b670a8b1c9b5ec67c5b7fde6982b27c6e/.github/workflows/release-staging-convergence.yml","https://github.com/BestNathan/nession/blob/cb81cd3469b9824d88adc26193ac30655e8070d5/.github/workflows/agent-staging-convergence-review.yml","https://github.com/BestNathan/nession/issues/4528","https://github.com/BestNathan/nession/blob/e5e41991d90c54a4cb4f0a37fbab9b6ff412d861/scripts/lib/agent/workflow/ci-policy.mjs","https://github.com/BestNathan/nession/blob/e5e41991d90c54a4cb4f0a37fbab9b6ff412d861/scripts/lib/agent/workflow/ci-evidence.mjs","https://github.com/BestNathan/nession/blob/e5e41991d90c54a4cb4f0a37fbab9b6ff412d861/scripts/lib/agent/workflow/worker-input.mjs","https://github.com/BestNathan/nession/blob/94088c864d0b5efd0b19653c049c99ead93da958/docs/architecture/agent-workflow-durability.md"]
 ---
 
 # Nession GitHub Actions workflow domains and trust boundaries
@@ -133,7 +133,36 @@ committed-checkpoint, lease/fencing and proven-Run readback; it never replaces a
 committed checkpoint with null or resets a fence, and an unproven ambiguous
 dispatch blocks with a diagnostic.
 
-Executable owners: `workflow/{contract,lifecycle,ci-barrier,feedback,migration,reconcile,facts,scan,diagnostic,apply,recovery,telemetry}.mjs`;
+**Exact-head CI barrier, durable retry and unified repair input (#4528).**
+The expected CI obligation is frozen from existing trusted owners before any
+observation: server-side branch-protection required contexts (never inferred
+from workflow YAML), the trusted-main Quality scope, Issue-selected E2E/Case
+applicability and authenticated producer identity. The Convergence
+merge-admission status stays with its merge owner and outside the pre-review
+barrier; the Reviewer is never a GitHub Check. Each exact-HEAD result is
+authenticated against its Run, attempt, declared workflow path, Job and steps
+with bounded pagination; a name or app slug alone is not proof. A
+missing-not-yet-created check stays required, a skip passes only when the
+trusted policy proved non-applicability, neutral passes only under canonical
+required-check semantics, and any material rerun (new check-run/attempt/job/
+steps) is a new evidence generation that invalidates the old aggregate.
+
+CI infrastructure/missing recovery now uses a durable system `ci_retry` Outbox
+action: the write-ahead marker and cumulative budget are persisted before the
+external rerun request, the committed receipt binds the verified rerun
+Run/attempt, a lost response is resolved by readback, an unknown effect blocks
+without a duplicate request, a queued new attempt is awaited and a stale-head
+retry is cancelled before crossing the effect boundary.
+
+The evaluation feedback bundle now always carries both CI and Review receipts,
+including the passed side, plus concrete blocking findings and prior unresolved
+IDs; nonblocking suggestions never gate repair. One signed Developer input is
+rendered from the persisted bundle and bound to the same Thread/checkpoint and
+both evidence digests. Reviewer runtime failures recover the Reviewer, result
+ingestion never schedules repair by itself, and only CI-pass + approved proceeds
+to existing SC Acceptance and the authorized merge path.
+
+Executable owners: `workflow/{contract,lifecycle,ci-barrier,ci-policy,ci-evidence,feedback,worker-input,migration,reconcile,facts,scan,diagnostic,apply,recovery,telemetry}.mjs`;
 canonical architecture: [agent-workflow-durability.md](https://github.com/BestNathan/nession/blob/4e30776748531bb03d6751585ee5ddc87a7c12af/docs/architecture/agent-workflow-durability.md).
 PR-stage criteria are proven by exact-source fixtures in the
 `agent-provider-contract` Gate. The real main-owned SC-06 canary remains
@@ -159,4 +188,4 @@ Owner `/approve-staging-convergence ...` comments and authenticated bot Audit re
 
 ## Limits / when to revisit
 
-This summarizes canonical workflow ownership as of source SHA 5eaaf2cf07d5, the #2953 source-bound convergence implementation through cb81cd3469b9 and the #4482 V2 lifecycle/reconcile implementation at 8783ecf6ab. New main/staging conflicts, approvals or deployment outcomes require their own exact-SHA evidence; the #4482 SC-06 canary remains unexecuted until separately authorized. Validate live workflows, protected refs, Gates and Issue authority when the implementation changes; this article is not a second workflow policy engine.
+This summarizes canonical workflow ownership as of source SHA 5eaaf2cf07d5, the #2953 source-bound convergence implementation through cb81cd3469b9 and the #4482 V2 lifecycle/reconcile implementation at 8783ecf6ab and the #4528 exact-head CI/retry/worker-input slice at e5e41991d90c54a4cb4f0a37fbab9b6ff412d861. New main/staging conflicts, approvals or deployment outcomes require their own exact-SHA evidence; the #4482 SC-06 canary remains unexecuted until separately authorized. Validate live workflows, protected refs, Gates and Issue authority when the implementation changes; this article is not a second workflow policy engine.
