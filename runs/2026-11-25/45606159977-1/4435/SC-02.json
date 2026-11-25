@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "4386a8ffca64ed48f889247a520d3e473b17a3987a9cf8a038f55a2a126bf56a",
+  "run_id": 45606159977,
+  "run_attempt": 1,
+  "issue": 4435,
+  "criterion": "SC-02",
+  "criterion_text": "Staging isolated terminal protocol/runtime Case exercises P2P and Relay under blocked ordinary request, independent terminal stream input/output, injected output gap, reconnect and replay/checkpoint; observed byte/ordinal sequence and parser progress follow existing contract, no duplicate input.",
+  "stage": "staging",
+  "target_sha": "a8c311c2c26908047abf3be1077954119ac84a1f",
+  "contract_sha256": "a5d88a2344219a1b4ce1491b3e53143b653e203e6ddf035fe49c30dee7260d10",
+  "case_revision": "a8c311c2c26908047abf3be1077954119ac84a1f",
+  "case_tree_sha": "7e701cd3bbcc4b70736466565f845324b249f45e",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-25T11:45:21.467Z",
+  "finished_at": "2026-11-25T11:45:35.614Z",
+  "duration_ms": 14147,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Reliable terminal input is ordered and never silently lost or blindly replayed; output recovery uses the existing cursor/ACK semantics across P2P and Relay; a gap or stale epoch is refused without writing; a reconnect reconciles the cursor and does not duplicate input",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "a8c311c2c26908047abf3be1077954119ac84a1f: bootstrap-before-ok, legacy unsequenced input, ACK reconcile on reattach, idempotent retry, gap/stale-epoch refusal, in-order session input, Relay attach/IO and the Relay input-ACK path all passed"
+        }
+      ],
+      "duration_ms": 8284,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45606159977,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "a8c311c2c26908047abf3be1077954119ac84a1f",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45606159977",
+    "record_path": "runs/2026-11-25/45606159977-1/4435/SC-02.json",
+    "source_result_sha256": "1f45a970e2e04246e422288d1ec4b0cc2ba64bf4e6d398eff80db9473f8d2edb"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45606159977-1",
+    "sha256": "1f45a970e2e04246e422288d1ec4b0cc2ba64bf4e6d398eff80db9473f8d2edb",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45606159977",
+    "durability": "time-limited; object archival not configured"
+  }
+}
