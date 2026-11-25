@@ -36,7 +36,7 @@ use crate::session::metadata::{
 };
 use crate::session::registry::SessionRegistry;
 use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
-use nession_runtime::lane::KeyedLane;
+use nession_runtime::lane::{AdmitError, KeyedLane};
 
 /// The label MCP-originated lane waits carry in logs, so a mutation queued by
 /// the endpoint is not mistaken for a peer-to-peer frame's.
@@ -173,8 +173,8 @@ impl AgentNodeBackend {
             DEFAULT_MUTATIONS_IN_FLIGHT,
             MCP_LANE_LABEL,
         );
-        lanes
-            .key(
+        if let Err(error) = lanes
+            .try_key(
                 ResourceKey::Session(session_name.to_string()),
                 Box::pin(async move {
                     // An expired MCP request must not start its queued mutation.
@@ -185,7 +185,15 @@ impl AgentNodeBackend {
                     }
                 }),
             )
-            .await;
+            .await
+        {
+            return Err(match error {
+                AdmitError::Saturated => ToolError::backend(
+                    "the Agent's mutation lane is at its execution bound; retry the request",
+                ),
+                AdmitError::Closed => ToolError::backend("the Agent's mutation lane is closed"),
+            });
+        }
         let outcome = result
             .await
             .map_err(|_| ToolError::backend("the Agent's mutation lane ended before answering"))?;

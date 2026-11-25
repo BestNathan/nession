@@ -47,6 +47,7 @@ use crate::session::terminal::state::InputSequence;
 // socket's own bounds — see `nession_runtime::lane`.
 use crate::server::outbound::{self, OutboundError, P2pOutbound};
 use crate::server::resize::ResizeReporter;
+use crate::stream::OutboundStreamClass;
 use crate::tmux::env::profiles_from_snapshots;
 use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionManager};
 use crate::tmux::session::TmuxSession;
@@ -62,7 +63,7 @@ use nession_protocol::contracts::env::v1::EnvSnapshot;
 use nession_protocol::contracts::mcp::v1::{McpToolCallPayload, McpToolCallReply};
 use nession_runtime::frame::WsFrame;
 use nession_runtime::ingress::{self, AdmissionSlot, AxumWebSocket};
-use nession_runtime::lane::{KeyedLane, Work};
+use nession_runtime::lane::{AdmitError, KeyedLane, Work};
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -181,7 +182,10 @@ fn spawn_output_forwarder(
                 // this forwarder's to act on twice — another session's
                 // forwarder may reach it first — so the connection is closed
                 // and this task ends with it.
-                match outbound.send_terminal(WsFrame::Text(json)).await {
+                match outbound
+                    .send_for_class(OutboundStreamClass::OrderedOutput, WsFrame::Text(json))
+                    .await
+                {
                     Ok(()) => {}
                     Err(OutboundError::Stalled) => {
                         outbound.close();
@@ -427,7 +431,9 @@ async fn send_terminal_resize_msg(
         return true;
     };
     !matches!(
-        outbound.try_send_state(WsFrame::Text(json)),
+        outbound
+            .send_for_class(OutboundStreamClass::LatestState, WsFrame::Text(json))
+            .await,
         Err(OutboundError::Closed)
     )
 }
@@ -462,7 +468,11 @@ async fn send_recorded_resize_msg(
     else {
         return;
     };
-    if outbound.send_terminal(WsFrame::Text(json)).await.is_err() {
+    if outbound
+        .send_for_class(OutboundStreamClass::OrderedOutput, WsFrame::Text(json))
+        .await
+        .is_err()
+    {
         debug!(
             "session {session_name}: the resize at seq {} did not reach a peer that stopped \
              draining; the reply that follows carries the verdict",
@@ -584,7 +594,10 @@ async fn send_atomic_output_prefix(
     let Ok(json) = serde_json::to_string(&msg) else {
         return false;
     };
-    match outbound.send_terminal(WsFrame::Text(json)).await {
+    match outbound
+        .send_for_class(OutboundStreamClass::AttachHistory, WsFrame::Text(json))
+        .await
+    {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             warn!("stream cut: client stalled on atomic prefix for {session_name}");
@@ -767,7 +780,10 @@ async fn send_bootstrap(
     let Ok(json) = serde_json::to_string(&msg) else {
         return true;
     };
-    match outbound.send_terminal(WsFrame::Text(json)).await {
+    match outbound
+        .send_for_class(OutboundStreamClass::AttachHistory, WsFrame::Text(json))
+        .await
+    {
         Ok(()) => true,
         Err(OutboundError::Stalled) => {
             // The honest verdict, and the same one the live-output task takes:
@@ -1868,6 +1884,16 @@ impl Frame {
                             verdict = ?outcome.verdict,
                             "terminal progress recorded without a reply"
                         );
+                        // Stream observation hook (#4435): a reconcile event
+                        // names its reason and required frontier. It is not a
+                        // wire frame; the exception-only notice below is.
+                        if let Some(event) = outcome.event {
+                            debug!(
+                                session = %payload.session_name,
+                                event = ?event,
+                                "terminal stream event"
+                            );
+                        }
                         let Some(notice) = outcome.notice else {
                             return true;
                         };
@@ -1885,7 +1911,11 @@ impl Frame {
                         )) else {
                             return true;
                         };
-                        match notice.outbound.send_terminal(WsFrame::Text(json)).await {
+                        match notice
+                            .outbound
+                            .send_for_class(OutboundStreamClass::FlowControl, WsFrame::Text(json))
+                            .await
+                        {
                             Ok(()) => true,
                             Err(_) => false,
                         }
@@ -3026,6 +3056,12 @@ p2p_routes! { ctx, msg_type, payload_value;
                         "terminal input requires an active controller lease",
                     ),
                     Err(InputRejected::InvalidBase64(error)) => ctx.err("decode_error", &error),
+                    // Explicit refusal: the cursor was restated immediately
+                    // before this reply, so the sender can resume rather than
+                    // replaying blindly.
+                    Err(InputRejected::StreamOverflow(overflow)) => {
+                        ctx.err("input_overflow", &overflow.to_string())
+                    }
                     Err(InputRejected::Write(error)) => ctx.err("write_error", &error.to_string()),
                     Err(InputRejected::StateChanged) => ctx.err(
                         "write_error",
@@ -3101,6 +3137,13 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(ResizeRejected::NotController) => ctx.err(
                         "not_controller",
                         "terminal resize requires an active controller lease",
+                    ),
+                    // The stream was killed/recreated across the backend
+                    // resize; the size belonged to the retired resource and is
+                    // deliberately not recorded into its successor.
+                    Err(ResizeRejected::SessionReplaced) => ctx.err(
+                        "session_replaced",
+                        "the session was replaced while the resize was applied",
                     ),
                     Err(ResizeRejected::Backend(error)) => {
                         ctx.err("resize_error", &error.to_string())
@@ -4234,8 +4277,46 @@ impl AgentServer {
                                         break;
                                     }
                                 }
-                                Query => lanes.query(lane_work(frame)).await,
-                                Key(key) => lanes.key(key, lane_work(frame)).await,
+                                Query => {
+                                    let frame_id = frame.id.clone();
+                                    let frame_connection = Arc::clone(&frame.connection);
+                                    match lanes.try_query(lane_work(frame)) {
+                                        Ok(()) => {}
+                                        Err(AdmitError::Saturated) => {
+                                            let Ok(reply) = serde_json::to_string(&make_error(
+                                                &frame_id,
+                                                "overloaded",
+                                                "the connection is at its execution bound; retry after in-flight work completes",
+                                            )) else {
+                                                break;
+                                            };
+                                            if !write_frame(&frame_connection, Some(reply)).await {
+                                                break;
+                                            }
+                                        }
+                                        Err(AdmitError::Closed) => break,
+                                    }
+                                }
+                                Key(key) => {
+                                    let frame_id = frame.id.clone();
+                                    let frame_connection = Arc::clone(&frame.connection);
+                                    match lanes.try_key(key, lane_work(frame)).await {
+                                        Ok(()) => {}
+                                        Err(AdmitError::Saturated) => {
+                                            let Ok(reply) = serde_json::to_string(&make_error(
+                                                &frame_id,
+                                                "overloaded",
+                                                "the connection is at its execution bound; retry after in-flight work completes",
+                                            )) else {
+                                                break;
+                                            };
+                                            if !write_frame(&frame_connection, Some(reply)).await {
+                                                break;
+                                            }
+                                        }
+                                        Err(AdmitError::Closed) => break,
+                                    }
+                                }
                             }
                         }
                     }
@@ -6292,22 +6373,23 @@ mod tests {
     /// detaching this subscriber) could never be delivered, because the
     /// forwarder never got to observe its own receiver closing.
     ///
-    /// The queue is saturated with one oversized state frame — `charge` clamps a
-    /// frame larger than the budget to the whole of it — so the next terminal
+    /// The stream class is filled to its frame bound — control's reserved
+    /// budget is deliberately not involved — so the forwarder's next terminal
     /// frame has no room and the grace is what decides. The grace is shortened
     /// because waiting out a production number is waiting out the calendar; the
-    /// bound still has to be reached first, which is what the saturation
-    /// arranges.
+    /// bound still has to be reached first, which is what the fill arranges.
     #[tokio::test]
     async fn a_terminal_forwarder_that_cannot_drain_closes_the_connection() {
-        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
-
         let (outbound, _rx) = P2pOutbound::with_terminal_grace(Duration::from_millis(50));
-        assert_eq!(
-            outbound.try_send_state(WsFrame::Text("x".repeat(OUTBOUND_BYTE_BUDGET))),
-            Ok(()),
-            "the whole byte budget is one frame's worth"
-        );
+        // Fill the stream class's reserved frame slots. That is what the
+        // forwarder below sends on, so its next send is the one that cannot
+        // drain — control's budget is separate and deliberately not involved.
+        for _ in 0..crate::server::outbound::STREAM_FRAME_SLOTS {
+            outbound
+                .send_terminal(WsFrame::Text("x".into()))
+                .await
+                .expect("a stream frame fits the reserved frame slots");
+        }
 
         let (tx, rx) = mpsc::channel::<SubscriberEvent>(SUBSCRIBER_QUEUE_SLOTS);
         spawn_output_forwarder(
@@ -7601,11 +7683,10 @@ mod tests {
     /// draining then parks the session's backend for that whole window, which is
     /// the opposite of what `AttachedSession::backend` documents the lock is for.
     ///
-    /// **The assertion is the lock, not the code shape.** `charge` clamps a frame
-    /// to the byte budget, so one oversized frame on the connection's outbound is
-    /// enough to leave no room for the next send; the fan-out then parks, and the
-    /// test asks for the backend and fails if it does not get it. Scoping the
-    /// guard is the only thing that makes it available.
+    /// **The assertion is the lock, not the code shape.** The stream class is
+    /// filled to its frame bound, so the fan-out's terminal send has no room and
+    /// parks; the test then asks for the backend and fails if it does not get
+    /// it. Scoping the guard is the only thing that makes it available.
     ///
     /// Two preconditions keep this from passing vacuously: the fan-out must
     /// actually have had to wait (`awaited` rose — a timeout would otherwise be
@@ -7613,7 +7694,6 @@ mod tests {
     /// must still be running when the lock is asked for.
     #[tokio::test]
     async fn a_stalled_fan_out_does_not_hold_the_session_backend() {
-        use crate::server::outbound::OUTBOUND_BYTE_BUDGET;
         use crate::tmux::session::TmuxSession;
 
         /// Only `resize` is reached; the rest exist because the arm holds a
@@ -7677,13 +7757,19 @@ mod tests {
             .collect(),
         ));
 
-        // The connection's outbound, with nothing draining it. One frame at the
-        // byte budget's own size takes the whole budget (`charge` clamps to it),
-        // so the fan-out's send has no room and waits.
+        // The connection's outbound, with nothing draining it. Filling the
+        // stream class's frame slots leaves the fan-out's terminal send with no
+        // room, so it waits.
         let (outbound, _outbound_rx) = P2pOutbound::new();
-        outbound
-            .try_send_state(WsFrame::Text("x".repeat(OUTBOUND_BYTE_BUDGET)))
-            .expect("the first frame fits the budget it is about to exhaust");
+        // Fill the stream class's reserved frame slots: the fan-out's terminal
+        // send is what this test needs to observe waiting, and control's
+        // reserved budget must not be the thing that makes it wait.
+        for _ in 0..crate::server::outbound::STREAM_FRAME_SLOTS {
+            outbound
+                .send_terminal(WsFrame::Text("x".into()))
+                .await
+                .expect("a stream frame fits the reserved frame slots");
+        }
 
         let tmux = Arc::new(SessionManager::new());
         let session_metadata = Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new())));

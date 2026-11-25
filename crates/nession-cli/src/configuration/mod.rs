@@ -550,6 +550,10 @@ pub const SERVER_FIELDS: &[FieldSpec] = &[
         kind: FieldKind::U64,
     },
     FieldSpec {
+        key: "legacy_blob_route",
+        kind: FieldKind::Bool,
+    },
+    FieldSpec {
         key: "terminal_stall_grace_secs",
         kind: FieldKind::U64,
     },

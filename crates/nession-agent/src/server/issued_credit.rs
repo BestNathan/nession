@@ -12,6 +12,8 @@
 
 use std::collections::VecDeque;
 
+use nession_runtime::metrics::{self, Direction, Domain, Labels};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum IssuedCreditError {
     SequenceGap,
@@ -213,6 +215,23 @@ impl SubscriberIssuedFlow {
         let Some(last_issued) = self.last_issued else {
             return Ok(0);
         };
+        // Lag is reported in the unit the catalog declares: events behind the
+        // issued frontier for progress, bytes still outstanding for credit.
+        let labels = Labels::new()
+            .domain(Domain::Stream)
+            .direction(Direction::Inbound);
+        if parsed_through <= last_issued {
+            metrics::gauge(
+                "ws_stream_progress_lag",
+                labels,
+                (last_issued - parsed_through) as f64,
+            );
+        }
+        metrics::gauge(
+            "ws_stream_credit_lag",
+            labels,
+            self.outstanding_bytes() as f64,
+        );
         match &mut self.credit {
             Some(ledger) => {
                 // Old parser callbacks may precede the opt-in cut. They must
