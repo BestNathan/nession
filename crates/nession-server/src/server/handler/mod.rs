@@ -140,6 +140,13 @@ pub struct ConnectionHandler {
     connection_generation: ConnectionGeneration,
     /// Outgoing message sender for this client connection (set after construction).
     client_sender: Option<WsMessageSender>,
+    /// The web-client broadcast forwarder this connection owns.
+    ///
+    /// Dropping it aborts the forwarder at teardown. Clones deliberately take
+    /// `None`: an execution task must not be able to cancel the connection's
+    /// subscriber, and only the connection's own handler owns its lifetime
+    /// (#4434).
+    web_client_subscription: Option<crate::server::web_client_registry::WebClientSubscription>,
     /// Session this client is attached to via relay (for cleanup on disconnect).
     attached_session_id: Option<String>,
     /// Unique client id for this relay attachment (for cleanup on disconnect).
@@ -194,6 +201,7 @@ impl Clone for ConnectionHandler {
             registered_agent_id: self.registered_agent_id.clone(),
             connection_generation: self.connection_generation,
             client_sender: self.client_sender.clone(),
+            web_client_subscription: None,
             attached_session_id: self.attached_session_id.clone(),
             attached_client_id: self.attached_client_id.clone(),
             browser_client_id: self.browser_client_id.clone(),
@@ -295,6 +303,7 @@ impl ConnectionHandler {
             registered_agent_id: None,
             connection_generation,
             client_sender: None,
+            web_client_subscription: None,
             attached_session_id: None,
             attached_client_id: None,
             browser_client_id: None,
@@ -417,6 +426,17 @@ impl ConnectionHandler {
     /// Must be called before processing messages that may need to broadcast.
     pub fn set_client_sender(&mut self, sender: WsMessageSender) {
         self.client_sender = Some(sender);
+    }
+
+    /// Stop this connection's web-client broadcast forwarder.
+    ///
+    /// The connection teardown calls this explicitly; the guard's `Drop` is the
+    /// backstop. Either way the task is aborted and its sender released, so an
+    /// idle disconnected browser leaves no parked forwarder (#4434).
+    pub fn stop_web_client_subscription(&mut self) {
+        if let Some(subscription) = self.web_client_subscription.take() {
+            subscription.stop();
+        }
     }
 
     /// Session this client is attached to via relay (for cleanup on disconnect).

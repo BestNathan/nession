@@ -8,6 +8,16 @@ use tracing::{debug, info, warn};
 
 use super::outbound::WsMessageSender;
 
+/// Hard cap on requests one agent's control channel may have pending.
+///
+/// A live agent that silently stops answering must not be able to grow the
+/// map without limit. The cap is per agent, not per connection: requests are
+/// keyed by server-minted UUIDs and outlive a reconnect (#743). Exceeding it
+/// refuses the new command explicitly (the caller sees the same closed reply a
+/// disconnected agent produces) rather than evicting an in-flight request that
+/// the agent may still execute.
+const MAX_PENDING_COMMANDS_PER_AGENT: usize = 256;
+
 /// Identity of one accepted WebSocket connection, handed out by
 /// [`CommandBroker::new_connection_generation`].
 ///
@@ -270,6 +280,36 @@ impl CommandBroker {
             .get(agent_id)
             .map_or(0, |control| control.pending_commands.len());
         (pending, self.pending_counters.snapshot())
+    }
+
+    /// Settle every pending command for an agent whose caller is gone.
+    ///
+    /// A dropped `oneshot::Receiver` is the cancellation signal: the handler
+    /// task was aborted, timed out without its explicit settlement, or the
+    /// browser went away. Reaping is idempotent — a settled entry is removed
+    /// once and counted once as [`PendingOutcome::Cancelled`] — so callers may
+    /// reap at any activity boundary. Returns how many entries were removed.
+    pub async fn reap_cancelled(&self, agent_id: &str) -> usize {
+        let mut agents = self.agents.write().await;
+        let Some(agent) = agents.get_mut(agent_id) else {
+            return 0;
+        };
+        self.reap_closed_pending(agent)
+    }
+
+    /// Remove entries whose waiter has dropped, counting each once.
+    fn reap_closed_pending(&self, agent: &mut AgentControl) -> usize {
+        let mut removed = 0;
+        agent.pending_commands.retain(|_, pending| {
+            if pending.tx.is_closed() {
+                removed += 1;
+                self.pending_counters.note(PendingOutcome::Cancelled);
+                false
+            } else {
+                true
+            }
+        });
+        removed
     }
 
     /// Hand out the identity of a newly accepted connection.
@@ -690,6 +730,26 @@ impl CommandBroker {
         };
         info!("CommandBroker: found agent {} in registry", agent_id);
 
+        // A waiter whose receiver is gone has been cancelled: its handler task
+        // was aborted or its caller stopped waiting. Settle it now rather than
+        // leaving an unreachable entry for the life of the connection (#4434).
+        self.reap_closed_pending(agent);
+        if agent.pending_commands.len() >= MAX_PENDING_COMMANDS_PER_AGENT {
+            warn!(
+                "CommandBroker: agent {} already has {} pending commands; refusing {}",
+                agent_id,
+                agent.pending_commands.len(),
+                msg_type
+            );
+            self.pending_counters.note(PendingOutcome::DeliveryFailed);
+            drop(agents);
+            // The refused command is never inserted: the caller observes the
+            // same closed reply a disconnected agent produces, and the bound is
+            // what keeps a silent agent from growing the map without limit.
+            drop(tx);
+            return rx;
+        }
+
         // A reused request id is a replacement, not a second waiter: settle the
         // older one now (it can never be answered under the new owner) rather
         // than leave it in the map to be resolved by whichever response arrives.
@@ -884,6 +944,35 @@ mod tests {
     /// with it resolves every waiting handler with `RecvError`, and the
     /// session-create handler renders that as "Agent disconnected" — for a
     /// command the agent may already have executed.
+    /// #4434 SC-03: a caller that goes away (its task is aborted and its
+    /// receiver dropped) must not leave a permanent pending entry. Reaping is
+    /// idempotent — one entry, one `Cancelled` — and runs at the next broker
+    /// activity for that agent as well as on demand.
+    #[tokio::test]
+    async fn a_cancelled_waiter_is_settled_exactly_once() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker
+            .claim_agent("a1", broker.new_connection_generation(), sender)
+            .await;
+
+        let waiter = broker
+            .send_command("a1", "agent.session.create", "req-1", json!({}))
+            .await;
+        assert_eq!(broker.pending_snapshot("a1").await.0, 1);
+
+        // The handler task is aborted: its receiver goes away.
+        drop(waiter);
+        assert_eq!(broker.reap_cancelled("a1").await, 1);
+        let (pending, counters) = broker.pending_snapshot("a1").await;
+        assert_eq!(pending, 0, "the cancelled entry survived");
+        assert_eq!(counters.cancelled, 1);
+
+        // A second reap must not settle it again.
+        assert_eq!(broker.reap_cancelled("a1").await, 0);
+        assert_eq!(broker.pending_snapshot("a1").await.1.cancelled, 1);
+    }
+
     #[tokio::test]
     async fn reconnecting_an_agent_keeps_its_pending_commands() {
         let broker = CommandBroker::new();

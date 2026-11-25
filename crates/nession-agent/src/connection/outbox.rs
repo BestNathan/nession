@@ -100,6 +100,7 @@ use nession_runtime::metrics::{self, Direction, Domain, Labels, ReasonKind, Resu
 use nession_runtime::outbound::{charge, Limits};
 
 use super::sync_intent::SyncIntent;
+use crate::stream::{classify_latest_state, LatestStateIdentity, LatestStateVerdict};
 
 /// The bound the heartbeat class holds to.
 ///
@@ -280,6 +281,10 @@ impl Class {
 struct PendingFrame {
     message: WsMessage,
     charged: usize,
+    /// The level identity this frame was published under, when its producer
+    /// stated one. A frame without an identity is a level whose order is the
+    /// publish order itself.
+    identity: Option<LatestStateIdentity>,
 }
 
 /// One class's pending frames, and what they were charged against its budget.
@@ -479,19 +484,19 @@ impl Outbox {
 
     /// Publish a heartbeat, superseding any heartbeat still pending.
     pub fn send_heartbeat(&self, msg: WsMessage) -> Result<()> {
-        self.publish(Class::Heartbeat, AGENT, msg)
+        self.publish(Class::Heartbeat, AGENT, None, msg)
     }
 
     /// Publish the agent's advertised address list, superseding any still
     /// pending.
     pub fn send_address_update(&self, msg: WsMessage) -> Result<()> {
-        self.publish(Class::Addresses, AGENT, msg)
+        self.publish(Class::Addresses, AGENT, None, msg)
     }
 
     /// Publish one session's state, superseding any update still pending for that
     /// session.
     pub fn send_session_update(&self, session: &str, msg: WsMessage) -> Result<()> {
-        self.publish(Class::SessionState, session, msg)
+        self.publish(Class::SessionState, session, None, msg)
     }
 
     /// Publish one session's Activity level (#3804), superseding any still
@@ -509,6 +514,7 @@ impl Outbox {
         self.publish(
             Class::SessionState,
             &format!("{ACTIVITY_KEY_PREFIX}{session}"),
+            None,
             msg,
         )
     }
@@ -520,12 +526,38 @@ impl Outbox {
     /// Server's relay path looks the session up by — see
     /// `ServerClientHandle::send_terminal_resize`.
     pub fn send_terminal_resize(&self, session_id: &str, msg: WsMessage) -> Result<()> {
-        self.publish(Class::Resize, session_id, msg)
+        self.publish(Class::Resize, session_id, None, msg)
+    }
+
+    /// Publish a terminal size with the level identity its producer observed
+    /// it under.
+    ///
+    /// The outbox is the canonical coalescer for this class, so it shares the
+    /// [`classify_latest_state`] rule: a same-incarnation publish with an older
+    /// or equal generation cannot replace a newer pending level, even if it is
+    /// published later (#4499).
+    pub fn send_terminal_resize_at(
+        &self,
+        session_id: &str,
+        incarnation: u64,
+        generation: u64,
+        msg: WsMessage,
+    ) -> Result<()> {
+        self.publish(
+            Class::Resize,
+            session_id,
+            Some(LatestStateIdentity {
+                incarnation,
+                key: session_id.to_string(),
+                generation,
+            }),
+            msg,
+        )
     }
 
     /// Publish one session's git invalidation, superseding any still pending.
     pub fn send_git_invalidated(&self, session: &str, msg: WsMessage) -> Result<()> {
-        self.publish(Class::GitInvalidation, session, msg)
+        self.publish(Class::GitInvalidation, session, None, msg)
     }
 
     /// Put one frame into one class, superseding what is pending for its key.
@@ -536,7 +568,13 @@ impl Outbox {
     /// writer any more — the supervisor is gone. Each class's own counters say
     /// what a refusal left behind, and publishing never waits for room, so there
     /// is no third outcome and nothing for a caller to retry.
-    fn publish(&self, class: Class, key: &str, msg: WsMessage) -> Result<()> {
+    fn publish(
+        &self,
+        class: Class,
+        key: &str,
+        identity: Option<LatestStateIdentity>,
+        msg: WsMessage,
+    ) -> Result<()> {
         if self.shared.closed.load(Ordering::SeqCst) {
             return Err(anyhow!("server client supervisor has stopped"));
         }
@@ -551,38 +589,57 @@ impl Outbox {
             let (room, counters) = class.parts(&mut state);
 
             if let Some(pending) = room.entries.get_mut(key) {
-                // A key that is already pending keeps its slot whatever the
-                // bounds say, because the frame replacing it is the *newer* fact
-                // and the lane is holding one either way. What can still be
-                // refused is a replacement that does not fit even with the entry
-                // it supersedes refunded — a key whose lane is at its bound like
-                // any other, and the verdict below is then the same one.
-                let refunded = room.charged_bytes.saturating_sub(pending.charged);
-                if refunded.saturating_add(charged) <= limits.bytes {
-                    room.charged_bytes = refunded + charged;
-                    pending.charged = charged;
-                    pending.message = msg;
-                    counters.superseded += 1;
-                    metrics::counter(
-                        "ws_stream_coalesced",
-                        Labels::new()
-                            .domain(Domain::Stream)
-                            .direction(Direction::Outbound)
-                            .result(ResultKind::Coalesced),
-                    );
+                // A level that states its identity is ordered by that identity,
+                // not by publish order: an older observation must not replace a
+                // newer pending one (#4499). A frame without an identity keeps
+                // the original rule — the publisher is the ordering authority.
+                let replace = match (&pending.identity, &identity) {
+                    (Some(pending), Some(incoming)) => !matches!(
+                        classify_latest_state(Some(pending), incoming),
+                        LatestStateVerdict::Superseded
+                    ),
+                    _ => true,
+                };
+                if !replace {
+                    // The pending level is already the newer fact: this publish
+                    // is a no-op, and the lane keeps holding one frame.
                     Verdict::Pending
                 } else {
-                    counters.dropped += 1;
-                    metrics::counter(
-                        "ws_outbound_refused",
-                        Labels::new()
-                            .domain(Domain::Stream)
-                            .direction(Direction::Outbound)
-                            .result(ResultKind::Refused)
-                            .reason(ReasonKind::Capacity),
-                    );
-                    Verdict::Refused {
-                        total: counters.dropped,
+                    // A key that is already pending keeps its slot whatever the
+                    // bounds say, because the frame replacing it is the *newer*
+                    // fact and the lane is holding one either way. What can
+                    // still be refused is a replacement that does not fit even
+                    // with the entry it supersedes refunded — a key whose lane
+                    // is at its bound like any other, and the verdict below is
+                    // then the same one.
+                    let refunded = room.charged_bytes.saturating_sub(pending.charged);
+                    if refunded.saturating_add(charged) <= limits.bytes {
+                        room.charged_bytes = refunded + charged;
+                        pending.charged = charged;
+                        pending.message = msg;
+                        pending.identity = identity;
+                        counters.superseded += 1;
+                        metrics::counter(
+                            "ws_stream_coalesced",
+                            Labels::new()
+                                .domain(Domain::Stream)
+                                .direction(Direction::Outbound)
+                                .result(ResultKind::Coalesced),
+                        );
+                        Verdict::Pending
+                    } else {
+                        counters.dropped += 1;
+                        metrics::counter(
+                            "ws_outbound_refused",
+                            Labels::new()
+                                .domain(Domain::Stream)
+                                .direction(Direction::Outbound)
+                                .result(ResultKind::Refused)
+                                .reason(ReasonKind::Capacity),
+                        );
+                        Verdict::Refused {
+                            total: counters.dropped,
+                        }
                     }
                 }
             } else if room.entries.len() < limits.frames
@@ -594,6 +651,7 @@ impl Outbox {
                     PendingFrame {
                         message: msg,
                         charged,
+                        identity,
                     },
                 );
                 Verdict::Pending
@@ -1038,6 +1096,38 @@ mod tests {
         assert_eq!(
             delivered,
             ["agent-1:s0:4998", "agent-1:s1:4999", "agent-1:s2:4997"].map(str::to_string)
+        );
+    }
+
+    /// #4499: the canonical coalescer enforces the latest-state rule. An older
+    /// observation published after a newer one cannot roll the pending level
+    /// back, and a level from another incarnation replaces rather than merges.
+    #[test]
+    fn an_older_resize_observation_cannot_replace_a_newer_pending_one() {
+        let (outbox, mut frames, _) = outbox();
+        outbox
+            .send_terminal_resize_at("agent-1:s1", 7, 20, text("newer"))
+            .expect("publish failed");
+        outbox
+            .send_terminal_resize_at("agent-1:s1", 7, 10, text("older"))
+            .expect("publish failed");
+        assert_eq!(
+            body(frames.try_next().expect("nothing pending")),
+            "newer",
+            "an older observation replaced the newer pending size"
+        );
+        assert!(frames.try_next().is_none());
+
+        outbox
+            .send_terminal_resize_at("agent-1:s1", 7, 30, text("inc-7"))
+            .expect("publish failed");
+        outbox
+            .send_terminal_resize_at("agent-1:s1", 8, 1, text("inc-8"))
+            .expect("publish failed");
+        assert_eq!(
+            body(frames.try_next().expect("nothing pending")),
+            "inc-8",
+            "a different incarnation did not replace the pending level"
         );
     }
 

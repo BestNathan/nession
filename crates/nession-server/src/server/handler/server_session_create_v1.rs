@@ -632,6 +632,15 @@ impl ConnectionHandler {
                 Ok(session_create_reply(&msg.id, refusal("Agent disconnected")))
             }
             Err(_) => {
+                // The caller's deadline settles the pending entry (#4434,
+                // SC-03): the entry is removed now, so a late create reply is
+                // counted as `late` instead of being delivered to a request
+                // whose caller has already been answered. Kill and the generic
+                // timeout path already do this; create ran its own timeout and
+                // was the rollout miss.
+                self.command_broker
+                    .expire_pending(agent_id, &request_id)
+                    .await;
                 if let Some(context) = &managed_context {
                     let _ = self
                         .db

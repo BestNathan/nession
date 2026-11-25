@@ -902,6 +902,10 @@ pub const DEFAULT_P2P_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The frame limits the listener has always enforced. Stated explicitly rather
 /// than left to a default: `#3439` moved the transport, not the bounds.
+/// A progress-report reconcile notice is exception-only bookkeeping. A
+/// subscriber with clogged outbound must not park the physical reader (and
+/// every other Session multiplexed on it) waiting for room (#4435).
+const RECONCILE_NOTICE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
@@ -1911,13 +1915,21 @@ impl Frame {
                         )) else {
                             return true;
                         };
-                        match notice
-                            .outbound
-                            .send_for_class(OutboundStreamClass::FlowControl, WsFrame::Text(json))
-                            .await
+                        match tokio::time::timeout(
+                            RECONCILE_NOTICE_TIMEOUT,
+                            notice.outbound.send_for_class(
+                                OutboundStreamClass::FlowControl,
+                                WsFrame::Text(json),
+                            ),
+                        )
+                        .await
                         {
-                            Ok(()) => true,
-                            Err(_) => false,
+                            Ok(Ok(())) => true,
+                            // A notice that cannot be delivered inside the
+                            // bound is dropped: the next progress report is
+                            // the recovery surface, and the reader must keep
+                            // dispatching (#4435).
+                            _ => false,
                         }
                     }
                     // A frame from a peer this Session does not know, or an
@@ -2894,10 +2906,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                                 // than replaying stale intermediate ones. The
                                 // source forwarder never waits on it.
                                 while resize_rx.changed().await.is_ok() {
+                                    // Draw the token at *observation* time, before
+                                    // the read: a preemption between the read and
+                                    // the publish must not let this older size
+                                    // replace a newer pending level (#4499).
+                                    let generation =
+                                        crate::server::resize::next_generation();
                                     let (cols, rows) = *resize_rx.borrow_and_update();
                                     let full_id =
                                         format!("{agent_id_resize}:{session_name_resize}");
-                                    resize_reporter.publish(&full_id, cols, rows);
+                                    resize_reporter.publish(
+                                        &full_id,
+                                        cols,
+                                        rows,
+                                        stream_epoch,
+                                        generation,
+                                    );
                                     let peers = sessions_for_resize
                                         .subscriber_sinks(&session_name_resize, stream_epoch);
                                     if peers.is_empty() {
@@ -3096,14 +3120,22 @@ p2p_routes! { ctx, msg_type, payload_value;
                         // command response or coalesced away). The reporter is
                         // a per-session latest-size level; this is not a second
                         // Agent stream seq.
-                        if recorded.position.is_some() {
+                        if let Some((epoch, _)) = recorded.position {
                             let full_id = format!("{}:{}", ctx.agent_id, payload.session_name);
                             // The applied size, not the requested one: the
                             // Session keeps its fixed columns (#2487), and a
                             // relay observer must learn what the pane
-                            // actually became.
-                            ctx.resize
-                                .publish(&full_id, recorded.cols, recorded.rows);
+                            // actually became. The observation token is drawn
+                            // after the apply, so it orders against the tmux
+                            // observer's token (#4499).
+                            let generation = crate::server::resize::next_generation();
+                            ctx.resize.publish(
+                                &full_id,
+                                recorded.cols,
+                                recorded.rows,
+                                epoch,
+                                generation,
+                            );
                         }
 
                         // Compatibility only: an old attachment with no

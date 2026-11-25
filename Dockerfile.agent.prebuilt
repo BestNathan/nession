@@ -34,7 +34,7 @@ RUN chmod +x /usr/local/bin/build-erofs-utils.sh && \
 # the same commit cannot silently migrate Debian minor releases.
 FROM ${AGENT_DEBIAN_BASE_IMAGE} AS runtime-tools
 ARG DEBIAN_FRONTEND=noninteractive
-ARG AGENT_NGINX_VERSION=1.22.1-9+deb12u10
+ARG AGENT_NGINX_VERSION=1.22.1-9+deb12u11
 ARG AGENT_CA_CERTIFICATES_VERSION=20250419~deb12u2
 ARG AGENT_CURL_VERSION=7.88.1-10+deb12u15
 ARG AGENT_GETTEXT_BASE_VERSION=0.21-12
