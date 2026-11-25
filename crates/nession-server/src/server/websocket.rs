@@ -468,6 +468,7 @@ impl WebSocketServer {
                         heartbeat_interval_secs,
                         terminal_cols: self.config.terminal_cols,
                         terminal_web_font_size: self.config.terminal_web_font_size,
+                        tls: !self.config.tls_cert_path.is_empty(),
                         terminal_stall_grace: std::time::Duration::from_secs(
                             self.config.terminal_stall_grace_secs,
                         ),
@@ -596,6 +597,9 @@ struct ServerContext {
     /// The absolute deadline for an upgraded connection's first authentication
     /// (`#3439` W2), fixed for the listener rather than read per frame.
     ws_auth_timeout: std::time::Duration,
+    /// Whether this listener serves TLS, for the connection's metric identity
+    /// (#4437 SC-02).
+    tls: bool,
 }
 
 /// How many accepted Server connections may be mid-HTTP-request at once
@@ -640,12 +644,22 @@ async fn handle_connection(
     pending_auth: Arc<tokio::sync::Semaphore>,
 ) -> anyhow::Result<()> {
     let router = http_router(ctx, slot.clone(), pending_auth);
+    let identity = nession_runtime::metrics::MetricsIdentity::new(
+        nession_runtime::metrics::RuntimeKind::Server,
+        nession_runtime::metrics::PeerKind::Browser,
+        if tls_acceptor.is_some() {
+            nession_runtime::metrics::TransportKind::Tls
+        } else {
+            nession_runtime::metrics::TransportKind::Plain
+        },
+    );
     ingress::serve(
         move || ingress::TcpOrTls::accept(tcp_stream, tls_acceptor),
         router,
         slot,
         DEFAULT_HANDSHAKE_TIMEOUT,
         ingress::HTTP_HEADER_READ_TIMEOUT,
+        Some(identity),
     )
     .await?;
     Ok(())
@@ -834,6 +848,7 @@ async fn handle_ws_stream(
         legacy_blob_route: _,
         allowed_origins: _,
         server_auth,
+        tls,
     } = ctx;
 
     let (mut write, mut read) = ws_stream.split();
@@ -843,6 +858,16 @@ async fn handle_ws_stream(
     // bounded and its policies belong to the messages rather than to the
     // connection: see `server::outbound`.
     let (sender, mut rx) = WsMessageSender::with_terminal_grace(terminal_stall_grace);
+    let identity = nession_runtime::metrics::MetricsIdentity::new(
+        nession_runtime::metrics::RuntimeKind::Server,
+        nession_runtime::metrics::PeerKind::Browser,
+        if tls {
+            nession_runtime::metrics::TransportKind::Tls
+        } else {
+            nession_runtime::metrics::TransportKind::Plain
+        },
+    );
+    sender.set_identity(identity);
 
     let token_registry = Arc::clone(&agent_registry);
     let mut handler = ConnectionHandler::new(
@@ -901,10 +926,11 @@ async fn handle_ws_stream(
                             // await; a plain `..` destructure dropped them
                             // before the write (#4434).
                             let (message, charge) = frame.into_write_parts();
-                            let written = nession_runtime::lifecycle::write_frame(
+                            let written = nession_runtime::lifecycle::write_frame_with_identity(
                                 &mut write,
                                 message,
                                 write_timeouts.write,
+                                rx.metrics_identity(),
                             )
                             .await;
                             drop(charge);
@@ -958,7 +984,8 @@ async fn handle_ws_stream(
         mutations,
         DEFAULT_MUTATIONS_IN_FLIGHT,
         super::execution::LANE_LABEL,
-    );
+    )
+    .with_metrics_identity(identity);
 
     // A bounded, credential-free classification of *why* this connection ends.
     // It is logged once below and is what makes a browser's close event
@@ -4708,6 +4735,7 @@ mod tests {
             terminal_stall_grace: std::time::Duration::from_secs(5),
             query_concurrency: 4,
             ws_auth_timeout: std::time::Duration::from_secs(10),
+            tls: false,
         }
     }
 

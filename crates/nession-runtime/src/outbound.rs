@@ -78,7 +78,7 @@ use tokio::sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
 
 use crate::frame::WsFrame;
-use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
+use crate::metrics::{self, Direction, Domain, Labels, MetricsIdentity, ReasonKind, ResultKind};
 
 /// What the WebSocket frame header costs beyond the payload `WsFrame::len`
 /// reports. Charged so a queue full of small frames is priced honestly.
@@ -618,6 +618,11 @@ impl ClassReceivers {
 
 struct OutboundInner {
     name: &'static str,
+    /// The runtime/peer/transport this connection belongs to (#4437 SC-02).
+    ///
+    /// A `OnceLock` because the receiver and every writer clone share this
+    /// inner; the owner states the identity once, through `&self`.
+    identity: std::sync::OnceLock<MetricsIdentity>,
     limits: ClassifiedLimits,
     control_class: ClassCapacity,
     response_class: ClassCapacity,
@@ -643,6 +648,16 @@ impl OutboundInner {
         }
     }
 
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        match self.identity.get() {
+            Some(identity) => Labels::new()
+                .identity(*identity)
+                .domain(domain)
+                .direction(direction),
+            None => Labels::new().domain(domain).direction(direction),
+        }
+    }
+
     fn note_refused(&self, class: FrameClass, error: OutboundError) {
         self.counters.refused.fetch_add(1, Ordering::Relaxed);
         self.process.refused.fetch_add(1, Ordering::Relaxed);
@@ -654,9 +669,7 @@ impl OutboundInner {
         };
         metrics::counter(
             "ws_outbound_refused",
-            Labels::new()
-                .domain(class.domain())
-                .direction(Direction::Outbound)
+            self.labels(class.domain(), Direction::Outbound)
                 .result(ResultKind::Refused)
                 .reason(reason),
         );
@@ -665,9 +678,7 @@ impl OutboundInner {
             self.process.too_large.fetch_add(1, Ordering::Relaxed);
             metrics::record(
                 "ws_outbound_too_large",
-                Labels::new()
-                    .domain(class.domain())
-                    .direction(Direction::Outbound)
+                self.labels(class.domain(), Direction::Outbound)
                     .result(ResultKind::TooLarge)
                     .reason(ReasonKind::Capacity),
                 size as f64,
@@ -730,6 +741,7 @@ impl Outbound {
         let (stream_tx, stream_rx) = mpsc::unbounded_channel();
         let inner = Arc::new(OutboundInner {
             name,
+            identity: std::sync::OnceLock::new(),
             limits,
             control_class: ClassCapacity::new(limits.control),
             response_class: ClassCapacity::new(limits.response),
@@ -914,6 +926,21 @@ impl Outbound {
         }
     }
 
+    /// State the runtime/peer/transport this connection belongs to (#4437
+    /// SC-02). Called before the sender is cloned.
+    pub fn set_identity(&self, identity: MetricsIdentity) {
+        let _ = self.inner.identity.set(identity);
+    }
+
+    /// The identity for a lifecycle write metric, when one was stated.
+    pub fn metrics_identity(&self) -> Option<MetricsIdentity> {
+        self.inner.identity.get().copied()
+    }
+
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        self.inner.labels(domain, direction)
+    }
+
     /// Bytes outstanding: queued, reserved by a waiting producer, or in flight.
     pub fn queued_bytes(&self) -> usize {
         self.snapshot().queued_bytes
@@ -1008,16 +1035,12 @@ impl Outbound {
                 self.inner.process.accepted.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_outbound_accepted",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound)
+                    self.labels(class.domain(), Direction::Outbound)
                         .result(ResultKind::Accepted),
                 );
                 metrics::gauge(
                     "ws_outbound_queued",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound),
+                    self.labels(class.domain(), Direction::Outbound),
                     self.queued_bytes() as f64,
                 );
                 self.inner.wake.notify_one();
@@ -1096,16 +1119,12 @@ impl Outbound {
                 self.inner.process.accepted.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_outbound_accepted",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound)
+                    self.labels(class.domain(), Direction::Outbound)
                         .result(ResultKind::Accepted),
                 );
                 metrics::gauge(
                     "ws_outbound_queued",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound),
+                    self.labels(class.domain(), Direction::Outbound),
                     self.queued_bytes() as f64,
                 );
                 self.inner.wake.notify_one();
@@ -1194,6 +1213,11 @@ pub struct OutboundReceiver {
 }
 
 impl OutboundReceiver {
+    /// The identity the writer should attribute its lifecycle metrics to.
+    pub fn metrics_identity(&self) -> Option<MetricsIdentity> {
+        self.inner.identity.get().copied()
+    }
+
     /// A frame that is ready now, without waiting.
     ///
     /// The scheduler's decision applied to the frames currently queued. Tests

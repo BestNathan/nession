@@ -48,7 +48,7 @@ use tokio::sync::watch;
 use tracing::debug;
 
 use crate::frame::WsFrame;
-use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
+use crate::metrics::{self, Direction, Domain, Labels, MetricsIdentity, ReasonKind, ResultKind};
 
 /// Why one connection ended.
 ///
@@ -288,14 +288,33 @@ where
     S: futures_util::Sink<WsFrame, Error = E> + Unpin,
     E: std::fmt::Display,
 {
+    write_frame_with_identity(sink, frame, deadline, None).await
+}
+
+/// The same, attributing a write timeout to the connection's runtime, peer and
+/// transport (#4437 SC-02).
+pub async fn write_frame_with_identity<S, E>(
+    sink: &mut S,
+    frame: WsFrame,
+    deadline: Duration,
+    identity: Option<MetricsIdentity>,
+) -> Result<(), WriteFailure>
+where
+    S: futures_util::Sink<WsFrame, Error = E> + Unpin,
+    E: std::fmt::Display,
+{
     use futures_util::SinkExt;
     match tokio::time::timeout(deadline, sink.send(frame)).await {
         Ok(Ok(())) => Ok(()),
         Ok(Err(error)) => Err(WriteFailure::Sink(error.to_string())),
         Err(_) => {
+            let labels = match identity {
+                Some(identity) => Labels::new().identity(identity),
+                None => Labels::new(),
+            };
             metrics::counter(
                 "ws_outbound_write_timeout",
-                Labels::new()
+                labels
                     .domain(Domain::Stream)
                     .direction(Direction::Outbound)
                     .result(ResultKind::Timeout)
