@@ -955,3 +955,10 @@
 - Categories: architecture, agent, ci, security, workflows
 - Reason: Record the #4525 production fact observer (authenticated Run/Attempt/Jobs/Claim/receipt/PR/checkpoint binding with typed unavailable/denied/un-ingested facts), deterministic fair active scan with malformed isolation and no auto-start, and the safe exported diagnostic whitelist; publication/verdict/acceptance/claim readers remain typed unavailable until their composition slices
 - Source: https://github.com/BestNathan/nession/issues/4525
+
+## 2026-11-25T18:46:48Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, agent, ci, security, workflows
+- Reason: Record the #4526 trusted apply composition — real no-force agent-store CAS/readback, complete scoped effect adapters with model/credential refusal, explicit V1/V2-exclusive authorized start, fail-closed activation, and one wake router with wake-only external sources, coalescing and lost-event recovery; production activation and SC-06 remain separate
+- Source: https://github.com/BestNathan/nession/issues/4526
