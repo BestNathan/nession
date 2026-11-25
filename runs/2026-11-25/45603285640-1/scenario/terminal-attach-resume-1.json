@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_scenario_observation",
+  "mode": "scenario",
+  "scenario": "terminal-attach-resume",
+  "target_sha": "68fd4eec811a25115abc9db685e967168f2aa6bf",
+  "scenario_revision": "68fd4eec811a25115abc9db685e967168f2aa6bf",
+  "run_id": 45603285640,
+  "run_attempt": 1,
+  "run_index": 1,
+  "status": "Completed",
+  "evaluation": null,
+  "started_at": "2026-11-25T11:21:42.202Z",
+  "finished_at": "2026-11-25T11:21:51.703Z",
+  "config_sha256": "02570e8ea79bef27b3596233d77e63cada084f43a56f2e11df811513f96f8826",
+  "config": {
+    "generated_lines": 240,
+    "samples_max": 12,
+    "transport": "Relay",
+    "reload": true
+  },
+  "observation_count": 3,
+  "observations": [
+    {
+      "at": "2026-11-25T11:21:50.864Z",
+      "stage": "before-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "0ca3a5067669769cf5a6b840d70e3bf5ef6de23f3271a35c0de83377daaa7678",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-25T11:21:51.144Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 0,
+        "viewport": {
+          "baseY": 0,
+          "viewportY": 0
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "0ca3a5067669769cf5a6b840d70e3bf5ef6de23f3271a35c0de83377daaa7678",
+        "bytes": 9649
+      }
+    },
+    {
+      "at": "2026-11-25T11:21:51.647Z",
+      "stage": "after-reload",
+      "browser": {
+        "mounted": true,
+        "marker_count": 240,
+        "viewport": {
+          "baseY": 213,
+          "viewportY": 213
+        }
+      },
+      "backend": {
+        "marker_count": 240,
+        "sha256": "0ca3a5067669769cf5a6b840d70e3bf5ef6de23f3271a35c0de83377daaa7678",
+        "bytes": 9649
+      }
+    }
+  ],
+  "privacy": "whitelisted counters/timestamps/digests only; no terminal bytes",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45603285640,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "chore/ws-runtime-batch",
+    "target_sha": "68fd4eec811a25115abc9db685e967168f2aa6bf",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45603285640",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "ea0b134e9c8a6163c346162ffe8e8c723fccc835eb200f5111f9d6017fa11ab2"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "scenario",
+    "provider": "github-actions-artifact",
+    "artifact_name": "e2e-terminal-scenario-45603285640-1",
+    "sha256": "ea0b134e9c8a6163c346162ffe8e8c723fccc835eb200f5111f9d6017fa11ab2",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 14,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45603285640",
+    "durability": "time-limited; object archival not configured"
+  },
+  "execution_id": "d8a261d5bf3359e8cbdd6ec2bc5a9f9ef73c54a1116179b8e056749932aea709"
+}
