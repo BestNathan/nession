@@ -419,6 +419,12 @@ function makeAction(state, nextVersion, {
 
 function intentFor(action) {
   if (action.role == null) {
+    if (action.action === 'ci_retry') {
+      return {
+        type: 'retry_ci', action_id: action.id, action: 'ci_retry',
+        sha: action.sha, evidence_generation: action.evidence_generation,
+      };
+    }
     return {
       type: 'notify', action_id: action.id, action: action.action, sha: action.sha,
     };
@@ -970,6 +976,15 @@ function invalidateEvidence() {
   return { review: null, feedback: null };
 }
 
+function fenceCiRetry(state, reason) {
+  const action = activeAction(state);
+  if (action == null || action.action !== 'ci_retry') return [];
+  return [{
+    id: action.id,
+    changes: { status: 'cancelled', receipt: { status: 'cancelled', reason } },
+  }];
+}
+
 function decideCi(state, observation, config, now) {
   const head = state.thread.head_sha;
   if (head == null) return invalid(state, 'CI phase without a published HEAD');
@@ -986,6 +1001,7 @@ function decideCi(state, observation, config, now) {
     });
     return recover(state, 'ci_obligation_refrozen', commit(state, {
       phase: 'ci_checking', substate: 'ci_pending', now, transition,
+      updates: fenceCiRetry(state, 'ci_obligation_refrozen'),
       patch: { ci, ...invalidateEvidence(state) },
     }), []);
   }
@@ -1021,6 +1037,7 @@ function decideCi(state, observation, config, now) {
         substate: 'aggregate_pending',
         nextState: commit(state, {
           phase: 'evaluating', substate: 'aggregate_pending', now,
+          updates: fenceCiRetry(state, 'ci_evidence_terminal'),
           patch: { ci },
         }),
         intents: [],
@@ -1040,6 +1057,7 @@ function decideCi(state, observation, config, now) {
       substate: 'review_pending',
       nextState: commit(state, {
         phase: 'reviewing', substate: 'review_pending', now, transition,
+        updates: fenceCiRetry(state, 'ci_evidence_terminal'),
         newActions: [reviewAction],
         patch: { ci, ...invalidateEvidence(state) },
       }),
@@ -1047,6 +1065,23 @@ function decideCi(state, observation, config, now) {
     };
   }
   // missing / infrastructure: bounded recovery, never an invented pass.
+  //
+  // A durable system `ci_retry` action is the write-ahead retry intent. While
+  // the retry for THIS unresolved evidence generation is pending/committed we
+  // wait instead of issuing another external rerun. New terminal evidence (a
+  // new check-run generation) changes the digest and makes a later retry
+  // eligible; a proven-absent effect is cancelled by the executor, which also
+  // makes a later bounded retry eligible.
+  const latestRetry = [...state.outbox].reverse()
+    .find((entry) => entry.action === 'ci_retry') ?? null;
+  if (latestRetry != null &&
+      !['cancelled', 'failed', 'retired', 'yielded'].includes(latestRetry.status) &&
+      latestRetry.evidence_generation === ci.digest) {
+    return wait(state,
+      latestRetry.status === 'committed' ? 'await_ci_retry_evidence' :
+        'await_ci_retry_readback',
+      'ci_recovery');
+  }
   const category = 'infrastructure';
   const retry = budgetRetry(state, category, config);
   const reason = ci.status === 'missing' ? 'ci_evidence_missing' : 'ci_infrastructure_failure';
@@ -1061,10 +1096,15 @@ function decideCi(state, observation, config, now) {
       intents: [],
     };
   }
+  const retryAction = makeAction(state, state.version + 1, {
+    role: null, action: 'ci_retry', sha: head, evidence_generation: ci.digest,
+    predecessor: latestRetry?.id ?? null,
+  });
   return recover(state, reason, commit(state, {
     phase: 'ci_checking', substate: 'ci_recovery', now,
+    newActions: [retryAction],
     patch: { ci, budgets: retry.budget, ...invalidateEvidence(state) },
-  }), [{ type: 'retry_ci', sha: head, obstacle: reason }]);
+  }), [intentFor(retryAction)]);
 }
 
 function decideReviewer(state, observation, config, now) {
@@ -1316,8 +1356,10 @@ function decideEvaluation(state, observation, config, now) {
   }
   const bundle = buildFeedbackBundle({
     issue: state.issue, pr: state.pr.number, head_sha: state.thread.head_sha,
-    ci: ciPass ? null : state.ci,
-    review: approved ? null : state.review,
+    // Both receipts are included even when one side passed: the feedback is
+    // the immutable evidence generation, not only the failing half.
+    ci: state.ci,
+    review: state.review,
     prior: state.feedback,
     repair_round: nextRound,
   });
@@ -1447,6 +1489,8 @@ function decideAccepting(state, observation, config, now) {
   }
   const bundle = buildFeedbackBundle({
     issue: state.issue, pr: state.pr.number, head_sha: state.thread.head_sha,
+    ci: state.ci,
+    review: state.review,
     acceptance: {
       head_sha: acceptance.head_sha,
       digest: acceptance.digest,

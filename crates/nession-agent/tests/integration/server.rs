@@ -3452,6 +3452,130 @@ async fn a_blocked_file_read_no_longer_holds_the_peer_connection() {
     handle.shutdown().await.ok();
 }
 
+/// #4431 SC-03: control, terminal streaming and ordinary requests make
+/// progress **in one window** while ordinary request admission is saturated.
+///
+/// The ordinary Request lane is filled with parked FIFO reads. On the same
+/// connection, a terminal attach and input (the reserved Stream domain) and a
+/// control ping must still be answered, the terminal output must still be
+/// delivered, and a further ordinary request must be refused explicitly. The
+/// parked reads are released only after every assertion.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_saturated_request_lane_does_not_delay_control_or_terminal_input() {
+    use std::time::{Duration, Instant};
+
+    let (addr, handle, root, auth) = start_server_with_file_root().await.unwrap();
+    let tmux = SessionManager::new();
+    let session = TestSession::new("mixed-load");
+    let session_name = session.name().to_string();
+    tmux.create_session(&session_name, 80, 24, "/tmp", &[])
+        .await
+        .unwrap();
+
+    let fifo = root.path().join("mixed.fifo");
+    make_fifo(&fifo).unwrap();
+    let writer = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(&fifo)
+        .expect("hold the fifo open for writing");
+
+    let (mut sink, mut stream) = connect(&auth, addr).await.unwrap();
+
+    // Saturate the ordinary Request lane with parked reads. Excess requests
+    // are refused explicitly; the parked ones keep the lane spent.
+    for _ in 0..24 {
+        let read = new_message(
+            msg_types::FILE_READ,
+            serde_json::json!({ "path": "mixed.fifo" }),
+        );
+        sink.send(WsMessage::Text(
+            serde_json::to_value(&read).unwrap().to_string(),
+        ))
+        .await
+        .expect("send the parked read");
+    }
+
+    // In the same window: control, attach and terminal input.
+    let attach = new_message(
+        msg_types::CLIENT_ATTACH,
+        serde_json::json!({ "session_name": session_name, "width": 80, "height": 24 }),
+    );
+    let input = new_message(msg_types::TERMINAL_INPUT, one_byte_input(&session_name));
+    let ping = new_message(msg_types::CONTROL_PING, serde_json::json!({}));
+    for request in [&attach, &input, &ping] {
+        sink.send(WsMessage::Text(
+            serde_json::to_value(request).unwrap().to_string(),
+        ))
+        .await
+        .expect("send to the agent");
+    }
+
+    let mut answered = std::collections::HashSet::new();
+    let mut output_seen = false;
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while Instant::now() < deadline
+        && !(answered.contains(&attach.id)
+            && answered.contains(&input.id)
+            && answered.contains(&ping.id)
+            && output_seen)
+    {
+        let Some(frame) = next_frame_within(&mut stream, Duration::from_secs(1))
+            .await
+            .unwrap()
+        else {
+            continue;
+        };
+        if let Some(id) = frame["id"].as_str() {
+            answered.insert(id.to_string());
+        }
+        if frame["msg_type"] == serde_json::json!(msg_types::TERMINAL_OUTPUT) {
+            output_seen = true;
+        }
+    }
+    assert!(
+        answered.contains(&attach.id),
+        "the attach was not answered while ordinary requests were saturated"
+    );
+    assert!(
+        answered.contains(&input.id),
+        "terminal input was not answered while ordinary requests were saturated"
+    );
+    assert!(
+        answered.contains(&ping.id),
+        "control was not answered while ordinary requests were saturated"
+    );
+    assert!(
+        output_seen,
+        "terminal output was not delivered while ordinary requests were saturated"
+    );
+
+    // The ordinary lane is still spent: a further request is refused
+    // explicitly rather than queued forever.
+    let refused = new_message(
+        msg_types::FILE_READ,
+        serde_json::json!({ "path": "mixed.fifo" }),
+    );
+    sink.send(WsMessage::Text(
+        serde_json::to_value(&refused).unwrap().to_string(),
+    ))
+    .await
+    .expect("send the refused read");
+    let refusal = answer_for(&mut stream, &refused.id, Duration::from_secs(10))
+        .await
+        .expect("a saturated request was neither answered nor refused");
+    assert_eq!(
+        refusal["payload"]["code"],
+        serde_json::json!("overloaded"),
+        "the saturated ordinary lane did not refuse explicitly: {refusal:?}"
+    );
+
+    // Release the parked reads and settle.
+    drop(writer);
+    handle.shutdown().await.ok();
+}
+
 // ---------------------------------------------------------------------------
 // Mutation ordering across connections, and the coarse filesystem key
 // (#961 review, findings 1 and 2)

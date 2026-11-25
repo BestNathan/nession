@@ -50,8 +50,10 @@ function dedupeFindings(findings) {
 
 // Build the single repair bundle. `review` is the accepted read-only Reviewer
 // result; `ci` is the accepted CI evidence; `acceptance` may carry an
-// actionable acceptance failure. Nonblocking suggestions are recorded by the
-// Reviewer but never become repair gates.
+// actionable acceptance failure. Both CI and Review receipts are included even
+// when one side passed: the Developer must receive the complete evidence
+// generation, not only the failing half. Nonblocking suggestions are recorded
+// by the Reviewer but never become repair gates.
 export function buildFeedbackBundle({
   issue, pr, head_sha, ci = null, review = null, acceptance = null,
   prior = null, repair_round,
@@ -155,6 +157,8 @@ export function buildFeedbackBundle({
     repair_round,
     finding_ids: [...new Set([...merged.map((finding) => finding.id), ...missingPrior])],
     sources,
+    findings: merged,
+    prior_finding_ids: missingPrior,
   };
 }
 
@@ -165,4 +169,35 @@ export function assertSingleRepairIntent(intents) {
     intent.type === 'dispatch' && intent.role === 'developer' && intent.action === 'repair');
   if (repairs.length > 1) reject('two repair actions for one evaluation');
   return repairs[0] ?? null;
+}
+
+// Recompute the immutable bundle digest from the persisted worker-visible
+// content. A worker input is rendered only when this verification passes.
+export function verifyFeedbackBundle({ bundle, issue, pr }) {
+  if (!Number.isSafeInteger(issue) || issue < 1) reject('invalid feedback Issue');
+  if (!Number.isSafeInteger(pr) || pr < 1) reject('invalid feedback PR');
+  if (bundle == null || typeof bundle !== 'object' || Array.isArray(bundle)) {
+    reject('missing feedback bundle');
+  }
+  if (!Array.isArray(bundle.findings) || !Array.isArray(bundle.prior_finding_ids) ||
+      !Array.isArray(bundle.sources)) {
+    reject('incomplete feedback bundle');
+  }
+  const content = {
+    kind: 'agent_workflow_v2_feedback',
+    issue,
+    pr,
+    head_sha: bundle.head_sha,
+    ci_digest: bundle.ci_digest ?? null,
+    review_digest: bundle.review_digest ?? null,
+    parent_sha256: bundle.parent_sha256 ?? null,
+    repair_round: bundle.repair_round,
+    sources: bundle.sources,
+    findings: bundle.findings,
+    prior_finding_ids: bundle.prior_finding_ids,
+  };
+  if (stableDigest(content) !== bundle.bundle_sha256) {
+    reject('feedback bundle digest mismatch');
+  }
+  return content;
 }

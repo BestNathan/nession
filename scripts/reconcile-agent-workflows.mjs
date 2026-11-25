@@ -15,7 +15,9 @@ import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { readIssueWorkflowState } from './lib/agent/orchestration/state-store.mjs';
 import { githubFetcher } from './lib/agent/github-read.mjs';
-import { classifyCiResults, freezeCiObligation } from './lib/agent/workflow/ci-barrier.mjs';
+import { freezeCiObligation } from './lib/agent/workflow/ci-barrier.mjs';
+import { collectExactCheckEvidence } from './lib/agent/workflow/ci-evidence.mjs';
+import { resolveCiDeclarations } from './lib/agent/workflow/ci-policy.mjs';
 import { buildReconcileTelemetry } from './lib/agent/workflow/telemetry.mjs';
 import { normalizeReconcileWake, reconcileOnce } from './lib/agent/workflow/reconcile.mjs';
 import {
@@ -29,7 +31,6 @@ import {
 const REPO = 'BestNathan/nession';
 const REF = 'agent-store';
 const SHA40 = /^[a-f0-9]{40}$/;
-const MAX_CHECKS = 100;
 
 function fail(message) {
   throw new Error('Agent Reconcile: ' + message);
@@ -80,64 +81,39 @@ function storePort(root) {
     },
   };
 }
-function checkConclusion(run) {
-  if (run.status !== 'completed') return 'pending';
-  switch (run.conclusion) {
-    case 'success':
-    case 'neutral':
-    case 'failure':
-    case 'timed_out':
-    case 'cancelled':
-    case 'skipped':
-      return run.conclusion;
-    default:
-      return 'unknown';
-  }
-}
-function checkIdentity(run) {
-  const owner = run.app?.slug && /^[a-z0-9-]{1,40}$/.test(run.app.slug) ?
-    run.app.slug : 'github';
-  return { workflow: owner, name: String(run.name ?? '').slice(0, 200) };
-}
 async function collectCi({ fetchGitHub, state, now }) {
   if (!SHA40.test(state.thread?.head_sha ?? '')) return null;
   if (!['ci_checking', 'reviewing', 'evaluating', 'accepting',
     'waiting_merge', 'post_merge_acceptance'].includes(state.phase)) return null;
-  const runs = await fetchGitHub(
-    'commits/' + state.thread.head_sha + '/check-runs?per_page=' + MAX_CHECKS);
-  const checks = (runs?.check_runs ?? [])
-    .filter((run) => run?.name && !/^Agent \/ Review\b/.test(run.name))
-    .slice(0, MAX_CHECKS)
-    .map((run) => {
-      const identity = checkIdentity(run);
-      return {
-        name: identity.name,
-        workflow: identity.workflow,
-        conclusion: checkConclusion(run),
-        applicability: 'applicable',
-        // The trusted applicability policy is owned by the CI-feedback slice.
-        // Plan mode is deliberately fail-closed: every observed check is
-        // source-owned and required.
-        category: 'source',
-        required: true,
-      };
-    });
-  if (!checks.length) return null;
-  const obligation = freezeCiObligation({
-    head_sha: state.thread.head_sha, checks,
+  if (state.pr == null || !Number.isSafeInteger(state.pr.number) ||
+      !SHA40.test(state.pr.base_sha ?? '')) return null;
+  const pr = await fetchGitHub('pulls/' + state.pr.number);
+  if (pr?.head?.sha !== state.thread.head_sha || pr?.base?.sha !== state.pr.base_sha ||
+      typeof pr?.base?.ref !== 'string' || !pr.base.ref ||
+      pr.base.ref.length > 200 || pr.base.ref.startsWith('/') ||
+      pr.base.ref.split('/').includes('..')) {
+    // A stale/fork/moved PR binding is never turned into a smaller obligation.
+    return null;
+  }
+  // Trusted policy owners freeze the expected set BEFORE any check-run is
+  // read: server-side required contexts, Quality family scope, browser
+  // applicability. A policy read failure propagates and is recorded as an
+  // unavailable observation by the reconcile loop.
+  const declarations = await resolveCiDeclarations({
+    fetchGitHub, branch: pr.base.ref, pullNumber: state.pr.number,
+    // Issue-selected browser applicability is fail-closed until its trusted
+    // selector is wired into this plan-only observer.
+    e2e: 'unknown', cases: 'unknown',
   });
-  return {
-    verified: true,
-    ...classifyCiResults({
-      obligation,
-      head_sha: state.thread.head_sha,
-      results: checks.map((check) => ({
-        name: check.name, workflow: check.workflow,
-        conclusion: check.conclusion, evidence_ref: null,
-      })),
-      observed_at: now(),
-    }),
-  };
+  const obligation = freezeCiObligation({
+    head_sha: state.thread.head_sha, base_sha: state.pr.base_sha, checks: declarations,
+  });
+  const ci = await collectExactCheckEvidence({
+    fetchGitHub, repository: REPO, obligation,
+    head_sha: state.thread.head_sha, base_sha: state.pr.base_sha,
+    observed_at: now(),
+  });
+  return { verified: true, ...ci };
 }
 
 function argValue(argv, name) {

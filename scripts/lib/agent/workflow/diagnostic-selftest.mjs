@@ -33,6 +33,9 @@ const state = validateLifecycleState({
     bundle_sha256: '5'.repeat(64), head_sha: BASE,
     ci_digest: null, review_digest: null, parent_sha256: null,
     repair_round: 1, finding_ids: ['review:R-1'], sources: ['review'],
+    findings: [{id: 'review:R-1', severity: 'blocking', category: 'review',
+      message: 'fix the finding', file: null, sc: null}],
+    prior_finding_ids: [],
   },
 });
 const summary = {
