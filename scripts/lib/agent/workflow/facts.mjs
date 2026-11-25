@@ -343,6 +343,20 @@ function mapFactToObservation(role, action, fact) {
       checkpoint: fact.checkpoint ?? null, verified: true,
     };
   }
+  if (fact.kind === 'completed_uningested') {
+    if (role === 'reviewer') {
+      return {
+        action_id: action.id, run_id: fact.run.id, attempt: fact.run.attempt,
+        status: 'completed', outcome: 'uningested', head_sha: null,
+        evidence_generation: null, digest: null, findings: [], verified: true,
+      };
+    }
+    return {
+      action_id: action.id, run_id: fact.run.id, attempt: fact.run.attempt,
+      status: 'completed', outcome: 'uningested', target_sha: null,
+      failure: null, checkpoint: null, verified: true,
+    };
+  }
   if (fact.kind !== 'terminal_result') return null;
   if (role === 'developer') {
     return {

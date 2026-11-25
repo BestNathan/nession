@@ -7,8 +7,8 @@
 import { createHash } from 'node:crypto';
 import { validateDevelopmentState } from '../orchestration/outbox.mjs';
 import {
-  actionIdFor, evidenceGenerationFor, stableDigest, threadIdFor, transitionKey,
-  validateLifecycleState,
+  actionIdFor, checkpointBinding, evidenceGenerationFor, stableDigest,
+  threadIdFor, transitionKey, validateLifecycleState,
 } from './contract.mjs';
 
 const SHA40 = /^[a-f0-9]{40}$/;
@@ -204,8 +204,15 @@ function blockedProjection({ state, baseSha, reason, migration, now }) {
 
 // `pr` is a trusted readback required for legacy phases whose state does not
 // record the PR number. It is never inferred from Issue prose or a model.
-export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
+export function migrateV1State({ state: v1, pr = null, readback = null, now = Date.now() }) {
   validateDevelopmentState(v1);
+  pr = pr ?? readback?.pr ?? null;
+  const checkpoint = readback?.checkpoint == null ? null : checkpointBinding(readback.checkpoint);
+  const fencing = readback?.lease?.fencing_generation;
+  if (fencing != null && (!Number.isSafeInteger(fencing) || fencing < 1)) {
+    reject('invalid legacy lease fencing generation');
+  }
+  const fencingGeneration = fencing ?? 1;
   if (v1.schema_version !== 1 || !V1_PHASES.has(v1.phase)) {
     reject('unsupported legacy schema/phase');
   }
@@ -226,6 +233,25 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
     !['retired', 'failed', 'cancelled', 'yielded'].includes(entry.status));
   if (active.length > 1) {
     reject('legacy state has multiple active actions');
+  }
+  // A v1 dispatch without a verified Run binding is ambiguous. A readback may
+  // prove the original Run; otherwise the migration blocks instead of guessing.
+  for (const entry of active) {
+    if (entry.status !== 'ambiguous') continue;
+    const proof = readback?.run;
+    if (proof?.verified === true && proof.action_id === entry.id &&
+        Number.isSafeInteger(proof.run_id) && proof.run_id > 0 &&
+        Number.isSafeInteger(proof.run_attempt) && proof.run_attempt > 0) {
+      entry.status = 'dispatched';
+      entry.run = {
+        id: proof.run_id, attempt: proof.run_attempt, verified: true,
+      };
+    } else {
+      return blockedProjection({
+        state: v1, baseSha, migration, now,
+        reason: 'legacy_ambiguous_dispatch',
+      });
+    }
   }
   const prBinding = (readback) => ({
     number: readback.number,
@@ -284,8 +310,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: null,
         merged_sha: SHA40.test(merged ?? '') ? merged : null,
-        fencing_generation: 1,
-        checkpoint: null,
+        fencing_generation: fencingGeneration,
+        checkpoint,
       },
       pr: null,
       ci: null,
@@ -319,8 +345,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: null,
         merged_sha: null,
-        fencing_generation: 1,
-        checkpoint: null,
+        fencing_generation: fencingGeneration,
+        checkpoint,
       },
       pr: null,
       ci: null,
@@ -358,13 +384,13 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: pr.head_sha,
         merged_sha: null,
-        fencing_generation: 1,
-        checkpoint: repairCheckpoint == null ? null : {
+        fencing_generation: fencingGeneration,
+        checkpoint: checkpoint ?? (repairCheckpoint == null ? null : {
           version: repairCheckpoint.checkpoint_version,
           commit_sha: repairCheckpoint.checkpoint_commit_sha,
           ciphertext_sha256: repairCheckpoint.ciphertext_sha256,
           native_session_id: null,
-        },
+        }),
       },
       pr: { ...prBinding(pr), merged_sha: null },
       ci: null,
@@ -400,8 +426,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: v1.target_sha,
         merged_sha: null,
-        fencing_generation: 1,
-        checkpoint: null,
+        fencing_generation: fencingGeneration,
+        checkpoint,
       },
       pr: { ...prBinding(pr), merged_sha: null },
       ci: null,
@@ -438,8 +464,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: v1.target_sha,
         merged_sha: null,
-        fencing_generation: 1,
-        checkpoint: null,
+        fencing_generation: fencingGeneration,
+        checkpoint,
       },
       pr: { ...prBinding(pr), merged_sha: null },
       ci: null,
@@ -481,8 +507,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: v1.target_sha,
         merged_sha: null,
-        fencing_generation: 1,
-        checkpoint: null,
+        fencing_generation: fencingGeneration,
+        checkpoint,
       },
       pr: { ...prBinding(pr), merged_sha: null },
       ci: null,
@@ -511,8 +537,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
         base_sha: baseSha,
         head_sha: v1.target_sha,
         merged_sha: null,
-        fencing_generation: 1,
-        checkpoint: null,
+        fencing_generation: fencingGeneration,
+        checkpoint,
       },
       pr: { ...prBinding(pr), merged_sha: null },
       ci: null,
@@ -561,8 +587,8 @@ export function migrateV1State({ state: v1, pr = null, now = Date.now() }) {
       base_sha: baseSha,
       head_sha: pr.head_sha,
       merged_sha: merged,
-      fencing_generation: 1,
-      checkpoint: null,
+      fencing_generation: fencingGeneration,
+      checkpoint,
     },
     pr: { ...prBinding(pr), state: 'merged', merged_sha: merged },
     ci: null,
