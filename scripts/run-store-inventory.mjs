@@ -181,7 +181,7 @@ export function checkInventory(manifest,workflows){
         ['.github/workflows/store-agent-controller-ingest.yml',['controller_initialization','main_workflow_run_or_authenticated_bot_dispatch']],
         ['.github/workflows/agent-controller-dispatch.yml',['controller_dispatch','owner_main_dispatch_or_issue_comment']],
         ['.github/workflows/store-agent-development-ingest.yml',['encrypted_checkpoint_ingest','main_workflow_run_or_owner_comment_or_authenticated_bot_dispatch']],
-        ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_reconcile','main_workflow_run']],
+        ['.github/workflows/store-agent-dispatch-reconcile.yml',['failed_dispatch_and_quality_reconcile','main_workflow_run_or_scheduled_owner_quality_reconcile']],
         ['.github/workflows/e2e-full-failure-ingest.yml',['e2e_failure_admission','main_workflow_run']],
         ['.github/workflows/acceptance-e2e-failure-bug.yml',['e2e_failure_bug_publish','main_workflow_run']],
       ]);
@@ -207,10 +207,40 @@ export function checkInventory(manifest,workflows){
           fail('real agent-store Writer lacks trusted main/App path');
         const triggers=body.split(/^permissions:\s*$/m)[0];
         const needs=writer.event;
+        // #4445: two distinct jobs in the existing Store reconciler. A
+        // manual/scheduled Quality readback must not enter Worker recovery.
+        const qualityReconcileProfile=()=>{
+          const jobs=body.split(/^jobs:\s*$/m)[1]??'';
+          const parts=jobs.split(/^  quality-reconcile:\s*$/m);
+          if(parts.length!==2)return false;
+          const worker=parts[0],quality=parts[1];
+          const guard=quality.split(/^    permissions:\s*$/m)[0];
+          return /^  workflow_run:\s*$/m.test(triggers)&&
+            /^  schedule:\s*\n    - cron: '17,47 \* \* \* \*'\s*$/m.test(triggers)&&
+            /^  workflow_dispatch:\s*$/m.test(triggers)&&
+            !/^  (push|pull_request|pull_request_target|issue_comment|repository_dispatch):/m.test(triggers)&&
+            worker.includes("github.event_name == 'workflow_run'")&&
+            worker.includes("github.event.workflow_run.actor.login == 'github-actions[bot]'")&&
+            worker.includes("github.event.workflow_run.head_branch == 'main'")&&
+            worker.includes('worker-reconcile.mjs reconcile')&&
+            guard.includes("github.repository == 'BestNathan/nession'")&&
+            guard.includes("github.ref == 'refs/heads/main'")&&
+            guard.includes("(github.event_name == 'schedule' ||")&&
+            guard.includes("(github.event_name == 'workflow_dispatch' && github.actor == github.repository_owner))")&&
+            /^    permissions:\s*\n      contents: read\n      actions: read\n      issues: read\n      pull-requests: read\s*$/m.test(quality)&&
+            quality.includes('group: store-agent-quality-reconcile')&&
+            quality.includes('ref: ${{ github.sha }}')&&
+            quality.includes('node scripts/lib/agent/orchestration/quality-reconcile-selftest.mjs')&&
+            quality.includes('node scripts/lib/agent/orchestration/quality-reconcile.mjs reconcile')&&
+            quality.includes('permission-contents: write')&&
+            quality.includes('STORE_APP_TOKEN: ${{ steps.writer.outputs.token }}')&&
+            !quality.includes('worker-reconcile.mjs reconcile');
+        };
         if((needs==='main_push_only'&&
               (!/^  push:\s*$/m.test(triggers)||/^  workflow_dispatch:\s*$/m.test(triggers)))||
            (needs==='main_workflow_run'&&
               (!/^  workflow_run:\s*$/m.test(triggers)||/^  workflow_dispatch:\s*$/m.test(triggers)))||
+           (needs==='main_workflow_run_or_scheduled_owner_quality_reconcile'&&!qualityReconcileProfile())||
            (needs==='main_workflow_run_or_authenticated_bot_dispatch'&&
               (!/^  workflow_run:\s*$/m.test(triggers)||
                !/^  workflow_dispatch:\s*$/m.test(triggers)||
@@ -537,6 +567,20 @@ function selfTest(){
     'all requirements passed';
   assert.throws(()=>checkInventory(falselyProtectedAgent,sources),
     /deferred admin proof must be classified honestly/);
+  const qualityWriter='.github/workflows/store-agent-dispatch-reconcile.yml';
+  for(const [from,to] of [
+    ["github.actor == github.repository_owner","true"],
+    ["github.ref == 'refs/heads/main'","true"],
+    ["github.event_name == 'workflow_run'","true"],
+    ["      actions: read","      actions: write"],
+    ["node scripts/lib/agent/orchestration/quality-reconcile-selftest.mjs","echo skipped"],
+    ["ref: ${{ github.sha }}","ref: ${{ github.event.pull_request.head.sha }}"],
+  ]){
+    const changed=new Map(sources);
+    changed.set(qualityWriter,changed.get(qualityWriter).replace(from,to));
+    assert.notEqual(changed.get(qualityWriter),sources.get(qualityWriter));
+    assert.throws(()=>checkInventory(manifest,changed),/active agent-store Writer trigger/);
+  }
   const directAgentPush=new Map(sources);
   const agentIngest='.github/workflows/store-agent-development-ingest.yml';
   directAgentPush.set(agentIngest,directAgentPush.get(agentIngest).replace(
