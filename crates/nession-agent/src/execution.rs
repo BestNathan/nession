@@ -136,6 +136,33 @@ pub fn mutation_scheduler() -> Arc<KeyedLane<ResourceKey>> {
     ))
 }
 
+/// The process's **reserved** Stream execution lane (#4503).
+///
+/// A second lane by construction, not a class inside the mutation one: real-time
+/// business work (terminal input, resize, legacy applied ACK and the session
+/// lifecycle ops they depend on) must complete while ordinary Request/mutation
+/// work is saturated, and ordinary work must not be able to spend the Stream
+/// workers. Its keys are the same [`ResourceKey`]s, so per-session order holds.
+pub type StreamLane = Arc<KeyedLane<ResourceKey>>;
+
+/// How many resources this process may be executing Stream work for at once.
+pub const DEFAULT_STREAM_WORKERS: usize = crate::server::execution::DEFAULT_MUTATIONS_IN_FLIGHT * 2;
+
+/// How many Stream units one connection may have in flight.
+pub const DEFAULT_STREAM_IN_FLIGHT: usize = 8;
+
+/// The label the Stream lane's diagnostics carry.
+pub const STREAM_LANE_LABEL: &str = "stream";
+
+/// Build the process's reserved Stream lane.
+pub fn stream_scheduler() -> Arc<KeyedLane<ResourceKey>> {
+    Arc::new(KeyedLane::with_worker_budget(
+        crate::server::execution::DEFAULT_KEY_QUEUE_DEPTH,
+        DEFAULT_STREAM_WORKERS,
+        STREAM_LANE_LABEL,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -148,6 +175,16 @@ mod tests {
         assert_eq!(
             lane.snapshot().await.worker_budget,
             Some(PROCESS_MUTATION_WORKERS),
+        );
+    }
+
+    /// #4503: the reserved Stream lane carries its own process worker budget.
+    #[tokio::test]
+    async fn the_stream_lane_is_worker_bounded() {
+        let lane = stream_scheduler();
+        assert_eq!(
+            lane.snapshot().await.worker_budget,
+            Some(DEFAULT_STREAM_WORKERS),
         );
     }
 }
