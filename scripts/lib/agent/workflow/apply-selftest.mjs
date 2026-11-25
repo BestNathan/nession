@@ -80,6 +80,7 @@ function effects(calls) {
     async readbackAccept() { return { status: 'absent' }; },
     async notify() { calls.notify++; },
     async retryCi() { calls.retryCi++; },
+    async readbackCiRetry() { return { status: 'absent' }; },
     async reingest() { calls.reingest = (calls.reingest ?? 0) + 1; },
   });
 }
