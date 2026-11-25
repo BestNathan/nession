@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45643549995,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4435-input-notification-isolation",
+    "target_sha": "6d0b9c13c2c9d22ca78ff493d361461c83714373",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45643549995",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "587ef379c08924b5f296de1131a5b8535e9541322d63e999b31e5743d3e031b6"
+  },
+  "record": "runs/2026-11-25/45643549995-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "87a85454242e189cf791ddd770359422d98fd69648d4f753556395e20a7f7986"
+}
