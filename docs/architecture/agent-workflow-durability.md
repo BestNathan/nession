@@ -226,6 +226,9 @@ the v1 orchestration modules remain the compatibility path for immutable
 | `workflow/feedback.mjs` | one immutable deduped repair bundle per HEAD + CI generation + Review result |
 | `workflow/migration.mjs` | explicit, readback-based v1 → v2 projection; unknown legacy state becomes a durable blocker |
 | `workflow/reconcile.mjs` | bounded observe → decide → CAS persist → scoped effect → readback → receipt loop |
+| `workflow/facts.mjs` | production fact observer over authenticated Run/Attempt/receipt/PR/checkpoint ports; typed unavailable/denied/un-ingested facts never become an outcome |
+| `workflow/scan.mjs` | fair, bounded active-lifecycle scan with deterministic rotation, malformed isolation and no auto-start |
+| `workflow/diagnostic.mjs` | exported diagnostic whitelist; the private next-state plan never leaves the trusted process |
 | `workflow/telemetry.mjs` | sanitized Reconcile observation projection (no prompts/native bytes/credentials) |
 | `orchestration/transition.mjs` | `advanceWorkflowV1` compatibility replay only; it rejects a v2 state |
 
@@ -291,11 +294,31 @@ Issues and carry a reason; it cannot start an arbitrary open Issue, select a
 role, approve a result or authorize merge/SC/Store writes. New lifecycles start
 only from the verified owner-authorized command/admission path.
 
+The production fact observer (`workflow/facts.mjs`) resolves every role through
+authenticated ports: exact action/Run/Attempt/source binding, Store result
+receipts, checkpoint metadata, PR readback and the Publisher publication
+receipt. Completed work without an ingested receipt is `completed_uningested`,
+not success; missing permission/API facts are `unavailable`; a mismatched
+Run/source/receipt is `denied`. Only a fully bound terminal fact becomes a
+lifecycle observation. The Publisher/Review-verdict/Acceptance readers remain
+typed `unavailable` until their composition slices wire them; the observer never
+guesses an effect from a job conclusion alone.
+
+The active scan (`workflow/scan.mjs`) reads only existing durable states,
+excludes `done`/`cancelled` records without outstanding obligations, preserves
+blocked and legacy candidates, isolates malformed heads and rotates
+deterministically over the raw candidate set. A stable set is covered within
+`ceil(candidateCount / maxIssues)` bounded ticks; no scan path creates or starts
+a lifecycle.
+
 The sanitized observation projection (`workflow/telemetry.mjs`) carries
 phase/substate, stage age, reconcile source/outcome, unresolved dispatch, retry
 budget, checkpoint version binding, stale results, repair round and finding
-counts. It is emitted in the existing trusted-main workflow log/artifact
-boundary; it does not create a new metrics store, schema owner or public UI.
+counts. The exported CLI artifact uses `workflow/diagnostic.mjs`, an explicit
+whitelist; the raw private next-state plan, checkpoint binding, native session
+identity/bytes, prompts, transcripts and free-text findings never enter it. It
+is emitted in the existing trusted-main workflow log/artifact boundary; it does
+not create a new metrics store, schema owner or public UI.
 
 State and receipts stay in the existing `agent-store` versioned Issue state;
 there is no second database or state engine. Every decision is persisted with
