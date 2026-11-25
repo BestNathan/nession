@@ -4,7 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { classifyBrowserReport, extractGeometryEvidence } from './browser-report.mjs';
 
-const DEFAULT_TIMEOUT_MS = 120_000;
+// The budget one verifier gets, not a correctness threshold. A runtime Case may
+// run several `cargo test` invocations, and the first one can spend most of a
+// two-minute budget linking a cold test binary — the #4433 SC-03 Case timed out
+// at exactly 120s with every assertion still unwritten. Ten minutes gives a cold
+// CI checkout room while the job's own 45-minute cap remains the outer bound; a
+// genuinely hanging verifier is still killed and reported as `Error`.
+const DEFAULT_TIMEOUT_MS = 600_000;
 
 function normalizeEvidence(value) {
   if (value == null) return [];
