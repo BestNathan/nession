@@ -902,6 +902,10 @@ pub const DEFAULT_P2P_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// The frame limits the listener has always enforced. Stated explicitly rather
 /// than left to a default: `#3439` moved the transport, not the bounds.
+/// A progress-report reconcile notice is exception-only bookkeeping. A
+/// subscriber with clogged outbound must not park the physical reader (and
+/// every other Session multiplexed on it) waiting for room (#4435).
+const RECONCILE_NOTICE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
 const MAX_WS_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
 const MAX_WS_FRAME_BYTES: usize = 16 * 1024 * 1024;
 
@@ -1911,13 +1915,21 @@ impl Frame {
                         )) else {
                             return true;
                         };
-                        match notice
-                            .outbound
-                            .send_for_class(OutboundStreamClass::FlowControl, WsFrame::Text(json))
-                            .await
+                        match tokio::time::timeout(
+                            RECONCILE_NOTICE_TIMEOUT,
+                            notice.outbound.send_for_class(
+                                OutboundStreamClass::FlowControl,
+                                WsFrame::Text(json),
+                            ),
+                        )
+                        .await
                         {
-                            Ok(()) => true,
-                            Err(_) => false,
+                            Ok(Ok(())) => true,
+                            // A notice that cannot be delivered inside the
+                            // bound is dropped: the next progress report is
+                            // the recovery surface, and the reader must keep
+                            // dispatching (#4435).
+                            _ => false,
                         }
                     }
                     // A frame from a peer this Session does not know, or an
