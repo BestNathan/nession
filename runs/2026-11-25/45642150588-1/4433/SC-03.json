@@ -1,0 +1,163 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c30c8f798980f57b85a4414c4bb2084682a691ffc0e8683ed2427adf4415d597",
+  "run_id": 45642150588,
+  "run_attempt": 1,
+  "issue": 4433,
+  "criterion": "SC-03",
+  "criterion_text": "A source-aligned isolated staging protocol Case on all three WS ingress roles proves heartbeat/response resolution remains live under blocked request saturation, auth/relay transition fences dependent work, and same-session mutations across central/P2P retain FIFO; no stale identity accepts work.",
+  "stage": "staging",
+  "target_sha": "beb5be6e80415c5fe7f214579ac2fd372abc313c",
+  "contract_sha256": "8f0e1cb7ab5eb9c1187642fa7dec3f6423fa9f29d068a235f0de15a7a00677d9",
+  "case_revision": "beb5be6e80415c5fe7f214579ac2fd372abc313c",
+  "case_tree_sha": "c58d27b39d3f3d88b35c63a546a39ed9f43e005a",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-25T15:13:37.810Z",
+  "finished_at": "2026-11-25T15:15:17.567Z",
+  "duration_ms": 99757,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "warmup-server-integration.cjs",
+      "result": "Pass",
+      "summary": "compiled the nession-server integration test binary for the WebSocket ingress ordering tests",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: compiled the nession-server integration test binary that carries the WebSocket ingress ordering tests"
+        }
+      ],
+      "duration_ms": 28245,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "server-integration.cjs",
+      "result": "Pass",
+      "summary": "The Server client socket fences registration ahead of dependent state, does not park the reader behind business permits, and preserves same-session FIFO across connections",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: the Server client socket ordered registration before dependent state, answered an independent mutation/probe behind a blocked slow query, and kept same-session FIFO across two connections"
+        }
+      ],
+      "duration_ms": 1586,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "warmup-agent-integration.cjs",
+      "result": "Pass",
+      "summary": "compiled the nession-agent integration test binary for the P2P same-session ordering test",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: compiled the nession-agent integration test binary that carries the P2P same-session ordering test"
+        }
+      ],
+      "duration_ms": 27704,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "agent-integration.cjs",
+      "result": "Pass",
+      "summary": "The Agent P2P socket preserves same-session mutation ordering across two peers without a connection-scoped lane",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: the Agent P2P socket held the second peer behind the first peer's parked attach for the same session and admitted it once that work ended"
+        }
+      ],
+      "duration_ms": 723,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "warmup-agent-lib.cjs",
+      "result": "Pass",
+      "summary": "compiled the nession-agent lib test binary for the central-connection refusal test",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: compiled the nession-agent lib test binary that carries the central-connection refusal test"
+        }
+      ],
+      "duration_ms": 17279,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "agent-lib.cjs",
+      "result": "Pass",
+      "summary": "The Agent central connection refuses past its bound explicitly and settles the refused command instead of parking it",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: the Agent central connection refused a command past its bound and answered it, so the Server settled the pending waiter instead of timing out"
+        }
+      ],
+      "duration_ms": 15943,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "warmup-runtime-lib.cjs",
+      "result": "Pass",
+      "summary": "compiled the nession-runtime lib test binary for the non-waiting admission test",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: compiled the nession-runtime lib test binary that carries the non-waiting admission test"
+        }
+      ],
+      "duration_ms": 2207,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "runtime-lib.cjs",
+      "result": "Pass",
+      "summary": "Runtime admission refuses saturated query lanes without waiting, so reader progress never depends on business permits",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "beb5be6e80415c5fe7f214579ac2fd372abc313c: a full query lane refused explicitly instead of parking the reader on a business permit"
+        }
+      ],
+      "duration_ms": 172,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45642150588,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "beb5be6e80415c5fe7f214579ac2fd372abc313c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45642150588",
+    "record_path": "runs/2026-11-25/45642150588-1/4433/SC-03.json",
+    "source_result_sha256": "a6a8e2f4b7c42ab12ad04cd26e2d6c720f1588cb4b205d29181c04a1485f8c41"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45642150588-1",
+    "sha256": "a6a8e2f4b7c42ab12ad04cd26e2d6c720f1588cb4b205d29181c04a1485f8c41",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45642150588",
+    "durability": "time-limited; object archival not configured"
+  }
+}
