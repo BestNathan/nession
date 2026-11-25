@@ -282,10 +282,16 @@ for (const [ciStatus, reviewOutcome, expected] of [
         'nonblocking suggestions never gate repair');
     }
     if (ciStatus === 'actionable_fail' && reviewOutcome === 'approved') {
-      assert.deepEqual(next.feedback.sources, ['ci']);
+      // The passed Review is part of the immutable evidence generation.
+      assert.deepEqual(next.feedback.sources, ['ci', 'review']);
+      assert.ok(next.feedback.review_digest);
+      assert.ok(next.feedback.ci_digest);
     }
     if (ciStatus === 'pass' && reviewOutcome === 'changes_requested') {
-      assert.deepEqual(next.feedback.sources, ['review']);
+      // The passed CI receipt is part of the immutable evidence generation.
+      assert.deepEqual(next.feedback.sources, ['ci', 'review']);
+      assert.ok(next.feedback.ci_digest);
+      assert.ok(next.feedback.review_digest);
     }
   } else {
     const accepts = next.outbox.filter((entry) =>
