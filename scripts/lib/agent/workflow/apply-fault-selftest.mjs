@@ -100,13 +100,14 @@ function effects(calls, { dispatchResponse = null,
     async readbackAccept() { return { status: 'absent' }; },
     async notify() { calls.notify++; },
     async retryCi() { calls.retryCi++; },
+    async reingest() { calls.reingest = (calls.reingest ?? 0) + 1; },
   });
 }
 
 // ── write-ahead intent precedes the external dispatch ──────────────────
 {
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   let observedWriteAhead = false;
   const composition = createApplyComposition({
     store: memoryStore(fresh()),
@@ -131,7 +132,7 @@ function effects(calls, { dispatchResponse = null,
 {
   const store = memoryStore(fresh());
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const apply = createApplyComposition({
     store,
     effects: effects(calls, {
@@ -151,7 +152,7 @@ function effects(calls, { dispatchResponse = null,
 {
   const store = memoryStore(fresh(), { conflictFirst: true });
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const apply = createApplyComposition({
     store, effects: effects(calls), observer: observer(), activation, registry,
   });
@@ -182,7 +183,7 @@ function effects(calls, { dispatchResponse = null,
   state = fenceGeneration(state, 4);
   const store = memoryStore(state);
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const apply = createApplyComposition({
     store, effects: effects(calls),
     observer: observer([() => ({
@@ -213,7 +214,7 @@ function effects(calls, { dispatchResponse = null,
 {
   const store = memoryStore(fresh());
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const apply = createApplyComposition({
     store,
     effects: effects(calls, {

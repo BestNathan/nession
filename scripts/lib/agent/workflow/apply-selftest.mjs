@@ -80,6 +80,7 @@ function effects(calls) {
     async readbackAccept() { return { status: 'absent' }; },
     async notify() { calls.notify++; },
     async retryCi() { calls.retryCi++; },
+    async reingest() { calls.reingest = (calls.reingest ?? 0) + 1; },
   });
 }
 function fresh(issue = 4526) {
@@ -94,7 +95,7 @@ function fresh(issue = 4526) {
 {
   const store = memoryStore(fresh(4526));
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const plan = createApplyComposition({
     store, observer: observer(), activation: planActivation, registry,
   });
@@ -119,7 +120,7 @@ function fresh(issue = 4526) {
 {
   const store = memoryStore();
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const apply = createApplyComposition({
     store, effects: effects(calls), observer: observer(),
     activation, registry,
@@ -148,7 +149,7 @@ function fresh(issue = 4526) {
 {
   const store = memoryStore();
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const apply = createApplyComposition({
     store, effects: effects(calls), observer: observer(),
     activation, registry,
@@ -192,7 +193,7 @@ function fresh(issue = 4526) {
 // ── credentials/model material cannot enter the effect boundary ────────
 {
   const calls = { prepare: 0, dispatch: 0, readback: 0, publish: 0,
-    accept: 0, notify: 0, retryCi: 0 };
+    accept: 0, notify: 0, retryCi: 0, reingest: 0 };
   const full = effects(calls);
   assert.throws(() => createScopedEffects({
     ...full, api_key: 'secret',

@@ -215,6 +215,24 @@ assert.throws(() => decideLifecycle(state, observation(state, {
   wake: { source: 'model', reason: 'choose-reviewer' },
 })), /invalid wake/);
 
+// ── a completed-but-un-ingested result requests idempotent ingestion ──
+{
+  let uningested = freshState();
+  const action = active(uningested);
+  uningested = dispatch(uningested, action, 121);
+  const decision = step(uningested, {
+    developer: developerEvent(action, 121, {
+      outcome: 'uningested', target_sha: null, checkpoint: null,
+    }),
+  });
+  assert.equal(decision.decision, 'recover');
+  assert.equal(decision.reason, 'result_not_ingested');
+  assert.equal(decision.nextState, null);
+  assert.equal(decision.intents.length, 1);
+  assert.equal(decision.intents[0].type, 'reingest');
+  assert.equal(decision.intents[0].run_id, 121);
+}
+
 // ── cancelled/timeout are retried as infrastructure, not model verdicts ─
 for (const outcome of ['cancelled', 'timeout']) {
   let cancelled = freshState();
