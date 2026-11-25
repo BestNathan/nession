@@ -121,4 +121,74 @@ assert.throws(() => migrateV1State({
   state: { ...v1, schema_version: 3 }, now: 1,
 }), /invalid state shape/);
 
+
+// ── authenticated readback preserves the committed checkpoint/lease ────
+const committed = {
+  version: 2, commit_sha: '7'.repeat(40),
+  ciphertext_sha256: '8'.repeat(64), native_session_id: 'native-2',
+};
+const qualityV1 = { ...v1, phase: 'quality' };
+const quality = migrateV1State({
+  state: qualityV1, pr,
+  readback: { checkpoint: committed, lease: { fencing_generation: 3 } },
+  now: 5000,
+});
+assert.equal(quality.phase, 'ci_checking');
+assert.deepEqual(quality.thread.checkpoint, committed);
+assert.equal(quality.thread.fencing_generation, 3);
+
+const repairV1 = {
+  ...v1,
+  phase: 'repair',
+  outbox: [{
+    ...v1.outbox[0],
+    task: {
+      type: 'dispatch', role: 'developer', task: 'repair', sha: CANDIDATE,
+      agent_id: 'dev-cursor-01', resume: true,
+    },
+  }],
+};
+const repair = migrateV1State({
+  state: repairV1, pr,
+  readback: { checkpoint: committed, lease: { fencing_generation: 4 } },
+  now: 5000,
+});
+assert.equal(repair.phase, 'developing');
+assert.deepEqual(repair.thread.checkpoint, committed);
+assert.equal(repair.thread.fencing_generation, 4);
+assert.equal(repair.outbox[0].action, 'repair');
+
+const reviewCheckpoint = migrateV1State({
+  state: v1, pr,
+  readback: { checkpoint: committed, lease: { fencing_generation: 5 } },
+  now: 5000,
+});
+assert.equal(reviewCheckpoint.phase, 'reviewing');
+assert.deepEqual(reviewCheckpoint.thread.checkpoint, committed);
+assert.equal(reviewCheckpoint.thread.fencing_generation, 5);
+
+// An ambiguous v1 dispatch without a proven original Run blocks.
+const ambiguousV1 = {
+  ...v1,
+  outbox: [{
+    ...v1.outbox[0],
+    status: 'dispatched',
+    receipt: { status: 'accepted', dispatch_id: v1.outbox[0].id },
+  }],
+};
+const ambiguous = migrateV1State({ state: ambiguousV1, pr, now: 5000 });
+assert.equal(ambiguous.phase, 'blocked');
+assert.equal(ambiguous.blocker.reason, 'legacy_ambiguous_dispatch');
+const proven = migrateV1State({
+  state: ambiguousV1, pr,
+  readback: { run: {
+    verified: true, action_id: v1.outbox[0].id,
+    run_id: 9001, run_attempt: 1,
+  } },
+  now: 5000,
+});
+assert.equal(proven.phase, 'reviewing');
+assert.equal(proven.outbox[0].status, 'dispatched');
+assert.equal(proven.outbox[0].run.id, 9001);
+
 console.log('agent workflow migration selftest: OK');

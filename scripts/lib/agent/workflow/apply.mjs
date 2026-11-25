@@ -21,7 +21,7 @@ const EFFECT_METHODS = [
   'prepareDispatch', 'dispatch', 'readbackDispatch',
   'preparePublish', 'publish', 'readbackPublish',
   'prepareAccept', 'accept', 'readbackAccept',
-  'notify', 'retryCi',
+  'notify', 'retryCi', 'reingest',
 ];
 const START_KEYS = ['issue', 'base_sha', 'developer_sha', 'developer',
   'reviewer', 'acceptor', 'authority'];
