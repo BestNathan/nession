@@ -78,7 +78,7 @@ use tokio::sync::{mpsc, Notify, OwnedSemaphorePermit, Semaphore};
 use tracing::{debug, warn};
 
 use crate::frame::WsFrame;
-use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
+use crate::metrics::{self, Direction, Domain, Labels, MetricsIdentity, ReasonKind, ResultKind};
 
 /// What the WebSocket frame header costs beyond the payload `WsFrame::len`
 /// reports. Charged so a queue full of small frames is priced honestly.
@@ -447,10 +447,57 @@ pub struct QueueSnapshot {
     pub process: ProcessSnapshot,
 }
 
-/// Process-wide aggregate accounting. Accounting, not a second global cap: see
-/// the module docs.
-#[derive(Default)]
+/// The hard process-wide ceilings one outbound charge may not cross (#4504).
+///
+/// `control_*` capacity is reserved out of the same budget: a non-Control
+/// submission may not consume it, so a flood of stream/response frames cannot
+/// starve the liveness/close traffic that has to keep flowing. Tune the numbers
+/// from the exact-SHA baseline; they are an accounting ceiling, not a claim
+/// about process RSS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessLimits {
+    pub bytes: usize,
+    pub frames: usize,
+    pub control_bytes: usize,
+    pub control_frames: usize,
+}
+
+impl Default for ProcessLimits {
+    fn default() -> Self {
+        // Conservative fallback: 64 connections at the Server/Agent
+        // per-connection budget (4 MiB / 64 frame slots), with one connection's
+        // Control capacity held out of the ordinary ceilings. A runtime that
+        // owns exact class limits installs its own through
+        // [`ProcessAccounting::install`]; the exact-SHA baseline tunes the
+        // candidate value, and this is an accounting ceiling, not an RSS claim.
+        Self {
+            bytes: 256 * 1024 * 1024,
+            frames: 4_096,
+            control_bytes: 512 * 1024,
+            control_frames: 16,
+        }
+    }
+}
+
+impl ProcessLimits {
+    /// The process ceilings implied by one connection's class limits over
+    /// `connections` concurrent connections, with its Control capacity
+    /// reserved. The adapters that own those limits install this at startup.
+    pub fn for_connections(limits: ClassifiedLimits, connections: usize) -> Self {
+        let connections = connections.max(1);
+        Self {
+            bytes: limits.total_bytes().saturating_mul(connections),
+            frames: limits.total_frames().saturating_mul(connections),
+            control_bytes: limits.control.bytes,
+            control_frames: limits.control.frames,
+        }
+    }
+}
+
+/// Process-wide aggregate accounting with hard ceilings (#4504).
+#[derive(Debug)]
 pub struct ProcessAccounting {
+    limits: ProcessLimits,
     bytes: AtomicUsize,
     frames: AtomicUsize,
     peak_bytes: AtomicUsize,
@@ -460,8 +507,18 @@ pub struct ProcessAccounting {
     too_large: AtomicU64,
 }
 
+impl Default for ProcessAccounting {
+    fn default() -> Self {
+        Self::with_limits(ProcessLimits::default())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessSnapshot {
+    pub limit_bytes: usize,
+    pub limit_frames: usize,
+    pub control_reserve_bytes: usize,
+    pub control_reserve_frames: usize,
     pub bytes: usize,
     pub frames: usize,
     pub peak_bytes: usize,
@@ -474,13 +531,99 @@ pub struct ProcessSnapshot {
 static PROCESS_ACCOUNTING: OnceLock<Arc<ProcessAccounting>> = OnceLock::new();
 
 impl ProcessAccounting {
+    /// A fresh accounting cell with explicit ceilings. Production uses the
+    /// process-wide [`Self::shared`]; tests inject deliberately small limits.
+    pub fn with_limits(limits: ProcessLimits) -> Self {
+        Self {
+            limits,
+            bytes: AtomicUsize::new(0),
+            frames: AtomicUsize::new(0),
+            peak_bytes: AtomicUsize::new(0),
+            peak_frames: AtomicUsize::new(0),
+            accepted: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
+            too_large: AtomicU64::new(0),
+        }
+    }
+
     /// The process's one aggregate accounting cell.
     pub fn shared() -> Arc<Self> {
         Arc::clone(PROCESS_ACCOUNTING.get_or_init(|| Arc::new(Self::default())))
     }
 
+    /// Install the process cell with the ceilings the owning runtime derived
+    /// from its class limits. Called once at startup, before connections exist;
+    /// a second call keeps the first cell.
+    pub fn install(limits: ProcessLimits) -> Arc<Self> {
+        Arc::clone(PROCESS_ACCOUNTING.get_or_init(|| Arc::new(Self::with_limits(limits))))
+    }
+
+    pub fn limits(&self) -> ProcessLimits {
+        self.limits
+    }
+
+    /// Reserve `bytes`, refusing when the non-Control ceiling would be crossed.
+    fn try_reserve_bytes(&self, bytes: usize, control: bool) -> bool {
+        let ceiling = if control {
+            self.limits.bytes
+        } else {
+            self.limits.bytes.saturating_sub(self.limits.control_bytes)
+        };
+        let mut current = self.bytes.load(Ordering::Relaxed);
+        loop {
+            if current.saturating_add(bytes) > ceiling {
+                return false;
+            }
+            match self.bytes.compare_exchange_weak(
+                current,
+                current + bytes,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.note_peaks();
+                    return true;
+                }
+                Err(next) => current = next,
+            }
+        }
+    }
+
+    /// Reserve one frame slot under the same ceilings and Control reserve.
+    fn try_reserve_frame(&self, control: bool) -> bool {
+        let ceiling = if control {
+            self.limits.frames
+        } else {
+            self.limits
+                .frames
+                .saturating_sub(self.limits.control_frames)
+        };
+        let mut current = self.frames.load(Ordering::Relaxed);
+        loop {
+            if current >= ceiling {
+                return false;
+            }
+            match self.frames.compare_exchange_weak(
+                current,
+                current + 1,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            ) {
+                Ok(_) => {
+                    self.note_peaks();
+                    return true;
+                }
+                Err(next) => current = next,
+            }
+        }
+    }
+
     pub fn snapshot(&self) -> ProcessSnapshot {
         ProcessSnapshot {
+            limit_bytes: self.limits.bytes,
+            limit_frames: self.limits.frames,
+            control_reserve_bytes: self.limits.control_bytes,
+            control_reserve_frames: self.limits.control_frames,
             bytes: self.bytes.load(Ordering::Relaxed),
             frames: self.frames.load(Ordering::Relaxed),
             peak_bytes: self.peak_bytes.load(Ordering::Relaxed),
@@ -507,20 +650,27 @@ struct ProcessCharge {
 }
 
 impl ProcessCharge {
-    fn reserve_bytes(accounting: Arc<ProcessAccounting>, bytes: usize) -> Self {
-        accounting.bytes.fetch_add(bytes, Ordering::Relaxed);
-        accounting.note_peaks();
-        Self {
+    fn reserve_bytes(
+        accounting: Arc<ProcessAccounting>,
+        bytes: usize,
+        control: bool,
+    ) -> Result<Self, ()> {
+        if !accounting.try_reserve_bytes(bytes, control) {
+            return Err(());
+        }
+        Ok(Self {
             accounting,
             bytes,
             frames: 0,
-        }
+        })
     }
 
-    fn reserve_frame(&mut self) {
-        self.accounting.frames.fetch_add(1, Ordering::Relaxed);
+    fn reserve_frame(&mut self, control: bool) -> Result<(), ()> {
+        if !self.accounting.try_reserve_frame(control) {
+            return Err(());
+        }
         self.frames = 1;
-        self.accounting.note_peaks();
+        Ok(())
     }
 }
 
@@ -618,6 +768,11 @@ impl ClassReceivers {
 
 struct OutboundInner {
     name: &'static str,
+    /// The runtime/peer/transport this connection belongs to (#4437 SC-02).
+    ///
+    /// A `OnceLock` because the receiver and every writer clone share this
+    /// inner; the owner states the identity once, through `&self`.
+    identity: std::sync::OnceLock<MetricsIdentity>,
     limits: ClassifiedLimits,
     control_class: ClassCapacity,
     response_class: ClassCapacity,
@@ -643,6 +798,16 @@ impl OutboundInner {
         }
     }
 
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        match self.identity.get() {
+            Some(identity) => Labels::new()
+                .identity(*identity)
+                .domain(domain)
+                .direction(direction),
+            None => Labels::new().domain(domain).direction(direction),
+        }
+    }
+
     fn note_refused(&self, class: FrameClass, error: OutboundError) {
         self.counters.refused.fetch_add(1, Ordering::Relaxed);
         self.process.refused.fetch_add(1, Ordering::Relaxed);
@@ -654,9 +819,7 @@ impl OutboundInner {
         };
         metrics::counter(
             "ws_outbound_refused",
-            Labels::new()
-                .domain(class.domain())
-                .direction(Direction::Outbound)
+            self.labels(class.domain(), Direction::Outbound)
                 .result(ResultKind::Refused)
                 .reason(reason),
         );
@@ -665,9 +828,7 @@ impl OutboundInner {
             self.process.too_large.fetch_add(1, Ordering::Relaxed);
             metrics::record(
                 "ws_outbound_too_large",
-                Labels::new()
-                    .domain(class.domain())
-                    .direction(Direction::Outbound)
+                self.labels(class.domain(), Direction::Outbound)
                     .result(ResultKind::TooLarge)
                     .reason(ReasonKind::Capacity),
                 size as f64,
@@ -730,6 +891,7 @@ impl Outbound {
         let (stream_tx, stream_rx) = mpsc::unbounded_channel();
         let inner = Arc::new(OutboundInner {
             name,
+            identity: std::sync::OnceLock::new(),
             limits,
             control_class: ClassCapacity::new(limits.control),
             response_class: ClassCapacity::new(limits.response),
@@ -914,6 +1076,21 @@ impl Outbound {
         }
     }
 
+    /// State the runtime/peer/transport this connection belongs to (#4437
+    /// SC-02). Called before the sender is cloned.
+    pub fn set_identity(&self, identity: MetricsIdentity) {
+        let _ = self.inner.identity.set(identity);
+    }
+
+    /// The identity for a lifecycle write metric, when one was stated.
+    pub fn metrics_identity(&self) -> Option<MetricsIdentity> {
+        self.inner.identity.get().copied()
+    }
+
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        self.inner.labels(domain, direction)
+    }
+
     /// Bytes outstanding: queued, reserved by a waiting producer, or in flight.
     pub fn queued_bytes(&self) -> usize {
         self.snapshot().queued_bytes
@@ -1008,16 +1185,12 @@ impl Outbound {
                 self.inner.process.accepted.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_outbound_accepted",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound)
+                    self.labels(class.domain(), Direction::Outbound)
                         .result(ResultKind::Accepted),
                 );
                 metrics::gauge(
                     "ws_outbound_queued",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound),
+                    self.labels(class.domain(), Direction::Outbound),
                     self.queued_bytes() as f64,
                 );
                 self.inner.wake.notify_one();
@@ -1063,7 +1236,18 @@ impl Outbound {
                 return SubmitOutcome::Refused(error);
             }
         };
-        let mut process = ProcessCharge::reserve_bytes(Arc::clone(&self.inner.process), charge);
+        let mut process = match ProcessCharge::reserve_bytes(
+            Arc::clone(&self.inner.process),
+            charge,
+            class == FrameClass::Control,
+        ) {
+            Ok(process) => process,
+            Err(()) => {
+                let error = OutboundError::Saturated;
+                self.inner.note_refused(class, error);
+                return SubmitOutcome::Refused(error);
+            }
+        };
         let slot = match Arc::clone(&capacity.frame_sem).try_acquire_owned() {
             Ok(permit) => permit,
             Err(_) => {
@@ -1073,7 +1257,11 @@ impl Outbound {
                 return SubmitOutcome::Refused(error);
             }
         };
-        process.reserve_frame();
+        if process.reserve_frame(class == FrameClass::Control).is_err() {
+            let error = OutboundError::Saturated;
+            self.inner.note_refused(class, error);
+            return SubmitOutcome::Refused(error);
+        }
 
         let queued_counter = Arc::clone(&capacity.queued);
         queued_counter.fetch_add(1, Ordering::Relaxed);
@@ -1096,16 +1284,12 @@ impl Outbound {
                 self.inner.process.accepted.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_outbound_accepted",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound)
+                    self.labels(class.domain(), Direction::Outbound)
                         .result(ResultKind::Accepted),
                 );
                 metrics::gauge(
                     "ws_outbound_queued",
-                    Labels::new()
-                        .domain(class.domain())
-                        .direction(Direction::Outbound),
+                    self.labels(class.domain(), Direction::Outbound),
                     self.queued_bytes() as f64,
                 );
                 self.inner.wake.notify_one();
@@ -1151,7 +1335,12 @@ impl Outbound {
 
         // The byte reservation is counted from this point on, including while
         // this producer waits for a frame slot below.
-        let mut process = ProcessCharge::reserve_bytes(Arc::clone(&self.inner.process), charge);
+        let mut process = ProcessCharge::reserve_bytes(
+            Arc::clone(&self.inner.process),
+            charge,
+            class == FrameClass::Control,
+        )
+        .map_err(|()| OutboundError::Saturated)?;
 
         let slot: Result<OwnedSemaphorePermit, OutboundError> = match wait {
             WaitPolicy::NoWait => frames
@@ -1170,7 +1359,9 @@ impl Outbound {
         };
         let slot = slot?;
 
-        process.reserve_frame();
+        process
+            .reserve_frame(class == FrameClass::Control)
+            .map_err(|()| OutboundError::Saturated)?;
         Ok((budget, slot, process))
     }
 }
@@ -1194,6 +1385,11 @@ pub struct OutboundReceiver {
 }
 
 impl OutboundReceiver {
+    /// The identity the writer should attribute its lifecycle metrics to.
+    pub fn metrics_identity(&self) -> Option<MetricsIdentity> {
+        self.inner.identity.get().copied()
+    }
+
     /// A frame that is ready now, without waiting.
     ///
     /// The scheduler's decision applied to the frames currently queued. Tests
@@ -1949,6 +2145,83 @@ mod tests {
         drop(second_rx);
         assert_eq!(process.snapshot().frames, 0);
         assert_eq!(process.snapshot().bytes, 0);
+    }
+
+    /// #4504: the process ceilings are hard and aggregate across connections.
+    ///
+    /// Six ordinary frames spend the non-Control process capacity while each
+    /// connection's own class still has room; a seventh ordinary submission on
+    /// the second connection is refused; a Control frame still fits its
+    /// reserved share. Nothing is charged by a refusal, and dropping the frames
+    /// returns every reservation to baseline.
+    #[tokio::test]
+    async fn process_limits_are_hard_and_reserve_control_capacity() {
+        let process = Arc::new(ProcessAccounting::with_limits(ProcessLimits {
+            bytes: 64 * 1024,
+            frames: 8,
+            control_bytes: 2 * 1024,
+            control_frames: 2,
+        }));
+        let (first, first_rx) = Outbound::with_process(
+            "first",
+            ROOMY,
+            Duration::from_millis(50),
+            SchedulerConfig::default(),
+            Arc::clone(&process),
+        );
+        let (second, second_rx) = Outbound::with_process(
+            "second",
+            ROOMY,
+            Duration::from_millis(50),
+            SchedulerConfig::default(),
+            Arc::clone(&process),
+        );
+
+        // 8 process frames, 2 reserved for Control: six ordinary frames fill
+        // the usable share.
+        for _ in 0..6 {
+            assert!(
+                first
+                    .submit_current(FrameClass::Stream, text(100), WaitPolicy::NoWait)
+                    .await
+                    .accepted(),
+                "an ordinary frame within the process ceiling was refused"
+            );
+        }
+        assert_eq!(
+            second
+                .submit_current(FrameClass::Stream, text(100), WaitPolicy::NoWait)
+                .await,
+            SubmitOutcome::Refused(OutboundError::Saturated),
+            "the aggregate process ceiling was not enforced"
+        );
+        assert!(
+            second.snapshot().stream_frames < ROOMY.stream.frames,
+            "the refusing connection's own class still has room"
+        );
+        assert_eq!(
+            process.snapshot().frames,
+            6,
+            "a refused submission reserved process capacity"
+        );
+
+        // Control keeps its reserved process share.
+        assert!(
+            second
+                .submit_current(FrameClass::Control, text(10), WaitPolicy::NoWait)
+                .await
+                .accepted(),
+            "the reserved Control capacity was not usable"
+        );
+        assert_eq!(process.snapshot().frames, 7);
+
+        // Every reservation returns to baseline when the frames are released.
+        drop(first_rx);
+        drop(second_rx);
+        assert_eq!(process.snapshot().frames, 0);
+        assert_eq!(process.snapshot().bytes, 0);
+        assert!(process.snapshot().peak_frames <= process.snapshot().limit_frames);
+        assert!(process.snapshot().peak_bytes <= process.snapshot().limit_bytes);
     }
 
     /// A gone writer is reported as closed on every lane.

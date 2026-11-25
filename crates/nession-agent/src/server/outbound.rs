@@ -157,6 +157,17 @@ struct Counters {
 }
 
 impl P2pOutbound {
+    /// State the runtime/peer/transport this connection belongs to (#4437
+    /// SC-02). Called before the sender is cloned.
+    pub fn set_identity(&self, identity: nession_runtime::metrics::MetricsIdentity) {
+        self.queue.set_identity(identity);
+    }
+
+    /// The identity the writer attributes its lifecycle metrics to.
+    pub fn metrics_identity(&self) -> Option<nession_runtime::metrics::MetricsIdentity> {
+        self.queue.metrics_identity()
+    }
+
     /// A connection's outbound path, and the receiver its writer drains.
     pub fn new() -> (Self, OutboundReceiver) {
         Self::with_terminal_grace(DEFAULT_TERMINAL_STALL_GRACE)
@@ -383,9 +394,13 @@ where
                 // charge — stays alive across the await, so an in-flight frame
                 // is visible to both bounds (#4434).
                 let (message, charge) = frame.into_write_parts();
-                let written =
-                    nession_runtime::lifecycle::write_frame(&mut sink, message, timeouts.write)
-                        .await;
+                let written = nession_runtime::lifecycle::write_frame_with_identity(
+                    &mut sink,
+                    message,
+                    timeouts.write,
+                    outbound.metrics_identity(),
+                )
+                .await;
                 drop(charge);
                 if let Err(failure) = written {
                     // The peer is gone or unhealthy. Record why, and let the

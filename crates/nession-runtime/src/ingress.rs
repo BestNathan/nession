@@ -38,41 +38,52 @@ use tokio_rustls::server::TlsStream;
 use tracing::warn;
 
 use crate::frame::{WsCloseFrame, WsFrame};
-use crate::metrics::{self, Direction, Domain, Labels};
+use crate::metrics::{self, Direction, Domain, Labels, MetricsIdentity};
 
 /// Physical connections currently served by this runtime process.
 static ACTIVE_CONNECTIONS: AtomicI64 = AtomicI64::new(0);
 
 /// Count one accepted physical socket while it is being served, and publish the
 /// process-wide active gauge on both ends.
-struct ActiveConnection;
+///
+/// The identity is the listener's runtime/peer/transport (#4437 SC-02); the
+/// gain and loss of a connection are attributed to the runtime that accepted
+/// it rather than to the process's first connection.
+struct ActiveConnection {
+    identity: Option<MetricsIdentity>,
+}
 
 impl ActiveConnection {
-    fn new() -> Self {
+    fn new(identity: Option<MetricsIdentity>) -> Self {
+        let labels = |domain: Domain, direction: Direction| match identity {
+            Some(identity) => Labels::new()
+                .identity(identity)
+                .domain(domain)
+                .direction(direction),
+            None => Labels::new().domain(domain).direction(direction),
+        };
         metrics::counter(
             "ws_connection_attempts",
-            Labels::new()
-                .domain(Domain::Lifecycle)
-                .direction(Direction::Inbound),
+            labels(Domain::Lifecycle, Direction::Inbound),
         );
         let active = ACTIVE_CONNECTIONS.fetch_add(1, Ordering::Relaxed) + 1;
         metrics::gauge(
             "ws_connection_active",
-            Labels::new().domain(Domain::Lifecycle),
+            labels(Domain::Lifecycle, Direction::Internal),
             active as f64,
         );
-        Self
+        Self { identity }
     }
 }
 
 impl Drop for ActiveConnection {
     fn drop(&mut self) {
         let active = ACTIVE_CONNECTIONS.fetch_sub(1, Ordering::Relaxed) - 1;
-        metrics::gauge(
-            "ws_connection_active",
-            Labels::new().domain(Domain::Lifecycle),
-            active.max(0) as f64,
-        );
+        let labels = match self.identity {
+            Some(identity) => Labels::new().identity(identity).domain(Domain::Lifecycle),
+            None => Labels::new().domain(Domain::Lifecycle),
+        };
+        metrics::gauge("ws_connection_active", labels, active.max(0) as f64);
     }
 }
 
@@ -260,12 +271,13 @@ pub async fn serve<F, Fut>(
     slot: AdmissionSlot,
     deadline: Duration,
     header_read_timeout: Duration,
+    identity: Option<MetricsIdentity>,
 ) -> io::Result<()>
 where
     F: FnOnce() -> Fut,
     Fut: std::future::Future<Output = io::Result<TcpOrTls>>,
 {
-    let _active = ActiveConnection::new();
+    let _active = ActiveConnection::new(identity);
     let served = async move {
         let io = connect().await?;
         hyper::server::conn::http1::Builder::new()
@@ -430,10 +442,10 @@ mod tests {
         crate::metrics::set_sink(Some(capture.clone()));
 
         {
-            let _first = ActiveConnection::new();
+            let _first = ActiveConnection::new(None);
         }
         {
-            let _second = ActiveConnection::new();
+            let _second = ActiveConnection::new(None);
         }
 
         let names = capture.names();
@@ -493,6 +505,7 @@ mod tests {
             slot,
             Duration::from_millis(100),
             Duration::from_secs(5),
+            None,
         )
         .await;
         assert_eq!(
@@ -554,6 +567,7 @@ mod tests {
                 slot,
                 Duration::from_millis(100),
                 Duration::from_millis(100),
+                None,
             ),
         )
         .await
@@ -618,6 +632,7 @@ mod tests {
             slot,
             Duration::from_secs(5),
             Duration::from_millis(100),
+            None,
         )
         .await
     }

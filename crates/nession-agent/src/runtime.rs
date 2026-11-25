@@ -79,6 +79,15 @@ pub async fn run(
     config.apply_env_overrides()?;
     config.validate()?;
 
+    // Hard process-wide outbound ceilings for the peer-to-peer connections
+    // (#4504), derived from their class limits over a bounded connection count.
+    nession_runtime::outbound::ProcessAccounting::install(
+        nession_runtime::outbound::ProcessLimits::for_connections(
+            crate::server::outbound::P2P_CLASS_LIMITS,
+            64,
+        ),
+    );
+
     // 1. Initialize logging (stdout + file)
     let _log_guard = nession_common::logging::init_logging(
         &config.logging,

@@ -29,6 +29,13 @@ run(({ evidence }) => {
   for (const test of RUNTIME_LIB) {
     assertRan(crateTests('nession-runtime', ['--lib', test], 600_000), [test]);
   }
+  // The runtime/peer/transport attribution invariant (#4437 SC-02). The emit
+  // path is a lane and an outbound at a connection owner; the test asserts the
+  // emitted labels carry the identity rather than the process default.
+  assertRan(
+    crateTests('nession-runtime', ['--test', 'metric_identity'], 600_000),
+    ['lane_metrics_carry_the_connection_identity'],
+  );
   for (const test of SERVER_LIB) {
     assertRan(crateTests('nession-server', ['--lib', test], 600_000), [test]);
   }
@@ -40,7 +47,9 @@ run(({ evidence }) => {
     value:
       sha +
       ': the mixed-load baseline settled with owner-emitted admission/outbound/task/duration ' +
-      'counters and gauges; bounded labels, dashboard/catalog agreement, stalled-collector drops, ' +
+      'counters and gauges; emitted samples carry the runtime/peer/transport identity of the ' +
+      'connection that owns the emit site; bounded labels, dashboard/catalog agreement, ' +
+      'stalled-collector drops, ' +
       'write-timeout and settlement reasons, reconnect attempts/active, lane refusal, broker ' +
       'outcomes and stream coalescence all held',
   });
