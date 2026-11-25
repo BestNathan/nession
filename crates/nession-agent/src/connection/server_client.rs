@@ -1191,17 +1191,17 @@ impl ServerClient {
                 response = responses_rx.recv() => {
                     match response {
                         Some(frame) => {
-                            // The exact byte claim is released after the write,
-                            // not when the frame was handed over.
-                            let nession_runtime::outbound::QueuedFrame {
-                                message, budget, ..
-                            } = frame;
+                            // Every claim is released after the write, not when
+                            // the frame was handed over: an in-flight frame
+                            // counts against the class and process bounds
+                            // (#4434).
+                            let (message, charge) = frame.into_write_parts();
                             let written = tokio::time::timeout(
                                 write_timeouts.write,
                                 sink.send(message.into_tungstenite()),
                             )
                             .await;
-                            drop(budget);
+                            drop(charge);
                             match written {
                                 Ok(Ok(())) => {}
                                 Ok(Err(e)) => {

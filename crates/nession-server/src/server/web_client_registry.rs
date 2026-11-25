@@ -37,6 +37,41 @@ pub const GIT_INVALIDATED: &str = "agent.git.invalidated";
 /// a client that missed a push re-reads `server.image.build.get|list`.
 pub const IMAGE_BUILD_UPDATED: &str = "server.image.build.updated";
 
+/// The connection's ownership of one broadcast forwarder task.
+///
+/// Dropping it aborts the task, so an ordinary teardown settles the subscriber
+/// immediately even when no further broadcast ever arrives.
+pub struct WebClientSubscription {
+    handle: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl WebClientSubscription {
+    /// Stop forwarding now (idempotent; `Drop` does the same).
+    pub fn stop(&self) {
+        if let Some(handle) = &self.handle {
+            handle.abort();
+        }
+    }
+
+    /// Stop and wait until the forwarder is actually gone.
+    ///
+    /// The async teardown path and the regression test use this when the
+    /// *absence* of the task is the assertion; the sync `stop`/`Drop` is
+    /// enough for an ordinary connection teardown.
+    pub async fn stop_and_wait(mut self) {
+        self.stop();
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.await;
+        }
+    }
+}
+
+impl Drop for WebClientSubscription {
+    fn drop(&mut self) {
+        self.stop();
+    }
+}
+
 /// Shared broadcast channel for agent state pushes. A single sender is held
 /// by the server; every web-client connection spawns a relay task that
 /// forwards each broadcast to its own `WsMessageSender`.
@@ -65,9 +100,17 @@ impl WebClientRegistry {
     /// existing semantic one hop earlier, so a client that has stopped draining
     /// is skipped rather than waited for. See
     /// `outbound::WsMessageSender::try_send_broadcast`.
-    pub fn subscribe(&self, sender: WsMessageSender) {
+    ///
+    /// The returned [`WebClientSubscription`] **owns** the forwarder: the
+    /// connection keeps it for its lifetime and dropping it aborts the task,
+    /// releasing the sender clone. Without that owner the task outlived an
+    /// idle teardown (it only exits on a later broadcast or a closed queue),
+    /// leaking one task and one retained queue per disconnected browser
+    /// (#4434).
+    #[must_use]
+    pub fn subscribe(&self, sender: WsMessageSender) -> WebClientSubscription {
         let mut rx = self.tx.subscribe();
-        tokio::spawn(async move {
+        let handle = tokio::spawn(async move {
             loop {
                 match rx.recv().await {
                     Ok(json) => {
@@ -99,6 +142,9 @@ impl WebClientRegistry {
             "WebClientRegistry: new subscriber (total capacity: {})",
             self.tx.len()
         );
+        WebClientSubscription {
+            handle: Some(handle),
+        }
     }
 
     /// Push a `server.agents.changed` JSON payload to all connected web clients.
@@ -298,7 +344,7 @@ mod tests {
     async fn broadcast_sessions_changed_reaches_subscriber() {
         let registry = WebClientRegistry::new();
         let (sender, mut rx) = WsMessageSender::new();
-        registry.subscribe(sender);
+        let _subscription = registry.subscribe(sender);
 
         let sessions = new_session_registry().await;
         sessions.update_session(make_session("a1", "s1", 1)).await;
@@ -332,7 +378,7 @@ mod tests {
     async fn broadcast_sessions_changed_pushes_empty_list() {
         let registry = WebClientRegistry::new();
         let (sender, mut rx) = WsMessageSender::new();
-        registry.subscribe(sender);
+        let _subscription = registry.subscribe(sender);
 
         registry
             .broadcast_sessions_changed(
@@ -350,6 +396,34 @@ mod tests {
 
         assert_eq!(parsed["msg_type"], SESSIONS_CHANGED);
         assert!(parsed["payload"]["sessions"].as_array().unwrap().is_empty());
+    }
+
+    /// #4434: the connection owns its forwarder. Dropping the subscription
+    /// ends the task even when no further broadcast arrives — the leak was an
+    /// idle teardown with nothing left to wake the parked `recv`.
+    #[tokio::test]
+    async fn dropping_the_subscription_stops_the_forwarder_without_a_broadcast() {
+        let registry = WebClientRegistry::new();
+        let (sender, mut rx) = WsMessageSender::new();
+        let subscription = registry.subscribe(sender);
+
+        registry.broadcast("first".to_string());
+        tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("the subscriber never forwarded the first broadcast")
+            .expect("the sender closed before the broadcast");
+
+        subscription.stop_and_wait().await;
+        // No broadcast follows. A forwarder that only exits on the next push
+        // (or a closed queue) would stay parked here forever.
+        registry.broadcast("second".to_string());
+        match tokio::time::timeout(std::time::Duration::from_millis(300), rx.recv()).await {
+            // Still open, but nothing routed: the task is gone.
+            Err(_) => {}
+            // The dropped task released the queue.
+            Ok(None) => {}
+            Ok(Some(_)) => panic!("the forwarder outlived its subscription"),
+        }
     }
 
     /// Broadcasting with nobody listening must not panic or error — the server
