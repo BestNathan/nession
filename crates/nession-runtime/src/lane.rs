@@ -865,8 +865,14 @@ where
         let mut work = Some(work);
         let spawn = {
             let mut queues = self.inner.queues.lock().await;
-            let queue = queues.entry(key.clone()).or_default();
-            if queue.pending.len() >= self.inner.depth {
+            // Refuse before creating the key's entry. `entry().or_default()` on
+            // a key that is then refused would leave an empty queue behind for
+            // good: the map would grow with every refused key and `drain()`
+            // would wait on a key nothing can ever fill (#4433).
+            if queues
+                .get(&key)
+                .is_some_and(|queue| queue.pending.len() >= self.inner.depth)
+            {
                 self.inner.refused.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_admission_refused",
@@ -880,7 +886,10 @@ where
                 );
                 return Err(AdmitError::Saturated);
             }
-            let needs_worker = !queue.worker;
+            let needs_worker = match queues.get(&key) {
+                Some(queue) => !queue.worker,
+                None => true,
+            };
             let permit = match (&self.inner.budget, needs_worker) {
                 (Some(budget), true) => match Arc::clone(&budget.permits).try_acquire_owned() {
                     Ok(permit) => Some(permit),
@@ -905,6 +914,7 @@ where
             let Some(queued) = work.take() else {
                 return Ok(());
             };
+            let queue = queues.entry(key.clone()).or_default();
             queue.pending.push_back(queued);
             if needs_worker {
                 queue.worker = true;
@@ -2003,6 +2013,59 @@ mod tests {
     /// The two that are running are parked, so the third cannot be admitted by
     /// anything but a permit being freed. The bounded window is the negative half
     /// and is safe in that direction.
+    /// #4433: a worker-budget refusal must not leave an empty key behind.
+    ///
+    /// `try_enqueue` used to insert the key's queue before checking the budget,
+    /// so a refused *new* key left an empty queue that nothing removed: the map
+    /// grew with every refusal and `drain()` waited on a key that could never be
+    /// filled. Refusal now happens before the entry exists.
+    #[tokio::test]
+    async fn a_budget_refusal_does_not_create_a_phantom_key() {
+        let mut lane = KeyedLane::with_worker_budget(8, 1, "phantom");
+        let held = gate();
+        let started = Arc::new(AtomicUsize::new(0));
+        let work = {
+            let started = Arc::clone(&started);
+            let held = Arc::clone(&held);
+            Box::pin(async move {
+                started.fetch_add(1, Ordering::SeqCst);
+                pass(&held).await;
+            }) as Work
+        };
+
+        within_patience("the budgeted worker never started", async {
+            lane.try_enqueue(session("busy"), work)
+                .await
+                .expect("the first key fits the budget");
+            assert_eq!(lane.snapshot().await.started, 1);
+        })
+        .await;
+
+        // The budget is spent by `busy`; a *new* key cannot get a worker.
+        assert_eq!(
+            lane.try_enqueue(session("refused"), nothing()).await,
+            Err(AdmitError::Saturated)
+        );
+        assert_eq!(
+            lane.snapshot().await.keys,
+            1,
+            "a refused key left an empty queue behind"
+        );
+
+        held.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(5), lane.drain())
+            .await
+            .expect("drain waited forever on a phantom key");
+
+        // The lane still admits after the budget frees.
+        lane.try_enqueue(session("later"), nothing())
+            .await
+            .expect("the lane no longer admits after a previous refusal");
+        tokio::time::timeout(Duration::from_secs(5), lane.drain())
+            .await
+            .expect("the post-refusal key never settled");
+    }
+
     #[tokio::test]
     async fn only_so_many_resources_are_mutated_at_once() {
         let budget = 2;
