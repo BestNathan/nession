@@ -20,10 +20,14 @@ function onlyKeys(value, allowed, label) {
 }
 
 // The obligation is the frozen, sorted identity of the checks that MUST reach
-// a terminal result for this exact HEAD. Proven not-applicable checks are
-// excluded; an unknown applicability is retained (fail closed).
-export function freezeCiObligation({ head_sha, checks }) {
+// a terminal result for this exact PR HEAD/base. Proven not-applicable checks
+// are excluded; an unknown applicability is retained (fail closed). The
+// declarations come from trusted policy owners (server-side required-check
+// policy + Quality/E2E/Case applicability); this module never infers a check
+// catalog from observed check-runs.
+export function freezeCiObligation({ head_sha, base_sha = null, checks }) {
   if (!SHA40.test(head_sha ?? '')) reject('invalid obligation HEAD');
+  if (base_sha != null && !SHA40.test(base_sha)) reject('invalid obligation base');
   if (!Array.isArray(checks) || checks.length < 1 || checks.length > 128) {
     reject('invalid obligation checks');
   }
@@ -31,13 +35,21 @@ export function freezeCiObligation({ head_sha, checks }) {
   const eligible = [];
   for (const check of checks) {
     onlyKeys(check, ['name', 'workflow', 'applicability', 'category', 'source_run_id',
-      'source_attempt', 'required'], 'obligation check');
+      'source_attempt', 'required', 'allow_neutral', 'run_path',
+      'producer_app_slug'], 'obligation check');
     if (typeof check.name !== 'string' || check.name.length < 1 || check.name.length > 200 ||
         typeof check.workflow !== 'string' || check.workflow.length < 1 ||
         check.workflow.length > 200 ||
         !['applicable', 'not_applicable', 'unknown'].includes(check.applicability) ||
         !['source', 'infrastructure'].includes(check.category) ||
-        typeof check.required !== 'boolean') {
+        typeof check.required !== 'boolean' ||
+        (check.allow_neutral != null && typeof check.allow_neutral !== 'boolean') ||
+        (check.run_path != null &&
+         (typeof check.run_path !== 'string' || check.run_path.length < 1 ||
+          check.run_path.length > 200 || check.run_path.startsWith('/') ||
+          check.run_path.includes('..'))) ||
+        (check.producer_app_slug != null &&
+         !/^[a-z0-9-]{1,40}$/.test(check.producer_app_slug))) {
       reject('invalid obligation check');
     }
     if (!check.required) continue;
@@ -50,6 +62,9 @@ export function freezeCiObligation({ head_sha, checks }) {
       workflow: check.workflow,
       applicability: check.applicability,
       category: check.category,
+      allow_neutral: check.allow_neutral === true,
+      run_path: check.run_path ?? null,
+      producer_app_slug: check.producer_app_slug ?? null,
     });
   }
   if (!eligible.length) reject('empty applicable CI obligation');
@@ -57,7 +72,10 @@ export function freezeCiObligation({ head_sha, checks }) {
     (a.workflow + '\u0000' + a.name).localeCompare(b.workflow + '\u0000' + b.name));
   return {
     head_sha,
-    obligation_sha256: stableDigest(['agent-workflow-v2-ci-obligation', head_sha, eligible]),
+    base_sha,
+    obligation_sha256: stableDigest([
+      'agent-workflow-v2-ci-obligation', head_sha, base_sha, eligible,
+    ]),
     checks: eligible,
   };
 }
@@ -116,8 +134,12 @@ export function classifyCiResults({ obligation, head_sha, results, observed_at }
                conclusion === 'skipped') {
       // `skipped` is accepted ONLY because the obligation excluded proven
       // not-applicable checks; an applicable required job that skipped is
-      // rejected below.
-      if (conclusion === 'skipped' && required.applicability !== 'not_applicable') missing = true;
+      // rejected below. `neutral` is a pass only when the canonical required
+      // check policy declares neutral acceptable for this context.
+      if (conclusion === 'skipped' && required.applicability !== 'not_applicable') {
+        missing = true;
+      }
+      if (conclusion === 'neutral' && required.allow_neutral !== true) missing = true;
     } else {
       missing = true;
     }
