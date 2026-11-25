@@ -1,0 +1,26 @@
+# Independent production standalone MCP pilot (#4529).
+# Activate only after production inbound SealedSecret is published and
+# the candidate image manifest and origin TLS/routing are verified.
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: nession-mcp-production
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/BestNathan/nession.git
+    targetRevision: gitops
+    path: environments/production/mcp
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: nession
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=false
+      - FailOnSharedResource=true
