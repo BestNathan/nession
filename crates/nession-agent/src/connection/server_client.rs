@@ -77,7 +77,12 @@ use crate::connection::outbox::{Outbox, OutboxFrames};
 use crate::connection::sync_intent::{SyncIntent, SyncToken};
 // The lanes' boxed work is the shared type: the lane that carries it knows
 // nothing about this connection, which is the point of `nession-runtime`.
-use nession_runtime::lane::Work;
+use nession_runtime::frame::WsFrame;
+use nession_runtime::lane::{AdmitError, Work};
+use nession_runtime::lifecycle::{CloseReason, ConnectionLifecycle, WriteTimeouts};
+use nession_runtime::outbound::{
+    ClassLimits, ClassifiedLimits, FrameClass, Outbound, OutboundReceiver, SubmitOutcome,
+};
 // The three policies by name, because the `core_routes!` invocation at the
 // bottom of this file declares one per unit and the names are the column there.
 use crate::connection::execution::ExecutionPolicy::{Inline, Key, Query};
@@ -126,6 +131,107 @@ const DEFAULT_CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(10);
 /// memory. At the extension contracts' 1 MiB read cap that is 32 MiB of frames
 /// rather than the unbounded channel's "as much as the Server can ask for".
 const AGENT_RESPONSE_QUEUE_SLOTS: usize = 32;
+
+/// The response queue's byte budget (`#4434`).
+///
+/// The old queue bounded only the frame *count*, so 32 extension reads at the
+/// 1 MiB contract cap were 32 MiB of frames — the count bounded nothing a memory
+/// budget cares about. Bytes and frames are both enforced here, by the same
+/// classified queue the sockets use, and the response class is separate from
+/// control so a pong never waits behind a large answer.
+const AGENT_RESPONSE_BYTE_BUDGET: usize = 2 * 1024 * 1024;
+
+/// The central connection's response/control class bounds.
+const CENTRAL_CLASS_LIMITS: ClassifiedLimits = ClassifiedLimits {
+    control: ClassLimits {
+        bytes: 256 * 1024,
+        frames: 8,
+    },
+    response: ClassLimits {
+        bytes: AGENT_RESPONSE_BYTE_BUDGET,
+        frames: AGENT_RESPONSE_QUEUE_SLOTS,
+    },
+    // The central connection's business stream rides the coalescing outbox,
+    // not this queue; the class exists so the shared type is complete.
+    stream: ClassLimits {
+        bytes: 256 * 1024,
+        frames: 4,
+    },
+};
+
+/// The writing half's reply lane: one bounded, byte-accounted queue shared by
+/// every handler task, drained only by [`ServerClient::run_connection`].
+///
+/// A reply waits for room until the connection closes; a pong is control and
+/// never waits. This is the same mechanism as the sockets' classified queue, so
+/// the central connection's process-wide accounting is part of the same total.
+#[derive(Clone)]
+pub(crate) struct ResponseSender {
+    queue: Outbound,
+}
+
+impl ResponseSender {
+    fn channel() -> (Self, OutboundReceiver) {
+        let (queue, rx) = Outbound::new(
+            "central responses",
+            CENTRAL_CLASS_LIMITS,
+            Duration::from_secs(15),
+        );
+        (Self { queue }, rx)
+    }
+
+    /// Queue one command response. Waits for room; never silently drops.
+    pub(crate) async fn send(&self, message: WsMessage) -> Result<()> {
+        let Some(frame) = WsFrame::from_tungstenite(message) else {
+            return Err(anyhow::anyhow!(
+                "a raw tungstenite frame cannot be sent as a response"
+            ));
+        };
+        self.queue
+            .send_reply(frame)
+            .await
+            .map_err(|error| anyhow::anyhow!("the response queue is closed: {error}"))
+    }
+
+    /// Queue one command response **without waiting** (`#4433`'s explicit
+    /// overload outcome).
+    ///
+    /// The reader answers a refused request through this. It must not park the
+    /// reader on the very queue that is already behind: if the response class
+    /// has no room, the refusal cannot be delivered and the caller ends the
+    /// connection.
+    pub(crate) fn try_send(&self, message: WsMessage) -> Result<()> {
+        let Some(frame) = WsFrame::from_tungstenite(message) else {
+            return Err(anyhow::anyhow!(
+                "a raw tungstenite frame cannot be sent as a response"
+            ));
+        };
+        match self.queue.try_submit(FrameClass::Response, frame) {
+            SubmitOutcome::Accepted => Ok(()),
+            SubmitOutcome::Refused(error) => Err(anyhow::anyhow!(
+                "the response queue refused the overload reply: {error}"
+            )),
+            SubmitOutcome::Closed => Err(anyhow::anyhow!("the response queue is closed")),
+        }
+    }
+
+    /// Queue one control frame (a pong), without waiting.
+    pub(crate) fn send_control(&self, message: WsMessage) -> Result<()> {
+        let Some(frame) = WsFrame::from_tungstenite(message) else {
+            return Err(anyhow::anyhow!(
+                "a raw tungstenite frame cannot be sent as a control frame"
+            ));
+        };
+        self.queue
+            .send_control(frame)
+            .map_err(|error| anyhow::anyhow!("the control queue is closed: {error}"))
+    }
+
+    #[cfg(test)]
+    fn test_channel() -> (Self, OutboundReceiver) {
+        Self::channel()
+    }
+}
 
 /// Message type constants for agent-to-server protocol.
 pub mod msg_types {
@@ -1009,17 +1115,28 @@ impl ServerClient {
         // those never parks anybody. What is *gone* is the case the unbounded
         // channel actually existed for — an agent whose Server stopped reading
         // growing its heap for as long as the Server stayed away.
-        let (resp_tx, mut resp_rx) = mpsc::channel::<WsMessage>(AGENT_RESPONSE_QUEUE_SLOTS);
+        // The reply queue is the same classified, byte-accounted mechanism as
+        // the sockets' (`#4434`): the old channel bounded only 32 frames, so a
+        // Server could make the agent hold 32 MiB of 1 MiB reads. Control (the
+        // pong lane) has its own reserved capacity.
+        let (responses, mut responses_rx) = ResponseSender::channel();
+
+        // One verdict per connection, shared with the reading half. A write
+        // deadline, a socket error or a normal end settles it exactly once.
+        let lifecycle = ConnectionLifecycle::new(1);
+        let write_timeouts = WriteTimeouts::default();
 
         // The reading half, and the signal that says how it ended. A channel
         // rather than joining the handle here: the handle is only needed to
         // *stop* a reader that is parked, and a `JoinHandle` polled after it has
         // completed panics.
         let (read_done_tx, mut read_done_rx) = mpsc::channel::<ConnectionOutcome>(1);
-        let reader = tokio::spawn(
-            self.clone()
-                .read_loop(stream, resp_tx.clone(), read_done_tx),
-        );
+        let reader = tokio::spawn(self.clone().read_loop(
+            stream,
+            responses.clone(),
+            read_done_tx,
+            Arc::clone(&lifecycle),
+        ));
 
         let outcome = loop {
             tokio::select! {
@@ -1033,9 +1150,23 @@ impl ServerClient {
                 outgoing = outbox_rx.next() => {
                     match outgoing {
                         Some(msg) => {
-                            if let Err(e) = sink.send(msg).await {
-                                warn!("Failed to send to server: {:#}", e);
-                                break ConnectionOutcome::Disconnected;
+                            match tokio::time::timeout(write_timeouts.write, sink.send(msg)).await
+                            {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    warn!("Failed to send to server: {:#}", e);
+                                    lifecycle.settle(CloseReason::WriteError);
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "A write to the server did not complete within {:?}; \
+                                         the peer is unhealthy",
+                                        write_timeouts.write
+                                    );
+                                    lifecycle.settle(CloseReason::WriteTimeout);
+                                    break ConnectionOutcome::Disconnected;
+                                }
                             }
                         }
                         None => {
@@ -1046,34 +1177,69 @@ impl ServerClient {
                     }
                 }
                 // Command responses from the reading half's lanes.
-                response = resp_rx.recv() => {
+                response = responses_rx.recv() => {
                     match response {
-                        Some(msg) => {
-                            if let Err(e) = sink.send(msg).await {
-                                warn!("Failed to send to server: {:#}", e);
-                                break ConnectionOutcome::Disconnected;
+                        Some(frame) => {
+                            // The exact byte claim is released after the write,
+                            // not when the frame was handed over.
+                            let nession_runtime::outbound::QueuedFrame {
+                                message, budget, ..
+                            } = frame;
+                            let written = tokio::time::timeout(
+                                write_timeouts.write,
+                                sink.send(message.into_tungstenite()),
+                            )
+                            .await;
+                            drop(budget);
+                            match written {
+                                Ok(Ok(())) => {}
+                                Ok(Err(e)) => {
+                                    warn!("Failed to send to server: {:#}", e);
+                                    lifecycle.settle(CloseReason::WriteError);
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                                Err(_) => {
+                                    lifecycle.settle(CloseReason::WriteTimeout);
+                                    break ConnectionOutcome::Disconnected;
+                                }
                             }
                         }
                         None => {
-                            // Unreachable while this loop holds a `resp_tx` clone;
-                            // kept as a defensive disconnect.
+                            // Unreachable while this loop holds a `responses`
+                            // clone; kept as a defensive disconnect.
                             break ConnectionOutcome::Disconnected;
                         }
                     }
                 }
-                // The reading half ended: its stream closed, or a write to
-                // `resp_tx` failed. Either way this connection is over.
+                // The reading half ended: its stream closed, or the write
+                // deadline settled the connection. Either way it is over.
                 done = read_done_rx.recv() => {
                     break done.unwrap_or(ConnectionOutcome::Disconnected);
                 }
-                // Shutdown: close the socket and stop the supervisor.
+                // Shutdown: close the socket and stop the supervisor. The close
+                // frame is best-effort and bounded; a peer that is not reading
+                // must not hold the supervisor open.
                 _ = shutdown_rx.recv() => {
                     info!("Shutdown signal received");
-                    let _ = sink.send(WsMessage::Close(None)).await;
+                    let _ = tokio::time::timeout(
+                        write_timeouts.close,
+                        sink.send(WsMessage::Close(None)),
+                    )
+                    .await;
                     break ConnectionOutcome::Shutdown;
                 }
             }
         };
+
+        // Record why this connection ended if no write path already did. The
+        // read half can then stop even if it is parked on a frame that will
+        // never arrive.
+        if !lifecycle.is_settled() {
+            lifecycle.settle(match outcome {
+                ConnectionOutcome::Shutdown => CloseReason::Shutdown,
+                ConnectionOutcome::Disconnected => CloseReason::PeerClosed,
+            });
+        }
 
         // Stop the reader, however this ended. It owns the lanes, and a reader
         // parked on a full key's queue would otherwise outlive the connection
@@ -1125,10 +1291,12 @@ impl ServerClient {
 
     /// Read this connection's frames and dispatch them, until the stream ends.
     ///
-    /// The reading half of a live connection, and the only half that may park:
-    /// a lane at its bound is enforced by the reader not reading, which is the
-    /// bound `#961` asks for. It never writes to the socket — answers go to
-    /// `responses`, which `run_connection` drains.
+    /// The reading half of a live connection. It never writes to the socket —
+    /// answers go to `responses`, which `run_connection` drains.
+    ///
+    /// Admission is non-blocking (`#4433`): a lane at its bound is refused
+    /// explicitly and answered `overloaded`, so the reader never parks on a
+    /// business permit and heartbeat/control keep moving.
     ///
     /// The split is what keeps the two regressions this stage exists around
     /// from being traded for one another: dispatch is bounded, and the heartbeat
@@ -1136,8 +1304,9 @@ impl ServerClient {
     async fn read_loop(
         self: Arc<Self>,
         mut stream: WsStreamHalf,
-        responses: mpsc::Sender<WsMessage>,
+        responses: ResponseSender,
         done: mpsc::Sender<ConnectionOutcome>,
+        lifecycle: Arc<ConnectionLifecycle>,
     ) {
         // The lanes this connection reads into, and the only thing that admits
         // to them. Dropped with the loop, which is what ends their tasks.
@@ -1158,7 +1327,15 @@ impl ServerClient {
         );
 
         let outcome = loop {
-            match stream.next().await {
+            // The write half's settlement is a fact this half must act on even
+            // while it is parked on a stream that will never produce another
+            // frame (#4434). Without the race, a stalled write left the reader,
+            // the lanes and the connection task alive until TCP gave up.
+            let next = tokio::select! {
+                _ = lifecycle.wait_cancelled() => break ConnectionOutcome::Disconnected,
+                next = stream.next() => next,
+            };
+            match next {
                 Some(Ok(WsMessage::Text(text))) => {
                     // Decoded here rather than in the task that serves it,
                     // because the unit's execution policy is read from the
@@ -1189,6 +1366,8 @@ impl ServerClient {
                         None => self.extension_policy(&msg),
                     };
 
+                    let reply_wire = msg.msg_type.clone();
+                    let reply_id = msg.id.clone();
                     let this = Arc::clone(&self);
                     let tx = responses.clone();
                     let work: Work = Box::pin(async move {
@@ -1199,8 +1378,40 @@ impl ServerClient {
 
                     match policy {
                         Inline => work.await,
-                        Query => lanes.query(work).await,
-                        Key(key) => lanes.key(key, work).await,
+                        Query => match lanes.try_query(work) {
+                            Ok(()) => {}
+                            Err(AdmitError::Saturated) => {
+                                if responses
+                                    .try_send(WsMessage::Text(overload_message(
+                                        &reply_wire,
+                                        &reply_id,
+                                    )))
+                                    .is_err()
+                                {
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                            }
+                            Err(AdmitError::Closed) => {
+                                break ConnectionOutcome::Disconnected;
+                            }
+                        },
+                        Key(key) => match lanes.try_key(key, work).await {
+                            Ok(()) => {}
+                            Err(AdmitError::Saturated) => {
+                                if responses
+                                    .try_send(WsMessage::Text(overload_message(
+                                        &reply_wire,
+                                        &reply_id,
+                                    )))
+                                    .is_err()
+                                {
+                                    break ConnectionOutcome::Disconnected;
+                                }
+                            }
+                            Err(AdmitError::Closed) => {
+                                break ConnectionOutcome::Disconnected;
+                            }
+                        },
                     }
                 }
                 Some(Ok(WsMessage::Ping(data))) => {
@@ -1210,7 +1421,9 @@ impl ServerClient {
                     // ordinary operation is empty — a full one means the
                     // Server is not draining, and a pong it is not reading
                     // would not have kept the connection alive either.
-                    if responses.send(WsMessage::Pong(data)).await.is_err() {
+                    // Control has its own reserved capacity, so a pong never
+                    // waits behind a large response.
+                    if responses.send_control(WsMessage::Pong(data)).is_err() {
                         break ConnectionOutcome::Disconnected;
                     }
                 }
@@ -1268,7 +1481,7 @@ impl ServerClient {
     async fn handle_server_message(
         &self,
         msg: ProtocolMessage<serde_json::Value>,
-        responses: &mpsc::Sender<WsMessage>,
+        responses: &ResponseSender,
     ) -> Result<()> {
         // Extension dispatch first, decided by the registry rather than by the
         // message type's spelling.
@@ -4032,6 +4245,46 @@ esac"#,
         responses
     }
 
+    /// Collect command outcomes **and** explicit overload answers in one pass.
+    ///
+    /// `responses_within` deliberately filters to command responses; an
+    /// overload answer travels under the request's own wire name (`#4433`), so
+    /// it needs its own counter. Reading both in one pass is what keeps the
+    /// overloads from being discarded while the test waits for the blocked
+    /// commands to finish.
+    async fn collect_outcomes(
+        msg_rx: &mut mpsc::Receiver<String>,
+        responses_expected: usize,
+        overloads_expected: usize,
+        within: Duration,
+    ) -> (Vec<serde_json::Value>, usize) {
+        let mut responses = Vec::new();
+        let mut overloaded = 0;
+        let deadline = std::time::Instant::now() + within;
+        while responses.len() < responses_expected || overloaded < overloads_expected {
+            let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+            assert!(
+                !remaining.is_zero(),
+                "only {} response(s) and {overloaded} overload(s) arrived",
+                responses.len()
+            );
+            if let Ok(Some(text)) =
+                tokio::time::timeout(remaining.min(Duration::from_millis(200)), msg_rx.recv()).await
+            {
+                let parsed: serde_json::Value =
+                    serde_json::from_str(&text).expect("the agent sends JSON");
+                if parsed.get("msg_type").and_then(|v| v.as_str())
+                    == Some("server.agent.command-response")
+                {
+                    responses.push(parsed);
+                } else if parsed["payload"]["error"] == "overloaded" {
+                    overloaded += 1;
+                }
+            }
+        }
+        (responses, overloaded)
+    }
+
     /// A `ServerClient` connected to the mock server, using `tmux`.
     async fn connected_client(
         addr: std::net::SocketAddr,
@@ -4190,13 +4443,14 @@ esac"#,
     /// lane from a `tokio::spawn`. Stage A's own note on this test said exactly
     /// that the number moves only if the bound is above it.
     ///
-    /// The three phases are the whole policy: the lane fills (positive), a
-    /// twelfth command does not start while it is full (the bound), and
-    /// releasing it lets every remaining command through, each answering its own
-    /// request (a bound that drops would show up as a missing id).
+    /// The three phases are the whole policy: the lane fills (positive), the
+    /// commands that exceed it are **refused explicitly** rather than waiting in
+    /// the reader (`#4433`), and releasing the lane lets no refused command run
+    /// later. The refusal is visible: every excess command gets an `overloaded`
+    /// answer, so a bound that silently dropped would show up as a missing reply.
     #[cfg(unix)]
     #[tokio::test]
-    async fn the_central_connection_holds_at_its_bound_and_then_drains() {
+    async fn the_central_connection_refuses_past_its_bound_and_drains() {
         const CONCURRENT_COMMANDS: usize = 12;
         let bound = crate::connection::execution::DEFAULT_QUERY_CONCURRENCY;
 
@@ -4216,8 +4470,8 @@ esac"#,
             "the lane did not fill: {started} of {bound} commands ran"
         );
 
-        // The bound is what the reader waits on: the command that would exceed
-        // it is not read, so no twelfth invocation can exist.
+        // The bound is what the reader refuses on: a command that would exceed
+        // it is not admitted, and it does not run later when the lane frees.
         let started = tmux
             .started_within(CONCURRENT_COMMANDS, Duration::from_millis(500))
             .await;
@@ -4232,13 +4486,23 @@ esac"#,
             .started_within(CONCURRENT_COMMANDS, Duration::from_secs(15))
             .await;
         assert_eq!(
-            started, CONCURRENT_COMMANDS,
-            "only {started} of {CONCURRENT_COMMANDS} commands ever ran: the bound \
-             turned into a loss rather than a delay"
+            started, bound,
+            "{started} of {CONCURRENT_COMMANDS} commands ever ran: a refused request \
+             was admitted later instead of being answered `overloaded`"
         );
 
-        let responses =
-            collect_responses(&mut msg_rx, CONCURRENT_COMMANDS, Duration::from_secs(20)).await;
+        let (responses, overloaded) = collect_outcomes(
+            &mut msg_rx,
+            bound,
+            CONCURRENT_COMMANDS - bound,
+            Duration::from_secs(20),
+        )
+        .await;
+        assert_eq!(
+            overloaded,
+            CONCURRENT_COMMANDS - bound,
+            "the refused commands were not all answered explicitly"
+        );
         let mut answered: Vec<&str> = responses
             .iter()
             .filter_map(|r| r["payload"]["request_id"].as_str())
@@ -4248,9 +4512,7 @@ esac"#,
         // numeric: `req-10` sorts before `req-2`, and comparing a sorted list
         // against an unsorted one would fail on the ordering of the *test's*
         // own generator rather than on anything the agent did.
-        let mut expected: Vec<String> = (0..CONCURRENT_COMMANDS)
-            .map(|n| format!("req-{n}"))
-            .collect();
+        let mut expected: Vec<String> = (0..bound).map(|n| format!("req-{n}")).collect();
         expected.sort_unstable();
         assert_eq!(
             answered,
@@ -4433,6 +4695,22 @@ fn env_file_by_name(payload: &serde_json::Value) -> ResourceKey {
 /// descriptor, and a descriptor is an offer this agent would be making — so the
 /// reader reads the category here, beside the constants that name it, rather
 /// than adding a column for something that is not a unit.
+/// The explicit overload reply for a request refused before admission
+/// (`#4433`). Additive `overloaded` outcome on the existing envelope shape,
+/// correlated by the request's own wire and `id`.
+fn overload_message(wire: &str, id: &str) -> String {
+    serde_json::json!({
+        "msg_type": wire,
+        "id": id,
+        "timestamp": chrono::Utc::now().timestamp().unsigned_abs(),
+        "payload": {
+            "error": "overloaded",
+            "message": "the connection is at its execution bound; retry after in-flight work completes",
+        },
+    })
+    .to_string()
+}
+
 fn is_control(wire: &str) -> bool {
     matches!(
         wire,
@@ -5962,7 +6240,7 @@ mod versioned_routing {
     /// Which body ran, as the error it returned.
     async fn ran(payload: serde_json::Value) -> String {
         let client = unconnected_client();
-        let (responses, _rx) = mpsc::channel(1);
+        let (responses, _rx) = ResponseSender::test_channel();
         dispatch_core(&client, &message(payload), &responses)
             .await
             .expect_err("the synthetic bodies answer with an error so the arm is visible")
@@ -6057,7 +6335,7 @@ mod versioned_routing {
         // run an arm either, or a message written for a generation this table
         // has never heard of would be handled as whichever arm matched first.
         let client = unconnected_client();
-        let (responses, _rx) = mpsc::channel(1);
+        let (responses, _rx) = ResponseSender::test_channel();
         let outcome = dispatch_core(
             &client,
             &message(serde_json::json!({ "contract_version": 99 })),

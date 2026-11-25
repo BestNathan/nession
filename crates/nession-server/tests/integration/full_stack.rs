@@ -1116,7 +1116,15 @@ async fn test_client_sessions_list_returns_sessions() {
     .await
     .unwrap();
 
-    let resp: serde_json::Value = serde_json::from_str(&recv_text(&mut client_ws).await).unwrap();
+    // A session-list push is a different frame and may interleave with the
+    // reply; replies correlate by id, so wait for this request's answer.
+    let resp: serde_json::Value = loop {
+        let raw = recv_text(&mut client_ws).await;
+        let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+        if parsed["msg_type"].as_str() == Some("server.session.list") {
+            break parsed;
+        }
+    };
     let sessions = resp["payload"]["sessions"].as_array().unwrap();
     assert!(!sessions.is_empty());
     assert_eq!(sessions[0]["session_id"], "sess-agent:my-sess");

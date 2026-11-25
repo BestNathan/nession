@@ -28,5 +28,10 @@ tokio-rustls.workspace = true
 tokio-tungstenite.workspace = true
 tracing.workspace = true
 
+[dev-dependencies]
+# The dashboard test validates the versioned definitions against the metric
+# catalog; no production path parses JSON.
+serde_json.workspace = true
+
 [lints]
 workspace = true

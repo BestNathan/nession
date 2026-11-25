@@ -6,11 +6,19 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use nession_protocol::contracts::terminal::v1::TerminalStreamEventPayload;
+use nession_runtime::metrics::{self, Direction, Domain, Labels, ResultKind};
 
-const DEFAULT_STREAM_EVENTS: usize = 4096;
+use crate::stream::{
+    StreamOverflow, INPUT_WINDOW, RUNTIME_RETENTION_BYTES, RUNTIME_RETENTION_EVENTS,
+};
+
+/// The replay ring's bounds are owned by the stream domain so the three
+/// budgets (per-stream window, per-runtime retention, RPC permits) are stated
+/// in one place (#4435).
+const DEFAULT_STREAM_EVENTS: usize = RUNTIME_RETENTION_EVENTS;
 /// A session cannot retain 4096 arbitrarily large base64 output chunks.
-const DEFAULT_STREAM_BYTES: usize = 512 * 1024;
-const DEFAULT_STREAM_AGE: Duration = Duration::from_secs(300);
+const DEFAULT_STREAM_BYTES: usize = RUNTIME_RETENTION_BYTES;
+const DEFAULT_STREAM_AGE: Duration = Duration::from_secs(crate::stream::RUNTIME_RETENTION_AGE_SECS);
 
 /// Hands out an epoch no client can already be holding.
 ///
@@ -350,6 +358,29 @@ impl SessionInputState {
         }
     }
 
+    /// Classify a frame **and** admit it against this stream's finite window.
+    ///
+    /// The window is the sender's unacknowledged run, mirroring the browser's
+    /// measured `PendingInputQueue` (128 chunks / 1 MiB). It is checked here,
+    /// before any backend write, so a frame that would reach too far ahead or
+    /// carry too many bytes is refused explicitly instead of silently dropped,
+    /// written partially, or trusted to an unbounded allocation.
+    ///
+    /// Only an `Apply` frame consumes the window: a duplicate, gap or stale
+    /// epoch writes nothing, so its size cannot overflow a budget it does not
+    /// use. The cursor is untouched by a refusal, which is what lets the sender
+    /// resume from the restated position using the existing sequence/ACK
+    /// semantics.
+    pub fn admit(
+        &self,
+        sequence: InputSequence,
+        bytes: usize,
+    ) -> Result<InputVerdict, StreamOverflow> {
+        let verdict = self.classify(sequence);
+        admit_run(verdict, self.applied_through, bytes)?;
+        Ok(verdict)
+    }
+
     /// Move the cursor, after the bytes it accounts for are on their way.
     ///
     /// `max` rather than assignment so that a late advance from a frame the
@@ -359,6 +390,28 @@ impl SessionInputState {
     pub fn applied(&mut self, through: u64) {
         self.applied_through = self.applied_through.max(through);
     }
+}
+
+/// Check the finite input window for a verdict already decided by the cursor.
+///
+/// Split from [`SessionInputState::admit`] so the registry can decode a bounded
+/// frame outside the Session lock and still state a refusal with the same
+/// arithmetic.
+pub fn admit_run(
+    verdict: InputVerdict,
+    applied_through: u64,
+    bytes: usize,
+) -> Result<(), StreamOverflow> {
+    let requested_bytes = u64::try_from(bytes).unwrap_or(u64::MAX);
+    let requested_frames = match verdict {
+        // A sequenced frame claims `seq_start..=seq_end`; the run it adds
+        // ahead of the cursor is that range's length.
+        InputVerdict::Apply { through } => through.saturating_sub(applied_through).max(1),
+        // A duplicate, gap or stale epoch writes nothing, so it cannot
+        // overflow a window it does not use.
+        InputVerdict::Duplicate | InputVerdict::Gap | InputVerdict::StaleEpoch => return Ok(()),
+    };
+    INPUT_WINDOW.try_admit(0, 0, requested_frames, requested_bytes)
 }
 
 impl Default for SessionInputState {
@@ -512,6 +565,13 @@ impl SessionStreamState {
         // Returning complete=true with no events would falsely synchronize
         // a client holding an impossible/forged resume position.
         if after_seq > self.cursor() {
+            metrics::counter(
+                "ws_stream_replay",
+                Labels::new()
+                    .domain(Domain::Stream)
+                    .direction(Direction::Outbound)
+                    .result(ResultKind::Replay),
+            );
             return Some(StreamReplay {
                 first_available_seq,
                 complete: false,
@@ -527,6 +587,13 @@ impl SessionStreamState {
             })
             .map(|entry| entry.event.clone())
             .collect();
+        metrics::counter(
+            "ws_stream_replay",
+            Labels::new()
+                .domain(Domain::Stream)
+                .direction(Direction::Outbound)
+                .result(ResultKind::Replay),
+        );
         Some(StreamReplay {
             first_available_seq,
             // The ring is contiguous, so the floor is the whole test: every
@@ -1296,6 +1363,102 @@ mod tests {
             "a frame from another epoch must not advance this one's cursor"
         );
         assert_eq!(input.applied_through, 0);
+    }
+
+    /// The finite input window is a *stream* bound: a frame may extend the run
+    /// by up to 128 chunks, and the 129th is refused with the unit stated.
+    ///
+    /// The mutation this pins is checking only classification and letting a
+    /// sender claim an arbitrary range. The Agent would then accept a frame
+    /// whose bytes it cannot account for and advance one cursor over an
+    /// unbounded span.
+    #[test]
+    fn an_input_frame_may_not_claim_beyond_the_finite_stream_window() {
+        let input = SessionInputState::new();
+        let epoch = input.epoch;
+        let at_limit = input
+            .admit(
+                InputSequence::Sequenced {
+                    epoch,
+                    seq_start: 1,
+                    seq_end: 128,
+                },
+                512,
+            )
+            .expect("128 chunks is the window");
+        assert_eq!(at_limit, InputVerdict::Apply { through: 128 });
+
+        let overflow = input
+            .admit(
+                InputSequence::Sequenced {
+                    epoch,
+                    seq_start: 1,
+                    seq_end: 129,
+                },
+                512,
+            )
+            .expect_err("129 chunks reaches past the window");
+        assert_eq!(overflow.unit, crate::stream::WindowUnit::Frames);
+        assert_eq!(overflow.limit, 128);
+        assert_eq!(overflow.requested, 129);
+        // Nothing moved: the sender resumes from the cursor it was given.
+        assert_eq!(input.applied_through, 0);
+    }
+
+    /// The byte bound is independent of the chunk bound and refuses before the
+    /// frame is written.
+    #[test]
+    fn an_input_frame_larger_than_the_byte_window_is_refused() {
+        let input = SessionInputState::new();
+        let epoch = input.epoch;
+        let overflow = input
+            .admit(
+                InputSequence::Sequenced {
+                    epoch,
+                    seq_start: 1,
+                    seq_end: 1,
+                },
+                crate::stream::INPUT_WINDOW_BYTES + 1,
+            )
+            .expect_err("one byte past the window");
+        assert_eq!(overflow.unit, crate::stream::WindowUnit::Bytes);
+        assert_eq!(overflow.limit, crate::stream::INPUT_WINDOW.bytes);
+        assert_eq!(overflow.requested, crate::stream::INPUT_WINDOW.bytes + 1);
+        assert_eq!(input.applied_through, 0);
+    }
+
+    /// A frame that writes nothing cannot overflow a window it does not use.
+    #[test]
+    fn a_duplicate_or_gap_frame_is_not_charged_to_the_input_window() {
+        let mut input = SessionInputState::new();
+        let epoch = input.epoch;
+        input.applied(5);
+        for sequence in [
+            InputSequence::Sequenced {
+                epoch,
+                seq_start: 1,
+                seq_end: 5,
+            },
+            InputSequence::Sequenced {
+                epoch,
+                seq_start: 9,
+                seq_end: 10_000,
+            },
+            InputSequence::Sequenced {
+                epoch: epoch + 1,
+                seq_start: 6,
+                seq_end: 10_000,
+            },
+        ] {
+            let verdict = input
+                .admit(sequence, crate::stream::INPUT_WINDOW_BYTES + 1)
+                .expect("a non-writing verdict is never an overflow");
+            assert!(matches!(
+                verdict,
+                InputVerdict::Duplicate | InputVerdict::Gap | InputVerdict::StaleEpoch
+            ));
+        }
+        assert_eq!(input.applied_through, 5);
     }
 
     /// A sender with no sequence writes, and moves nothing.

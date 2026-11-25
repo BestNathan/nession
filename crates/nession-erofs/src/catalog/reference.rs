@@ -359,6 +359,55 @@ pub async fn tags_for_manifest(
         .collect()
 }
 
+/// The standard OCI `/v2/` repository whose Tag-reachable closure contains one
+/// resolved Manifest (#4250).
+///
+/// The `/v2/` Registry exposes an immutable digest only when a repository's Tags
+/// reach it through descriptor edges (including Index children). This finds the
+/// first such repository in deterministic order so the Server can issue a
+/// repository-scoped `/v2/{repo}/manifests/{digest}` grant. `None` means the
+/// Manifest is not Tag-reachable in any repository — an untagged build or a
+/// digest-only legacy row — and the caller keeps the bounded compatibility route.
+/// This reads the same Tag roots and descriptor edges as the Registry's
+/// reachability fence; it grants no access beyond what `/v2/` already serves.
+pub async fn v2_repository_for_manifest(
+    conn: &impl ConnectionTrait,
+    manifest_digest: &str,
+) -> Result<Option<String>> {
+    if !is_valid_digest(manifest_digest) {
+        anyhow::bail!("invalid catalog object digest {manifest_digest:?}");
+    }
+    // Candidate reachability roots: the Manifest itself and every Index/Manifest
+    // ancestor a Tag might target instead of the Manifest digest.
+    let mut roots = vec![manifest_digest.to_string()];
+    for ancestor in manifest_ancestors(conn, manifest_digest).await? {
+        roots.push(ancestor.digest);
+    }
+    let mut repositories: Vec<String> = Vec::new();
+    for root in &roots {
+        for (repository, _tag) in tags_for_manifest(conn, root).await? {
+            if !repositories.contains(&repository) {
+                repositories.push(repository);
+            }
+        }
+    }
+    repositories.sort();
+    for repository in repositories {
+        let mut tag_roots = Vec::new();
+        for name in super::tag::list_tags(conn, &repository).await? {
+            if let Some(digest) = super::tag::get_tag(conn, &repository, &name).await? {
+                if !tag_roots.contains(&digest) {
+                    tag_roots.push(digest);
+                }
+            }
+        }
+        if reachable(conn, &tag_roots).await?.contains(manifest_digest) {
+            return Ok(Some(repository));
+        }
+    }
+    Ok(None)
+}
+
 /// Live catalog pins for one digest, counted by consumer kind.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PinCounts {
@@ -536,5 +585,101 @@ mod tests {
         let found = reachable(&conn, &roots).await.unwrap();
         assert!(!found.contains(&config.digest));
         assert!(!found.contains(&layer.digest));
+    }
+
+    #[tokio::test]
+    async fn v2_repository_resolves_a_directly_tagged_manifest() {
+        let conn = memory_connection().await;
+        crate::catalog::sqlite::migrate(&conn).await.unwrap();
+        let manifest = object(ObjectKind::Manifest, 'a', 10);
+        record_object(&conn, &manifest, 1).await.unwrap();
+        crate::catalog::tag::set_tag(
+            &conn,
+            "team/app",
+            "v1",
+            &manifest.digest,
+            &crate::catalog::tag::TagExpectation::Absent,
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v2_repository_for_manifest(&conn, &manifest.digest)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("team/app")
+        );
+    }
+
+    #[tokio::test]
+    async fn v2_repository_is_none_for_an_untagged_manifest() {
+        let conn = memory_connection().await;
+        crate::catalog::sqlite::migrate(&conn).await.unwrap();
+        let manifest = object(ObjectKind::Manifest, 'a', 10);
+        record_object(&conn, &manifest, 1).await.unwrap();
+        assert_eq!(
+            v2_repository_for_manifest(&conn, &manifest.digest)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn v2_repository_resolves_a_manifest_through_a_tagged_index() {
+        let conn = memory_connection().await;
+        crate::catalog::sqlite::migrate(&conn).await.unwrap();
+        let index = object(ObjectKind::Index, 'a', 1);
+        let manifest = object(ObjectKind::Manifest, 'b', 1);
+        record_object(&conn, &index, 1).await.unwrap();
+        record_object(&conn, &manifest, 1).await.unwrap();
+        record_reference(&conn, &index.digest, &manifest.digest, "index-child", 1)
+            .await
+            .unwrap();
+        crate::catalog::tag::set_tag(
+            &conn,
+            "team/app",
+            "v1",
+            &index.digest,
+            &crate::catalog::tag::TagExpectation::Absent,
+            1,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            v2_repository_for_manifest(&conn, &manifest.digest)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("team/app")
+        );
+    }
+
+    #[tokio::test]
+    async fn v2_repository_pick_is_deterministic_across_repositories() {
+        let conn = memory_connection().await;
+        crate::catalog::sqlite::migrate(&conn).await.unwrap();
+        let manifest = object(ObjectKind::Manifest, 'a', 10);
+        record_object(&conn, &manifest, 1).await.unwrap();
+        for repository in ["z/repo", "a/repo"] {
+            crate::catalog::tag::set_tag(
+                &conn,
+                repository,
+                "v1",
+                &manifest.digest,
+                &crate::catalog::tag::TagExpectation::Absent,
+                1,
+            )
+            .await
+            .unwrap();
+        }
+        assert_eq!(
+            v2_repository_for_manifest(&conn, &manifest.digest)
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("a/repo")
+        );
     }
 }

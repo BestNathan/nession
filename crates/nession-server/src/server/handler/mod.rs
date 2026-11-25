@@ -710,6 +710,13 @@ impl ConnectionHandler {
                     "agent_command_with_timeout: timeout waiting for agent {} (req: {})",
                     agent_id, request_id
                 );
+                // The caller's deadline is the terminal outcome for this
+                // request: remove the pending entry so a reply that arrives
+                // later is classified as late instead of resolving a request
+                // nobody is waiting for (#4434, SC-03).
+                self.command_broker
+                    .expire_pending(agent_id, &request_id)
+                    .await;
                 Err("Timeout waiting for agent response".to_string())
             }
         }
@@ -1337,6 +1344,28 @@ fn env_list_reply(id: &str, payload: ClientEnvListResponsePayload) -> HandlerAct
         id,
         "server.env.list",
         serde_json::to_value(&payload).unwrap_or(json!({ "files": [] })),
+    )
+}
+
+/// The reply for a request the connection refused **before admission**
+/// (`#4433`).
+///
+/// A new, additive `overloaded` outcome on the existing envelope shape,
+/// correlated by the request's own wire and `id`. The reader sends it on the
+/// reply lane; if that lane is gone the connection is over and the caller
+/// stops rather than leaving the request unanswered.
+pub(crate) fn overload_reply(wire: &str, id: &str) -> WsFrame {
+    WsFrame::Text(
+        json!({
+            "msg_type": wire,
+            "id": id,
+            "timestamp": current_timestamp(),
+            "payload": {
+                "error": "overloaded",
+                "message": "the connection is at its execution bound; retry after in-flight work completes",
+            },
+        })
+        .to_string(),
     )
 }
 

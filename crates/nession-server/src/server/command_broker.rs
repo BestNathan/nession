@@ -1,4 +1,5 @@
 use nession_runtime::frame::WsFrame;
+use nession_runtime::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -62,7 +63,124 @@ struct AgentControl {
     high_water_generation: ConnectionGeneration,
     /// The connection currently serving this agent's control channel, if any.
     active: Option<ActiveControl>,
-    pub pending_commands: HashMap<String, oneshot::Sender<serde_json::Value>>,
+    /// One entry per in-flight request. The generation is the connection that
+    /// inserted it: it is recorded so a late or duplicate reply can be
+    /// attributed, but resolution is by the request id (server-generated UUID),
+    /// which is what makes a reconnect's in-flight command still answerable
+    /// (#743) without letting a late reply touch a different request.
+    pub pending_commands: HashMap<String, PendingCommand>,
+}
+
+/// One pending request and the connection generation that created it.
+struct PendingCommand {
+    generation: ConnectionGeneration,
+    tx: oneshot::Sender<serde_json::Value>,
+}
+
+/// The terminal outcome of a pending request (`#4434`, SC-03).
+///
+/// Every one of these resolves or removes exactly one pending entry; the
+/// broker's counters record which happened, so "the caller timed out" and "the
+/// agent disconnected" are not the same silent event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingOutcome {
+    /// The agent's response arrived and was delivered.
+    Response,
+    /// The caller's own deadline expired; the entry is removed so a later
+    /// reply is classified as late rather than delivered.
+    Timeout,
+    /// The caller cancelled (its connection went away, or it stopped waiting).
+    Cancelled,
+    /// The transport refused the command after it was inserted.
+    DeliveryFailed,
+    /// A second command reused the same request id; the older waiter was
+    /// settled before the new one was inserted.
+    Replaced,
+    /// The agent disconnected; every pending entry settled with this.
+    Disconnected,
+}
+
+impl PendingOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Response => "response",
+            Self::Timeout => "timeout",
+            Self::Cancelled => "cancelled",
+            Self::DeliveryFailed => "delivery-failed",
+            Self::Replaced => "replaced",
+            Self::Disconnected => "disconnected",
+        }
+    }
+}
+
+/// Counters for the pending-request lifecycle. Plain `AtomicU64`s: observed by a
+/// log line or a metric exporter without any dependency on one.
+#[derive(Default)]
+pub struct PendingCounters {
+    inserted: AtomicU64,
+    resolved: AtomicU64,
+    timed_out: AtomicU64,
+    cancelled: AtomicU64,
+    delivery_failed: AtomicU64,
+    replaced: AtomicU64,
+    disconnected: AtomicU64,
+    late: AtomicU64,
+}
+
+/// A point-in-time copy of [`PendingCounters`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct PendingCounterSnapshot {
+    pub inserted: u64,
+    pub resolved: u64,
+    pub timed_out: u64,
+    pub cancelled: u64,
+    pub delivery_failed: u64,
+    pub replaced: u64,
+    pub disconnected: u64,
+    pub late: u64,
+}
+
+impl PendingCounters {
+    fn note(&self, outcome: PendingOutcome) {
+        let counter = match outcome {
+            PendingOutcome::Response => &self.resolved,
+            PendingOutcome::Timeout => &self.timed_out,
+            PendingOutcome::Cancelled => &self.cancelled,
+            PendingOutcome::DeliveryFailed => &self.delivery_failed,
+            PendingOutcome::Replaced => &self.replaced,
+            PendingOutcome::Disconnected => &self.disconnected,
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
+        let (result, reason) = match outcome {
+            PendingOutcome::Response => (ResultKind::Completed, ReasonKind::None),
+            PendingOutcome::Timeout => (ResultKind::Timeout, ReasonKind::None),
+            PendingOutcome::Cancelled => (ResultKind::Cancelled, ReasonKind::None),
+            PendingOutcome::DeliveryFailed => (ResultKind::Failed, ReasonKind::WriteError),
+            PendingOutcome::Replaced => (ResultKind::Failed, ReasonKind::Replacement),
+            PendingOutcome::Disconnected => (ResultKind::Closed, ReasonKind::Disconnect),
+        };
+        metrics::counter(
+            "ws_pending_outcome",
+            Labels::new()
+                .domain(Domain::Control)
+                .direction(Direction::Internal)
+                .result(result)
+                .reason(reason),
+        );
+    }
+
+    pub fn snapshot(&self) -> PendingCounterSnapshot {
+        PendingCounterSnapshot {
+            inserted: self.inserted.load(Ordering::Relaxed),
+            resolved: self.resolved.load(Ordering::Relaxed),
+            timed_out: self.timed_out.load(Ordering::Relaxed),
+            cancelled: self.cancelled.load(Ordering::Relaxed),
+            delivery_failed: self.delivery_failed.load(Ordering::Relaxed),
+            replaced: self.replaced.load(Ordering::Relaxed),
+            disconnected: self.disconnected.load(Ordering::Relaxed),
+            late: self.late.load(Ordering::Relaxed),
+        }
+    }
 }
 
 /// Proof that a registration holds its agent's registration gate, and so is
@@ -120,6 +238,8 @@ pub struct CommandBroker {
     registration_gates: Mutex<HashMap<String, Arc<Mutex<()>>>>,
     /// Source of [`ConnectionGeneration`]s; see that type for why they order.
     generations: AtomicU64,
+    /// Pending-request lifecycle counters (`#4434`, SC-03).
+    pending_counters: PendingCounters,
 }
 
 impl Default for CommandBroker {
@@ -134,7 +254,22 @@ impl CommandBroker {
             agents: RwLock::new(HashMap::new()),
             registration_gates: Mutex::new(HashMap::new()),
             generations: AtomicU64::new(0),
+            pending_counters: PendingCounters::default(),
         }
+    }
+
+    /// The pending-request counters, for logging and tests.
+    pub fn pending_counters(&self) -> PendingCounterSnapshot {
+        self.pending_counters.snapshot()
+    }
+
+    /// How many requests are pending for one agent, and the broker's counters.
+    pub async fn pending_snapshot(&self, agent_id: &str) -> (usize, PendingCounterSnapshot) {
+        let agents = self.agents.read().await;
+        let pending = agents
+            .get(agent_id)
+            .map_or(0, |control| control.pending_commands.len());
+        (pending, self.pending_counters.snapshot())
     }
 
     /// Hand out the identity of a newly accepted connection.
@@ -392,6 +527,25 @@ impl CommandBroker {
     /// [`Self::forget_agent`], when the agent is deleted rather than merely
     /// unreachable.
     ///
+    /// Settle every pending entry for one agent with a terminal outcome.
+    ///
+    /// Dropping each oneshot sender resolves its waiter with `RecvError`, which
+    /// every caller already reads as "the agent is gone". The counter says how
+    /// many that happened to, so a disconnect is observable rather than a
+    /// silent fan-out of errors.
+    fn settle_all_pending(&self, control: &mut AgentControl, outcome: PendingOutcome) {
+        let taken: Vec<PendingCommand> = control
+            .pending_commands
+            .drain()
+            .map(|(_, entry)| entry)
+            .collect();
+        let settled = taken.len() as u64;
+        drop(taken);
+        for _ in 0..settled {
+            self.pending_counters.note(outcome);
+        }
+    }
+
     /// Returns whether the caller was still the owner.
     pub async fn release_agent(&self, agent_id: &str, generation: ConnectionGeneration) -> bool {
         let mut agents = self.agents.write().await;
@@ -401,7 +555,7 @@ impl CommandBroker {
         match control.active.as_ref().map(|active| active.generation) {
             Some(current) if current == generation => {
                 control.active = None;
-                control.pending_commands.clear();
+                self.settle_all_pending(control, PendingOutcome::Disconnected);
                 info!(
                     "CommandBroker: agent {} released by {}",
                     agent_id, generation
@@ -446,7 +600,7 @@ impl CommandBroker {
             return;
         };
         let was_held = control.active.take().is_some();
-        control.pending_commands.clear();
+        self.settle_all_pending(control, PendingOutcome::Disconnected);
         if was_held {
             info!("CommandBroker: evicted agent {}", agent_id);
         }
@@ -465,12 +619,22 @@ impl CommandBroker {
     /// registry no longer knows the agent, so its heartbeats, session updates
     /// and address updates are refused there (`handler::ConnectionHandler`).
     pub async fn forget_agent(&self, agent_id: &str) {
-        let removed = {
+        let (removed, pending) = {
             let mut agents = self.agents.write().await;
-            agents.remove(agent_id).is_some()
+            match agents.remove(agent_id) {
+                Some(mut control) => {
+                    let pending = control.pending_commands.len();
+                    self.settle_all_pending(&mut control, PendingOutcome::Disconnected);
+                    (true, pending)
+                }
+                None => (false, 0),
+            }
         };
         if removed {
-            info!("CommandBroker: forgot agent {}", agent_id);
+            info!(
+                "CommandBroker: forgot agent {} ({} pending command(s) settled)",
+                agent_id, pending
+            );
         }
         // The registration gate goes with the record: a deleted agent has no
         // generation left for it to order. A registration already holding the
@@ -512,7 +676,11 @@ impl CommandBroker {
         // agent with no control connection — released, or evicted and not yet
         // re-claimed — which is the same answer as "not found" from the
         // caller's side: there is nothing to carry the command.
-        let Some(sender) = agent.active.as_ref().map(|active| active.sender.clone()) else {
+        let Some((generation, sender)) = agent
+            .active
+            .as_ref()
+            .map(|active| (active.generation, active.sender.clone()))
+        else {
             warn!(
                 "CommandBroker: agent {} has no control connection to send {} to",
                 agent_id, msg_type
@@ -522,7 +690,19 @@ impl CommandBroker {
         };
         info!("CommandBroker: found agent {} in registry", agent_id);
 
-        agent.pending_commands.insert(request_id.to_string(), tx);
+        // A reused request id is a replacement, not a second waiter: settle the
+        // older one now (it can never be answered under the new owner) rather
+        // than leave it in the map to be resolved by whichever response arrives.
+        if let Some(previous) = agent
+            .pending_commands
+            .insert(request_id.to_string(), PendingCommand { generation, tx })
+        {
+            drop(previous.tx);
+            self.pending_counters.note(PendingOutcome::Replaced);
+        }
+        self.pending_counters
+            .inserted
+            .fetch_add(1, Ordering::Relaxed);
         info!(
             "CommandBroker: inserted pending_command for agent {} req {}",
             agent_id, request_id
@@ -543,6 +723,7 @@ impl CommandBroker {
             Err(e) => {
                 warn!("CommandBroker: failed to serialize command: {}", e);
                 agent.pending_commands.remove(request_id);
+                self.pending_counters.note(PendingOutcome::DeliveryFailed);
                 return rx;
             }
         };
@@ -598,10 +779,60 @@ impl CommandBroker {
     /// and if a response somehow won the race, the entry is already gone and
     /// there is nothing to remove.
     async fn revoke_pending(&self, agent_id: &str, request_id: &str) {
-        let mut agents = self.agents.write().await;
-        if let Some(agent) = agents.get_mut(agent_id) {
-            agent.pending_commands.remove(request_id);
+        self.settle_pending(agent_id, request_id, PendingOutcome::DeliveryFailed)
+            .await;
+    }
+
+    /// Remove one pending entry and resolve its waiter with the given terminal
+    /// outcome. Returns `true` when an entry was there.
+    ///
+    /// Idempotent by construction: a second call finds nothing and reports
+    /// `false`, so a duplicate timeout or cancellation cannot turn into a second
+    /// settlement. This is the caller-deadline half of SC-03.
+    pub async fn settle_pending(
+        &self,
+        agent_id: &str,
+        request_id: &str,
+        outcome: PendingOutcome,
+    ) -> bool {
+        if outcome == PendingOutcome::Response {
+            // A response is `resolve_command`'s: it carries a value, and the
+            // waiter must receive it rather than an error.
+            return false;
         }
+        let mut agents = self.agents.write().await;
+        let Some(agent) = agents.get_mut(agent_id) else {
+            return false;
+        };
+        match agent.pending_commands.remove(request_id) {
+            Some(pending) => {
+                drop(pending.tx);
+                self.pending_counters.note(outcome);
+                debug!(
+                    "CommandBroker: settled pending command {} for agent {} as {} (created by {})",
+                    request_id,
+                    agent_id,
+                    outcome.as_str(),
+                    pending.generation
+                );
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// The caller's deadline expired: remove the entry so a later reply is
+    /// classified as late instead of delivered to a request nobody is waiting
+    /// for.
+    pub async fn expire_pending(&self, agent_id: &str, request_id: &str) -> bool {
+        self.settle_pending(agent_id, request_id, PendingOutcome::Timeout)
+            .await
+    }
+
+    /// The caller cancelled: same removal, a different recorded reason.
+    pub async fn cancel_pending(&self, agent_id: &str, request_id: &str) -> bool {
+        self.settle_pending(agent_id, request_id, PendingOutcome::Cancelled)
+            .await
     }
 
     /// Resolve a pending command with a response from the agent.
@@ -618,12 +849,22 @@ impl CommandBroker {
             None => return false,
         };
 
-        if let Some(tx) = agent.pending_commands.remove(request_id) {
-            let _ = tx.send(response);
+        if let Some(pending) = agent.pending_commands.remove(request_id) {
+            let _ = pending.tx.send(response);
+            self.pending_counters.note(PendingOutcome::Response);
+            debug!(
+                "CommandBroker: resolved pending command {} for agent {} (created by {})",
+                request_id, agent_id, pending.generation
+            );
             true
         } else {
+            // A late or duplicate reply, or one for a request that was timed
+            // out, cancelled or replaced. It settles nothing — the request it
+            // names is no longer waiting — and is counted so a protocol peer
+            // answering twice is observable rather than ignored.
+            self.pending_counters.late.fetch_add(1, Ordering::Relaxed);
             debug!(
-                "CommandBroker: no pending command {} for agent {}",
+                "CommandBroker: no pending command {} for agent {} (late or duplicate reply)",
                 request_id, agent_id
             );
             false
@@ -798,6 +1039,12 @@ mod tests {
                 .pending_commands
                 .is_empty(),
             "the revoked command must not be left in the pending map"
+        );
+        drop(agents);
+        assert_eq!(
+            broker.pending_counters().delivery_failed,
+            1,
+            "a transport refusal is its own terminal outcome, not a timeout"
         );
     }
 
@@ -1066,5 +1313,224 @@ mod tests {
             Ok(Ok(response)) => panic!("{because} — but it answered: {response}"),
             Err(_) => panic!("{because} — but it waited for a timeout instead"),
         }
+    }
+
+    /// SC-03: the caller's deadline settles the entry exactly once, and a reply
+    /// that arrives afterwards is late — it cannot resolve anything.
+    #[tokio::test]
+    async fn a_timeout_settles_once_and_a_late_reply_cannot_revive_it() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker
+            .claim_agent("a1", broker.new_connection_generation(), sender)
+            .await;
+        let waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+
+        assert!(broker.expire_pending("a1", "req-1").await);
+        assert!(
+            !broker.expire_pending("a1", "req-1").await,
+            "a second expiry must not settle a second entry"
+        );
+        waiter.await.expect_err("the timed-out waiter must be told");
+
+        assert!(
+            !broker
+                .resolve_command("a1", "req-1", json!({ "success": true }))
+                .await,
+            "a late reply must not resolve a request that already timed out"
+        );
+        let counters = broker.pending_counters();
+        assert_eq!(counters.timed_out, 1);
+        assert_eq!(counters.late, 1);
+        assert_eq!(counters.resolved, 0);
+        assert_eq!(broker.pending_snapshot("a1").await.0, 0);
+    }
+
+    /// SC-03: cancellation is a distinct terminal outcome, idempotent like the
+    /// timeout, and counted as itself.
+    #[tokio::test]
+    async fn a_cancellation_settles_once_and_is_counted_separately() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker
+            .claim_agent("a1", broker.new_connection_generation(), sender)
+            .await;
+        let waiter = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+
+        assert!(broker.cancel_pending("a1", "req-1").await);
+        assert!(!broker.cancel_pending("a1", "req-1").await);
+        waiter.await.expect_err("the cancelled waiter must be told");
+
+        let counters = broker.pending_counters();
+        assert_eq!(counters.cancelled, 1);
+        assert_eq!(counters.timed_out, 0);
+        assert_eq!(counters.resolved, 0);
+        assert_eq!(broker.pending_snapshot("a1").await.0, 0);
+    }
+
+    /// SC-03: replacing a request id settles the old waiter and leaves exactly
+    /// one entry, which the response resolves.
+    #[tokio::test]
+    async fn a_replacement_settles_the_old_waiter_then_the_new_one_resolves() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker
+            .claim_agent("a1", broker.new_connection_generation(), sender)
+            .await;
+
+        let first = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        let second = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        first
+            .await
+            .expect_err("the replaced waiter must be settled, not left to race the response");
+
+        assert_eq!(
+            broker.pending_snapshot("a1").await.0,
+            1,
+            "a replacement is one entry, not two"
+        );
+        assert!(
+            broker
+                .resolve_command("a1", "req-1", json!({ "success": true }))
+                .await
+        );
+        assert_eq!(
+            second.await.expect("the new request answers")["success"],
+            json!(true)
+        );
+        let counters = broker.pending_counters();
+        assert_eq!(counters.replaced, 1);
+        assert_eq!(counters.resolved, 1);
+    }
+
+    /// SC-03: a disconnect settles every pending waiter exactly once, and the
+    /// reason is recorded rather than only surfacing as a generic `RecvError`.
+    #[tokio::test]
+    async fn a_disconnect_settles_every_pending_entry_once() {
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        let generation = broker.new_connection_generation();
+        broker.claim_agent("a1", generation, sender).await;
+
+        let first = broker
+            .send_command("a1", "server.session.create", "req-1", json!({}))
+            .await;
+        let second = broker
+            .send_command("a1", "server.session.create", "req-2", json!({}))
+            .await;
+
+        assert!(broker.release_agent("a1", generation).await);
+        first.await.expect_err("the first waiter is settled");
+        second.await.expect_err("the second waiter is settled");
+        assert!(
+            !broker.release_agent("a1", generation).await,
+            "a second release is a no-op and must not settle anything twice"
+        );
+
+        let counters = broker.pending_counters();
+        assert_eq!(counters.disconnected, 2);
+        assert_eq!(broker.pending_snapshot("a1").await.0, 0);
+    }
+
+    /// SC-03: a request from an old generation that already timed out cannot
+    /// affect the new owner's request, even when the late reply is for the same
+    /// agent.
+    #[tokio::test]
+    async fn an_old_generations_late_reply_cannot_settle_the_new_owners_request() {
+        let broker = CommandBroker::new();
+        let old = broker.new_connection_generation();
+        let (old_sender, _old_keepalive) = WsMessageSender::new();
+        broker.claim_agent("a1", old, old_sender).await;
+        let old_waiter = broker
+            .send_command("a1", "server.session.create", "req-old", json!({}))
+            .await;
+        assert!(broker.expire_pending("a1", "req-old").await);
+        old_waiter
+            .await
+            .expect_err("the old request ended at its deadline");
+
+        let new = broker.new_connection_generation();
+        let (new_sender, _new_keepalive) = WsMessageSender::new();
+        broker.claim_agent("a1", new, new_sender).await;
+        let new_waiter = broker
+            .send_command("a1", "server.session.create", "req-new", json!({}))
+            .await;
+
+        assert!(
+            !broker
+                .resolve_command("a1", "req-old", json!({ "success": false }))
+                .await,
+            "the old generation's late reply names a request nobody is waiting for"
+        );
+        assert!(
+            broker
+                .resolve_command("a1", "req-new", json!({ "success": true }))
+                .await,
+            "the new owner's request is still waiting"
+        );
+        assert_eq!(
+            new_waiter.await.expect("the new request answers")["success"],
+            json!(true)
+        );
+        assert_eq!(broker.pending_counters().late, 1);
+    }
+
+    /// Every terminal pending outcome is observable through the bounded metric
+    /// contract, not only the internal counter snapshot.
+    #[tokio::test]
+    async fn pending_outcomes_emit_bounded_telemetry() {
+        struct Capture(std::sync::Mutex<Vec<&'static str>>);
+        impl nession_runtime::metrics::MetricSink for Capture {
+            fn record(&self, metric: nession_runtime::metrics::Metric) {
+                if let Ok(mut names) = self.0.lock() {
+                    names.push(metric.name);
+                }
+            }
+        }
+
+        let capture = Arc::new(Capture(std::sync::Mutex::new(Vec::new())));
+        nession_runtime::metrics::set_sink(Some(capture.clone()));
+
+        let broker = CommandBroker::new();
+        let (sender, _keepalive) = WsMessageSender::new();
+        broker
+            .claim_agent("a1", broker.new_connection_generation(), sender)
+            .await;
+        let _expired = broker
+            .send_command("a1", "agent.session.create", "req-timeout", json!({}))
+            .await;
+        assert!(broker.expire_pending("a1", "req-timeout").await);
+        let _resolved = broker
+            .send_command("a1", "agent.session.create", "req-ok", json!({}))
+            .await;
+        assert!(
+            broker
+                .resolve_command("a1", "req-ok", json!({ "success": true }))
+                .await
+        );
+        assert!(
+            !broker
+                .resolve_command("a1", "req-late", json!({ "success": false }))
+                .await
+        );
+
+        let names = capture
+            .0
+            .lock()
+            .map(|names| names.clone())
+            .unwrap_or_default();
+        assert!(
+            names.contains(&"ws_pending_outcome"),
+            "terminal pending outcomes must be counted: {names:?}"
+        );
+        nession_runtime::metrics::set_sink(None);
     }
 }

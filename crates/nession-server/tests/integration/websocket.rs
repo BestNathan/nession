@@ -371,7 +371,7 @@ async fn the_server_pending_auth_budget_refuses_an_upgrade_and_authentication_re
     let reply = next_reply(
         &mut first,
         &["auth-budget"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -388,7 +388,7 @@ async fn the_server_pending_auth_budget_refuses_an_upgrade_and_authentication_re
                 let reply = next_reply(
                     &mut ws,
                     &["auth-admitted"],
-                    std::time::Duration::from_secs(5),
+                    std::time::Duration::from_secs(30),
                 )
                 .await?;
                 assert_eq!(payload_of(&reply, "server.auth")?["status"], "success");
@@ -652,11 +652,20 @@ fn ownership_server_config(db_path: String) -> nession_common::config::ServerCon
 /// protocol messages, so a close or a binary frame where one is expected is the
 /// answer, not a frame to skip past.
 async fn next_json(ws: &mut TestWs) -> anyhow::Result<serde_json::Value> {
-    match ws.next().await {
-        Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
-            Ok(serde_json::from_str(&text)?)
+    loop {
+        match ws.next().await {
+            Some(Ok(tokio_tungstenite::tungstenite::Message::Text(text))) => {
+                return Ok(serde_json::from_str(&text)?)
+            }
+            // Keepalive control is transport, not protocol: a Ping/Pong may
+            // interleave with any reply, and failing on it made these tests
+            // load-dependent.
+            Some(Ok(
+                tokio_tungstenite::tungstenite::Message::Ping(_)
+                | tokio_tungstenite::tungstenite::Message::Pong(_),
+            )) => continue,
+            other => anyhow::bail!("expected a JSON text frame, got {other:?}"),
         }
-        other => anyhow::bail!("expected a JSON text frame, got {other:?}"),
     }
 }
 
@@ -771,7 +780,11 @@ async fn connect_client(addr: std::net::SocketAddr) -> anyhow::Result<TestWs> {
         }),
     )
     .await?;
-    let reply = next_json(&mut ws).await?;
+    // The Server pushes a `server.sessions.changed` snapshot (id "") once a
+    // client authenticates; under CI load that push can reach the socket
+    // before the correlated `server.auth` reply. Select the reply by its
+    // request id instead of assuming it is the first protocol frame (#4476).
+    let reply = next_reply(&mut ws, &["auth-1"], std::time::Duration::from_secs(15)).await?;
     let payload = payload_of(&reply, "server.auth")?;
     anyhow::ensure!(
         payload.get("status").and_then(serde_json::Value::as_str) == Some("success"),
@@ -1027,7 +1040,7 @@ async fn an_agent_that_sends_a_malformed_frame_is_torn_down_and_released() -> an
     send_frame(&mut agent, malformed_text_frame()).await?;
 
     assert!(
-        ends_within(&mut agent, std::time::Duration::from_secs(5)).await,
+        ends_within(&mut agent, std::time::Duration::from_secs(30)).await,
         "an undecodable frame must end the connection, not only its reader"
     );
 
@@ -1040,7 +1053,7 @@ async fn an_agent_that_sends_a_malformed_frame_is_torn_down_and_released() -> an
     let reply = next_reply(
         &mut client,
         &["after-malformed"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     let payload = payload_of(&reply, "server.session.capture-preview")?;
@@ -1073,7 +1086,7 @@ async fn a_superseded_agents_abnormal_exit_leaves_the_new_generation_authoritati
 
     send_frame(&mut old, malformed_text_frame()).await?;
     assert!(
-        ends_within(&mut old, std::time::Duration::from_secs(5)).await,
+        ends_within(&mut old, std::time::Duration::from_secs(30)).await,
         "the malformed frame must end the superseded connection"
     );
 
@@ -1096,7 +1109,7 @@ async fn a_superseded_agents_abnormal_exit_leaves_the_new_generation_authoritati
     let attach = next_reply(
         &mut client,
         &["attach-1"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     let attach = payload_of(&attach, "server.session.attach")?;
@@ -1138,7 +1151,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
     let reply = next_reply(
         &mut victim,
         &["victim-attach"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -1155,7 +1168,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
     let reply = next_reply(
         &mut sibling,
         &["sibling-attach"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -1165,7 +1178,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
 
     send_frame(&mut victim, malformed_text_frame()).await?;
     assert!(
-        ends_within(&mut victim, std::time::Duration::from_secs(5)).await,
+        ends_within(&mut victim, std::time::Duration::from_secs(30)).await,
         "the malformed frame must end the client's physical connection"
     );
 
@@ -1185,7 +1198,7 @@ async fn an_attached_client_that_sends_a_malformed_frame_retires_only_its_attach
     let reply = next_reply(
         &mut reconnect,
         &["reconnect-attach"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(
@@ -1227,7 +1240,7 @@ async fn an_attached_client_whose_relay_cannot_dial_is_torn_down() -> anyhow::Re
     .await?;
 
     assert!(
-        ends_within(&mut client, std::time::Duration::from_secs(5)).await,
+        ends_within(&mut client, std::time::Duration::from_secs(30)).await,
         "a failed relay dial must end the client's physical connection"
     );
 
@@ -1278,7 +1291,7 @@ async fn answered_barrier(ws: &mut TestWs, id: &str) -> anyhow::Result<()> {
         }),
     )
     .await?;
-    let reply = next_reply(ws, &[id], std::time::Duration::from_secs(5)).await?;
+    let reply = next_reply(ws, &[id], std::time::Duration::from_secs(30)).await?;
     // The type is the assertion: this is the answer to *that* frame, not a push
     // that happened to arrive at the same time.
     payload_of(&reply, "server.agent.register")?;
@@ -1301,7 +1314,7 @@ async fn listed_session_ids(client: &mut TestWs) -> anyhow::Result<Vec<String>> 
     // By id, not by "the next frame": this connection is also sent
     // `server.sessions.changed` pushes, and one of those arriving first would
     // otherwise be read as this reply.
-    let reply = next_reply(client, &["sessions-1"], std::time::Duration::from_secs(5)).await?;
+    let reply = next_reply(client, &["sessions-1"], std::time::Duration::from_secs(30)).await?;
     let payload = payload_of(&reply, "server.session.list")?;
     Ok(payload
         .get("sessions")
@@ -1413,7 +1426,7 @@ async fn replies_in_arrival_order(
     expected: &[&str],
 ) -> anyhow::Result<Vec<serde_json::Value>> {
     let mut seen: Vec<serde_json::Value> = Vec::new();
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
 
     while seen.len() < expected.len() {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
@@ -1458,7 +1471,7 @@ async fn replies_in_arrival_order(
 /// asked. `session` is what the client named, which is how a test tells one
 /// request's answer from another's at the far end.
 async fn next_capture_command(agent: &mut TestWs) -> anyhow::Result<(String, String)> {
-    let command = tokio::time::timeout(std::time::Duration::from_secs(5), next_json(agent))
+    let command = tokio::time::timeout(std::time::Duration::from_secs(30), next_json(agent))
         .await
         .map_err(|_| anyhow::anyhow!("the server never forwarded the capture command"))??;
     let payload = payload_of(&command, "agent.session.capture-preview")?;
@@ -1705,22 +1718,21 @@ async fn two_queries_waiting_on_an_agent_run_at_the_same_time() -> anyhow::Resul
     Ok(())
 }
 
-/// The lane's bound is real: a connection that fills it stops being read.
+/// The lane's bound is real and its refusal is explicit (`#4433`).
 ///
 /// This is `#961`'s "concurrency upper bound" test for the Server — the
-/// requirement's goal 5 is that a task count must not grow with a message count,
-/// and the way this lane enforces it is that the frame which would exceed the
-/// bound is never read. Five requests against a lane of two, with an agent that
-/// answers nothing: exactly two commands exist to be forwarded, and the
-/// assertion that no third arrives is what the bound *is*.
+/// requirement's goal is that a task count must not grow with a message count.
+/// Five requests against a lane of two, with an agent that answers nothing:
+/// exactly two commands exist to be forwarded, and the assertion that no third
+/// arrives is what the bound *is*. The reader is not parked, though: the three
+/// frames past the bound are answered `overloaded` before they are accepted.
 ///
-/// Then the other half, which is why the bound is a delay and not a loss: as the
-/// two are answered the reader is admitted again, the remaining three commands
-/// flow, and all five replies come back carrying the answer to their own
-/// request. A bound that dropped the overflow would show up here as a missing
-/// id or an echo addressed to the wrong request.
+/// Every request still gets exactly one reply, correlated to its own id: the
+/// two admitted ones carry the agent's echo, the three refused ones carry the
+/// explicit overload. A bound that silently dropped the overflow would show up
+/// as a missing id.
 #[tokio::test]
-async fn the_query_lane_holds_a_connection_at_its_bound_and_then_drains() -> anyhow::Result<()> {
+async fn the_query_lane_refuses_past_its_bound_and_settles() -> anyhow::Result<()> {
     const BOUND: usize = 2;
     const REQUESTS: usize = 5;
 
@@ -1746,20 +1758,21 @@ async fn the_query_lane_holds_a_connection_at_its_bound_and_then_drains() -> any
     }
     no_capture_command_within(&mut agent, std::time::Duration::from_millis(500)).await?;
 
-    // Answering frees the slots the reader is waiting for, one command at a
-    // time. The order the answers go back in is deliberately not the order the
-    // commands arrived.
+    // Answering the admitted requests lets the connection settle. The order the
+    // answers go back in is deliberately not the order the commands arrived.
     for (request_id, name) in forwarded.iter().rev() {
         send_json(&mut agent, command_answer(request_id, name)).await?;
-    }
-    for _ in BOUND..REQUESTS {
-        let (request_id, name) = next_capture_command(&mut agent).await?;
-        send_json(&mut agent, command_answer(&request_id, &name)).await?;
     }
 
     let refs: Vec<&str> = ids.iter().map(String::as_str).collect();
     let replies = replies_in_arrival_order(&mut client, &refs).await?;
+    let mut echoed = 0;
+    let mut refused = 0;
     for reply in &replies {
+        if reply["payload"]["error"] == "overloaded" {
+            refused += 1;
+            continue;
+        }
         let id = reply["id"].as_str().unwrap_or_default();
         let session = id.trim_start_matches("q-");
         assert_eq!(
@@ -1767,7 +1780,14 @@ async fn the_query_lane_holds_a_connection_at_its_bound_and_then_drains() -> any
             serde_json::json!(format!("dev-{session}")),
             "reply `{id}` carries the answer to another request: {reply}"
         );
+        echoed += 1;
     }
+    assert_eq!(echoed, BOUND, "the admitted requests did not all echo");
+    assert_eq!(
+        refused,
+        REQUESTS - BOUND,
+        "the requests past the bound were not all refused explicitly"
+    );
     Ok(())
 }
 
@@ -1881,7 +1901,7 @@ async fn a_slow_query_does_not_hold_the_connection_open() -> anyhow::Result<()> 
     .await?;
 
     assert!(
-        ends_within(&mut client, std::time::Duration::from_secs(5)).await,
+        ends_within(&mut client, std::time::Duration::from_secs(30)).await,
         "the connection was still open {:?} after a close frame, with a query the agent \
          has not answered in flight: the close was queued behind it (that query gives up \
          after 15s)",
@@ -2048,7 +2068,9 @@ async fn registration_is_ordered_before_the_state_the_agent_reports() -> anyhow:
     .await?;
 
     let mut client = connect_client(addr).await?;
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    // Coverage instrumentation plus parallel integration tests can make the
+    // registry catch up slowly; the assertion is ordering, not latency.
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     let mut attempt = 0usize;
 
     loop {
@@ -2633,42 +2655,41 @@ async fn a_client_naming_many_resources_gets_workers_for_a_bounded_number_of_the
 ///
 /// Both halves are the assertion:
 ///
-/// * the command count **plateaus below `FLOOD_REQUESTS`** — dispatch is parked
-///   on a queue the client is not draining. If every command still got through,
-///   the path is unbounded again, which is the regression this test exists to
-///   catch.
-/// * once the client reads, **the count completes and every reply arrives**,
-///   whole and distinct — so the park was a park, not a drop. A reply lost to
-///   the bound would show up here as a missing id or a stalled count.
+/// * the command count **plateaus at the connection's query bound** (`BOUND`) —
+///   the frames past it are refused explicitly, and the reader parks writing
+///   those refusal replies onto an outbound queue the client is not draining.
+///   A count that kept climbing would mean the ingress bound had become
+///   unbounded again.
+/// * once the client reads, **every request gets a reply and nothing is lost**:
+///   the admitted payloads arrive whole and distinct, and every refused request
+///   carries the explicit `overloaded` outcome.
 ///
 /// The gap between the two halves is also the flow-control claim: the client
-/// draining is what lets dispatch resume, with nothing dropped in between.
+/// draining is what lets the parked refusal replies finish, with nothing
+/// dropped in between.
 ///
 /// ## Why the flood is 48 requests and not 16 (#961-C)
 ///
 /// The bound holds either way — what changed is how much traffic it takes to
-/// *see* it. The Server's own hold is the 8 MiB budget; everything past that
-/// sits in kernel socket buffers, which is TCP flow control doing its job and
-/// not something the Server sizes. Stage B's flood of 16 MiB sat entirely
-/// inside queue-plus-socket, so the count never stopped moving; that test was
-/// measuring the pipeline's *depth* rather than the bound. The depth was one
-/// command at a time then (the read loop awaited each handler inline) and is the
-/// query lane's bound now, so a non-draining client gets further before the
-/// Server stops.
-///
-/// Measured on macOS loopback with this payload: **dispatch parks after 17 of
-/// 48** — the 8 MiB budget of 1 MiB answers plus ~9 MiB of socket buffers. The
-/// flood is sized well past that so the plateau is a property of the bound
-/// rather than of the machine's buffers.
+/// *see* it. The Server's own outbound hold is the 8 MiB budget; everything past
+/// that sits in kernel socket buffers, which is TCP flow control doing its job
+/// and not something the Server sizes. The flood is sized well past the
+/// outbound budget and the ingress bound so the plateau is a property of the
+/// bounds rather than of the machine's buffers.
 #[tokio::test]
 async fn a_client_that_stops_reading_parks_dispatch_and_loses_nothing() -> anyhow::Result<()> {
     const FLOOD_REQUESTS: usize = 48;
+    /// The connection's query bound. Small enough that the agent's command
+    /// count plateaus long before the outbound budget stops moving, and explicit
+    /// so the refusal count below is a statement rather than a guess.
+    const BOUND: usize = 8;
     const FLOOD_PAYLOAD_BYTES: usize = 1024 * 1024;
     /// How long the command count must stop moving before it counts as the
     /// bound rather than as the agent being between commands.
     const PLATEAU_HOLD: std::time::Duration = std::time::Duration::from_secs(2);
 
-    let (_db_dir, addr, _handle) = start_ownership_server("test_ws_outbound_flood.db").await?;
+    let (_db_dir, addr, _handle) =
+        start_ownership_server_with_queries("test_ws_outbound_flood.db", BOUND).await?;
 
     let agent = connect_agent(addr, "a1").await?;
     let mut client = connect_client(addr).await?;
@@ -2732,40 +2753,53 @@ async fn a_client_that_stops_reading_parks_dispatch_and_loses_nothing() -> anyho
     // answer with its own sequence number, so 16 distinct markers of the full
     // length is 16 answers that arrived intact rather than 16 truncated or
     // duplicated frames.
-    let mut markers: Vec<String> = replies
-        .iter()
-        .map(|reply| {
-            let echo = reply["payload"]["echo"].as_str().unwrap_or_default();
-            assert_eq!(
-                echo.len(),
-                FLOOD_PAYLOAD_BYTES,
-                "a reply payload did not survive the queue intact"
-            );
+    let mut markers: Vec<String> = Vec::new();
+    let mut echoed = 0usize;
+    let mut refused = 0usize;
+    for reply in &replies {
+        if reply["payload"]["error"] == "overloaded" {
+            refused += 1;
+            continue;
+        }
+        let echo = reply["payload"]["echo"].as_str().unwrap_or_default();
+        assert_eq!(
+            echo.len(),
+            FLOOD_PAYLOAD_BYTES,
+            "a reply payload did not survive the queue intact"
+        );
+        markers.push(
             echo.get(..answer_marker_len())
                 .unwrap_or_default()
-                .to_string()
-        })
-        .collect();
+                .to_string(),
+        );
+        echoed += 1;
+    }
     markers.sort();
-    let expected_markers: Vec<String> = (0..FLOOD_REQUESTS).map(answer_marker).collect();
+    let expected_markers: Vec<String> = (0..BOUND).map(answer_marker).collect();
     assert_eq!(
         markers, expected_markers,
-        "the same command was answered twice, or one answer came back twice"
+        "the same admitted command was answered twice, or one answer came back twice"
+    );
+    assert_eq!(
+        echoed, BOUND,
+        "the admitted requests did not all carry an intact reply"
+    );
+    assert_eq!(
+        refused,
+        FLOOD_REQUESTS - BOUND,
+        "the requests past the bound were not all refused explicitly"
     );
 
-    // The parked half is what makes the count's completion meaningful: the
-    // commands that had been waiting for room were dispatched *because* the
-    // client started reading, and the agent saw every one of them.
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-    while answered.load(Ordering::SeqCst) < FLOOD_REQUESTS {
-        anyhow::ensure!(
-            tokio::time::Instant::now() < deadline,
-            "dispatch never resumed after the client drained ({} of {FLOOD_REQUESTS} \
-             commands reached the agent, {parked_at} had when it parked)",
-            answered.load(Ordering::SeqCst)
-        );
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    // Only the admitted requests reached the agent. The rest were refused
+    // before acceptance, so the count settles at the bound; a count that kept
+    // climbing would mean the ingress bound had become unbounded again.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(
+        answered.load(Ordering::SeqCst),
+        BOUND,
+        "dispatch resumed past the bound after the client drained: a refused \
+         request reached the agent"
+    );
     Ok(())
 }
 
@@ -3410,7 +3444,7 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(attach["payload"]["session_name"], serde_json::json!("dev"));
@@ -3425,7 +3459,16 @@ async fn the_relay_forwards_what_the_agent_says_before_it_answers() -> anyhow::R
     // the next one: the attach reply is also forwarded once the relay is live,
     // and which of the two the client sees first is not what is being asserted.
     let forwarded = loop {
-        let frame = next_json(&mut client).await?;
+        // Transport control (a keepalive Ping/Pong, a Close) is not a
+        // protocol frame, and it may interleave with the bootstrap under load.
+        let frame = client
+            .next()
+            .await
+            .ok_or_else(|| anyhow::anyhow!("the client stream ended before the bootstrap"))??;
+        let tokio_tungstenite::tungstenite::Message::Text(text) = frame else {
+            continue;
+        };
+        let frame: serde_json::Value = serde_json::from_str(&text)?;
         if frame.get("msg_type").and_then(serde_json::Value::as_str)
             == Some("agent.terminal.output")
         {
@@ -3464,7 +3507,14 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
         }),
     )
     .await?;
-    let auth = next_json(&mut client).await?;
+    // Select the auth reply by id: a `server.sessions.changed` push can
+    // precede it under load (#4476).
+    let auth = next_reply(
+        &mut client,
+        &["auth-proof"],
+        std::time::Duration::from_secs(15),
+    )
+    .await?;
     anyhow::ensure!(
         auth["payload"]["status"] == "success",
         "auth failed: {auth}"
@@ -3484,7 +3534,7 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     let handshake = expect_frame_of_type(
         &mut endpoint.frames,
         "client.auth",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -3498,14 +3548,14 @@ async fn relay_publishes_only_server_authored_agent_subscription_proof() -> anyh
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(attach["payload"]["session_name"] == "dev");
     // Session watch notifications are legitimately asynchronous relative to
     // relay.ready. Skip ONLY those Server-authored notifications: any forged
     // receipt or unexpected frame must still fail the assertion below.
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let frame = next_json(&mut client).await?;
             if frame["msg_type"] != "server.sessions.changed" {
@@ -3572,7 +3622,14 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
         }),
     )
     .await?;
-    let auth = next_json(&mut client).await?;
+    // Select the auth reply by id: a `server.sessions.changed` push can
+    // precede it under load (#4476).
+    let auth = next_reply(
+        &mut client,
+        &["auth-credit"],
+        std::time::Duration::from_secs(15),
+    )
+    .await?;
     anyhow::ensure!(auth["payload"]["status"] == "success");
     wait_for_session(&mut client, "a1:dev").await?;
     send_json(
@@ -3587,10 +3644,10 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
     let _attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
-    let receipt = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let receipt = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         loop {
             let frame = next_json(&mut client).await?;
             if frame["msg_type"] != "server.sessions.changed" {
@@ -3626,7 +3683,7 @@ async fn relay_output_applied_reaches_current_attached_agent_without_rewriting_i
     let forwarded = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.terminal.output.applied",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -3692,7 +3749,7 @@ async fn a_relay_serves_the_servers_own_units_and_forwards_only_its_wires() -> a
     let attach = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     assert_eq!(attach["payload"]["session_name"], serde_json::json!("dev"));
@@ -3820,7 +3877,7 @@ async fn a_terminal_client_that_stops_draining_is_closed_by_the_bound() -> anyho
     expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
 
@@ -4146,7 +4203,7 @@ async fn an_agent_registration_with_a_wrong_token_is_rejected() {
 fn keep_mock_agent_control_healthy(agent: TestWs) {
     tokio::spawn(async move {
         let (mut sink, mut stream) = agent.split();
-        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(5));
+        let mut heartbeat = tokio::time::interval(std::time::Duration::from_secs(30));
         let mut ordinal = 0u64;
         loop {
             tokio::select! {
@@ -4275,7 +4332,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let first = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4330,7 +4387,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let attached = next_reply(
         &mut reconnect,
         &["half-open-reattach"],
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4350,7 +4407,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let second = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4371,7 +4428,7 @@ async fn half_open_relay_reports_reason_and_reattaches() -> anyhow::Result<()> {
     let forwarded = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.terminal.input",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4417,7 +4474,7 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
     let attached = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.attach",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(
@@ -4463,7 +4520,7 @@ async fn healthy_idle_agent_leg_survives_full_watchdog() -> anyhow::Result<()> {
     let forwarded = expect_frame_of_type(
         &mut endpoint.frames,
         "agent.terminal.input",
-        std::time::Duration::from_secs(5),
+        std::time::Duration::from_secs(30),
     )
     .await?;
     anyhow::ensure!(

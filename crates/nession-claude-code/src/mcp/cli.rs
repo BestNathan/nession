@@ -333,6 +333,7 @@ pub async fn run_mcp(
 mod tests {
     use super::*;
     use crate::mcp::config::Roots;
+    use crate::mcp::test_support::install_executable_fixture;
     use crate::session_context::SessionClaudeConfig;
     use async_trait::async_trait;
     use std::fs;
@@ -393,12 +394,7 @@ mod tests {
             "#!/bin/sh\n{record_line}\nif [ \"$1\" = \"--version\" ]; then echo '{version_banner}'; exit 0; fi\necho 'Added stdio MCP server fixture to local config'\n"
         );
         let claude = bin.join("claude");
-        fs::write(&claude, script).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&claude, fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        install_executable_fixture(&claude, &script);
         let roots = Roots {
             cwd: cwd.clone(),
             canonical_cwd: cwd.clone(),
@@ -573,12 +569,7 @@ mod tests {
             record.display(),
             record.display()
         );
-        fs::write(bin.join("claude"), script).unwrap();
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(bin.join("claude"), fs::Permissions::from_mode(0o755)).unwrap();
-        }
+        install_executable_fixture(&bin.join("claude"), &script);
         let roots = Roots {
             cwd: cwd.clone(),
             canonical_cwd: cwd.clone(),
