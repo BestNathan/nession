@@ -16,6 +16,10 @@ const SERVER = [
 const AGENT = [
   'server::a_sessions_frames_are_applied_in_order',
   'server::a_peer_naming_many_sessions_gets_workers_for_a_bounded_number_of_them',
+  // The simultaneous mixed-load proof (#4431 SC-03): one window, saturated
+  // ordinary Request admission, with control, terminal attach/input and
+  // terminal output all progressing and excess requests refused explicitly.
+  'server::a_saturated_request_lane_does_not_delay_control_or_terminal_input',
 ];
 
 run(({ evidence }) => {
@@ -31,8 +35,9 @@ run(({ evidence }) => {
     value:
       sha +
       ': control/registration ordering, independent queries, explicit overload refusal, ' +
-      'bounded per-connection/key workers, ordered terminal frames and the stream stall verdict ' +
-      'all held in the same integrated runtime',
+      'bounded per-connection/key workers, ordered terminal frames, the stream stall verdict, and ' +
+      'a simultaneous mixed-load window where saturated ordinary admission did not delay ' +
+      'control, attach/input or terminal output',
   });
   return (
     'Mixed control/request/stream load is bounded and explicit: independent queries overlap, ' +
