@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# #4529 pilot: initial CI-published staging candidate, not a production release.
+# No Argo Application until image readback and production inbound sealing pass.
+namespace: nession
+commonLabels:
+  app: nession
+  env: production
+resources:
+- deployment.yaml
+- service.yaml
+- ingress.yaml
+configMapGenerator:
+- files:
+  - mcp.toml
+  name: nession-mcp-production-settings
+images:
+- name: ghcr.io/bestnathan/nession-mcp
+  newName: ghcr.io/bestnathan/nession
+  newTag: mcp-924b161

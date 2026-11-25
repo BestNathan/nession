@@ -1,0 +1,101 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nession-mcp-production
+  labels:
+    app: nession
+    component: mcp
+    env: production
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nession
+      component: mcp
+      env: production
+  template:
+    metadata:
+      labels:
+        app: nession
+        component: mcp
+        env: production
+    spec:
+      # Reuse the production registry pull Secret already used by Server/Agent/UI.
+      imagePullSecrets:
+        - name: ghcr-secret
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: nession-mcp
+          image: ghcr.io/bestnathan/nession-mcp:main
+          imagePullPolicy: Always
+          ports:
+            - name: mcp
+              containerPort: 9090
+              protocol: TCP
+          env:
+            - name: NESSION_MCP_CONFIG
+              value: /etc/nession/mcp.toml
+            - name: NESSION_MCP_INBOUND_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nession-mcp-inbound-production
+                  key: token
+                  optional: false
+            # Direct reference to the existing canonical production Server credential.
+            - name: NESSION_MCP_BACKEND_SERVER_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: nession-secret
+                  key: auth-token
+                  optional: false
+          volumeMounts:
+            - name: mcp-config
+              mountPath: /etc/nession
+              readOnly: true
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          # The TCP listener is the process-health boundary; MCP HTTP
+          # requires bearer auth, and backend Server outages are not a reason
+          # to restart this stateless access layer.
+          startupProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 2
+            failureThreshold: 20
+          livenessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 30
+            timeoutSeconds: 3
+          readinessProbe:
+            tcpSocket:
+              port: mcp
+            periodSeconds: 10
+            timeoutSeconds: 3
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+      volumes:
+        # Kustomize-generated ConfigMap from checked-in token-free mcp.toml.
+        # Its name is content-hashed and rewritten by Kustomize, so updates
+        # change the Pod template and cause a new read-only config mount.
+        - name: mcp-config
+          configMap:
+            name: nession-mcp-production-settings
+            items:
+              - key: mcp.toml
+                path: mcp.toml

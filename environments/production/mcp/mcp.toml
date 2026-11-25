@@ -1,0 +1,17 @@
+# #4529 production standalone MCP pilot. Nonsecret GitOps only.
+[mcp]
+listen_address = "0.0.0.0:9090"
+path = "/mcp"
+# Begin with Bearer; enable query credentials only after log-redaction checks.
+allow_query_token = false
+allowed_hosts = [
+  "mcp-nession.bestnathan.top",
+  "nession-mcp-production",
+  "nession-mcp-production.nession.svc",
+  "nession-mcp-production.nession.svc.cluster.local",
+  "localhost",
+  "127.0.0.1"
+]
+allowed_origins = []
+[backend.server]
+endpoint = "ws://nession-server:18080"

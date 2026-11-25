@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: nession-mcp-production
+  labels:
+    app: nession
+    component: mcp
+    env: production
+spec:
+  type: ClusterIP
+  selector:
+    app: nession
+    component: mcp
+    env: production
+  ports:
+    - name: mcp
+      port: 9090
+      targetPort: mcp
+      protocol: TCP
