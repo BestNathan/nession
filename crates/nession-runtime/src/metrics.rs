@@ -425,7 +425,7 @@ pub const METRIC_CATALOG: &[MetricDef] = &[
         MetricKind::Counter,
         UnitKind::Count,
         Domain::Stream,
-        "output gaps observed",
+        "stream gaps observed; the direction label separates terminal input from output",
     ),
     def(
         "ws_stream_replay",
@@ -889,6 +889,45 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// #4502: a byte counter must not be presented as a frame count, and the
+    /// gap metric's two surfaces must stay visibly separate in the panels.
+    #[test]
+    fn dashboards_keep_gap_directions_and_byte_units_honest() {
+        let doc: serde_json::Value =
+            serde_json::from_str(DASHBOARDS).expect("dashboards are valid JSON");
+        let dashboards = doc["dashboards"].as_array().expect("dashboards array");
+        let mut gap_directions = Vec::new();
+        for dashboard in dashboards {
+            for panel in dashboard["panels"].as_array().expect("panels array") {
+                let name = panel["metric"].as_str().expect("panel metric");
+                let def = metric_def(name).expect("panel names a catalogued metric");
+                let title = panel["title"]
+                    .as_str()
+                    .expect("panel title")
+                    .to_ascii_lowercase();
+                if def.unit == UnitKind::Byte {
+                    assert!(
+                        !title.contains("frame") || title.contains("byte"),
+                        "panel {name} measures bytes but its title claims frames: {title}"
+                    );
+                }
+                if name == "ws_stream_gap" {
+                    let direction = panel["labels"]["direction"]
+                        .as_str()
+                        .expect("a gap panel names its direction");
+                    gap_directions.push(direction.to_string());
+                }
+            }
+        }
+        gap_directions.sort();
+        gap_directions.dedup();
+        assert_eq!(
+            gap_directions,
+            vec!["inbound".to_string(), "outbound".to_string()],
+            "input and output gaps are not separately observable"
+        );
     }
 
     #[tokio::test]
