@@ -153,6 +153,12 @@ pub struct WsMessageSender {
 }
 
 impl WsMessageSender {
+    /// State the runtime/peer/transport this connection belongs to (#4437
+    /// SC-02). Called before the sender is cloned.
+    pub fn set_identity(&self, identity: nession_runtime::metrics::MetricsIdentity) {
+        self.queue.set_identity(identity);
+    }
+
     /// A connection's outbound path with the standard bounds and stall grace.
     pub fn new() -> (Self, OutboundReceiver) {
         Self::with_terminal_grace(DEFAULT_TERMINAL_STALL_GRACE)

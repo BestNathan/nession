@@ -83,6 +83,31 @@ impl TransportKind {
     }
 }
 
+/// The runtime, peer and transport one emit site belongs to (#4437 SC-02).
+///
+/// A process hosts more than one connection kind — the Agent serves central and
+/// peer-to-peer sockets; the Server serves browser and relay legs. Without this
+/// identity every sample of one connection is indistinguishable from another's,
+/// so a refused admission cannot be attributed. Every owner that constructs a
+/// lane or an outbound path supplies its identity once, beside the code that
+/// knows what the connection is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MetricsIdentity {
+    pub runtime: RuntimeKind,
+    pub peer: PeerKind,
+    pub transport: TransportKind,
+}
+
+impl MetricsIdentity {
+    pub const fn new(runtime: RuntimeKind, peer: PeerKind, transport: TransportKind) -> Self {
+        Self {
+            runtime,
+            peer,
+            transport,
+        }
+    }
+}
+
 /// The dispatch/ownership domain a metric belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Domain {
@@ -502,6 +527,14 @@ impl Labels {
         self
     }
 
+    /// Apply the connection's runtime/peer/transport identity (#4437 SC-02).
+    pub const fn identity(mut self, identity: MetricsIdentity) -> Self {
+        self.runtime = Some(identity.runtime);
+        self.peer = Some(identity.peer);
+        self.transport = Some(identity.transport);
+        self
+    }
+
     pub const fn domain(mut self, value: Domain) -> Self {
         self.domain = Some(value);
         self
@@ -804,6 +837,35 @@ mod tests {
                 metrics.push(metric);
             }
         }
+    }
+
+    /// #4504 SC-03: the budget metrics declare the units their owners charge.
+    #[test]
+    fn budget_metrics_declare_their_units() {
+        assert_eq!(
+            metric_def("ws_outbound_queued").expect("catalogued").unit,
+            UnitKind::Byte
+        );
+        assert_eq!(
+            metric_def("ws_outbound_too_large")
+                .expect("catalogued")
+                .unit,
+            UnitKind::Byte
+        );
+        assert_eq!(
+            metric_def("ws_task_active").expect("catalogued").unit,
+            UnitKind::Count
+        );
+        assert_eq!(
+            metric_def("ws_stream_credit_lag").expect("catalogued").unit,
+            UnitKind::Byte
+        );
+        assert_eq!(
+            metric_def("ws_stream_progress_lag")
+                .expect("catalogued")
+                .unit,
+            UnitKind::Count
+        );
     }
 
     #[test]

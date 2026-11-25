@@ -28,7 +28,7 @@ use crate::config::AttachMode;
 use crate::fs::ops::FileOps;
 use crate::p2p_auth::{AuthContext, P2pAccess, P2pAuth};
 use crate::protocol::p2p_routes;
-use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query};
+use crate::server::execution::ExecutionPolicy::{Inline, Key, Ordered, Query, Stream};
 use crate::server::execution::{
     ExecutionLanes, ResourceKey, DEFAULT_MUTATIONS_IN_FLIGHT, SHUTDOWN_GRACE,
 };
@@ -1022,6 +1022,9 @@ pub struct AgentServer {
     /// tmux server, one file sandbox — are here. See
     /// `server::execution::mutation_scheduler`.
     mutations: Arc<KeyedLane<ResourceKey>>,
+    /// The process's **reserved** Stream execution lane (#4503), separate from
+    /// the mutation lane so ordinary work cannot consume Stream capacity.
+    streams: Arc<KeyedLane<ResourceKey>>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: Option<mpsc::Receiver<()>>,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
@@ -1236,6 +1239,8 @@ struct AgentIngress {
     file_ops: Arc<FileOps>,
     session_metadata: Arc<SessionMetadataStore>,
     mutations: Arc<KeyedLane<ResourceKey>>,
+    /// The process's reserved Stream lane (#4503).
+    streams: Arc<KeyedLane<ResourceKey>>,
     default_working_dir: String,
     terminal_cols: u16,
     listen_address: String,
@@ -1250,6 +1255,24 @@ struct AgentIngress {
     /// Capability preparation after a Session is created (`#4073`). `None`
     /// when the runtime did not compose one (direct test constructions).
     session_created: Option<crate::session_created::SharedSessionCreatedHook>,
+}
+
+/// The connection-lifetime facts one P2P socket is served under.
+///
+/// Grouped rather than passed one by one so `serve_connection`'s parameter list
+/// stays within the workspace's argument bound; none of these is an independent
+/// decision at its call site.
+struct ConnectionOptions {
+    auth_timeout: Duration,
+    tls: bool,
+    shutdown: watch::Receiver<bool>,
+}
+
+/// The process-owned lanes one peer-to-peer connection dispatches into: the
+/// shared mutation lane and the reserved Stream lane (#4503).
+struct ProcessLanes {
+    mutations: Arc<KeyedLane<ResourceKey>>,
+    streams: Arc<KeyedLane<ResourceKey>>,
 }
 
 /// Router state for one accepted P2P connection.
@@ -1272,6 +1295,9 @@ struct P2pHttpState {
     pending_auth: Arc<Semaphore>,
     /// The absolute deadline for the first successful `client.auth`.
     auth_timeout: Duration,
+    /// Whether this listener serves TLS, for the connection's metric identity
+    /// (#4437 SC-02).
+    tls: bool,
     /// The listener's owner of upgraded WebSocket tasks and their shutdown
     /// signal (`#3439` W3).
     supervisor: Arc<ConnectionSupervisor>,
@@ -1432,6 +1458,7 @@ async fn p2p_upgrade_or_not_found(
     let auth = Arc::clone(&state.auth);
     let addr = state.addr;
     let auth_timeout = state.auth_timeout;
+    let tls = state.tls;
     let ingress_context = state.ingress;
     let supervisor = Arc::clone(&state.supervisor);
     ws.max_message_size(MAX_WS_MESSAGE_BYTES)
@@ -1446,8 +1473,11 @@ async fn p2p_upgrade_or_not_found(
                         addr,
                         ingress_context,
                         pending_auth,
-                        auth_timeout,
-                        shutdown,
+                        ConnectionOptions {
+                            auth_timeout,
+                            tls,
+                            shutdown,
+                        },
                     )
                     .await
                     {
@@ -2415,7 +2445,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.attach" => "agent.attach" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.attach" => "agent.attach" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: ClientAttachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -2950,7 +2980,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     }
                 }
             }
-            "agent.detach" => "agent.detach" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.detach" => "agent.detach" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: ClientDetachPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3011,7 +3041,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.terminal.stream.resume" => "agent.terminal.stream.resume" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: TerminalStreamResumePayload =
                     match serde_json::from_value(payload_value) {
                         Ok(p) => p,
@@ -3026,7 +3056,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                 serde_json::to_string(&make_response(ctx.id, msg_types::OK, resp))
                     .unwrap_or_default()
             }
-            "agent.terminal.output.applied" => "agent.terminal.output.applied" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.terminal.output.applied" => "agent.terminal.output.applied" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: TerminalOutputAppliedPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3044,7 +3074,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     Err(reason) => ctx.err("output_ack_rejected", reason),
                 }
             }
-            "agent.terminal.input" => "agent.terminal.input" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.terminal.input" => "agent.terminal.input" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: TerminalInputPayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3093,7 +3123,7 @@ p2p_routes! { ctx, msg_type, payload_value;
                     ),
                 }
             }
-            "agent.terminal.resize" => "agent.terminal.resize" => 1 => P2pAccess::Authenticated => Key(session_named(payload_value)) => {
+            "agent.terminal.resize" => "agent.terminal.resize" => 1 => P2pAccess::Authenticated => Stream(session_named(payload_value)) => {
                 let payload: TerminalResizePayload = match serde_json::from_value(payload_value) {
                     Ok(p) => p,
                     Err(e) => return ctx.err("parse_error", &e.to_string()),
@@ -3702,6 +3732,7 @@ impl AgentServer {
             sessions: Arc::new(SessionRegistry::new()),
             file_ops,
             mutations: context.mutations,
+            streams: crate::execution::stream_scheduler(),
             shutdown_tx,
             shutdown_rx: Some(shutdown_rx),
             tls_acceptor,
@@ -3846,6 +3877,7 @@ impl AgentServer {
             file_ops: Arc::clone(&self.file_ops),
             session_metadata: Arc::clone(&self.session_metadata),
             mutations: Arc::clone(&self.mutations),
+            streams: Arc::clone(&self.streams),
             default_working_dir: self.default_working_dir.clone(),
             terminal_cols: self.terminal_cols,
             listen_address: self.listen_address.clone(),
@@ -3916,6 +3948,7 @@ impl AgentServer {
                                     slot: AdmissionSlot::new(slot),
                                     addr,
                                     ingress: ingress_context.clone(),
+                                    tls: tls_acceptor.is_some(),
                                     auth: Arc::clone(&auth),
                                     mcp: mcp.clone(),
                                     registry: registry.clone(),
@@ -4000,12 +4033,22 @@ impl AgentServer {
         let deadline = state.deadline;
         let slot = state.slot.clone();
         let router = p2p_router(state);
+        let identity = nession_runtime::metrics::MetricsIdentity::new(
+            nession_runtime::metrics::RuntimeKind::AgentP2p,
+            nession_runtime::metrics::PeerKind::Browser,
+            if tls_acceptor.is_some() {
+                nession_runtime::metrics::TransportKind::Tls
+            } else {
+                nession_runtime::metrics::TransportKind::Plain
+            },
+        );
         ingress::serve(
             move || ingress::TcpOrTls::accept(stream, tls_acceptor),
             router,
             slot,
             deadline,
             ingress::HTTP_HEADER_READ_TIMEOUT,
+            Some(identity),
         )
         .await?;
         Ok(())
@@ -4022,9 +4065,13 @@ impl AgentServer {
         addr: SocketAddr,
         context: AgentIngress,
         pending_auth: tokio::sync::OwnedSemaphorePermit,
-        auth_timeout: Duration,
-        shutdown: watch::Receiver<bool>,
+        options: ConnectionOptions,
     ) -> Result<()> {
+        let ConnectionOptions {
+            auth_timeout,
+            tls,
+            shutdown,
+        } = options;
         let (ws_sink, ws_stream) = ws.split();
 
         // The outbound path: a bounded queue with a policy per lane, and one
@@ -4032,7 +4079,17 @@ impl AgentServer {
         // the reader — holds a handle to it and says which *class* of message it
         // is sending, because the classes do not share a failure mode; see
         // `server::outbound`.
+        let identity = nession_runtime::metrics::MetricsIdentity::new(
+            nession_runtime::metrics::RuntimeKind::AgentP2p,
+            nession_runtime::metrics::PeerKind::Browser,
+            if tls {
+                nession_runtime::metrics::TransportKind::Tls
+            } else {
+                nession_runtime::metrics::TransportKind::Plain
+            },
+        );
         let (outbound, outbound_rx) = P2pOutbound::new();
+        outbound.set_identity(identity);
         let mut writer = tokio::spawn(outbound::run_writer(ws_sink, outbound_rx, outbound.clone()));
 
         // Both attach modes share the Agent-owned Session map.
@@ -4046,6 +4103,7 @@ impl AgentServer {
             file_ops,
             session_metadata,
             mutations,
+            streams,
             default_working_dir,
             terminal_cols,
             listen_address,
@@ -4089,7 +4147,8 @@ impl AgentServer {
         let result = Self::run_message_loop(
             ws_stream,
             connection,
-            mutations,
+            ProcessLanes { mutations, streams },
+            identity,
             Some(pending_auth),
             auth_timeout,
             shutdown,
@@ -4166,7 +4225,8 @@ impl AgentServer {
     async fn run_message_loop(
         mut ws_stream: futures_util::stream::SplitStream<AxumWebSocket>,
         connection: Arc<Connection>,
-        mutations: Arc<KeyedLane<ResourceKey>>,
+        lanes_spec: ProcessLanes,
+        identity: nession_runtime::metrics::MetricsIdentity,
         mut pending_auth: Option<tokio::sync::OwnedSemaphorePermit>,
         auth_timeout: Duration,
         mut shutdown: watch::Receiver<bool>,
@@ -4188,10 +4248,16 @@ impl AgentServer {
         // what ends this connection's share of them.
         let mut lanes = ExecutionLanes::shared(
             crate::server::execution::DEFAULT_QUERY_CONCURRENCY,
-            mutations,
+            lanes_spec.mutations,
             DEFAULT_MUTATIONS_IN_FLIGHT,
             crate::server::execution::LANE_LABEL,
-        );
+        )
+        .with_stream_lane(
+            lanes_spec.streams,
+            crate::execution::DEFAULT_STREAM_IN_FLIGHT,
+            crate::execution::STREAM_LANE_LABEL,
+        )
+        .with_metrics_identity(identity);
 
         loop {
             // The pending-auth budget is returned the moment this connection
@@ -4349,6 +4415,26 @@ impl AgentServer {
                                         Err(AdmitError::Closed) => break,
                                     }
                                 }
+                                Stream(key) => {
+                                    let frame_id = frame.id.clone();
+                                    let frame_connection = Arc::clone(&frame.connection);
+                                    match lanes.try_stream_key(key, lane_work(frame)).await {
+                                        Ok(()) => {}
+                                        Err(AdmitError::Saturated) => {
+                                            let Ok(reply) = serde_json::to_string(&make_error(
+                                                &frame_id,
+                                                "overloaded",
+                                                "the connection is at its stream execution bound; retry after in-flight stream work completes",
+                                            )) else {
+                                                break;
+                                            };
+                                            if !write_frame(&frame_connection, Some(reply)).await {
+                                                break;
+                                            }
+                                        }
+                                        Err(AdmitError::Closed) => break,
+                                    }
+                                }
                             }
                         }
                     }
@@ -4464,6 +4550,32 @@ impl AgentServer {
 
 #[cfg(test)]
 mod tests {
+
+    /// #4503: the real-time business wires declare the reserved Stream domain
+    /// beside the unit; ordinary session mutations stay on the shared lane.
+    #[test]
+    fn terminal_realtime_wires_declare_the_reserved_stream_policy() {
+        let payload = serde_json::json!({ "session_name": "s" });
+        for wire in [
+            msg_types::TERMINAL_INPUT,
+            msg_types::TERMINAL_RESIZE,
+            msg_types::TERMINAL_OUTPUT_APPLIED,
+            msg_types::CLIENT_ATTACH,
+            msg_types::CLIENT_DETACH,
+            msg_types::TERMINAL_STREAM_RESUME,
+        ] {
+            match p2p_policy(wire, &payload) {
+                Some(crate::server::execution::ExecutionPolicy::Stream(key)) => {
+                    assert_eq!(key, crate::execution::ResourceKey::Session("s".to_string()));
+                }
+                other => panic!("{wire} did not declare the reserved Stream policy: {other:?}"),
+            }
+        }
+        assert!(matches!(
+            p2p_policy("agent.session.create", &serde_json::json!({ "name": "s" })),
+            Some(crate::server::execution::ExecutionPolicy::Key(_))
+        ));
+    }
     use super::*;
     use crate::server::output_ack::{OutputAckBinding, OutputAckVerdict, SubscriberOutputAck};
     use crate::session::terminal::runtime::{

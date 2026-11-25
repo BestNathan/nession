@@ -130,12 +130,25 @@ use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 use tokio::task::JoinSet;
 use tracing::{debug, error, warn};
 
-use crate::metrics::{self, Direction, Domain, Labels, ReasonKind, ResultKind};
+use crate::metrics::{self, Direction, Domain, Labels, MetricsIdentity, ReasonKind, ResultKind};
 
 /// Labels for a lane event. Only the bounded vocabulary is used; the adapter
 /// that owns the runtime identity adds `runtime`/`peer` when it emits its own.
 fn lane_labels(domain: Domain, direction: Direction) -> Labels {
     Labels::new().domain(domain).direction(direction)
+}
+
+/// The bounded labels for one emit site, carrying the connection's identity when
+/// its owner supplied one (#4437 SC-02).
+fn lane_labels_with(
+    identity: Option<MetricsIdentity>,
+    domain: Domain,
+    direction: Direction,
+) -> Labels {
+    match identity {
+        Some(identity) => lane_labels(domain, direction).identity(identity),
+        None => lane_labels(domain, direction),
+    }
 }
 
 // Process-wide task gauges (#4437).
@@ -232,6 +245,9 @@ pub struct KeySnapshot {
     pub queued: usize,
     /// The bound one key's queue moves within.
     pub depth: usize,
+    /// The lane-wide worker budget, when the runtime stated one (#4433 SC-02):
+    /// the process-wide bound on how many resources may be mutating at once.
+    pub worker_budget: Option<usize>,
     /// The deepest single key's queue: the per-key depth that is furthest ahead.
     ///
     /// `#961`'s backpressure section asks for per-key queue depth to be
@@ -335,6 +351,8 @@ struct QueryCounters {
 
 /// The read-only frames one connection has in flight.
 pub struct QueryLane {
+    /// The runtime/peer/transport this connection belongs to (#4437 SC-02).
+    identity: Option<MetricsIdentity>,
     /// One permit per query in flight.
     permits: Arc<Semaphore>,
     /// The tasks themselves — a `JoinSet` rather than a `Vec<JoinHandle>`
@@ -356,12 +374,28 @@ impl QueryLane {
     pub fn new(bound: usize, label: &'static str) -> Self {
         let bound = bound.max(1);
         Self {
+            identity: None,
             permits: Arc::new(Semaphore::new(bound)),
             tasks: JoinSet::new(),
             counters: Arc::new(QueryCounters::default()),
             bound,
             label,
         }
+    }
+
+    /// State the runtime/peer/transport this lane belongs to (#4437 SC-02).
+    pub fn set_identity(&mut self, identity: Option<MetricsIdentity>) {
+        self.identity = identity;
+    }
+
+    /// The same, as a builder for a connection that is being constructed.
+    pub fn with_metrics_identity(mut self, identity: MetricsIdentity) -> Self {
+        self.set_identity(Some(identity));
+        self
+    }
+
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        lane_labels_with(self.identity, domain, direction)
     }
 
     /// Admit one query and run it on its own task, waiting for a slot first.
@@ -393,7 +427,7 @@ impl QueryLane {
                 self.counters.refused.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_admission_refused",
-                    lane_labels(Domain::Request, Direction::Inbound)
+                    self.labels(Domain::Request, Direction::Inbound)
                         .result(ResultKind::Refused)
                         .reason(ReasonKind::Saturated),
                 );
@@ -421,11 +455,17 @@ impl QueryLane {
             .peak_in_flight
             .fetch_max(self.in_flight() as u64, Ordering::Relaxed);
         task_gauges(1, 1);
-        self.tasks
-            .spawn(run(work, permit, Arc::clone(&self.counters), ActiveTask));
+        self.tasks.spawn(run(
+            work,
+            permit,
+            Arc::clone(&self.counters),
+            ActiveTask,
+            self.identity,
+        ));
         metrics::counter(
             "ws_admission_accepted",
-            lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
+            self.labels(Domain::Request, Direction::Inbound)
+                .result(ResultKind::Accepted),
         );
     }
 
@@ -441,13 +481,14 @@ impl QueryLane {
             self.counters.reaped.fetch_add(1, Ordering::Relaxed);
             metrics::counter(
                 "ws_task_reaped",
-                lane_labels(Domain::Request, Direction::Internal).result(ResultKind::Reaped),
+                self.labels(Domain::Request, Direction::Internal)
+                    .result(ResultKind::Reaped),
             );
             if report(&joined, self.label, "query") == Outcome::Panicked {
                 self.counters.panics.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_task_panicked",
-                    lane_labels(Domain::Request, Direction::Internal)
+                    self.labels(Domain::Request, Direction::Internal)
                         .result(ResultKind::Panicked)
                         .reason(ReasonKind::Panic),
                 );
@@ -539,7 +580,7 @@ impl QueryLane {
             .fetch_add(1, Ordering::Relaxed);
         metrics::counter(
             "ws_admission_waited",
-            lane_labels(Domain::Request, Direction::Inbound),
+            self.labels(Domain::Request, Direction::Inbound),
         );
         debug!(
             "{}query lane is full ({} in flight of {}); the connection waits for a slot \
@@ -573,6 +614,7 @@ async fn run<F>(
     permit: Option<OwnedSemaphorePermit>,
     counters: Arc<QueryCounters>,
     _active: ActiveTask,
+    identity: Option<MetricsIdentity>,
 ) where
     F: Future<Output = ()>,
 {
@@ -590,7 +632,8 @@ async fn run<F>(
     counters.completed.fetch_add(1, Ordering::Relaxed);
     metrics::record(
         "ws_request_duration",
-        lane_labels(Domain::Request, Direction::Internal).result(ResultKind::Completed),
+        lane_labels_with(identity, Domain::Request, Direction::Internal)
+            .result(ResultKind::Completed),
         started.elapsed().as_secs_f64() * 1_000.0,
     );
 }
@@ -707,6 +750,8 @@ struct KeyInner<K> {
     reaped: AtomicU64,
     panics: AtomicU64,
     label: &'static str,
+    /// The runtime/peer/transport this lane's owner belongs to (#4437 SC-02).
+    identity: Option<MetricsIdentity>,
 }
 
 impl<K> KeyedLane<K>
@@ -755,9 +800,22 @@ where
                 reaped: AtomicU64::new(0),
                 panics: AtomicU64::new(0),
                 label,
+                identity: None,
             }),
             workers: Mutex::new(JoinSet::new()),
         }
+    }
+
+    /// State the runtime/peer/transport this lane's owner belongs to (#4437
+    /// SC-02). Called before any worker exists.
+    pub fn set_identity(&mut self, identity: Option<MetricsIdentity>) {
+        if let Some(inner) = Arc::get_mut(&mut self.inner) {
+            inner.identity = identity;
+        }
+    }
+
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        lane_labels_with(self.inner.identity, domain, direction)
     }
 
     /// Queue one mutation, waiting for room in that key's queue if it is full.
@@ -766,10 +824,17 @@ where
     /// the queue cannot grow with the message count. See this module's docs for
     /// why the waiter is the reader and what that costs.
     pub async fn enqueue(&self, key: K, work: Work) {
+        self.enqueue_with(key, work, None).await;
+    }
+
+    /// The same, with the admitting connection's identity for attribution.
+    pub async fn enqueue_with(&self, key: K, work: Work, identity: Option<MetricsIdentity>) {
+        let identity = identity.or(self.inner.identity);
         self.reap_workers().await;
         metrics::counter(
             "ws_admission_accepted",
-            lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
+            lane_labels_with(identity, Domain::Request, Direction::Inbound)
+                .result(ResultKind::Accepted),
         );
         let mut work = Some(work);
         loop {
@@ -834,10 +899,11 @@ where
                 self.inner.started.fetch_add(1, Ordering::Relaxed);
                 let inner = Arc::clone(&self.inner);
                 let worker_key = key;
+                let identity = self.inner.identity;
                 let mut workers = self.workers.lock().await;
                 workers.spawn(async move {
                     let _permit = permit;
-                    work_key(inner, worker_key).await
+                    work_key(inner, worker_key, identity).await
                 });
                 return;
             }
@@ -861,6 +927,17 @@ where
     /// either holds a slot for the whole claim or holds nothing. The work is
     /// dropped on refusal before it is polled.
     pub async fn try_enqueue(&self, key: K, work: Work) -> Result<(), AdmitError> {
+        self.try_enqueue_with(key, work, None).await
+    }
+
+    /// The same, with the admitting connection's identity for attribution.
+    pub async fn try_enqueue_with(
+        &self,
+        key: K,
+        work: Work,
+        identity: Option<MetricsIdentity>,
+    ) -> Result<(), AdmitError> {
+        let identity = identity.or(self.inner.identity);
         self.reap_workers().await;
         let mut work = Some(work);
         let spawn = {
@@ -876,7 +953,7 @@ where
                 self.inner.refused.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_admission_refused",
-                    lane_labels(Domain::Request, Direction::Inbound)
+                    lane_labels_with(identity, Domain::Request, Direction::Inbound)
                         .result(ResultKind::Refused)
                         .reason(ReasonKind::Capacity),
                 );
@@ -897,7 +974,7 @@ where
                         self.inner.refused.fetch_add(1, Ordering::Relaxed);
                         metrics::counter(
                             "ws_admission_refused",
-                            lane_labels(Domain::Request, Direction::Inbound)
+                            lane_labels_with(identity, Domain::Request, Direction::Inbound)
                                 .result(ResultKind::Refused)
                                 .reason(ReasonKind::Capacity),
                         );
@@ -929,14 +1006,16 @@ where
             let inner = Arc::clone(&self.inner);
             let worker_key = key;
             let mut workers = self.workers.lock().await;
+            let identity = self.inner.identity;
             workers.spawn(async move {
                 let _permit = permit;
-                work_key(inner, worker_key).await
+                work_key(inner, worker_key, identity).await
             });
         }
         metrics::counter(
             "ws_admission_accepted",
-            lane_labels(Domain::Request, Direction::Inbound).result(ResultKind::Accepted),
+            lane_labels_with(identity, Domain::Request, Direction::Inbound)
+                .result(ResultKind::Accepted),
         );
         Ok(())
     }
@@ -952,13 +1031,14 @@ where
             self.inner.reaped.fetch_add(1, Ordering::Relaxed);
             metrics::counter(
                 "ws_task_reaped",
-                lane_labels(Domain::Request, Direction::Internal).result(ResultKind::Reaped),
+                self.labels(Domain::Request, Direction::Internal)
+                    .result(ResultKind::Reaped),
             );
             if report(&joined, self.inner.label, "key") == Outcome::Panicked {
                 self.inner.panics.fetch_add(1, Ordering::Relaxed);
                 metrics::counter(
                     "ws_task_panicked",
-                    lane_labels(Domain::Request, Direction::Internal)
+                    self.labels(Domain::Request, Direction::Internal)
                         .result(ResultKind::Panicked)
                         .reason(ReasonKind::Panic),
                 );
@@ -1045,6 +1125,7 @@ where
             keys,
             queued,
             depth: self.inner.depth,
+            worker_budget: self.inner.budget.as_ref().map(|budget| budget.bound),
             deepest,
             started: self.inner.started.load(Ordering::Relaxed),
             completed: self.inner.completed.load(Ordering::Relaxed),
@@ -1063,7 +1144,7 @@ where
 /// when the key goes idle: an enqueue waiting for room is woken by any pop, and a
 /// `drain` is woken by the removal that ends the key. Both register before they
 /// check, so neither depends on the signal arriving at a particular moment.
-async fn work_key<K>(inner: Arc<KeyInner<K>>, key: K)
+async fn work_key<K>(inner: Arc<KeyInner<K>>, key: K, identity: Option<MetricsIdentity>)
 where
     K: Clone + Eq + Hash + fmt::Display + Send + Sync + 'static,
 {
@@ -1094,7 +1175,7 @@ where
                         inner.panics.fetch_add(1, Ordering::Relaxed);
                         metrics::counter(
                             "ws_task_panicked",
-                            lane_labels(Domain::Request, Direction::Internal)
+                            lane_labels_with(identity, Domain::Request, Direction::Internal)
                                 .result(ResultKind::Panicked)
                                 .reason(ReasonKind::Panic),
                         );
@@ -1160,6 +1241,8 @@ struct SharedKeys<K> {
     /// Refusals this connection saw, at its own slot or at the shared lane.
     refused: AtomicU64,
     label: &'static str,
+    /// The runtime/peer/transport this connection belongs to (#4437 SC-02).
+    identity: Option<MetricsIdentity>,
 }
 
 /// A one-way "this is over" signal.
@@ -1202,6 +1285,15 @@ impl<K> SharedKeys<K>
 where
     K: Clone + Eq + Hash + fmt::Display + Send + Sync + 'static,
 {
+    /// State the runtime/peer/transport this connection belongs to (#4437 SC-02).
+    fn set_identity(&mut self, identity: Option<MetricsIdentity>) {
+        self.identity = identity;
+    }
+
+    fn labels(&self, domain: Domain, direction: Direction) -> Labels {
+        lane_labels_with(self.identity, domain, direction)
+    }
+
     /// Admit one mutation, waiting for a slot if this connection is at its
     /// bound, and queue it behind its resource's own queue.
     async fn enqueue(&self, key: K, work: Work) {
@@ -1222,7 +1314,7 @@ where
             }
             drop(permit);
         });
-        self.lane.enqueue(key, admitted).await;
+        self.lane.enqueue_with(key, admitted, self.identity).await;
     }
 
     /// Admit one mutation **without waiting**, or refuse it (`#4433`).
@@ -1236,6 +1328,12 @@ where
             Ok(permit) => permit,
             Err(tokio::sync::TryAcquireError::NoPermits) => {
                 self.refused.fetch_add(1, Ordering::Relaxed);
+                metrics::counter(
+                    "ws_admission_refused",
+                    self.labels(Domain::Request, Direction::Inbound)
+                        .result(ResultKind::Refused)
+                        .reason(ReasonKind::Saturated),
+                );
                 debug!(
                     "{}key lane: this connection already has {} mutation(s) in flight; \
                      refusing the frame explicitly",
@@ -1255,7 +1353,11 @@ where
             }
             drop(permit);
         });
-        match self.lane.try_enqueue(key, admitted).await {
+        match self
+            .lane
+            .try_enqueue_with(key, admitted, self.identity)
+            .await
+        {
             Ok(()) => Ok(()),
             Err(error) => {
                 self.refused.fetch_add(1, Ordering::Relaxed);
@@ -1340,6 +1442,10 @@ where
 pub struct Lanes<K> {
     queries: QueryLane,
     keys: Keys<K>,
+    /// The reserved Stream execution lane (#4503), when the provider declared
+    /// one. Real-time business work (terminal input, resize, progress) runs
+    /// here, so ordinary Request saturation cannot consume its admission.
+    streams: Option<SharedKeys<K>>,
 }
 
 impl<K> Lanes<K>
@@ -1357,6 +1463,7 @@ where
         Self {
             queries: QueryLane::new(query_bound, label),
             keys: Keys::Own(KeyedLane::new(key_depth, label)),
+            streams: None,
         }
     }
 
@@ -1373,7 +1480,64 @@ where
         Self {
             queries: QueryLane::new(query_bound, label),
             keys: Keys::Own(KeyedLane::with_worker_budget(key_depth, key_workers, label)),
+            streams: None,
         }
+    }
+
+    /// State the connection's runtime/peer/transport identity once, for every
+    /// metric this connection's lanes emit (#4437 SC-02).
+    pub fn with_metrics_identity(mut self, identity: MetricsIdentity) -> Self {
+        self.queries.set_identity(Some(identity));
+        match &mut self.keys {
+            Keys::Own(lane) => lane.set_identity(Some(identity)),
+            Keys::Shared(shared) => shared.set_identity(Some(identity)),
+        }
+        if let Some(shared) = &mut self.streams {
+            shared.set_identity(Some(identity));
+        }
+        self
+    }
+
+    /// Give this connection the provider's reserved Stream execution lane
+    /// (#4503): its own per-connection admission bound over a process lane whose
+    /// worker budget is separate from the mutation lane.
+    pub fn with_stream_lane(
+        mut self,
+        lane: Arc<KeyedLane<K>>,
+        bound: usize,
+        label: &'static str,
+    ) -> Self {
+        let bound = u32::try_from(bound).unwrap_or(u32::MAX).max(1);
+        self.streams = Some(SharedKeys {
+            lane,
+            slots: Arc::new(Semaphore::new(bound as usize)),
+            bound,
+            ended: Arc::new(Ended::default()),
+            admission_waits: AtomicU64::new(0),
+            refused: AtomicU64::new(0),
+            label,
+            identity: None,
+        });
+        self
+    }
+
+    /// Queue one Stream unit behind its resource's Stream queue, waiting for
+    /// room. Falls back to the ordinary key lane only when the provider did not
+    /// declare a reserved lane (older adapters/tests).
+    pub async fn stream_key(&mut self, key: K, work: Work) {
+        if let Some(streams) = &self.streams {
+            streams.enqueue(key, work).await;
+            return;
+        }
+        self.key(key, work).await;
+    }
+
+    /// Admit one Stream unit without waiting, or refuse it explicitly.
+    pub async fn try_stream_key(&mut self, key: K, work: Work) -> Result<(), AdmitError> {
+        if let Some(streams) = &self.streams {
+            return streams.try_enqueue(key, work).await;
+        }
+        self.try_key(key, work).await
     }
 
     /// The lanes of a connection whose mutations are of the *runtime's*
@@ -1410,7 +1574,9 @@ where
                 admission_waits: AtomicU64::new(0),
                 refused: AtomicU64::new(0),
                 label,
+                identity: None,
             }),
+            streams: None,
         }
     }
 
@@ -1459,6 +1625,9 @@ where
             Keys::Own(lane) => lane.drain().await,
             Keys::Shared(shared) => shared.drain().await,
         }
+        if let Some(streams) = &mut self.streams {
+            streams.drain().await;
+        }
     }
 
     /// End everything in flight, waiting at most `grace` for it to stop.
@@ -1478,6 +1647,9 @@ where
         match &mut self.keys {
             Keys::Own(lane) => lane.shutdown(grace).await,
             Keys::Shared(shared) => shared.shutdown(grace).await,
+        }
+        if let Some(streams) = &mut self.streams {
+            streams.shutdown(grace).await;
         }
     }
 
@@ -2019,6 +2191,85 @@ mod tests {
     /// so a refused *new* key left an empty queue that nothing removed: the map
     /// grew with every refusal and `drain()` waited on a key that could never be
     /// filled. Refusal now happens before the entry exists.
+    /// #4503: the reserved Stream lane is real execution isolation. Filling
+    /// the ordinary mutation lane's only worker does not delay a Stream unit,
+    /// and saturating the Stream lane does not consume query capacity.
+    #[tokio::test]
+    async fn a_reserved_stream_lane_is_independent_of_mutation_saturation() {
+        let mutations = Arc::new(KeyedLane::with_worker_budget(8, 1, "mut"));
+        let streams = Arc::new(KeyedLane::with_worker_budget(8, 1, "stream"));
+        let mut lanes = Lanes::shared(1, mutations, 8, "").with_stream_lane(streams, 8, "");
+        let mutation_gate = gate();
+        let stream_gate = gate();
+        let stream_done = Arc::new(AtomicUsize::new(0));
+
+        // The mutation lane's one worker is parked; ordinary Request capacity
+        // is fully consumed for this connection.
+        {
+            let gate = Arc::clone(&mutation_gate);
+            lanes
+                .try_key(
+                    session("busy"),
+                    Box::pin(async move { pass(&gate).await }) as Work,
+                )
+                .await
+                .expect("the first mutation fits the lane");
+        }
+
+        // A Stream unit is admitted on its own reserved worker and completes
+        // while the mutation lane is still blocked.
+        {
+            let gate = Arc::clone(&stream_gate);
+            let done = Arc::clone(&stream_done);
+            lanes
+                .try_stream_key(
+                    session("terminal"),
+                    Box::pin(async move {
+                        pass(&gate).await;
+                        done.fetch_add(1, Ordering::SeqCst);
+                    }) as Work,
+                )
+                .await
+                .expect("a Stream unit was refused while Request work was blocked");
+        }
+        stream_gate.add_permits(1);
+        within_patience("the reserved Stream unit never completed", async {
+            while stream_done.load(Ordering::SeqCst) == 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await;
+
+        // Saturating the Stream lane refuses explicitly without touching the
+        // query lane's independent capacity.
+        let stream_gate_2 = gate();
+        {
+            let gate = Arc::clone(&stream_gate_2);
+            lanes
+                .try_stream_key(
+                    session("terminal-2"),
+                    Box::pin(async move { pass(&gate).await }) as Work,
+                )
+                .await
+                .expect("the Stream worker was not free after the first unit");
+        }
+        assert_eq!(
+            lanes.try_stream_key(session("terminal-3"), nothing()).await,
+            Err(AdmitError::Saturated),
+            "a saturated Stream lane did not refuse explicitly"
+        );
+        lanes
+            .try_query(async {})
+            .expect("Stream saturation consumed the query lane's capacity");
+
+        mutation_gate.add_permits(1);
+        stream_gate_2.add_permits(1);
+        within_patience("the lanes did not settle", async {
+            lanes.drain().await;
+        })
+        .await;
+    }
+
     #[tokio::test]
     async fn a_budget_refusal_does_not_create_a_phantom_key() {
         let mut lane = KeyedLane::with_worker_budget(8, 1, "phantom");
