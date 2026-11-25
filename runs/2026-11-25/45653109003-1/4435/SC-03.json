@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "41e9286a4e043e3584fa57445ebde49785d2b815691404d5bd8140c4607c1db4",
+  "run_id": 45653109003,
+  "run_attempt": 1,
+  "issue": 4435,
+  "criterion": "SC-03",
+  "criterion_text": "Staging runtime Case gates kill/recreate, authority transfer and sandbox/pane or resize transition against queued input; stale epoch/generation cannot write to the replacement resource, and valid current input/resize retains required ordering.",
+  "stage": "staging",
+  "target_sha": "bbd4fad95ba3b457f02ec89a6955d607bdd14425",
+  "contract_sha256": "a5d88a2344219a1b4ce1491b3e53143b653e203e6ddf035fe49c30dee7260d10",
+  "case_revision": "bbd4fad95ba3b457f02ec89a6955d607bdd14425",
+  "case_tree_sha": "87745a2fb1b3a1203564a6dab62ba2fa27d0d16d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-25T16:26:28.428Z",
+  "finished_at": "2026-11-25T16:26:55.034Z",
+  "duration_ms": 26606,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Kill/recreate, authority transfer and stream replacement are fenced at the Session owner: stale epochs, leases and generations cannot write to a replacement, a retired producer cannot feed it, and valid current input/resize retain their ordering",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "bbd4fad95ba3b457f02ec89a6955d607bdd14425: pre-replacement input/resize was not claimed by the successor, retired output could not enter it, replacement revoked old ACK provenance, stale-lease input/resize were refused without writing, and a killed Session retired its attachment"
+        }
+      ],
+      "duration_ms": 20752,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45653109003,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "bbd4fad95ba3b457f02ec89a6955d607bdd14425",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45653109003",
+    "record_path": "runs/2026-11-25/45653109003-1/4435/SC-03.json",
+    "source_result_sha256": "c124c1b261408ed8f0c78d4a76329e20aca44305691eb8fcd193dfe9e70e6e3f"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45653109003-1",
+    "sha256": "c124c1b261408ed8f0c78d4a76329e20aca44305691eb8fcd193dfe9e70e6e3f",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45653109003",
+    "durability": "time-limited; object archival not configured"
+  }
+}
