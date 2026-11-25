@@ -271,7 +271,7 @@ test('staging MCP inbound token is a dedicated strict SealedSecret target', () =
   assert.equal(inboundTarget.namespace, 'nession');
   assert.equal(inboundTarget.key, 'token');
   assert.equal(inboundTarget.resource, 'environments/staging/mcp/sealed-inbound.json');
-  assert.throws(() => getTarget('production', inboundSecret));
+  assert.equal(getTarget('production', inboundSecret).name, 'nession-mcp-inbound-production');
   assert.throws(() => getTarget('staging-01', inboundSecret));
   const doc = createPlainSecret(environment, inboundSecret, 'opaque-query-safe_token');
   assert.deepEqual(Object.keys(doc.data), ['token']);
@@ -353,7 +353,7 @@ test('environment dispatch registers the COMPLETE fixed required Secret set', ()
   assert.deepEqual(getRequiredSecrets('staging'), [
     'NESSION_MCP_INBOUND_TOKEN', 'NESSION_MCP_BACKEND_SERVER_TOKEN'
   ]);
-  for (const other of ['', 'production', 'preprod', 'staging-01', '../staging']) {
+  for (const other of ['', 'preprod', 'staging-01', '../staging']) {
     assert.throws(() => getRequiredSecrets(other));
   }
   assert.ok(!getRequiredSecrets('staging').includes('MCP_CONFIG_TOML'));
@@ -461,4 +461,17 @@ test('staging batch aborts before touching GitOps if ANY sealed output is absent
     stageRequired(root, 'staging', work);
     assert.equal(readFileSync(kustomization, 'utf8'), enrolled);
   } finally { rmSync(root, {recursive: true, force: true}); }
+});
+
+
+test('production seals only its own inbound credential and never staging or backend resources', () => {
+  assert.deepEqual(getRequiredSecrets('production'), [inboundSecret]);
+  const target = getTarget('production', inboundSecret);
+  assert.equal(target.resource, 'environments/production/mcp/sealed-inbound.json');
+  assert.equal(target.kustomization, 'environments/production/mcp/kustomization.yaml');
+  assert.deepEqual(prepareRequiredSecrets('production', {[inboundSecret]: 'pilot-inbound-token'}).map(x => x.name), [inboundSecret]);
+  assert.throws(() => prepareRequiredSecrets('production', {}));
+  assert.throws(() => getTarget('production', backendServerSecret));
+  assert.throws(() => validateChangedPathsForRequired([inboundTarget.resource], 'production'));
+  assert.deepEqual(validateChangedPathsForRequired([target.resource, target.kustomization], 'production'), [target.resource, target.kustomization]);
 });
