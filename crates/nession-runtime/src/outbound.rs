@@ -2176,27 +2176,36 @@ mod tests {
             SchedulerConfig::default(),
             Arc::clone(&process),
         );
+        let (third, third_rx) = Outbound::with_process(
+            "third",
+            ROOMY,
+            Duration::from_millis(50),
+            SchedulerConfig::default(),
+            Arc::clone(&process),
+        );
 
-        // 8 process frames, 2 reserved for Control: six ordinary frames fill
-        // the usable share.
-        for _ in 0..6 {
-            assert!(
-                first
-                    .submit_current(FrameClass::Stream, text(100), WaitPolicy::NoWait)
-                    .await
-                    .accepted(),
-                "an ordinary frame within the process ceiling was refused"
-            );
+        // 8 process frames, 2 reserved for Control: six ordinary frames across
+        // three independent connections fill the usable share.
+        for outbound in [&first, &second, &third] {
+            for _ in 0..2 {
+                assert!(
+                    outbound
+                        .submit_current(FrameClass::Stream, text(100), WaitPolicy::NoWait)
+                        .await
+                        .accepted(),
+                    "an ordinary frame within the process ceiling was refused"
+                );
+            }
         }
         assert_eq!(
-            second
+            third
                 .submit_current(FrameClass::Stream, text(100), WaitPolicy::NoWait)
                 .await,
             SubmitOutcome::Refused(OutboundError::Saturated),
             "the aggregate process ceiling was not enforced"
         );
         assert!(
-            second.snapshot().stream_frames < ROOMY.stream.frames,
+            third.snapshot().stream_frames < ROOMY.stream.frames,
             "the refusing connection's own class still has room"
         );
         assert_eq!(
@@ -2207,7 +2216,7 @@ mod tests {
 
         // Control keeps its reserved process share.
         assert!(
-            second
+            third
                 .submit_current(FrameClass::Control, text(10), WaitPolicy::NoWait)
                 .await
                 .accepted(),
@@ -2218,10 +2227,56 @@ mod tests {
         // Every reservation returns to baseline when the frames are released.
         drop(first_rx);
         drop(second_rx);
+        drop(third_rx);
         assert_eq!(process.snapshot().frames, 0);
         assert_eq!(process.snapshot().bytes, 0);
         assert!(process.snapshot().peak_frames <= process.snapshot().limit_frames);
         assert!(process.snapshot().peak_bytes <= process.snapshot().limit_bytes);
+    }
+
+    /// #4504 SC-03: moving a queued frame to the writer (ownership transfer)
+    /// must not charge the process budget twice, and dropping the charge must
+    /// release exactly what was reserved.
+    #[tokio::test]
+    async fn ownership_transfer_does_not_double_charge_the_process_budget() {
+        let process = Arc::new(ProcessAccounting::with_limits(ProcessLimits {
+            bytes: 64 * 1024,
+            frames: 8,
+            control_bytes: 2 * 1024,
+            control_frames: 2,
+        }));
+        let (outbound, mut rx) = Outbound::with_process(
+            "transfer",
+            ROOMY,
+            Duration::from_millis(50),
+            SchedulerConfig::default(),
+            Arc::clone(&process),
+        );
+        assert!(outbound
+            .submit_current(FrameClass::Stream, text(100), WaitPolicy::NoWait)
+            .await
+            .accepted());
+        let frame = rx.try_recv().expect("the frame was queued");
+        assert_eq!(process.snapshot().frames, 1);
+        let charged = process.snapshot().bytes;
+        assert_eq!(charged, exact_charge(100).expect("small frame"));
+
+        let (message, charge) = frame.into_write_parts();
+        assert!(matches!(message, WsFrame::Text(_)));
+        assert_eq!(
+            process.snapshot().frames,
+            1,
+            "ownership transfer double-charged the process frame budget"
+        );
+        assert_eq!(
+            process.snapshot().bytes,
+            charged,
+            "ownership transfer double-charged the process byte budget"
+        );
+
+        drop(charge);
+        assert_eq!(process.snapshot().frames, 0);
+        assert_eq!(process.snapshot().bytes, 0);
     }
 
     /// A gone writer is reported as closed on every lane.
