@@ -40,6 +40,10 @@ const LAUNCHD_PLIST_NAME: &str = "com.nession.agent.plist";
 #[cfg(any(target_os = "macos", test))]
 const LAUNCHD_LABEL: &str = "com.nession.agent";
 
+use nession_common::logging::{
+    SERVICE_CAPTURE_MAX_BYTES, SERVICE_CAPTURE_STDERR_FILE, SERVICE_CAPTURE_STDOUT_FILE,
+};
+
 /// Install the autostart service for the current user.
 ///
 /// Writes the service unit/plist and enables it, then asks the service manager
@@ -789,6 +793,23 @@ fn service_status_platform() -> &'static str {
     }
 }
 
+/// The registered systemd user unit path, when a registration exists.
+///
+/// `nession agent logs --source service` consumes this to prove it is reading
+/// a *registered* user service rather than guessing at a unit name.
+#[cfg(target_os = "linux")]
+pub(crate) fn registered_systemd_unit_path() -> Result<Option<PathBuf>> {
+    let path = systemd_user_unit_dir()?.join(SYSTEMD_UNIT_NAME);
+    Ok(path.exists().then_some(path))
+}
+
+/// The registered launchd plist path, when a registration exists.
+#[cfg(target_os = "macos")]
+pub(crate) fn registered_launchd_plist_path() -> Result<Option<PathBuf>> {
+    let path = launchd_agents_dir()?.join(LAUNCHD_PLIST_NAME);
+    Ok(path.exists().then_some(path))
+}
+
 #[cfg(target_os = "linux")]
 fn systemd_user_unit_dir() -> Result<PathBuf> {
     // Honour $XDG_CONFIG_HOME if set; otherwise ~/.config.
@@ -820,8 +841,19 @@ fn install_platform(
     })?;
     let plist_path = agents_dir.join(LAUNCHD_PLIST_NAME);
 
-    let plist_content =
-        launchd_plist_content(exe_path, config_path, pid_file, nession_home, runtime_dir);
+    // Captures live under the resolved home, not the historical shared
+    // `/tmp` names (#4600). Preparing them here is the only rotation window:
+    // once launchd has the file open it owns the descriptor.
+    let capture_dir = nession_common::paths::agent_service_logs_dir()?;
+    prepare_service_capture_dir(&capture_dir)?;
+    let plist_content = launchd_plist_content(
+        exe_path,
+        config_path,
+        pid_file,
+        nession_home,
+        runtime_dir,
+        &capture_dir,
+    );
     let previous = fs::read_to_string(&plist_path).ok();
 
     fs::write(&plist_path, &plist_content)
@@ -1134,7 +1166,7 @@ fn systemd_environment_value(value: &str) -> String {
 }
 
 /// Escape text for an XML text node or attribute value.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn xml_escape(value: &str) -> String {
     value
         .replace('&', "&amp;")
@@ -1203,14 +1235,17 @@ fn systemd_unit_content(
 }
 
 /// The launchd LaunchAgent plist this command installs.
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn launchd_plist_content(
     exe_path: &str,
     config_path: &str,
     pid_file: &str,
     nession_home: Option<&str>,
     runtime_dir: Option<&str>,
+    capture_dir: &Path,
 ) -> String {
+    let stdout_path = capture_dir.join(SERVICE_CAPTURE_STDOUT_FILE);
+    let stderr_path = capture_dir.join(SERVICE_CAPTURE_STDERR_FILE);
     let mut env_entries = format!("    <key>{MANAGED_AGENT_ENV}</key>\n    <string>1</string>\n");
     if let Some(home) = nession_home {
         env_entries.push_str(&format!(
@@ -1250,15 +1285,58 @@ fn launchd_plist_content(
          {env_block}\
          \x20 <key>RunAtLoad</key>\n  <true/>\n\
          \x20 <key>KeepAlive</key>\n  <true/>\n\
-         \x20 <key>StandardOutPath</key>\n  <string>/tmp/nession-agent.launchd.out</string>\n\
-         \x20 <key>StandardErrorPath</key>\n  <string>/tmp/nession-agent.launchd.err</string>\n\
+         \x20 <key>StandardOutPath</key>\n  <string>{stdout}</string>\n\
+         \x20 <key>StandardErrorPath</key>\n  <string>{stderr}</string>\n\
          </dict>\n\
          </plist>\n",
         exe = xml_escape(exe_path),
         label = LAUNCHD_LABEL,
         config = xml_escape(config_path),
         pid = xml_escape(pid_file),
+        stdout = xml_escape(&stdout_path.to_string_lossy()),
+        stderr = xml_escape(&stderr_path.to_string_lossy()),
     )
+}
+
+/// Create the service capture directory owner-private and rotate captures that
+/// exceeded their bound before launchd reopens them.
+///
+/// launchd keeps the capture file open for the job's lifetime; it cannot be
+/// renamed while the job runs without the writes continuing into the renamed
+/// inode. Bound therefore has two parts: a size cap enforced at registration
+/// (this function, keeping one `.1` generation) and the live process's own
+/// runtime file logging, which has daily/hourly retention.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn prepare_service_capture_dir(dir: &Path) -> Result<()> {
+    fs::create_dir_all(dir)
+        .with_context(|| format!("failed to create service log dir: {}", dir.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(dir, fs::Permissions::from_mode(0o700))
+            .with_context(|| format!("failed to make {} owner-private", dir.display()))?;
+    }
+    for name in [SERVICE_CAPTURE_STDOUT_FILE, SERVICE_CAPTURE_STDERR_FILE] {
+        let path = dir.join(name);
+        let size = match fs::metadata(&path) {
+            Ok(metadata) if metadata.is_file() => metadata.len(),
+            Ok(_) => continue,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error).context("failed to inspect service capture"),
+        };
+        if size < SERVICE_CAPTURE_MAX_BYTES {
+            continue;
+        }
+        let rotated = dir.join(format!("{name}.1"));
+        match fs::remove_file(&rotated) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error).context("failed to remove old service capture"),
+        }
+        fs::rename(&path, &rotated)
+            .with_context(|| format!("failed to rotate service capture {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// Run a command, returning a friendly error on failure.
@@ -1557,7 +1635,6 @@ mod tests {
         );
     }
 
-    #[cfg(target_os = "macos")]
     #[test]
     fn the_launchd_plist_forwards_config_and_pid_file_with_valid_escaping() {
         let plist = launchd_plist_content(
@@ -1566,8 +1643,11 @@ mod tests {
             "/tmp/agent \"quoted\".pid",
             Some("/home/me/Home <x>"),
             Some("/var/folders/xy/T/nession"),
+            Path::new("/Users/me/.nession/agent/logs/service"),
         );
         for expected in [
+            "<string>/Users/me/.nession/agent/logs/service/launchd.out</string>",
+            "<string>/Users/me/.nession/agent/logs/service/launchd.err</string>",
             "<string>/opt/My Tools/nession</string>",
             "<string>/home/me/Config &amp; Data/agent.toml</string>",
             "<string>/tmp/agent &quot;quoted&quot;.pid</string>",
@@ -1578,15 +1658,18 @@ mod tests {
             assert!(plist.contains(expected), "missing {expected}: {plist}");
         }
 
-        let dir = tempfile::tempdir().expect("tempdir");
-        let path = dir.path().join("com.nession.agent.plist");
-        std::fs::write(&path, &plist).expect("write plist");
-        let status = std::process::Command::new("plutil")
-            .arg("-lint")
-            .arg(&path)
-            .status()
-            .expect("run plutil");
-        assert!(status.success(), "launchd plist must parse: {plist}");
+        #[cfg(target_os = "macos")]
+        {
+            let dir = tempfile::tempdir().expect("tempdir");
+            let path = dir.path().join("com.nession.agent.plist");
+            std::fs::write(&path, &plist).expect("write plist");
+            let status = std::process::Command::new("plutil")
+                .arg("-lint")
+                .arg(&path)
+                .status()
+                .expect("run plutil");
+            assert!(status.success(), "launchd plist must parse: {plist}");
+        }
     }
 
     #[test]
@@ -1681,6 +1764,41 @@ mod tests {
         assert!(!is_manager_child(false, false));
     }
 
+    /// #4600 SC-06: registration rotates an oversized capture before launchd
+    /// reopens it, keeps one generation, and leaves the directory private.
+    #[test]
+    fn oversized_service_captures_rotate_at_registration() {
+        let dir = tempfile::tempdir().unwrap();
+        let capture = dir.path().join("service");
+        std::fs::create_dir_all(&capture).unwrap();
+        std::fs::write(capture.join("launchd.out.1"), "old generation").unwrap();
+        std::fs::write(
+            capture.join("launchd.out"),
+            "x".repeat(usize::try_from(SERVICE_CAPTURE_MAX_BYTES).unwrap_or(usize::MAX)),
+        )
+        .unwrap();
+        std::fs::write(capture.join("launchd.err"), "small").unwrap();
+
+        prepare_service_capture_dir(&capture).unwrap();
+
+        assert!(!capture.join("launchd.out").exists());
+        let rotated = std::fs::read_to_string(capture.join("launchd.out.1")).unwrap();
+        assert_eq!(
+            rotated.len(),
+            usize::try_from(SERVICE_CAPTURE_MAX_BYTES).unwrap_or(usize::MAX)
+        );
+        assert_eq!(
+            std::fs::read_to_string(capture.join("launchd.err")).unwrap(),
+            "small"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&capture).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o700);
+        }
+    }
+
     #[test]
     fn the_generated_service_artifacts_are_marked_as_manager_invoked() {
         #[cfg(target_os = "linux")]
@@ -1697,7 +1815,6 @@ mod tests {
                 "the unit must mark its direct child: {unit}"
             );
         }
-        #[cfg(target_os = "macos")]
         {
             let plist = launchd_plist_content(
                 "/usr/local/bin/nession",
@@ -1705,6 +1822,7 @@ mod tests {
                 "/tmp/nession/agent.pid",
                 Some("/Users/u/.nession"),
                 Some("/tmp/nession"),
+                Path::new("/Users/u/.nession/agent/logs/service"),
             );
             assert!(
                 plist.contains(&format!("<key>{MANAGED_AGENT_ENV}</key>")),

@@ -47,10 +47,20 @@ does not introduce a lock manager.
 ## Explicit `--pid-file`
 
 `--pid-file` remains the highest-priority override for `agent` and `server`
-`start`/`stop`/`restart`/`status`, the foreground/background child re-exec, and
-`agent install-service`. An explicit path disables runtime-directory resolution
-and disables legacy migration; custom paths are authoritative and are not
-migrated implicitly.
+`start`/`stop`/`restart`/`status`/`logs`, the foreground/background child
+re-exec, and `agent install-service`. An explicit path disables
+runtime-directory resolution and disables legacy migration; custom paths are
+authoritative and are not migrated implicitly.
+
+## Recorded log scope
+
+`write_identity` also records the absolute `home` and runtime `log_dir` the
+process resolved. They are optional and backward compatible: an older record
+reads as unknown, and a reader must say the live process's log location is
+unverified rather than substituting the documented default. `status` shows the
+recorded directory only when it is the canonical one under the recorded home;
+`agent|server logs` refuses an explicitly selected home that conflicts with a
+live instance. See [cli-logs.md](cli-logs.md).
 
 ## Migration from home-relative PID files
 

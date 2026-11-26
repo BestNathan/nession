@@ -18,6 +18,12 @@ pub const NESSION_RUNTIME_DIR_ENV: &str = "NESSION_RUNTIME_DIR";
 /// The Nession-owned directory inside the OS runtime root.
 pub const RUNTIME_DIR_NAME: &str = "nession";
 
+/// Subdirectory under a component's `logs/` holding bounded startup records.
+pub const STARTUP_LOGS_DIR_NAME: &str = "startup";
+
+/// Subdirectory under a component's `logs/` holding managed-service captures.
+pub const SERVICE_LOGS_DIR_NAME: &str = "service";
+
 /// Root directory for durable nession data.
 ///
 /// Resolution order:
@@ -187,7 +193,11 @@ pub fn server_logs_dir() -> io::Result<PathBuf> {
     server_dir().map(|d| d.join("logs"))
 }
 
-/// Agent logs directory: ~/.nession/agent/logs
+/// Server logs directory under an explicit Nession home.
+pub fn server_logs_dir_under(home: &Path) -> PathBuf {
+    home.join("server").join("logs")
+}
+
 /// Durable Session metadata: ~/.nession/agent/sessions
 ///
 /// One directory per tmux Session instance, keyed by the opaque
@@ -198,8 +208,63 @@ pub fn agent_sessions_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("sessions"))
 }
 
+/// Agent logs directory: ~/.nession/agent/logs
 pub fn agent_logs_dir() -> io::Result<PathBuf> {
     agent_dir().map(|d| d.join("logs"))
+}
+
+/// Agent logs directory under an explicit Nession home.
+pub fn agent_logs_dir_under(home: &Path) -> PathBuf {
+    home.join("agent").join("logs")
+}
+
+/// Agent startup diagnostics directory: ~/.nession/agent/logs/startup
+///
+/// Startup records cover the window before the runtime log writer exists
+/// (configuration/validation/first-start failures) and bounded background
+/// readiness failures. They are read by `nession agent logs --source startup`.
+pub fn agent_startup_logs_dir() -> io::Result<PathBuf> {
+    agent_logs_dir().map(|dir| dir.join(STARTUP_LOGS_DIR_NAME))
+}
+
+/// Agent startup diagnostics directory under an explicit Nession home.
+pub fn agent_startup_logs_dir_under(home: &Path) -> PathBuf {
+    agent_logs_dir_under(home).join(STARTUP_LOGS_DIR_NAME)
+}
+
+/// Server startup diagnostics directory: ~/.nession/server/logs/startup
+pub fn server_startup_logs_dir() -> io::Result<PathBuf> {
+    server_logs_dir().map(|dir| dir.join(STARTUP_LOGS_DIR_NAME))
+}
+
+/// Server startup diagnostics directory under an explicit Nession home.
+pub fn server_startup_logs_dir_under(home: &Path) -> PathBuf {
+    server_logs_dir_under(home).join(STARTUP_LOGS_DIR_NAME)
+}
+
+/// Agent managed-service capture directory: ~/.nession/agent/logs/service
+///
+/// The macOS LaunchAgent redirects its stdout/stderr here instead of the
+/// historical shared `/tmp` files (#4600). Linux uses the systemd user journal;
+/// this directory simply has no files there.
+pub fn agent_service_logs_dir() -> io::Result<PathBuf> {
+    agent_logs_dir().map(|dir| dir.join(SERVICE_LOGS_DIR_NAME))
+}
+
+/// Agent managed-service capture directory under an explicit Nession home.
+pub fn agent_service_logs_dir_under(home: &Path) -> PathBuf {
+    agent_logs_dir_under(home).join(SERVICE_LOGS_DIR_NAME)
+}
+
+/// Server managed-service capture directory. The Server has no native managed
+/// service in this CLI; the helper is symmetric with the Agent's.
+pub fn server_service_logs_dir() -> io::Result<PathBuf> {
+    server_logs_dir().map(|dir| dir.join(SERVICE_LOGS_DIR_NAME))
+}
+
+/// Server managed-service capture directory under an explicit Nession home.
+pub fn server_service_logs_dir_under(home: &Path) -> PathBuf {
+    server_logs_dir_under(home).join(SERVICE_LOGS_DIR_NAME)
 }
 
 /// Agent identity file path: ~/.nession/agent/identity
@@ -857,6 +922,35 @@ mod tests {
         assert_eq!(
             legacy_agent_pid_path().unwrap(),
             home.path().join("agent").join("agent.pid")
+        );
+    }
+
+    #[test]
+    fn log_roots_have_explicit_home_variants() {
+        let home = Path::new("/explicit/home");
+        assert_eq!(
+            agent_logs_dir_under(home),
+            Path::new("/explicit/home/agent/logs")
+        );
+        assert_eq!(
+            server_logs_dir_under(home),
+            Path::new("/explicit/home/server/logs")
+        );
+        assert_eq!(
+            agent_startup_logs_dir_under(home),
+            Path::new("/explicit/home/agent/logs/startup")
+        );
+        assert_eq!(
+            server_startup_logs_dir_under(home),
+            Path::new("/explicit/home/server/logs/startup")
+        );
+        assert_eq!(
+            agent_service_logs_dir_under(home),
+            Path::new("/explicit/home/agent/logs/service")
+        );
+        assert_eq!(
+            server_service_logs_dir_under(home),
+            Path::new("/explicit/home/server/logs/service")
         );
     }
 

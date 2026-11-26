@@ -12,24 +12,18 @@ use nession_cli::commands;
 use nession_cli::versions;
 use std::ffi::OsString;
 
-fn should_skip_background_check(args: &[OsString]) -> bool {
-    std::env::var("NESSION_NO_UPDATE_CHECK").is_ok()
-        || args.iter().any(|arg| {
-            matches!(
-                arg.to_str(),
-                Some("--help" | "-h" | "help" | "--version" | "-V" | "--upgrade-config-check")
-            )
-        })
-}
-
 #[tokio::main]
 async fn main() -> Result<()> {
     let raw_args: Vec<OsString> = std::env::args_os().collect();
 
-    // A previous install may have been killed mid-transaction. Recover (or
-    // fail closed) before any command reads Current (#3232 F4, #4592); the
-    // diagnostic goes to stderr so it cannot corrupt parseable stdout.
-    nession_cli::update::transaction::recover_before_command(&raw_args)?;
+    // `logs` is read-only: no install-recovery mutation, only a diagnostic
+    // when a transaction is pending (#4600 SC-04). Every other command
+    // recovers (or fails closed) before reading Current (#3232 F4, #4592).
+    if versions::is_logs_invocation(&raw_args) {
+        nession_cli::update::transaction::report_pending_journal_for_read_only_command();
+    } else {
+        nession_cli::update::transaction::recover_before_command(&raw_args)?;
+    }
 
     // May `exec` an archived release and never return (#3173).
     let prepared = versions::prepare(raw_args)?;
@@ -44,7 +38,7 @@ async fn main() -> Result<()> {
         std::process::exit(code);
     }
 
-    if !should_skip_background_check(&prepared.args) {
+    if !versions::should_skip_background_check(&prepared.args) {
         tokio::spawn(async {
             if let Some(msg) = nession_cli::update::check::background_check().await {
                 eprintln!("{msg}");

@@ -30,6 +30,14 @@ pub async fn run(pid_file_path: Option<String>) -> Result<()> {
         for warning in inspection.unresolved_warnings("server") {
             eprintln!("Warning: {warning}");
         }
+        if let Ok(home) = nession_common::paths::nession_home() {
+            println!(
+                "Logs: {} (selected home; no live process)",
+                nession_common::logging::LogComponent::Server
+                    .logs_dir_under(&home)
+                    .display()
+            );
+        }
         return Ok(());
     };
 
@@ -61,6 +69,13 @@ pub async fn run(pid_file_path: Option<String>) -> Result<()> {
             println!("Config: unknown (the running process did not record which configuration it loaded)")
         }
     }
+    println!(
+        "{}",
+        crate::local_logs::resolve::describe_status_logs(
+            nession_common::logging::LogComponent::Server,
+            &identity,
+        )
+    );
 
     Ok(())
 }
