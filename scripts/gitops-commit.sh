@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# gitops-commit.sh <env> <ref>
+# gitops-commit.sh <env> <ref> [--repair-current]
 #
 # All environments deploy GHCR images {server,agent,ui}-<ref> (#4032).
-# The staging-only standalone MCP overlay follows the same exact SHA as all
-# other staging roles; non-staging environments remain three-role deployments.
+# Staging and production also advance their independently owned MCP overlay
+# in the same GitOps commit; other environments remain three-role deployments.
 # Pushes a deploy commit ("deploy(<env>): <ref>") to the gitops branch.
 # The ONLY writer of deployment desired state; used by staging.yml (staging
 # branch auto-deploy), release.yml (production promotion) and deploy.yml
@@ -15,6 +15,11 @@ set -euo pipefail
 
 env=$1
 ref=$2
+repair=${3:-}
+if [[ -n "$repair" && ( "$repair" != "--repair-current" || "$env" != "production" ) ]]; then
+  echo "invalid GitOps repair mode" >&2
+  exit 1
+fi
 OWNER="${GITHUB_REPOSITORY_OWNER,,}"
 TOKEN="${GITHUB_TOKEN:?gitops-commit.sh needs GITHUB_TOKEN}"
 SOURCE_IMAGE="ghcr.io/${OWNER}/nession"
@@ -27,24 +32,23 @@ if [ "$env" = "production" ]; then
     || { echo "refusing to write non-semver tag to production: $ref"; exit 1; }
 fi
 
-# Staging must not move desired state to a GHCR tag until both platforms are
-# remotely readable. This also guards manual staging deploys, whose workflow
-# doesn't depend on the ACR mirror job.
-if [[ "${env}" == "staging" ]]; then
+# Staging and production must not advance until every role has both platforms
+# remotely readable from GHCR. This includes repair of an existing release.
+if [[ "${env}" == "staging" || "${env}" == "production" ]]; then
   for img in server agent ui mcp; do
     tag="${img}-${ref}"
     # GHCR can return HTTP 401 to raw curl manifest requests while the Docker
     # Registry challenge/token flow still permits anonymous image pulls.
     # Buildx performs that negotiation, just as Kubernetes containerd does.
     if ! manifest="$(docker buildx imagetools inspect --raw "${TARGET_IMAGE}:${tag}")"; then
-      echo "GHCR image ${tag} unavailable; refusing to advance staging GitOps" >&2
+      echo "GHCR image ${tag} unavailable; refusing to advance $env GitOps" >&2
       exit 1
     fi
     if ! jq -e '
       [.manifests[]? | select(.platform.os == "linux") | .platform.architecture]
       | index("amd64") != null and index("arm64") != null
     ' <<< "${manifest}" >/dev/null; then
-      echo "GHCR image ${tag} missing amd64 or arm64; refusing staging GitOps update" >&2
+      echo "GHCR image ${tag} missing amd64 or arm64; refusing $env GitOps update" >&2
       exit 1
     fi
   done
@@ -57,19 +61,29 @@ git clone --quiet --branch gitops --depth 1 \
   "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "$tmp"
 cd "$tmp/environments/$env/nession"
 
+# Recovery is not a new release or a rollback. Re-check the actual cloned
+# desired state under the shared writer lock before making any changes.
+if [[ "$repair" == "--repair-current" ]]; then
+  for role in server agent ui; do
+    grep -Fxq "  newTag: ${role}-${ref}" kustomization.yaml || {
+      echo "production core is not uniformly at $ref; refusing repair" >&2
+      exit 1
+    }
+  done
+fi
+
 for img in server agent ui; do
   kustomize edit set image \
     "ghcr.io/${OWNER}/nession-${img}=${TARGET_IMAGE}:${img}-${ref}"
 done
 
-# Staging hosts a separate Argo CD Application for the standalone MCP service,
-# yet both applications must advance in ONE GitOps commit to the same source SHA.
-# Refuse a partial promotion if its overlay is absent, rather than silently
-# deploying the Server/Agent/UI at a newer revision than MCP.
-if [[ "${env}" == "staging" ]]; then
-  mcp_overlay="${tmp}/environments/staging/mcp"
+# Staging and production host a separate Argo CD Application for MCP.
+# Both applications advance in ONE GitOps commit to the same release identity.
+# Refuse a partial promotion if the required MCP overlay is absent.
+if [[ "${env}" == "staging" || "${env}" == "production" ]]; then
+  mcp_overlay="${tmp}/environments/${env}/mcp"
   if [[ ! -f "${mcp_overlay}/kustomization.yaml" ]]; then
-    echo "missing staging MCP GitOps overlay: ${mcp_overlay}/kustomization.yaml" >&2
+    echo "missing $env MCP GitOps overlay: ${mcp_overlay}/kustomization.yaml" >&2
     exit 1
   fi
   cd "${mcp_overlay}"
@@ -87,6 +101,15 @@ git add -A
 git -c user.name="github-actions[bot]" \
     -c user.email="github-actions[bot]@users.noreply.github.com" \
     commit -m "$msg"
+
+# A repair must never be rebased onto a different desired-state version.
+# A concurrent GitOps writer makes this fast-forward push fail; rerun to
+# re-read and validate the current core version rather than forcing a write.
+if [[ "$repair" == "--repair-current" ]]; then
+  git push origin gitops
+  echo "pushed: $msg (repair)"
+  exit 0
+fi
 
 for i in $(seq 1 10); do
   # Auto-deploy remains bound to the current protected staging SHA even
