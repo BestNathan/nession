@@ -21,10 +21,10 @@
 #   for an existing installation, NESSION_UPDATE_API_URL),
 #   GITHUB_TOKEN
 #
-# First migration: when the install directory already holds a CLI that predates
-# the versioned `install` command, this script hands the upgrade to the new
-# binary's install transaction instead of overwriting files. The old release's
-# binaries and durable state are archived; a failed transaction restores them.
+# First safe upgrade: only a CLI advertising the upgrade contract
+# (nession-upgrade-v1) runs its own transaction; any older CLI — even one that
+# supports `install` — is upgraded by the verified TARGET binary, so the
+# superseded move-based path never runs. State is retained; archives get copies.
 set -eu
 
 REPO="BestNathan/nession"
@@ -97,19 +97,27 @@ else
   die "need curl or wget installed"
 fi
 
+# Bounded bootstrap transport (#4592 §8.5): every request has a connect bound,
+# a whole-request budget and bounded retries; a stalled asset transfer aborts
+# after 60s below 1 KiB/s instead of hanging forever. Metadata is small (30s
+# budget); the asset may legitimately take minutes (30min budget, idle-bound).
 # fetch <url> -> stdout
 fetch() {
   if [ "$DL" = curl ]; then
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-      curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" "$1"
+      curl -fsSL --connect-timeout 10 --max-time 30 \
+        --retry 3 --retry-delay 2 --retry-max-time 120 \
+        -H "Authorization: Bearer $GITHUB_TOKEN" "$1"
     else
-      curl -fsSL "$1"
+      curl -fsSL --connect-timeout 10 --max-time 30 \
+        --retry 3 --retry-delay 2 --retry-max-time 120 "$1"
     fi
   else
     if [ -n "${GITHUB_TOKEN:-}" ]; then
-      wget -qO- --header="Authorization: Bearer $GITHUB_TOKEN" "$1"
+      wget -qO- --timeout=30 --tries=4 --waitretry=2 \
+        --header="Authorization: Bearer $GITHUB_TOKEN" "$1"
     else
-      wget -qO- "$1"
+      wget -qO- --timeout=30 --tries=4 --waitretry=2 "$1"
     fi
   fi
 }
@@ -117,9 +125,12 @@ fetch() {
 # download <url> <dest-file>
 download() {
   if [ "$DL" = curl ]; then
-    curl -fsSL -o "$2" "$1"
+    curl -fsSL --connect-timeout 10 --max-time 1800 \
+      --speed-limit 1024 --speed-time 60 \
+      --retry 3 --retry-delay 2 --retry-max-time 1900 \
+      -C - -o "$2" "$1"
   else
-    wget -qO "$2" "$1"
+    wget -qO "$2" --timeout=60 --read-timeout=60 --tries=4 --waitretry=2 -c "$1"
   fi
 }
 
@@ -145,7 +156,9 @@ resolve_version() {
     info "Resolving latest release…" >&2
     # Follow the 302 redirect from /releases/latest to extract the tag.
     # No GitHub API call — avoids the 60 req/hr unauthenticated rate limit.
-    tag=$(curl -sI -L "https://github.com/$REPO/releases/latest" \
+    tag=$(curl -sI -L --connect-timeout 10 --max-time 30 \
+      --retry 3 --retry-delay 2 --retry-max-time 120 \
+      "https://github.com/$REPO/releases/latest" \
       | grep -i '^location:' | tail -1 \
       | sed 's|.*/releases/tag/||' | tr -d '\r')
     if [ -z "$tag" ]; then
@@ -195,26 +208,33 @@ if [ -n "$EXISTING_CLI" ] && [ -n "${NESSION_RELEASE_BASE_URL:-}" ] \
 fi
 
 # ── Delegate versioned installs to an existing CLI ──────────────────────────
-# A first install (no nession on PATH, or an older CLI without `install`) uses
-# the bootstrap below. Once a CLI with the archive rule is installed, an
-# upgrade follows the same transaction as `nession update`.
+# Only a CLI that advertises the versioned upgrade contract may run its own
+# transaction (#4592 §6). `install --help` is NOT proof: an old CLI can support
+# `install` and still execute the superseded move-based transaction that strips
+# Current of its configuration and identity. Any CLI without the token — including
+# one that supports `install` — falls through to MIGRATE, where the verified
+# TARGET binary performs the upgrade with the actual installed directory/version.
 MIGRATE=0
 if [ -n "$EXISTING_CLI" ]; then
   if [ -n "$BINS" ]; then
     die "--bins is only supported for a fresh installation; the versioned transaction always publishes all three binaries. Use \`nession install <version>\` to update an existing installation."
   fi
-  if "$EXISTING_CLI" install --help >/dev/null 2>&1; then
-    export NESSION_INSTALL_DIR="$INSTALL_DIR"
-    if [ "$VERSION" = latest ]; then
-      info "Delegating to the installed nession CLI (update)…"
-      exec "$EXISTING_CLI" update --yes
-    else
-      info "Delegating to the installed nession CLI (install ${VERSION})…"
-      exec "$EXISTING_CLI" install "$VERSION"
-    fi
-  fi
-  # The installed CLI predates `install`: the extracted new CLI performs the
-  # first migration through the same archive transaction.
+  UPGRADE_CONTRACT="$("$EXISTING_CLI" --upgrade-contract 2>/dev/null || true)"
+  case "$UPGRADE_CONTRACT" in
+    nession-upgrade-v1\ *)
+      export NESSION_INSTALL_DIR="$INSTALL_DIR"
+      if [ "$VERSION" = latest ]; then
+        info "Delegating to the installed nession CLI (update)…"
+        exec "$EXISTING_CLI" update --yes
+      else
+        info "Delegating to the installed nession CLI (install ${VERSION})…"
+        exec "$EXISTING_CLI" install "$VERSION"
+      fi
+      ;;
+  esac
+  # The installed CLI does not advertise the upgrade contract: the extracted,
+  # hash-verified TARGET CLI performs the first safe upgrade through the same
+  # retention transaction. The old CLI's own install/update code never runs.
   MIGRATE=1
 fi
 
@@ -279,12 +299,20 @@ if [ "$MIGRATE" = 1 ]; then
   # The migration transaction publishes all three binaries; verify the archive
   # is complete before handing it the upgrade.
   for b in $ALL_BINS; do
-    [ -f "$TMP/$b" ] || die "the release archive is missing '$b'; refusing a first migration"
+    [ -f "$TMP/$b" ] || die "the release archive is missing '$b'; refusing a first safe upgrade"
   done
 fi
 
-# ── First migration through the versioned transaction ───────────────────────
+# ── First safe upgrade through the verified TARGET transaction ──────────────
 if [ "$MIGRATE" = 1 ]; then
+  # The downloaded target must itself advertise the upgrade contract; an older
+  # target cannot prove retention compatibility and is refused fail-closed.
+  TARGET_CONTRACT="$("$TMP/nession" --upgrade-contract 2>/dev/null || true)"
+  case "$TARGET_CONTRACT" in
+    nession-upgrade-v1\ *) ;;
+    *) die "the downloaded release ${VER} does not advertise the upgrade contract; refusing to upgrade with a release that cannot prove retention compatibility" ;;
+  esac
+
   OLD_VERSION="$("$EXISTING_CLI" --version 2>/dev/null | awk '{print $NF}')" || OLD_VERSION=""
   # The transaction names the archive with the normalized SemVer; tolerate an
   # older CLI that prints a `v` prefix.
@@ -295,17 +323,28 @@ if [ "$MIGRATE" = 1 ]; then
   HAD_AGENT_DIR=0;    [ -d "$OLD_HOME/agent" ] && HAD_AGENT_DIR=1
   HAD_SERVER_DIR=0;   [ -d "$OLD_HOME/server" ] && HAD_SERVER_DIR=1
 
-  info "Migrating the pre-versioned installation at ${INSTALL_DIR} (release ${OLD_VERSION:-unknown})…"
-  # The new CLI refuses while an Agent/Server is live and restores the old
+  info "Upgrading the installation at ${INSTALL_DIR} (release ${OLD_VERSION:-unknown}) through the verified target transaction…"
+  # The target CLI refuses while an Agent/Server is live and restores the old
   # installation if any step fails. It never stops a daemon implicitly.
   NESSION_INSTALL_DIR="$INSTALL_DIR" "$TMP/nession" install "$VER" --yes \
-    || die "first migration failed; the versioned transaction restored the previous installation"
+    || die "first safe upgrade failed; the retention transaction restored the previous installation"
 
   for b in $ALL_BINS; do
-    [ -f "$INSTALL_DIR/$b" ] || die "migration did not install '$b'"
+    [ -f "$INSTALL_DIR/$b" ] || die "the upgrade did not install '$b'"
     cmp -s "$TMP/$b" "$INSTALL_DIR/$b" \
       || die "installed '$b' does not match the verified downloaded release"
   done
+
+  # Retention (#4592 SC-01): Current keeps its configuration and durable state
+  # at the same paths; the archive holds independent copies, never a rename.
+  [ "$HAD_AGENT_CONFIG" = 0 ]  || [ -f "$OLD_HOME/agent-config.toml" ] \
+    || die "the upgrade removed Current's agent config; retention was violated"
+  [ "$HAD_SERVER_CONFIG" = 0 ] || [ -f "$OLD_HOME/server-config.toml" ] \
+    || die "the upgrade removed Current's server config; retention was violated"
+  [ "$HAD_AGENT_DIR" = 0 ]     || [ -d "$OLD_HOME/agent" ] \
+    || die "the upgrade removed Current's agent state; retention was violated"
+  [ "$HAD_SERVER_DIR" = 0 ]    || [ -d "$OLD_HOME/server" ] \
+    || die "the upgrade removed Current's server state; retention was violated"
 
   if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$VER" ]; then
     ARCHIVED="$OLD_HOME/versions/$OLD_VERSION"
@@ -314,14 +353,16 @@ if [ "$MIGRATE" = 1 ]; then
     for b in $ALL_BINS; do
       [ -f "$ARCHIVED/bin/$b" ] || die "the archived release is missing '$b'"
     done
+    [ -f "$ARCHIVED/manifest.json" ] \
+      || die "the archive has no coverage manifest; refusing to report an unproven snapshot"
     [ "$HAD_AGENT_CONFIG" = 0 ]  || [ -f "$ARCHIVED/agent-config.toml" ] \
-      || die "the previous agent config was not archived"
+      || die "the previous agent config was not copied into the archive"
     [ "$HAD_SERVER_CONFIG" = 0 ] || [ -f "$ARCHIVED/server-config.toml" ] \
-      || die "the previous server config was not archived"
+      || die "the previous server config was not copied into the archive"
     [ "$HAD_AGENT_DIR" = 0 ]     || [ -d "$ARCHIVED/agent" ] \
-      || die "the previous agent state was not archived"
+      || die "the previous agent state was not snapshotted into the archive"
     [ "$HAD_SERVER_DIR" = 0 ]    || [ -d "$ARCHIVED/server" ] \
-      || die "the previous server state was not archived"
+      || die "the previous server state was not snapshotted into the archive"
     info "Previous release archived at ${C_DIM}${ARCHIVED}${C_RST}"
   fi
 

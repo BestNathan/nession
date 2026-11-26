@@ -749,10 +749,60 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ═══════════════════════════════════════════════════════════════════
+  # Native macOS runtime qualification (#4584 SC-03). The affected macOS
+  # release candidate must prove the rusage regression and the release-mode
+  # Agent/Server/tmux runtime on a real ARM64 runner at this exact SHA before
+  # any macOS binary is built or published. A failed native test blocks the
+  # candidate (build-macos and therefore create-release depend on this job).
+  # Cross-compilation alone is not execution proof; Intel execution is tracked
+  # separately as Pending and is never inferred from this ARM64 lane.
+  # ═══════════════════════════════════════════════════════════════════
+  native-macos-check:
+    needs: version-check
+    if: needs.version-check.outputs.version_changed == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Record target OS and architecture
+        run: |
+          echo "uname: $(uname -srm)"
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+      - name: Ensure tmux
+        run: command -v tmux >/dev/null || brew install tmux
+      - name: Native macOS process-discovery regression (release)
+        run: |
+          cargo test --release -p nession-agent --lib session::process_discovery:: -- --test-threads=1
+      - name: Build release native binaries
+        run: cargo build --release --bin nession --bin nession-agent --bin nession-server
+      - name: Native release-mode runtime fixture
+        run: ./scripts/native-macos-runtime-check.sh target/release
+      - name: Upload native diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-macos-release-diagnostics-${{ github.sha }}
+          path: /tmp/nession-native-*/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # ═══════════════════════════════════════════════════════════════════
   # Native binaries — macOS (arm64 native + amd64 cross-compile)
   # ═══════════════════════════════════════════════════════════════════
   build-macos:
-    needs: [version-check, rust-check, web-check]
+    needs: [version-check, rust-check, web-check, native-macos-check]
     if: needs.version-check.outputs.version_changed == 'true'
     runs-on: macos-latest
     steps:
@@ -919,6 +969,10 @@ jobs:
           registry: ${{ env.ACR_REGISTRY }}
           username: ${{ secrets.ALIYUN_ACR_USERNAME }}
           password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+      # #4593: the mirror script's chunked ACR fallback fails closed without
+      # regctl on PATH; provide the same pinned binary the staging lane uses.
+      - uses: ./.github/actions/install-regctl
+        if: steps.credentials.outputs.configured == 'true'
       - name: Mirror and verify multi-arch ${{ matrix.image }} image
         if: steps.credentials.outputs.configured == 'true'
         shell: bash

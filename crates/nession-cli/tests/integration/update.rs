@@ -139,15 +139,30 @@ async fn fetch_latest_with_mock_server() {
     assert_eq!(release.assets.len(), 2);
 }
 
+/// A policy with deterministic zero backoff for fault-matrix tests.
+fn fast_policy() -> nession_cli::update::policy::TransferPolicy {
+    nession_cli::update::policy::TransferPolicy {
+        backoff_base: std::time::Duration::ZERO,
+        ..Default::default()
+    }
+}
+
 #[tokio::test]
 async fn fetch_latest_rate_limited() {
     use nession_cli::update::github::GitHubReleaseClient;
     use nession_cli::update::UpdateError;
 
     let server = Server::run();
-    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(429)));
+    // 429 is transient: the bounded policy retries (initial + 3) before
+    // surfacing the rate-limit diagnostic.
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .times(4)
+            .respond_with(status_code(429)),
+    );
 
-    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let client =
+        GitHubReleaseClient::with_policy(server.url("/").to_string(), &fast_policy()).unwrap();
     let err = client.fetch_latest().await.unwrap_err();
     assert!(matches!(err, UpdateError::RateLimited));
 }
@@ -332,21 +347,69 @@ async fn background_check_all_scenarios() {
 }
 
 #[tokio::test]
-async fn download_to_file_error_status() {
+async fn download_asset_permanent_status_fails_promptly() {
     use nession_cli::update::download;
+    use nession_cli::update::progress::{CancelToken, Reporter};
     use nession_cli::update::UpdateError;
 
     let server = Server::run();
-    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(500)));
+    // 404 is permanent: no retry, prompt failure.
+    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(404)));
 
     let reqwest_client = reqwest::Client::new();
     let dir = tempfile::tempdir().unwrap();
     let dest = dir.path().join("error.tar.gz");
+    let part = dir.path().join("error.tar.gz.part");
 
-    let err = download::download_to_file(&reqwest_client, &server.url("/").to_string(), &dest)
-        .await
-        .unwrap_err();
+    let err = download::download_asset(
+        &reqwest_client,
+        &server.url("/").to_string(),
+        &dest,
+        &part,
+        &fast_policy(),
+        &CancelToken::new(),
+        &Reporter::silent(),
+    )
+    .await
+    .unwrap_err();
     assert!(matches!(err, UpdateError::Network(_)));
+    assert!(!dest.exists());
+}
+
+#[tokio::test]
+async fn download_asset_transient_status_retries_then_exhausts() {
+    use nession_cli::update::download;
+    use nession_cli::update::progress::{CancelToken, Reporter};
+    use nession_cli::update::UpdateError;
+
+    let server = Server::run();
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .times(4)
+            .respond_with(status_code(500)),
+    );
+
+    let reqwest_client = reqwest::Client::new();
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("error.tar.gz");
+    let part = dir.path().join("error.tar.gz.part");
+
+    let err = download::download_asset(
+        &reqwest_client,
+        &server.url("/").to_string(),
+        &dest,
+        &part,
+        &fast_policy(),
+        &CancelToken::new(),
+        &Reporter::silent(),
+    )
+    .await
+    .unwrap_err();
+    match err {
+        UpdateError::RetryExhausted { attempts, .. } => assert_eq!(attempts, 4),
+        other => panic!("expected RetryExhausted, got {other:?}"),
+    }
+    assert!(!dest.exists());
 }
 
 #[tokio::test]
@@ -355,9 +418,14 @@ async fn fetch_latest_server_error() {
     use nession_cli::update::UpdateError;
 
     let server = Server::run();
-    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(500)));
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .times(4)
+            .respond_with(status_code(500)),
+    );
 
-    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let client =
+        GitHubReleaseClient::with_policy(server.url("/").to_string(), &fast_policy()).unwrap();
     let err = client.fetch_latest().await.unwrap_err();
     assert!(matches!(err, UpdateError::Network(_)));
 }
@@ -368,9 +436,14 @@ async fn download_checksums_http_error() {
     use nession_cli::update::UpdateError;
 
     let server = Server::run();
-    server.expect(Expectation::matching(request::method("GET")).respond_with(status_code(500)));
+    server.expect(
+        Expectation::matching(request::method("GET"))
+            .times(4)
+            .respond_with(status_code(500)),
+    );
 
-    let client = GitHubReleaseClient::with_base_url(server.url("/").to_string()).unwrap();
+    let client =
+        GitHubReleaseClient::with_policy(server.url("/").to_string(), &fast_policy()).unwrap();
     let release = ReleaseInfo {
         tag_name: "v0.5.0".into(),
         prerelease: false,

@@ -18,20 +18,29 @@ A release is a coherent unit: `nession`, `nession-agent` and `nession-server`
 plus that release's configuration and durable state. Binaries are never mixed
 from different releases.
 
+**The installation is the stable unit; a release is replaceable (#4592).**
+`NESSION_HOME`, both TOML configs, the Agent identity/credentials and the
+compatible durable state belong to the *installation*, not to one release.
+Upgrading Current retains them in place; an archive receives independent
+copies. The superseded rule "the new Current starts with built-in defaults"
+(#3173/#3232) no longer holds — single-active, archive isolation and
+transaction recovery do.
+
 ## Layout
 
 ```text
 <NESSION_HOME>/
   (managed install dir, e.g. ~/.local/bin)   # Current binaries
-  agent-config.toml                           # Current durable configuration
+  agent-config.toml                           # installation configuration (retained)
   server-config.toml
-  agent/                                      # Current durable state
+  agent/                                      # installation durable state (retained)
   server/
   versions/
     <semver>/
       bin/nession  bin/nession-agent  bin/nession-server
-      agent-config.toml  server-config.toml
-      agent/  server/
+      manifest.json                           # snapshot coverage record
+      agent-config.toml  server-config.toml   # independent copies
+      agent/  server/                         # bounded snapshot subset
 ```
 
 The managed install directory is the directory of the running CLI unless
@@ -45,8 +54,11 @@ the same live process.
 ## Install and archive
 
 `nession install <version>`, `nession update [--version <version>]` and
-`scripts/install.sh --version <version>` converge on one rule (the script
-delegates to the installed CLI once it supports `install`):
+`scripts/install.sh --version <version>` converge on one rule. The script
+delegates to the installed CLI **only when it advertises the versioned upgrade
+contract** (`nession --upgrade-contract` prints `nession-upgrade-v1 <release>`);
+`install --help` alone is not proof, because an old CLI can support `install`
+and still run the superseded move-based transaction:
 
 - **target == Current**: idempotent no-op; no network access is needed and no
   user data is touched.
@@ -55,70 +67,163 @@ delegates to the installed CLI once it supports `install`):
   complete archive is a no-op; an existing archive's configuration and data are
   never overwritten.
 - **target > Current**: download and SHA256-verify the release, then run the
-  archive transaction below. The new Current starts with built-in defaults (no
-  inherited config/database).
+  retention transaction below. Current keeps both configs, the Agent identity
+  and the compatible durable state at their existing paths; the archive gets
+  independent copies. New config fields resolve through the **target** binary's
+  defaults; a config the target cannot losslessly parse and validate refuses
+  the upgrade before any mutation. No identity is ever auto-minted by an
+  upgrade.
 
 Versions are strict SemVer; a leading `v` is accepted and normalized. Invalid
 or unavailable releases are rejected before mutation.
 
-### Archive transaction and recovery
+### Retention transaction and recovery
 
 A release archive is assembled in a private `versions/.stage-*` directory and
 published by **one atomic rename**. A final `versions/<semver>` directory is
 therefore always complete; `versions::is_complete_archive` requires all three
 binaries before any archive is listed or reused (#3232 F4).
 
+Preflight (before any mutation) inventories the durable state and fails closed
+on: active mount points under the home, symlinks escaping the home,
+insufficient space for the independent snapshot, a target that does not
+advertise the upgrade contract, or a target that cannot parse/validate the
+retained configs. The config proof is the **target binary's own** hidden probe
+`nession --upgrade-config-check <agent|server> <path>` run on staged copies —
+pure (no writes, no identity minting) and sanitized (parse failures report a
+location, never config values).
+
+The snapshot is a bounded subset, never a rename of Current: both configs are
+byte-copied; the Agent identity, sessions, Claude/ENV bindings and Server ENV
+records are copied; the Server DB is captured through the SQLite backup API
+(WAL accounted for); content-addressed stores (image blobs, EROFS) are
+**referenced, not copied**; caches, logs and runtime files are omitted; unknown
+top-level entries are preserved in place and recorded as coverage gaps. Every
+archive carries `manifest.json` recording binary digests, config coverage,
+per-entry state digests, references, gaps, external dependencies and whether
+the snapshot is state-complete. A failed DB backup is a recorded gap, never a
+fake complete snapshot.
+
 Every mutating phase is recorded in `<NESSION_HOME>/.install-transaction.json`
-before it starts. The journal names the release homes, the exact old/new binary
-SHA256 digests, each configuration/state entry that may move, the original
-`server-config.toml` text and the transaction PID. Phases:
+(schema 2, mode 0600) before it starts. The journal names the release homes,
+the exact old/new binary SHA256 digests, the config **preimage fingerprints**
+and the transaction PID. Current's config/state are never moved, so recovery
+verifies preimages instead of restoring anything. Phases:
 
 ```text
-staging -> state-move -> archive-committed -> binary-swap -> committed
+staging -> snapshot -> archive-committed -> binary-swap -> committed
 ```
 
 Recovery runs before any command reads Current (including `version list`) and
 under the lifecycle lock, so an active install is skipped rather than raced:
 
 - `staging`: remove the staging directory; Current was untouched.
-- `state-move` / `archive-committed`: restore all three binaries from the
-  archive (or staging before the rename), move configuration/state back, write
-  the original config text, remove the uncommitted archive.
-- `binary-swap`: if all three installed binaries match the journal's new
-  digests, the swap had finished — commit forward and keep the archive.
-  Anything mixed is rolled back from the archive.
-- An unreadable journal, a missing archive copy, or an entry present at both
-  locations is **fail-stop**: the journal is retained and every later command
-  reports the exact repair instead of starting a half-installed release.
-  Recovery errors are never swallowed.
+- `snapshot` / `archive-committed`: verify the config preimages, restore all
+  three binaries from the archive (or staging before the rename), remove the
+  uncommitted archive.
+- `binary-swap`: commit forward **only** when all three installed binaries
+  match the journal's new digests **and** the published archive carries its
+  manifest — three binary digests alone never decide a commit. Anything mixed
+  is rolled back from the archive.
+- A changed config preimage is an external writer: recovery fails closed and
+  never overwrites the user's writes. An unreadable journal, an unknown schema
+  or a missing archive copy is **fail-stop**: the journal is retained and every
+  later command reports the exact repair instead of starting a half-installed
+  release. Recovery errors are never swallowed.
+
+Schema-1 journals (the superseded move-based transaction) keep their own
+compatible recovery owner: moved entries are restored to Current by the old
+algorithm, or the recovery refuses with precise instructions. They are never
+guessed by the schema-2 path.
+
+### First safe upgrade and the installer bridge
 
 `scripts/install.sh` verifies the release SHA256 before extracting and before
-publishing anything. On a machine whose existing CLI predates `install`, it
-hands the first upgrade to the **new** binary's transaction, so the old three
-binaries, configuration and durable state are archived instead of overwritten.
-A fresh machine still bootstraps the selected binaries from staging in one
-publication step. Neither path stops a running daemon.
+publishing anything. When the existing CLI does not advertise the upgrade
+contract — **including CLIs that support `install` but run the move-based
+transaction** — the script downloads and hash-verifies the target, checks the
+target's own contract, and hands the upgrade to the verified **target**
+transaction with the actual installed directory/version. The old CLI's own
+install/update code never runs. A fresh machine still bootstraps the selected
+binaries from staging in one publication step. Neither path stops a running
+daemon. Bootstrap curl/wget calls are bounded (connect/total/idle budgets and
+bounded retries).
+
+**Limitation:** an already-released old CLI's direct `nession update` cannot be
+retroactively changed by a new target artifact. Affected users must use the
+updated official installer (`curl -fsSL
+https://raw.githubusercontent.com/BestNathan/nession/main/scripts/install.sh |
+sh -s -- --version <target>`) as the supported first hop; release notes route
+them there.
+
+### Recovery for already-affected installations
+
+Installations whose configuration/identity was moved by the superseded
+transaction recover through two bounded commands:
+
+- `nession version inspect <version>` — read-only: binary availability,
+  snapshot coverage, historical runtime eligibility, and a non-secret recovery
+  plan (entry names and statuses only, never contents).
+- `nession version recover <version>` — copies **only missing** config/identity
+  entries from the explicitly selected, provenance-verified archive back into
+  Current. It refuses while an Agent/Server is live or the lifecycle lock is
+  busy; any entry that exists at Current with different bytes is a conflict
+  that refuses the whole run (nothing is copied); identical entries are
+  skipped, so re-running is idempotent. Business data (Server DB, sessions,
+  workspaces) is never auto-restored here — use the owner's backup/restore path
+  with explicit reconciliation.
+
+In-flight transaction rollback is automatic; intentional rollback after a
+commit is this explicit operator recovery. Post-commit writes are never
+discarded automatically.
 
 ### Archived server paths
 
 `config server init` persists the *generated* absolute defaults for `db_path`,
-`image_blob_dir` and `image_build_dir`. Archiving rewrites exactly those values
-to the archived home's defaults so an archived Server opens
-`versions/<old>/server/...`, never Current's state (#3232 F1):
+`image_blob_dir` and `image_build_dir`. Only the **archive's copy** of the
+server config is rewritten, and only for paths whose data was actually
+captured as an independent snapshot (#4592 coverage honesty):
 
+- a generated default whose data was captured moves to the archived home's
+  default, so an archived Server opens `versions/<old>/server/...`;
+- a generated default whose data was **not** captured (a failed DB backup, a
+  referenced-not-copied CAS store) stays verbatim and is recorded as an
+  external dependency — the archive must not claim a copy it does not have;
 - explicit absolute paths outside the Current home are the operator's external
-  declaration and stay verbatim;
+  declaration and stay verbatim (also recorded as dependencies);
 - a relative, empty, or Current-home path that is not a generated default
-  cannot be relocated safely, so the archive is refused with an actionable
-  diagnostic instead of silently reading Current data;
+  cannot be proven safe, so the archive is refused with an actionable
+  diagnostic instead of silently sharing Current's live data;
 - an unreadable or non-string field also refuses the archive.
 
-The transaction restores the exact original config text on rollback.
+Current's own config is never rewritten by the upgrade.
 
-A Current replacement is **refused while an Agent or Server is live**. Moving
-the configuration and database directories that a running process is using is
-not safe, and install never stops or restarts a service implicitly. Installing
-an older release into an archive is unaffected.
+A Current replacement is **refused while an Agent or Server is live**: a
+consistent snapshot of the configuration and durable state cannot be proven
+under a live writer, and install never stops or restarts a service implicitly.
+Installing an older release into an archive is unaffected.
+
+### Upgrade transport policy
+
+All three upgrade entries share one bounded transfer policy
+(`update/policy.rs`): connect 10s, metadata 30s, asset no-progress 60s, total
+transfer 30min, lifecycle-lock wait 30s, initial attempt + 3 retries with
+jittered exponential backoff. CLI flags override validated env overrides,
+which override the defaults; out-of-range values are refused. A valid
+`Retry-After` is honored only inside the remaining budget. Metadata and the
+background check never inherit the long download budget.
+
+Downloads stream into a private partial with bounded memory; a strong
+validator (weak ETags are rejected) binds `Range`/`If-Range` resume to the
+exact URL, and a changed validator, wrong `Content-Range` or 416 restarts
+safely from zero. Truncation, tampering or a SHA256 mismatch discards the
+artifact — Current stays complete. SIGINT/SIGTERM cancel cooperatively at safe
+boundaries; SIGKILL leaves the journal for the next invocation's recovery.
+Progress reports phase, bytes (monotonic, resume-aware, no fake percentages
+for unknown lengths) and elapsed time; failures report phase, category,
+retryability, Current state and the next action, with credentials and signed
+URLs redacted. The executable contract lives in
+`update/{policy,progress,download,github}.rs` and `lifecycle/lock.rs`.
 
 ## Selection
 
@@ -126,6 +231,8 @@ an older release into an archive is unaffected.
 nession +0.35.0 sessions list              # highest priority
 NESSION_VERSION=0.35.0 nession agent status
 nession version list                       # Current / Archived / Running
+nession version inspect 0.35.0             # read-only archive diagnostics
+nession version recover 0.35.0             # explicit missing-entry recovery
 nession --version                          # Current CLI release
 ```
 
@@ -136,6 +243,21 @@ the child so an archived CLI cannot re-dispatch, and disables the background
 update check for that child. `version` and `install`/`update` always run on
 Current; `install`/`update` reject a non-Current selector instead of silently
 writing into an archived home.
+
+### Historical state-coverage gate
+
+Binary availability, snapshot coverage and safe historical runtime eligibility
+are three different facts (#4592 §5). Before `exec`, the Current dispatcher
+refuses **data-touching** commands (agent/server start/restart/stop and service
+registration, sessions create/attach/kill, config init/set) on an archive
+whose independent state ownership is unproven: a binary-only or legacy archive
+without `manifest.json`, or a manifest recording gaps/external dependencies.
+Read-only inspection (`status`, `logs`, `list`, `show`, `agents list`) stays
+available on every complete archive. The gate applies to legacy versions too;
+the supported entrypoint is the Current dispatcher — arbitrary direct
+invocation of old binaries is not sandboxed. Existing archives remain
+untouched and inspectable; there is no automatic DB downgrade and no implicit
+promotion of a historical release.
 
 ### Shared lifecycle contract
 
@@ -180,11 +302,13 @@ different installed version is ignored. Nothing in selection changes Current.
 
 ## State and protocol compatibility
 
-The archive moves configuration and durable state with the release that owns
-them; the new Current starts from defaults. There is no implicit database
-downgrade or migration. An archived release selected later uses its own archived
-configuration/state through its version home, while process discovery still
-uses the shared runtime directory.
+The installation retains its configuration, identity and compatible durable
+state across upgrades; the archive holds independent copies, never the moved
+originals. The Server DB schema evolves through the Server's own migrations at
+startup — there is no implicit database downgrade. An archived release
+selected later uses its own snapshotted configuration/state through its version
+home (only when the coverage gate proves it safe), while process discovery
+still uses the shared runtime directory.
 
 Protocol compatibility between different releases remains owned by the Protocol
 Unit / Contract Version / Manifest Resolver (#678/#963). A matching release
@@ -228,24 +352,28 @@ and re-running `install-service` from it.
   an isolated user/manager lane; a generated unit/plist fixture is not
   evidence.
 - Releases older than the shared lifecycle contract can still be archived and
-  run non-lifecycle commands, but cross-release lifecycle commands are refused
-  (see **Shared lifecycle contract**). This is the supported compatibility
-  boundary, not an assumption that old binaries behave like new ones.
+  run read-only commands, but cross-release lifecycle commands are refused
+  (see **Shared lifecycle contract**) and data-touching commands additionally
+  require proven state coverage (see **Historical state-coverage gate**). This
+  is the supported compatibility boundary, not an assumption that old binaries
+  behave like new ones.
 - Selecting the same version as the running entry binary executes the entry
   binary (the equivalence is by release, not by archive path). `version list`
   still shows an otherwise-identical archive.
-- tmux Sessions themselves live on the Agent's shared tmux socket and still
-  exist after an upgrade; their per-instance metadata is archived with the
-  release that owned it. The new Current does not adopt the old Session
-  metadata automatically, and a Session whose owning Agent release is archived
-  is not silently reattached under a different release. Stopping the Agent (and
-  therefore the upgrade's preflight) is the operator's explicit boundary.
+- tmux Sessions live on the Agent's tmux socket under the stable home and
+  survive an upgrade; their instance metadata is retained at Current and
+  snapshotted into the archive. A Session is reattached only when instance and
+  execution ownership are compatible; an incompatible owner blocks recovery
+  explicitly rather than recreating or silently taking over the Session.
+  Stopping the Agent (the upgrade preflight) is the operator's explicit
+  boundary; the upgrade never restarts a process implicitly.
 - No `lifecycle.lock`-based multi-instance or grouped Agent/Server switching is
   defined here.
 
 Implementation owners: `crates/nession-cli/src/versions/mod.rs`,
-`crates/nession-cli/src/update/{install,transaction,release_config}.rs`,
+`crates/nession-cli/src/update/{install,transaction,release_config,snapshot,policy,progress,download,github,config_check}.rs`,
 `crates/nession-cli/src/lifecycle/{lock,release,pid_file,terminate}.rs`,
-`crates/nession-cli/src/commands/{install,version}.rs`,
+`crates/nession-cli/src/commands/install.rs`,
+`crates/nession-cli/src/commands/version/`,
 `crates/nession-cli/src/commands/{agent,server}/`,
 `crates/nession-cli/src/service/mod.rs`, and `scripts/install.sh`.

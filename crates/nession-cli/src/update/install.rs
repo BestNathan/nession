@@ -27,9 +27,10 @@
 
 use crate::lifecycle::lock::LifecycleLock;
 use crate::lifecycle::pid_file::{self, Component};
-use crate::update::download;
 use crate::update::github::{self, GitHubReleaseClient};
-use crate::update::transaction;
+use crate::update::policy::{self, PolicyOverrides, TransferPolicy};
+use crate::update::progress::{CancelToken, Event, FailureReport, Phase, Reporter};
+use crate::update::{download, transaction};
 use crate::versions;
 use anyhow::{bail, Result};
 use semver::Version;
@@ -48,6 +49,8 @@ pub struct InstallRequest {
     pub prompt: bool,
     /// `nession update --include-installer`.
     pub include_installer: bool,
+    /// Explicit CLI timeout/retry overrides (#4592 §8.1).
+    pub policy_overrides: PolicyOverrides,
 }
 
 /// What the plan will do.
@@ -119,6 +122,105 @@ pub fn plan(layout: &versions::Layout, target: &Version) -> Result<InstallPlan> 
 
 /// Run a full install/update, including the download and checksum.
 pub async fn run(request: InstallRequest) -> Result<()> {
+    let resolved =
+        policy::resolve(&request.policy_overrides).map_err(|error| anyhow::anyhow!("{error}"))?;
+    let cancel = CancelToken::new();
+    install_signal_handlers(cancel.clone());
+    let reporter = Reporter::new();
+    let result = run_inner(request, &resolved, &cancel, &reporter).await;
+    if let Err(error) = &result {
+        // The failure contract: phase, category, retryability, Current state
+        // and the safe next action. The transaction owner reports its proven
+        // Current state inside the error chain; pre-lock failures never
+        // mutated Current.
+        let phase = phase_from_error_chain(error);
+        let report = classify_failure(phase, error);
+        eprintln!("{}", report.render());
+    }
+    result
+}
+
+/// Register SIGINT/SIGTERM on the one cooperative cancellation path.
+///
+/// Cancellation stops the work at the next safe boundary; it never interrupts
+/// a rename/fsync/SQLite write in flight. SIGKILL/power loss is recovered from
+/// the journal on the next invocation, not here (#4592 §8.3).
+fn install_signal_handlers(cancel: CancelToken) {
+    #[cfg(unix)]
+    {
+        use tokio::signal::unix::{signal, SignalKind};
+        for kind in [SignalKind::interrupt(), SignalKind::terminate()] {
+            if let Ok(mut stream) = signal(kind) {
+                let cancel = cancel.clone();
+                tokio::spawn(async move {
+                    if stream.recv().await.is_some() {
+                        cancel.cancel();
+                    }
+                });
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = cancel;
+    }
+}
+
+fn phase_from_error_chain(error: &anyhow::Error) -> Phase {
+    let text = format!("{error:#}");
+    if text.contains("lifecycle lock") {
+        Phase::WaitLock
+    } else if text.contains("download") || text.contains("Download") {
+        Phase::DownloadAsset
+    } else if text.contains("checksum") || text.contains("Checksum") {
+        Phase::Verify
+    } else if text.contains("extract") {
+        Phase::Extract
+    } else if text.contains("journal")
+        || text.contains("archive")
+        || text.contains("install failed")
+    {
+        Phase::Publish
+    } else {
+        Phase::ResolveRelease
+    }
+}
+
+fn classify_failure(phase: Phase, error: &anyhow::Error) -> FailureReport {
+    // Unwrap a typed UpdateError when the chain carries one.
+    for cause in error.chain() {
+        if let Some(update_error) = cause.downcast_ref::<crate::update::UpdateError>() {
+            return FailureReport::from_update_error(phase, update_error);
+        }
+    }
+    let text = format!("{error:#}");
+    let current_state = if text.contains("recovery failed") || text.contains("journal was retained")
+    {
+        crate::update::progress::CurrentState::RecoveryBlocked
+    } else if text.contains("were restored from the transaction journal") {
+        crate::update::progress::CurrentState::RolledBack
+    } else if text.contains("committed forward during recovery") {
+        crate::update::progress::CurrentState::Committed
+    } else {
+        crate::update::progress::CurrentState::Unchanged
+    };
+    FailureReport {
+        phase,
+        category: "install-error",
+        retryable: true,
+        current_state,
+        cause: text,
+        next_action: "inspect the cause; a retained journal is recovered on the next command"
+            .to_string(),
+    }
+}
+
+async fn run_inner(
+    request: InstallRequest,
+    resolved: &TransferPolicy,
+    cancel: &CancelToken,
+    reporter: &Reporter,
+) -> Result<()> {
     // A previous process may have been killed mid-transaction. Resolve that
     // before reading Current: a mixed binary set is not a release, and the
     // journal is the only safe source of what to restore (#3232 F4).
@@ -149,7 +251,8 @@ pub async fn run(request: InstallRequest) -> Result<()> {
         }
     }
 
-    let client = GitHubReleaseClient::from_env()?;
+    let client = GitHubReleaseClient::from_env_with_policy(resolved)?;
+    download::prune_stale_partials(&layout.home, std::time::Duration::from_secs(7 * 24 * 3600));
     let release = match request.version.as_deref() {
         Some(raw) => {
             let target = versions::normalize_version(raw)?;
@@ -213,6 +316,8 @@ pub async fn run(request: InstallRequest) -> Result<()> {
         &layout,
         &target,
         &plan,
+        cancel,
+        reporter,
     )
     .await;
     let _ = fs::remove_dir_all(&tmp_dir);
@@ -221,7 +326,7 @@ pub async fn run(request: InstallRequest) -> Result<()> {
 
     if request.include_installer {
         println!("Downloading install.sh...");
-        match download::download_installer(client.http_client(), &release, &layout.install_dir)
+        match download::download_installer(client.asset_client(), &release, &layout.install_dir)
             .await
         {
             Ok(path) => println!("  ✓ install.sh -> {}", path.display()),
@@ -248,24 +353,88 @@ async fn download_and_apply(
     layout: &versions::Layout,
     target: &Version,
     plan: &InstallPlan,
+    cancel: &CancelToken,
+    reporter: &Reporter,
 ) -> Result<InstallOutcome> {
+    let policy = client.policy();
     let tarball = tmp_dir.join(asset_name);
-    println!("Downloading {asset_name}...");
-    download::download_to_file(client.http_client(), asset_url, &tarball).await?;
+
+    // Verified release identity and expected SHA256 come first; the asset is
+    // then streamed into a private partial, never a whole-response buffer.
+    // Download/checksum/extract all happen BEFORE the lifecycle lock: no
+    // network transfer or retry runs under the lock (#4592 §8.2).
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::DownloadChecksums,
+    });
     let checksums = client.download_checksums(release).await?;
-    download::verify_checksum(&tarball, &checksums, asset_name)?;
-    println!("Checksum verified.");
-    download::extract_binaries(&tarball, tmp_dir)?;
+    let expected = download::expected_checksum(&checksums, asset_name)
+        .map_err(|error| anyhow::anyhow!("{error}"))?;
+
+    cancel.check(Phase::DownloadAsset)?;
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::DownloadAsset,
+    });
+    let part = download::partial_cache_dir(&layout.home).join(asset_name);
+    let started = std::time::Instant::now();
+    let bytes = download::download_asset(
+        client.asset_client(),
+        asset_url,
+        &tarball,
+        &part,
+        policy,
+        cancel,
+        reporter,
+    )
+    .await
+    .map_err(|error| anyhow::anyhow!("{error}"))?;
+    reporter.emit(Event::PhaseDone {
+        phase: Phase::DownloadAsset,
+        elapsed: started.elapsed(),
+    });
+
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::Verify,
+    });
+    let actual = download::sha256_file(&tarball).map_err(|error| anyhow::anyhow!("{error}"))?;
+    if actual != expected {
+        // A checksum mismatch never becomes a trusted cache hit: discard the
+        // corrupt artifact and require a fresh verified download.
+        let _ = fs::remove_file(&tarball);
+        let _ = fs::remove_file(&part);
+        bail!(
+            "checksum mismatch for {asset_name}: expected {expected}, got {actual}; \
+             the corrupt download was discarded"
+        );
+    }
+    let _ = bytes;
+    reporter.emit(Event::Note("Checksum verified.".to_string()));
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::Extract,
+    });
+    download::extract_binaries(&tarball, tmp_dir).map_err(|error| anyhow::anyhow!("{error}"))?;
     for name in versions::RELEASE_BINARIES {
         if !tmp_dir.join(name).is_file() {
             bail!("release archive is missing the {name} binary; refusing a partial release");
         }
     }
+    cancel.check(Phase::WaitLock)?;
 
-    // One lifecycle command at a time across every installed release. The lock
-    // covers the live-process re-check and the whole archive transaction, and
-    // any journal left by an earlier crash is recovered before this plan runs.
-    let _lock = LifecycleLock::acquire()?;
+    // One lifecycle command at a time across every installed release. The
+    // bounded wait covers the live-process re-check and the whole archive
+    // transaction; any journal left by an earlier crash is recovered before
+    // this plan runs. A busy lock is a retryable diagnostic, never a break.
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::WaitLock,
+    });
+    let lock_started = std::time::Instant::now();
+    let _lock = LifecycleLock::acquire_bounded(policy.lock_wait, |elapsed| {
+        reporter.emit(Event::LockWait { elapsed });
+    })
+    .map_err(|error| anyhow::anyhow!("{error}"))?;
+    reporter.emit(Event::PhaseDone {
+        phase: Phase::WaitLock,
+        elapsed: lock_started.elapsed(),
+    });
     report_recovery(transaction::recover_journal_locked(&layout.home)?);
 
     match plan {
@@ -329,7 +498,8 @@ fn refuse_while_running() -> Result<()> {
             };
             bail!(
                 "{} is running (PID {}, release {}, state file {path}); installing a new Current \
-                 requires moving its configuration and durable state.\n\
+                 requires a consistent snapshot of its configuration and durable state, and a \
+                 live writer would make the archive's independent copies unverifiable.\n\
                  Fix: stop the {} first with {}, then re-run the install. Nession never stops \
                  or restarts a service implicitly.",
                 match component {
@@ -430,14 +600,45 @@ mod tests {
         );
     }
 
+    /// A staged target CLI that advertises the upgrade contract and validates
+    /// configs (the real handshake is proven by the runtime Cases).
+    fn write_target_cli(staged: &Path, version: &str) {
+        let script = format!(
+            "#!/bin/sh\n\
+             case \"$1\" in\n\
+             --upgrade-contract) echo \"{} {version}\"; exit 0 ;;\n\
+             --upgrade-config-check) echo ok; exit 0 ;;\n\
+             --version) echo \"nession {version}\"; exit 0 ;;\n\
+             esac\n\
+             exit 2\n",
+            crate::update::UPGRADE_CONTRACT_TOKEN,
+        );
+        write_binary(&staged.join("nession"), &script);
+    }
+
     #[test]
-    fn a_newer_version_archives_current_and_replaces_it() {
+    fn a_newer_version_retains_current_and_archives_independent_copies() {
         let root = TempDir::new().unwrap();
         let layout = current_tree(&root, "1.1.0");
         fs::create_dir_all(&layout.home).unwrap();
         fs::write(layout.home.join("agent-config.toml"), "old-config").unwrap();
+        fs::write(
+            layout.home.join("server-config.toml"),
+            "listen_address = \"127.0.0.1:19090\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(layout.home.join("agent")).unwrap();
+        fs::write(layout.home.join("agent/identity"), "old-id").unwrap();
         fs::create_dir_all(layout.home.join("server")).unwrap();
-        fs::write(layout.home.join("server/server.db"), "old-db").unwrap();
+        {
+            let conn = rusqlite::Connection::open(layout.home.join("server/server.db")).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE marker(v TEXT); INSERT INTO marker VALUES ('old-db');",
+            )
+            .unwrap();
+        }
+        let staged = staged(&root, "1.2.0");
+        write_target_cli(&staged, "1.2.0");
 
         let archive = transaction::replace_current(
             &layout.home,
@@ -445,34 +646,45 @@ mod tests {
             &layout.current,
             &Version::new(1, 2, 0),
             &layout.home.join("versions/1.1.0"),
-            &staged(&root, "1.2.0"),
+            &staged,
         )
         .unwrap();
 
         assert_eq!(
             fs::read_to_string(layout.install_dir.join("nession")).unwrap(),
-            "1.2.0"
+            fs::read_to_string(staged.join("nession")).unwrap(),
+            "Current must be the target release's CLI"
         );
         assert_eq!(
             fs::read_to_string(archive.join("bin/nession")).unwrap(),
             "1.1.0"
         );
+        // SC-01 retention: both configs, the identity and the durable state
+        // stay at their Current paths, byte-for-byte.
+        assert_eq!(
+            fs::read_to_string(layout.home.join("agent-config.toml")).unwrap(),
+            "old-config"
+        );
+        assert_eq!(
+            fs::read_to_string(layout.home.join("server-config.toml")).unwrap(),
+            "listen_address = \"127.0.0.1:19090\"\n"
+        );
+        assert_eq!(
+            fs::read_to_string(layout.home.join("agent/identity")).unwrap(),
+            "old-id"
+        );
+        assert!(layout.home.join("server/server.db").is_file());
+        // The archive holds independent copies, never a rename of Current.
         assert_eq!(
             fs::read_to_string(archive.join("agent-config.toml")).unwrap(),
             "old-config"
         );
         assert_eq!(
-            fs::read_to_string(archive.join("server/server.db")).unwrap(),
-            "old-db"
+            fs::read_to_string(archive.join("agent/identity")).unwrap(),
+            "old-id"
         );
-        assert!(
-            !layout.home.join("agent-config.toml").exists(),
-            "the new Current must not silently inherit the old config"
-        );
-        assert!(
-            !layout.home.join("server").exists(),
-            "the new Current must not silently reuse the old durable state"
-        );
+        assert!(archive.join("server/server.db").is_file());
+        assert!(archive.join("manifest.json").is_file());
     }
 
     #[test]
