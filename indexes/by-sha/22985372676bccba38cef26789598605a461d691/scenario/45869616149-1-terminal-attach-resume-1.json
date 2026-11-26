@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45869616149,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4597-staging-cases",
+    "target_sha": "22985372676bccba38cef26789598605a461d691",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45869616149",
+    "scenario_tree_sha": "bdabf5e8e31f31a089a93927615d1bb3a3115318",
+    "original_sha256": "6b831d95303e65a46b0f59029898e0865016d18ff99efaad39779a1b94f637cf"
+  },
+  "record": "runs/2026-11-26/45869616149-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "2b76035f7aed8980973aad5f8750c9c35fd1a814935085c5f4b652c8b34e5b15"
+}
