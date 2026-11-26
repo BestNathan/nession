@@ -29,6 +29,11 @@ const {
   allocateLoopbackPort,
   startFullStackRuntime,
 } = require('../../runner/runtime/full-stack.js');
+const {
+  assertOwnedPath,
+  createRunRoot,
+  sanitizedEnv,
+} = require('../../runner/runtime/test-runtime.js');
 
 function arg(name, required = false) {
   const index = process.argv.indexOf('--' + name);
@@ -202,9 +207,19 @@ export async function runCase({
     caseTree,
   });
 
-  const suffix = runId + '-' + runAttempt + '-' + issueNumber + '-' + criterion.toLowerCase();
-  const caseHome = home ?? path.join(os.tmpdir(), 'nession-acceptance-' + suffix);
-  const tmuxSocket = path.join(os.tmpdir(), 'nession-acceptance-tmux-' + suffix, 'tmux.sock');
+  // The run root is created only when this evaluator owns the runtime. A
+  // caller-supplied runtime owns its own verified root; a supplied home must
+  // still sit inside this run's root (#4597).
+  let run = null;
+  let caseHome = home;
+  let tmuxSocket = null;
+  if (!suppliedRuntime) {
+    run = createRunRoot('nession-acceptance');
+    caseHome = home
+      ? assertOwnedPath(run.root, home, 'home')
+      : path.join(run.root, 'home');
+    tmuxSocket = path.join(run.root, 'sockets', 'tmux.sock');
+  }
 
   let runtime = suppliedRuntime;
   const ownsRuntime = !suppliedRuntime;
@@ -225,6 +240,7 @@ export async function runCase({
         repoRoot,
         targetSha,
         profile: selected.manifest.runtime,
+        runRoot: run.root,
         home: caseHome,
         tmuxSocket,
         serverPort,
@@ -232,9 +248,21 @@ export async function runCase({
         stalledProbePort,
         webPort,
         cleanupHome: true,
+        cleanupRoot: true,
       });
     }
     infrastructureStatus = 'ready';
+
+    // The standard lane runs verifiers in the runtime's verified, sanitized
+    // environment. The live-cli lane is the explicit authenticated exception:
+    // it is declared in the Case manifest and the workflow scopes its
+    // credential to that step (#4597 SC-05).
+    const verifierLane = selected.manifest.runner ?? 'standard';
+    const verifierEnv = verifierLane === 'live-cli'
+      ? process.env
+      : runtime?.run_root && runtime?.tmux_socket
+        ? sanitizedEnv(runtime.run_root, runtime.tmux_socket)
+        : process.env;
 
     const runtimeFile = path.join(runtime.home, 'runtime.json');
     for (const verifier of selected.manifest.verifiers) {
@@ -247,6 +275,7 @@ export async function runCase({
         contractSha256: acceptanceContext.contract_sha256,
         issueNumber,
         criterion,
+        env: verifierEnv,
       }));
     }
     result = aggregateVerifierResults(verifierResults, selected.manifest.result_policy);

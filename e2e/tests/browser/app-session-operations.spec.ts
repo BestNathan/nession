@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
+import { E2E_RUN_DIR, E2E_SERVER_URL } from '../../runtime';
 
 // App project/Session operation depths (#3089). Real tmux/agent stack — CI only.
 const APP_URL =
   '/?token=e2e-test-token&server_url=' +
-  encodeURIComponent('ws://localhost:19090/ws') +
+  encodeURIComponent(E2E_SERVER_URL) +
   '&experience=app';
 
 /**
@@ -31,7 +32,7 @@ test.describe('App Project and Session operation pages (#3089)', () => {
     await expect(projectPage.getByTestId('app-page-header')).toHaveCount(1);
     await projectPage.locator('#project-create-name').fill(projectName);
     await projectPage.getByTestId('project-location-add').click();
-    await projectPage.locator('#project-create-location-path-0').fill('/tmp/nession-e2e');
+    await projectPage.locator('#project-create-location-path-0').fill(E2E_RUN_DIR);
     await projectPage.getByTestId('project-create-submit').click();
     await expect(page.getByTestId('project-detail-title')).toHaveText(projectName);
 
@@ -45,7 +46,7 @@ test.describe('App Project and Session operation pages (#3089)', () => {
     await createPage.getByTestId('app-session-location').click();
     const locationPage = page.getByTestId('app-create-location-page');
     await expect(locationPage).toBeVisible();
-    await expect(locationPage.getByTestId('project-location-path')).toHaveText('/tmp/nession-e2e');
+    await expect(locationPage.getByTestId('project-location-path')).toHaveText(E2E_RUN_DIR);
     await locationPage.getByTestId('app-create-location-0').click();
     await locationPage.getByTestId('app-create-location-done').click();
     await expect(createPage).toBeVisible();

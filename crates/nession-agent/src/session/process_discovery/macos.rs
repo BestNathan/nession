@@ -459,24 +459,49 @@ mod tests {
         // PPID relationship the fallback walks. Both are the same user, which
         // is what libproc requires for command reads.
         let mut child = std::process::Command::new("sleep")
-            .arg("5")
+            .arg("30")
             .spawn()
             .expect("spawn sleep");
         let pid = child.id();
-        let table = table().expect("process table");
-        let facts = table.get(&pid).expect("child is in the table");
-        assert_eq!(facts.ppid, Some(std::process::id()));
-        let start = facts.start_time_ms.expect("a start time");
+
+        // `spawn` returns after fork, before the child necessarily finishes
+        // exec. libproc cannot report a command line for that window, so a
+        // single immediate read is a race under a loaded parallel suite: the
+        // full unit run failed here intermittently while the isolated test
+        // always passed. Wait for the child to become observable; the bound is
+        // far below the child's own lifetime.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        let (ppid, start) = loop {
+            let table = table().expect("process table");
+            if let Some(facts) = table.get(&pid) {
+                break (facts.ppid, facts.start_time_ms);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "child is in the process table"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
+        assert_eq!(ppid, Some(std::process::id()));
+        let start = start.expect("a start time");
         let now = chrono::Utc::now().timestamp_millis();
         assert!(
             start <= now && now - start < 60_000,
             "start time must be wall-clock epoch milliseconds, not boot-relative: {start} vs {now}"
         );
 
-        let detail = details(pid);
-        let argv = detail.argv.expect("same-user command line is readable");
+        let argv = loop {
+            if let Some(argv) = details(pid).argv {
+                break argv;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "same-user command line is readable"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        };
         assert_eq!(argv.first().map(String::as_str), Some("sleep"));
-        assert_eq!(argv.get(1).map(String::as_str), Some("5"));
+        assert_eq!(argv.get(1).map(String::as_str), Some("30"));
 
         let _ = child.kill();
         let _ = child.wait();

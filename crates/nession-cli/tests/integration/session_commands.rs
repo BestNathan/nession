@@ -2,14 +2,39 @@
 
 use std::process::Command;
 
+const BIN: &str = env!("CARGO_BIN_EXE_nession");
+
+/// A loopback endpoint nothing is listening on.
+///
+/// Binding `:0` and dropping the listener yields a port that was free a moment
+/// ago, so the CLI's connection is refused deterministically. The previous
+/// fixed `localhost:59999` could be occupied by another test run or an
+/// unrelated service, which made a "no server" assertion depend on the host
+/// (#4597 F08).
+fn refused_endpoint() -> std::io::Result<String> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    Ok(format!("ws://127.0.0.1:{port}"))
+}
+
+/// Run the real CLI binary under an owned home, never the developer's
+/// `~/.nession` or a nested `cargo run` (#4597 F08).
+fn cli(args: &[&str], server_url: Option<&str>) -> std::io::Result<std::process::Output> {
+    let home = tempfile::tempdir()?;
+    // not-tmux: runs the nession CLI binary, not a tmux process
+    let mut command = Command::new(BIN);
+    command
+        .env(nession_common::paths::NESSION_HOME_ENV, home.path())
+        .env("NESION_NO_UPDATE_CHECK", "1");
+    if let Some(url) = server_url {
+        command.args(["--server-url", url]);
+    }
+    command.args(args).output()
+}
+
 #[test]
 fn test_sessions_create_help() {
-    let output = Command::new("cargo")
-        .args([
-            "run", "--bin", "nession", "--", "sessions", "create", "--help",
-        ])
-        .output()
-        .expect("Failed to execute command");
+    let output = cli(&["sessions", "create", "--help"], None).unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Create a new tmux session"));
@@ -25,14 +50,9 @@ fn test_sessions_create_help() {
 /// ignored input. The command must not reach the Server.
 #[test]
 fn test_sessions_create_rejects_removed_dimensions() {
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "--server-url",
-            "ws://localhost:59999",
+    let endpoint = refused_endpoint().unwrap();
+    let output = cli(
+        &[
             "sessions",
             "create",
             "--agent-id",
@@ -41,9 +61,10 @@ fn test_sessions_create_rejects_removed_dimensions() {
             "test-session",
             "--width",
             "111",
-        ])
-        .output()
-        .expect("Failed to execute command");
+        ],
+        Some(&endpoint),
+    )
+    .unwrap();
 
     assert!(
         !output.status.success(),
@@ -63,12 +84,7 @@ fn test_sessions_create_rejects_removed_dimensions() {
 
 #[test]
 fn test_sessions_kill_help() {
-    let output = Command::new("cargo")
-        .args([
-            "run", "--bin", "nession", "--", "sessions", "kill", "--help",
-        ])
-        .output()
-        .expect("Failed to execute command");
+    let output = cli(&["sessions", "kill", "--help"], None).unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Kill a tmux session"));
@@ -78,24 +94,19 @@ fn test_sessions_kill_help() {
 
 #[test]
 fn test_sessions_create_no_server() {
-    // Should fail gracefully when server is not running
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "--server-url",
-            "ws://localhost:59999",
+    let endpoint = refused_endpoint().unwrap();
+    let output = cli(
+        &[
             "sessions",
             "create",
             "--agent-id",
             "test-agent",
             "--name",
             "test-session",
-        ])
-        .output()
-        .expect("Failed to execute command");
+        ],
+        Some(&endpoint),
+    )
+    .unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -104,23 +115,18 @@ fn test_sessions_create_no_server() {
 
 #[test]
 fn test_sessions_kill_no_server() {
-    // Should fail gracefully when server is not running
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "--server-url",
-            "ws://localhost:59999",
+    let endpoint = refused_endpoint().unwrap();
+    let output = cli(
+        &[
             "sessions",
             "kill",
             "--session-id",
             "test-agent:test-session",
             "--force",
-        ])
-        .output()
-        .expect("Failed to execute command");
+        ],
+        Some(&endpoint),
+    )
+    .unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -129,23 +135,18 @@ fn test_sessions_kill_no_server() {
 
 #[test]
 fn test_sessions_kill_invalid_format() {
-    // Should fail when session_id doesn't contain ':'
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "--server-url",
-            "ws://localhost:59999",
+    let endpoint = refused_endpoint().unwrap();
+    let output = cli(
+        &[
             "sessions",
             "kill",
             "--session-id",
             "invalid-format-no-colon",
             "--force",
-        ])
-        .output()
-        .expect("Failed to execute command");
+        ],
+        Some(&endpoint),
+    )
+    .unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);

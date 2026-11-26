@@ -7,6 +7,7 @@ import {
   assertLiveTranscriptMatrix,
   assertLoadOlderAnchor,
 } from '../../helpers/conversationAcceptance';
+import { E2E_WEB_ORIGIN } from '../../runtime';
 
 test.skip(!process.env.CI, 'local only — runs in CI workflow only');
 
@@ -18,7 +19,7 @@ test.describe('SC-14/17/18 · Web conversation contract', () => {
     context,
   }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
-      origin: 'http://localhost:4173',
+      origin: E2E_WEB_ORIGIN,
     });
     await page.goto('/#/fixture/workspace?capability=claude-code&conversation=tool-scroll');
 

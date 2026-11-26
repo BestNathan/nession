@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
+import { E2E_AGENT_URL, E2E_SERVER_URL, E2E_STALLED_AGENT_URL } from '../../runtime';
 
 const APP_URL =
-  '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
-const FAST_AGENT_URL = 'ws://127.0.0.1:19091/ws';
-const STALLED_AGENT_URL = 'ws://127.0.0.1:19092/ws';
+  '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL);
+const FAST_AGENT_URL = E2E_AGENT_URL;
+const STALLED_AGENT_URL = E2E_STALLED_AGENT_URL;
 
 /**
  * Browser-side evidence for #1430.

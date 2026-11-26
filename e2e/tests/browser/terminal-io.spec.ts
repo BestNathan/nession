@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openCapsuleCapability } from '../../helpers/capsule';
 import { waitForShell } from '../../helpers/shell';
-import { E2E_TMUX_SOCKET } from '../../runtime';
+import { E2E_TMUX_SOCKET, E2E_RUN_DIR, E2E_SERVER_PORT, E2E_SERVER_URL } from '../../runtime';
 import {
   readTerminalBuffer,
   readBufferType,
@@ -52,7 +52,7 @@ import {
 test.describe('Terminal I/O', () => {
   test.beforeEach(async ({ page }) => {
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
-    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL));
     await waitForShell(page);
   });
 
@@ -773,7 +773,7 @@ test.describe('Terminal I/O', () => {
  */
 test.describe('Mode-aware upper-panel clearance (#3492)', () => {
   test.beforeEach(async ({ page }) => {
-    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL));
     await waitForShell(page);
   });
 
@@ -1273,7 +1273,7 @@ test.describe('Terminal touch direction pad (#2657)', () => {
   test.beforeEach(async ({ page }) => {
     // The describe is outside `Terminal I/O`, so it does not inherit that
     // block's navigation. Mount the same shell before creating a Session.
-    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL));
     await waitForShell(page);
   });
 
@@ -1481,7 +1481,7 @@ test.describe('Terminal touch direction pad (#2657)', () => {
 test.describe('Terminal file references', () => {
   test('Web: clicking path:line:column opens Files at that position', async ({ page }) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
-    const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+    const runtime = { server_port: E2E_SERVER_PORT, home: E2E_RUN_DIR };
     seedTerminalFiles(runtime.home);
     await openFileLinkShell(page, expect, runtime, 'e2e-3187-web');
     await runFileLinkCommand(page, expect, 'cd src/deep');
@@ -1501,7 +1501,7 @@ test.describe('Terminal file references', () => {
   // not exist the reference fails rather than opening the lookalike.
   test('Web: a relative reference from the filesystem root never falls back into the source root', async ({ page }) => {
     test.skip(!process.env.CI, 'real stack available in CI only');
-    const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+    const runtime = { server_port: E2E_SERVER_PORT, home: E2E_RUN_DIR };
     seedTerminalFiles(runtime.home);
     await openFileLinkShell(page, expect, runtime, 'e2e-3414-web');
     await runFileLinkCommand(page, expect, 'cd /');

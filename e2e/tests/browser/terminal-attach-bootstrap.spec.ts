@@ -5,7 +5,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openCapsuleCapability } from '../../helpers/capsule';
 import { waitForShell } from '../../helpers/shell';
-import { E2E_TMUX_SOCKET } from '../../runtime';
+import { E2E_TMUX_SOCKET, E2E_SERVER_URL } from '../../runtime';
 import {
   readTerminalBuffer,
   readBufferType,
@@ -43,7 +43,7 @@ test.describe('Attach bootstrap (#321)', () => {
   // and this one sends nothing.
 
   const APP_URL =
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL);
 
   /** A marker whose typed form and rendered form differ. */
   const typedForm = (tag: string) => `printf 'BOOT-%s\\n' ${tag}`;

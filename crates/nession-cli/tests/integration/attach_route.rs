@@ -165,7 +165,10 @@ impl TestAgent {
                 auth,
                 mutations: Arc::clone(&mutations),
                 tmux: Arc::clone(&tmux),
-                session_metadata: Arc::new(SessionMetadataStore::new(tmux)),
+                session_metadata: Arc::new(SessionMetadataStore::with_root(
+                    tmux,
+                    tmp.path().join("sessions"),
+                )),
                 terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
                 handshake_policy: Default::default(),
             },
