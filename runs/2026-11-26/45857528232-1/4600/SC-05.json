@@ -1,0 +1,97 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "57ed595b5c9aa2da99062612ce1c1a1eef7971b113563ff7c2f6405db640a148",
+  "run_id": 45857528232,
+  "run_attempt": 1,
+  "issue": 4600,
+  "criterion": "SC-05",
+  "criterion_text": "Real isolated Agent/Server CLI starts (foreground/background), malformed config, early validation failure and readiness failure produce retrievable sanitized diagnostics or explicit unavailable-path errors; normal runtime file/stdout logging and readiness/exit ownership remain intact, stderr flood cannot deadlock startup, Ctrl-C of logs does not terminate daemon. Runtime Case covers actual child processes and temp roots.",
+  "stage": "staging",
+  "target_sha": "b45278616ecfda525da45ee09078ecccdbc8fc7c",
+  "contract_sha256": "55361902a1f2294a879f4301cabcbf73f13a383bbd00a74ece2ac57f394f4de9",
+  "case_revision": "b45278616ecfda525da45ee09078ecccdbc8fc7c",
+  "case_tree_sha": "605cd598c23097428f4b47c2aa0e1d5e0dcd4fe7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T16:21:33.928Z",
+  "finished_at": "2026-11-26T16:21:41.092Z",
+  "duration_ms": 7164,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real exact-SHA CLI processes proved retrievable sanitized startup diagnostics (config/validate/readiness/unavailable), intact runtime logging and ownership, bounded flood-safe readiness and reader-only Ctrl-C for `logs -f`.",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: background Server recorded log_dir=/tmp/nession-3155-4600-sc05-KG9xzj/home/server/logs home=/tmp/nession-3155-4600-sc05-KG9xzj/home; server logs/status read that directory"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: Agent logs -f reader exited on SIGINT while pid 3858 stayed running and its identity remained"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: malformed config failed before startup and /tmp/nession-3155-4600-sc05-KG9xzj/bad-home/agent/logs/startup/startup.log held a retrievable config record"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: malformed Server config failed before startup and /tmp/nession-3155-4600-sc05-KG9xzj/bad-home/server/logs/startup/startup.log held a retrievable config record"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: an invalid terminal_cols value failed before log initialization and appeared as a validate record in --source startup"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: an occupied Agent port produced an exited-before-serving readiness record in --source startup and no phantom identity"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: a 100 KB invalid value reached the child stderr path; startup completed in 75ms and the startup log was bounded at 8192 bytes"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: an unusable <home>/agent path reported \"startup diagnostics unavailable\" while preserving the terminal/stderr diagnostic"
+        },
+        {
+          "type": "runtime",
+          "value": "b45278616ecfda525da45ee09078ecccdbc8fc7c: explicit agent/server stop ended the recorded processes and removed their runtime identities"
+        }
+      ],
+      "duration_ms": 1263,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45857528232,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "b45278616ecfda525da45ee09078ecccdbc8fc7c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45857528232",
+    "record_path": "runs/2026-11-26/45857528232-1/4600/SC-05.json",
+    "source_result_sha256": "3e1b66ef5bfc79502edbf68def514cc10b00fbf64ba72681047a1bdcbc980afd"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45857528232-1",
+    "sha256": "3e1b66ef5bfc79502edbf68def514cc10b00fbf64ba72681047a1bdcbc980afd",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45857528232",
+    "durability": "time-limited; object archival not configured"
+  }
+}
