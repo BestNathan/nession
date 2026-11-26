@@ -707,8 +707,12 @@ The staging build-provenance document and the authenticated staging source
 verifier include `mcp`; the ACR mirror lane copies the already-published index
 and records its digest. A missing or failed MCP image job fails publication and
 deployment verification rather than being silently skipped. The image is
-**not** added to the Server/Agent/UI GitOps kustomizations: GitOps rollout rules
-are unchanged by this role.
+**not** added to the Server/Agent/UI workload kustomization. Staging and production
+advance their independent MCP overlay and the three core roles in one GitOps
+commit: staging uses the source SHA, production the released workspace version.
+All four GHCR multi-arch manifests must be readable before publication. The
+protected production repair lane reuses the current published core version
+without rebuilding or changing credentials, ingress or topology.
 
 **Configuration and security.** Mount an operator-managed document read-only at
 `/etc/nession/mcp.toml` (the default), or pass `--config` /
@@ -736,5 +740,6 @@ capabilities and a required image reference. It is not a service in
 `deploy/docker-compose.yml`, so `docker compose up` never installs MCP with
 Server/Agent. Deploy it on a separate machine, Compose project or Kubernetes
 workload with its own Secret, ingress and lifecycle. Roll back by pinning a
-previous `mcp-*` tag or, preferably, an immutable digest; no Server/Agent/UI
-rollout changes are required.
+previous `mcp-*` tag or, preferably, an immutable digest in externally managed
+standalone deployments. Nession-managed production uses a common released
+version for the four roles; do not independently pin the managed MCP image.
