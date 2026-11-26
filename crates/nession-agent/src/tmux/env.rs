@@ -58,7 +58,29 @@ const BINDING_STATE_FILE: &str = "binding.json";
 const ENV_RUNTIME_VAR: &str = "NESSION_RUNTIME_ENV_RUNTIME";
 const ENV_REVISION_VAR: &str = "NESSION_RUNTIME_ENV_REVISION";
 const SHELL_REVISION_VAR: &str = "NESSION_RUNTIME_ENV_SHELL_REVISION";
-const USER_ZDOTDIR_VAR: &str = "NESSION_RUNTIME_USER_ZDOTDIR";
+/// The validated original user `ZDOTDIR` a Session's zsh adapter forwards.
+pub(crate) const USER_ZDOTDIR_VAR: &str = "NESSION_RUNTIME_USER_ZDOTDIR";
+/// Pre-#3757 name of [`USER_ZDOTDIR_VAR`], read as compatibility input only.
+const LEGACY_USER_ZDOTDIR_VAR: &str = "NESSON_USER_ZDOTDIR";
+
+/// Marker file identifying a directory as a Nession-generated zsh adapter.
+///
+/// Generated wrappers use it to refuse a managed directory as user
+/// configuration even when the environment marker naming it was injected or
+/// corrupted. It is written beside the wrappers, so it is absent from legacy
+/// adapters; those are recognized by [`ZSH_ADAPTER_HEADER`] instead.
+const ZSH_ADAPTER_MARKER_FILE: &str = ".nession-adapter";
+const ZSH_ADAPTER_MARKER_CONTENT: &str = "nession-zsh-adapter-v1\n";
+/// Stable first line of every generated adapter `.zshenv`, including legacy
+/// files written before the marker existed. Used only to recognize generated
+/// artifacts, never to trust them with user configuration.
+const ZSH_ADAPTER_HEADER: &str = "Nession Session-local zsh adapter";
+
+/// The durable binding layout's root component (`<agent>/env-bindings`). A
+/// legacy adapter root is recognized by this name plus the adapter shape.
+const ENV_BINDINGS_DIR_NAME: &str = "env-bindings";
+const ZSH_SHELL_DIR_NAME: &str = "shell";
+const ZSH_DIR_NAME: &str = "zsh";
 
 const STATUS_IN_SYNC: &str = "in_sync";
 const STATUS_PENDING_SHELL: &str = "pending_shell";
@@ -122,6 +144,12 @@ pub(crate) struct ShellAdapter {
     pub supported: bool,
     /// Why it cannot, when it cannot.
     pub reason: Option<String>,
+    /// The validated original user configuration directory this adapter
+    /// forwards (zsh), if one was available. Never a Nession-managed adapter.
+    pub user_zdotdir: Option<String>,
+    /// A bounded, value-free explanation when an inherited runtime control was
+    /// rejected and the adapter fell back to the Session HOME.
+    pub warning: Option<String>,
 }
 
 impl ShellAdapter {
@@ -132,8 +160,47 @@ impl ShellAdapter {
             command: Vec::new(),
             supported: false,
             reason: Some(reason.into()),
+            user_zdotdir: None,
+            warning: None,
         }
     }
+}
+
+/// The Agent process values that select a Session's original zsh
+/// configuration.
+///
+/// Settled once at the canonical producer. Production reads them from the
+/// Agent environment; a caller (or test) that composes the Agent differently
+/// can state them explicitly instead of mutating the process environment.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct InheritedShellEnvironment {
+    /// The Agent's inherited `ZDOTDIR`, if any.
+    pub zdotdir: Option<String>,
+    /// The inherited Nession user-ZDOTDIR marker, if any.
+    pub user_zdotdir: Option<String>,
+}
+
+impl InheritedShellEnvironment {
+    /// Read the values from this Agent process's environment.
+    pub(crate) fn from_process() -> Self {
+        Self {
+            zdotdir: std::env::var_os("ZDOTDIR").and_then(|value| value.into_string().ok()),
+            user_zdotdir: [USER_ZDOTDIR_VAR, LEGACY_USER_ZDOTDIR_VAR]
+                .iter()
+                .find_map(|key| std::env::var_os(key).and_then(|value| value.into_string().ok())),
+        }
+    }
+}
+
+/// How a Session's zsh adapter should find the user's original startup files.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct ZshUserConfiguration {
+    /// A validated absolute directory that is not a Nession managed adapter.
+    /// `None` means the generated wrapper's runtime `$HOME` fallback applies.
+    pub directory: Option<String>,
+    /// Bounded, value-free explanation when an inherited managed path could
+    /// not be traced to an original directory.
+    pub degraded_reason: Option<&'static str>,
 }
 
 /// The durable half of a Session's binding, written after every materialization.
@@ -152,6 +219,12 @@ struct StoredBinding {
     /// must not be read as an error.
     #[serde(default)]
     adapter_reason: Option<String>,
+    /// The validated original user zsh configuration this Session's adapter
+    /// was created with. Durable so a later repair, and a Session launched
+    /// from this one, recover the same directory instead of a managed adapter
+    /// path. Absent (or `None`) means the wrapper's `$HOME` fallback applies.
+    #[serde(default)]
+    zdotdir_origin: Option<String>,
     status: String,
     /// The last tmux mutation failure. Never the adapter's explanation.
     last_error: Option<String>,
@@ -177,6 +250,9 @@ pub struct EnvManager {
     state_dir: PathBuf,
     /// The tmux everything this manager runs is addressed to.
     tmux: TmuxDep,
+    /// The Agent environment that selects a Session's original zsh
+    /// configuration, settled once at construction.
+    inherited_shell: InheritedShellEnvironment,
 }
 
 impl EnvManager {
@@ -185,7 +261,23 @@ impl EnvManager {
         Self {
             state_dir,
             tmux: TmuxDep::global(),
+            inherited_shell: InheritedShellEnvironment::from_process(),
         }
+    }
+
+    /// State the inherited zsh selection explicitly.
+    ///
+    /// This is the canonical producer's input; production leaves it at the
+    /// Agent process environment. Tests use it instead of mutating the
+    /// process environment, which is process-global and raced by parallel
+    /// tests.
+    #[cfg(test)]
+    pub(crate) fn with_inherited_shell_environment(
+        mut self,
+        inherited_shell: InheritedShellEnvironment,
+    ) -> Self {
+        self.inherited_shell = inherited_shell;
+        self
     }
 
     /// Bind this manager to a specific tmux dependency — **the substitution
@@ -292,7 +384,7 @@ impl EnvManager {
         snapshots: &[EnvSnapshot],
     ) -> Result<BindingApplyOutcome> {
         let overlay = Self::merge_snapshots(snapshots)?;
-        let warnings = overlay.warnings.clone();
+        let mut warnings = overlay.warnings.clone();
         let dir = self.session_dir(session_name);
         // An existing record that cannot be read or parsed is not "no binding":
         // treating it as first use would capture the currently overlaid tmux
@@ -309,11 +401,22 @@ impl EnvManager {
                 shell: None,
                 adapter: false,
                 adapter_reason: None,
+                zdotdir_origin: None,
                 status: STATUS_IN_SYNC.to_string(),
                 last_error: None,
                 updated_at: now_secs(),
             },
         };
+
+        // Repair a legacy or contaminated generated adapter before the new
+        // revision is materialized. A failure is a real preparation failure:
+        // the apply stops rather than reporting convergence for a Session
+        // whose shell bootstrap is still wrong (#4605).
+        if self.repair_zsh_adapter(session_name, &state).await? {
+            warnings.push(format!(
+                "{session_name}: repaired the Session's zsh adapter; already-running shells need a new shell or pane to use the corrected startup environment"
+            ));
+        }
 
         // Capture the base value of every newly managed key before changing
         // anything. A read failure aborts the whole apply: proceeding would
@@ -467,6 +570,7 @@ impl EnvManager {
             shell: adapter.shell.clone(),
             adapter: adapter.supported,
             adapter_reason: adapter.reason.clone(),
+            zdotdir_origin: adapter.user_zdotdir.clone(),
             status: if adapter.supported {
                 STATUS_IN_SYNC.to_string()
             } else {
@@ -686,24 +790,29 @@ impl EnvManager {
             ],
             supported: true,
             reason: None,
+            user_zdotdir: None,
+            warning: None,
         })
     }
 
     async fn install_zsh_adapter(&self, session_name: &str) -> Result<ShellAdapter> {
         let dir = self.session_dir(session_name).join("shell").join("zsh");
-        secure_dir(&dir).await?;
-        for (name, content) in ZSH_ADAPTER_FILES {
-            write_atomic(&dir.join(name), content).await?;
-        }
+        write_zsh_adapter_files(&dir).await?;
         let mut env = self.adapter_env(session_name);
-        // Only an explicitly configured ZDOTDIR has to be preserved. When the
-        // Agent inherited none, the wrapper uses the Session's `$HOME` at
-        // runtime — which is the home the shell itself will have, not the
-        // Agent process's.
-        if let Ok(original) = std::env::var("ZDOTDIR") {
-            if !original.is_empty() {
-                env.push((USER_ZDOTDIR_VAR.to_string(), original));
-            }
+        // Only a *validated* original user directory is forwarded. An
+        // inherited Nession adapter path is recognized as managed provenance
+        // and never becomes this Session's user baseline (#4605). When none is
+        // available the wrapper uses the Session's `$HOME` at runtime — the
+        // home the shell itself will have, not the Agent service's.
+        let user_configuration = self.resolve_zsh_user_configuration().await;
+        if let Some(reason) = user_configuration.degraded_reason {
+            tracing::warn!("session {session_name}: {reason}");
+        }
+        let warning = user_configuration
+            .degraded_reason
+            .map(|reason| format!("the zsh adapter degraded its user configuration: {reason}"));
+        if let Some(directory) = &user_configuration.directory {
+            env.push((USER_ZDOTDIR_VAR.to_string(), directory.clone()));
         }
         env.push(("ZDOTDIR".to_string(), dir.to_string_lossy().into_owned()));
         Ok(ShellAdapter {
@@ -712,7 +821,162 @@ impl EnvManager {
             command: Vec::new(),
             supported: true,
             reason: None,
+            user_zdotdir: user_configuration.directory,
+            warning,
         })
+    }
+
+    /// Resolve the user configuration directory this Session's zsh adapter may
+    /// source.
+    ///
+    /// This is the one place the inherited `ZDOTDIR` is interpreted. A path
+    /// that names a Nession-generated adapter is never a user baseline: the
+    /// producer either recovers a validated original directory (the parent
+    /// Session's durable record, then the inherited marker) or degrades to the
+    /// Session `$HOME` fallback and reports it (#4605).
+    pub(crate) async fn resolve_zsh_user_configuration(&self) -> ZshUserConfiguration {
+        let Some(inherited) = self
+            .inherited_shell
+            .zdotdir
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            return ZshUserConfiguration::default();
+        };
+        if let Some(session_dir) = self.managed_adapter_session_dir(Path::new(inherited)) {
+            if let Some(origin) = self.recover_zsh_origin(&session_dir).await {
+                return ZshUserConfiguration {
+                    directory: Some(origin),
+                    degraded_reason: None,
+                };
+            }
+            if let Some(origin) = self
+                .inherited_shell
+                .user_zdotdir
+                .as_deref()
+                .and_then(|value| self.validated_origin(value))
+            {
+                return ZshUserConfiguration {
+                    directory: Some(origin),
+                    degraded_reason: None,
+                };
+            }
+            return ZshUserConfiguration {
+                directory: None,
+                degraded_reason: Some(
+                    "the inherited ZDOTDIR is a Nession-managed zsh adapter and no validated \
+                     original user directory was available; the Session HOME applies",
+                ),
+            };
+        }
+        if !Path::new(inherited).is_absolute() {
+            return ZshUserConfiguration {
+                directory: None,
+                degraded_reason: Some(
+                    "the inherited ZDOTDIR is not an absolute path; the Session HOME applies",
+                ),
+            };
+        }
+        ZshUserConfiguration {
+            directory: Some(inherited.to_string()),
+            degraded_reason: None,
+        }
+    }
+
+    /// Drop inherited shell runtime controls that belong to another Session.
+    ///
+    /// Only the shell-owned controls are removed here: a managed `ZDOTDIR` and
+    /// the per-Session user markers. Ordinary user variables, `NESSION_MCP_TOKEN`
+    /// and unrelated Agent-scoped settings are preserved by this boundary; the
+    /// prefix policy in the create path owns the rest.
+    ///
+    /// Returns whether a managed `ZDOTDIR` was removed, so the create path can
+    /// replace it with the Session's own home instead of letting tmux's global
+    /// environment supply the stale adapter path.
+    pub(crate) fn sanitize_inherited_environment(&self, vars: &mut Vec<(String, String)>) -> bool {
+        let stripped_managed_zdotdir = vars
+            .iter()
+            .any(|(key, value)| key == "ZDOTDIR" && self.inherited_zdotdir_is_managed(value));
+        vars.retain(|(key, value)| {
+            if key == "ZDOTDIR" {
+                return !self.inherited_zdotdir_is_managed(value);
+            }
+            key != USER_ZDOTDIR_VAR && key != LEGACY_USER_ZDOTDIR_VAR
+        });
+        stripped_managed_zdotdir
+    }
+
+    /// Whether `value` names a Nession-generated adapter directory.
+    fn inherited_zdotdir_is_managed(&self, value: &str) -> bool {
+        self.managed_adapter_session_dir(Path::new(value.trim()))
+            .is_some()
+    }
+
+    /// The Session state directory behind a managed adapter path, when the
+    /// path is one. Both the literal path and its symlink-resolved identity
+    /// are checked, so an alias cannot launder a managed directory.
+    fn managed_adapter_session_dir(&self, path: &Path) -> Option<PathBuf> {
+        let mut candidates = vec![path.to_path_buf()];
+        if let Ok(canonical) = path.canonicalize() {
+            if canonical != path {
+                candidates.push(canonical);
+            }
+        }
+        candidates
+            .into_iter()
+            .find_map(|candidate| self.adapter_session_dir_of(&candidate))
+    }
+
+    fn adapter_session_dir_of(&self, dir: &Path) -> Option<PathBuf> {
+        if dir.file_name()? != ZSH_DIR_NAME {
+            return None;
+        }
+        let shell_dir = dir.parent()?;
+        if shell_dir.file_name()? != ZSH_SHELL_DIR_NAME {
+            return None;
+        }
+        let session_dir = shell_dir.parent()?;
+        let root = session_dir.parent()?;
+        let under_state = path_is_under(dir, &self.state_dir);
+        let legacy_root = root
+            .file_name()
+            .is_some_and(|name| name == ENV_BINDINGS_DIR_NAME);
+        if !under_state && !legacy_root {
+            return None;
+        }
+        // A configured state-dir path is Agent-owned even when its marker was
+        // lost. A legacy root additionally needs the generated identity.
+        if under_state || adapter_has_marker(dir) || adapter_has_header(dir) {
+            Some(session_dir.to_path_buf())
+        } else {
+            None
+        }
+    }
+
+    /// The durable origin recorded by the Session that owns a managed adapter
+    /// path, when it is still a validated non-managed directory.
+    async fn recover_zsh_origin(&self, session_dir: &Path) -> Option<String> {
+        let bytes = fs::read(session_dir.join(BINDING_STATE_FILE)).await.ok()?;
+        let state: StoredBinding = serde_json::from_slice(&bytes).ok()?;
+        let dir_name = session_dir.file_name()?.to_string_lossy();
+        if sanitize_component(&state.session_name) != dir_name {
+            return None;
+        }
+        self.validated_origin(state.zdotdir_origin.as_deref()?)
+    }
+
+    /// Accept an original user directory only when it is absolute, nonempty
+    /// and not itself a managed adapter (lexically or by file identity).
+    fn validated_origin(&self, value: &str) -> Option<String> {
+        let trimmed = value.trim();
+        if trimmed.is_empty() || !Path::new(trimmed).is_absolute() {
+            return None;
+        }
+        if self.inherited_zdotdir_is_managed(trimmed) {
+            return None;
+        }
+        Some(trimmed.to_string())
     }
 
     fn adapter_env(&self, session_name: &str) -> Vec<(String, String)> {
@@ -735,6 +999,166 @@ impl EnvManager {
 
     fn session_dir(&self, session_name: &str) -> PathBuf {
         self.state_dir.join(sanitize_component(session_name))
+    }
+
+    /// Rewrite a recorded Session's generated zsh adapter and owned tmux
+    /// shell controls when they are legacy or contaminated.
+    ///
+    /// This is the repair half of #4605: an Agent update must converge
+    /// generated artifacts from the pre-fix template without recreating the
+    /// Session. Only Session-owned shell controls are touched; profiles,
+    /// revisions and baselines are handled by the binding path itself.
+    /// Returns whether anything changed, so a repeated recovery is silent.
+    async fn repair_zsh_adapter(&self, session_name: &str, state: &StoredBinding) -> Result<bool> {
+        if !state.adapter || state.shell.as_deref() != Some("zsh") {
+            return Ok(false);
+        }
+        let dir = self.session_dir(session_name).join("shell").join("zsh");
+        let mut changed = write_zsh_adapter_files_if_changed(&dir).await?;
+
+        for (key, value) in self.adapter_env(session_name) {
+            let current = self.tmux.ops().show_environment(session_name, &key).await?;
+            if current.as_deref() != Some(value.as_str()) {
+                self.tmux
+                    .ops()
+                    .set_environment(session_name, &key, &value)
+                    .await?;
+                changed = true;
+            }
+        }
+
+        let adapter_dir = dir.to_string_lossy().into_owned();
+        let zdotdir = self
+            .tmux
+            .ops()
+            .show_environment(session_name, "ZDOTDIR")
+            .await?;
+        if zdotdir.as_deref() != Some(adapter_dir.as_str()) {
+            self.tmux
+                .ops()
+                .set_environment(session_name, "ZDOTDIR", &adapter_dir)
+                .await?;
+            changed = true;
+        }
+
+        // The user marker: force the recorded validated origin, or remove a
+        // value that names a managed adapter (a legacy contamination). A
+        // valid legacy custom value is left alone.
+        let recorded = state
+            .zdotdir_origin
+            .as_deref()
+            .and_then(|value| self.validated_origin(value));
+        let current = self
+            .tmux
+            .ops()
+            .show_environment(session_name, USER_ZDOTDIR_VAR)
+            .await?;
+        match (recorded, current) {
+            (Some(origin), Some(value)) if value == origin => {}
+            (Some(origin), _) => {
+                self.tmux
+                    .ops()
+                    .set_environment(session_name, USER_ZDOTDIR_VAR, &origin)
+                    .await?;
+                changed = true;
+            }
+            (None, Some(value)) if self.inherited_zdotdir_is_managed(&value) => {
+                self.tmux
+                    .ops()
+                    .unset_environment(session_name, USER_ZDOTDIR_VAR)
+                    .await?;
+                changed = true;
+            }
+            _ => {}
+        }
+        let legacy = self
+            .tmux
+            .ops()
+            .show_environment(session_name, LEGACY_USER_ZDOTDIR_VAR)
+            .await?;
+        if legacy
+            .as_deref()
+            .is_some_and(|value| self.inherited_zdotdir_is_managed(value))
+        {
+            self.tmux
+                .ops()
+                .unset_environment(session_name, LEGACY_USER_ZDOTDIR_VAR)
+                .await?;
+            changed = true;
+        }
+        Ok(changed)
+    }
+
+    /// Repair every recorded Session's generated zsh adapter at Agent startup.
+    ///
+    /// Idempotent and best effort: only Sessions that still exist are touched,
+    /// a converged adapter writes nothing, and a tmux that cannot answer skips
+    /// the pass rather than guessing which Sessions are live.
+    pub(crate) async fn repair_recorded_zsh_adapters(&self) -> usize {
+        let records = self.stored_binding_records().await;
+        if records.is_empty() {
+            return 0;
+        }
+        let sessions = match self.tmux.ops().list_sessions().await {
+            Ok(sessions) => sessions,
+            Err(error) => {
+                tracing::warn!(
+                    "skipping the zsh adapter repair pass because tmux did not answer: {error:#}"
+                );
+                return 0;
+            }
+        };
+        let live: HashSet<&str> = sessions
+            .iter()
+            .map(|session| session.name.as_str())
+            .collect();
+        let mut repaired = 0;
+        for state in records {
+            if !live.contains(state.session_name.as_str()) {
+                continue;
+            }
+            match self.repair_zsh_adapter(&state.session_name, &state).await {
+                Ok(true) => {
+                    repaired += 1;
+                    tracing::info!(
+                        "repaired the generated zsh adapter for session {}; already-running \
+                         shells need a new shell or pane to use the corrected startup environment",
+                        state.session_name
+                    );
+                }
+                Ok(false) => {}
+                Err(error) => tracing::warn!(
+                    "could not repair the generated zsh adapter for session {}: {error:#}",
+                    state.session_name
+                ),
+            }
+        }
+        repaired
+    }
+
+    /// Every parseable durable binding record on this Agent.
+    async fn stored_binding_records(&self) -> Vec<StoredBinding> {
+        let mut out = Vec::new();
+        let mut dir = match fs::read_dir(&self.state_dir).await {
+            Ok(dir) => dir,
+            Err(_) => return out,
+        };
+        while let Ok(Some(entry)) = dir.next_entry().await {
+            let Ok(file_type) = entry.file_type().await else {
+                continue;
+            };
+            if !file_type.is_dir() {
+                continue;
+            }
+            let Ok(bytes) = fs::read(entry.path().join(BINDING_STATE_FILE)).await else {
+                continue;
+            };
+            let Ok(state) = serde_json::from_slice::<StoredBinding>(&bytes) else {
+                continue;
+            };
+            out.push(state);
+        }
+        out
     }
 
     /// Load the durable binding record for one Session.
@@ -989,6 +1413,96 @@ async fn write_atomic(path: &Path, contents: impl AsRef<[u8]>) -> Result<()> {
     Ok(())
 }
 
+/// Write the complete generated zsh adapter (wrappers plus the managed marker).
+async fn write_zsh_adapter_files(dir: &Path) -> Result<()> {
+    secure_dir(dir).await?;
+    for (name, content) in zsh_adapter_files() {
+        write_atomic(&dir.join(name), content).await?;
+    }
+    write_atomic(
+        &dir.join(ZSH_ADAPTER_MARKER_FILE),
+        ZSH_ADAPTER_MARKER_CONTENT,
+    )
+    .await?;
+    Ok(())
+}
+
+/// Rewrite only the generated zsh adapter files that differ, atomically.
+///
+/// Returns whether anything changed. Every replacement is prepared before any
+/// file is published: a failed preparation leaves the surviving adapter
+/// exactly as found, and a repeated call on a converged directory writes
+/// nothing.
+async fn write_zsh_adapter_files_if_changed(dir: &Path) -> Result<bool> {
+    let mut pending: Vec<(PathBuf, String)> = Vec::new();
+    for (name, content) in zsh_adapter_files() {
+        let path = dir.join(name);
+        if fs::read_to_string(&path).await.ok().as_deref() != Some(content.as_str()) {
+            pending.push((path, content));
+        }
+    }
+    let marker = dir.join(ZSH_ADAPTER_MARKER_FILE);
+    if fs::read_to_string(&marker).await.ok().as_deref() != Some(ZSH_ADAPTER_MARKER_CONTENT) {
+        pending.push((marker, ZSH_ADAPTER_MARKER_CONTENT.to_string()));
+    }
+    if pending.is_empty() {
+        return Ok(false);
+    }
+
+    secure_dir(dir).await?;
+    let mut prepared: Vec<(PathBuf, PathBuf)> = Vec::new();
+    for (path, content) in &pending {
+        let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
+        let write = async {
+            fs::write(&tmp, content).await?;
+            secure_file(&tmp).await
+        }
+        .await;
+        if let Err(error) = write {
+            for (_, tmp) in &prepared {
+                let _ = fs::remove_file(tmp).await;
+            }
+            return Err(error).with_context(|| format!("preparing {}", tmp.display()));
+        }
+        prepared.push((path.clone(), tmp));
+    }
+    for (path, tmp) in &prepared {
+        fs::rename(tmp, path)
+            .await
+            .with_context(|| format!("renaming {} to {}", tmp.display(), path.display()))?;
+    }
+    Ok(true)
+}
+
+fn adapter_has_marker(dir: &Path) -> bool {
+    dir.join(ZSH_ADAPTER_MARKER_FILE).is_file()
+}
+
+fn adapter_has_header(dir: &Path) -> bool {
+    let Some(prefix) = read_bounded_prefix(&dir.join(".zshenv"), 256) else {
+        return false;
+    };
+    String::from_utf8_lossy(&prefix).contains(ZSH_ADAPTER_HEADER)
+}
+
+fn read_bounded_prefix(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buffer = vec![0; limit];
+    let read = file.read(&mut buffer).ok()?;
+    buffer.truncate(read);
+    Some(buffer)
+}
+
+/// Whether `path` is inside `root`, comparing symlink-resolved identities when
+/// both exist.
+fn path_is_under(path: &Path, root: &Path) -> bool {
+    match (path.canonicalize(), root.canonicalize()) {
+        (Ok(path), Ok(root)) => path.starts_with(&root),
+        _ => path.starts_with(root),
+    }
+}
+
 async fn secure_dir(path: &Path) -> Result<()> {
     fs::create_dir_all(path)
         .await
@@ -1069,38 +1583,101 @@ esac
 /// The zsh adapter files. `.zshenv` is read by every zsh invocation, so it only
 /// forwards the user's own file; the hook belongs in `.zshrc`, after the user's
 /// configuration has had its say.
-const ZSH_ADAPTER_FILES: [(&str, &str); 5] = [
-    (
-        ".zshenv",
-        r#"# Nession Session-local zsh adapter (#170 Phase B).
-__nession_session_zdotdir="${ZDOTDIR:-$HOME}"
-__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
-if [ -r "${__nession_user_zdotdir}/.zshenv" ]; then
-  . "${__nession_user_zdotdir}/.zshenv"
+///
+/// Every file is generated from one preamble (#4605):
+///
+/// * a **non-exported per-phase reentrancy guard** — a legitimate nested zsh
+///   process starts with a fresh guard and initializes once; a source loop in
+///   one process stops;
+/// * a **managed-target check** — a target carrying [`ZSH_ADAPTER_MARKER_FILE`]
+///   or [`ZSH_ADAPTER_HEADER`] is another generated adapter, never user
+///   configuration, so it is refused (and the Session `$HOME` is used instead);
+/// * a bounded, value-free diagnostic when a managed target was refused.
+fn zsh_adapter_file(guard: &str, body: &str, extra: &str) -> String {
+    const TEMPLATE: &str = r#"# Nession Session-local zsh adapter (#170 Phase B).
+# Generated per Session by Nession; do not edit.
+if [ -n "${__GUARD__:-}" ]; then
+  return 0
 fi
-# A user .zshenv may change ZDOTDIR. Keep the Session-local startup chain ours;
+__GUARD__=1
+__nession_session_zdotdir="${ZDOTDIR:-$HOME}"
+
+__nession_is_managed_zdotdir() {
+  local __nession_target="$1"
+  [ -n "$__nession_target" ] || return 1
+  [ -d "$__nession_target" ] || return 1
+  [ -f "$__nession_target/.nession-adapter" ] && return 0
+  local __nession_first=""
+  { IFS= read -r __nession_first < "$__nession_target/.zshenv"; } 2>/dev/null || return 1
+  case "$__nession_first" in
+    *"Nession Session-local zsh adapter"*) return 0 ;;
+  esac
+  return 1
+}
+
+__nession_note_managed_target() {
+  [ -z "${__nession_managed_notice:-}" ] || return 0
+  __nession_managed_notice=1
+  if [[ -o interactive ]]; then
+    printf '%s\n' 'nession: refusing a Nession-managed zsh adapter as user configuration' >&2
+  fi
+}
+
+__nession_note_missing_target() {
+  [ -z "${__nession_managed_notice:-}" ] || return 0
+  __nession_managed_notice=1
+  if [[ -o interactive ]]; then
+    printf '%s\n' 'nession: the configured zsh user directory is missing; using the Session HOME' >&2
+  fi
+}
+
+__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
+if [ -n "$__nession_user_zdotdir" ]; then
+  __nession_user_target=1
+  if [ "$__nession_user_zdotdir" = "$__nession_session_zdotdir" ]; then
+    __nession_note_managed_target
+    __nession_user_target=0
+  elif __nession_is_managed_zdotdir "$__nession_user_zdotdir"; then
+    __nession_note_managed_target
+    __nession_user_target=0
+  elif [ ! -d "$__nession_user_zdotdir" ]; then
+    __nession_note_missing_target
+    __nession_user_target=0
+  fi
+  if [ "$__nession_user_target" = 0 ]; then
+    __nession_user_zdotdir="$HOME"
+  fi
+  if [ "$__nession_user_zdotdir" != "$__nession_session_zdotdir" ] && ! __nession_is_managed_zdotdir "$__nession_user_zdotdir"; then
+__BODY__
+  fi
+fi
+__EXTRA__
+unset __GUARD__
+"#;
+    TEMPLATE
+        .replace("__GUARD__", guard)
+        .replace("__BODY__", body)
+        .replace("__EXTRA__", extra)
+}
+
+const ZSH_ZSHENV_BODY: &str = r#"    if [ -r "$__nession_user_zdotdir/.zshenv" ]; then
+      . "$__nession_user_zdotdir/.zshenv"
+    fi"#;
+
+const ZSH_ZSHENV_EXTRA: &str = r#"# A user .zshenv may change ZDOTDIR. Keep the Session-local startup chain ours;
 # the user's own files are sourced explicitly by the wrappers below.
 ZDOTDIR="$__nession_session_zdotdir"
-export ZDOTDIR
-"#,
-    ),
-    (
-        ".zprofile",
-        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
-if [ -r "${__nession_user_zdotdir}/.zprofile" ]; then
-  . "${__nession_user_zdotdir}/.zprofile"
-fi
-"#,
-    ),
-    (
-        ".zshrc",
-        r#"# Nession Session-local zsh adapter (#170 Phase B).
-__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
-if [ -r "${__nession_user_zdotdir}/.zshrc" ]; then
-  . "${__nession_user_zdotdir}/.zshrc"
-fi
+export ZDOTDIR"#;
 
-__nession_env_sync() {
+const ZSH_ZPROFILE_BODY: &str = r#"    if [ -r "$__nession_user_zdotdir/.zprofile" ]; then
+      . "$__nession_user_zdotdir/.zprofile"
+    fi"#;
+
+const ZSH_ZSHRC_BODY: &str = r#"    if [ -r "$__nession_user_zdotdir/.zshrc" ]; then
+      . "$__nession_user_zdotdir/.zshrc"
+    fi"#;
+
+const ZSH_ZSHRC_EXTRA: &str = r#"__nession_env_sync() {
   [ -n "${NESSION_RUNTIME_ENV_RUNTIME:-}" ] || return 0
   [ -r "${NESSION_RUNTIME_ENV_RUNTIME}" ] || return 0
   local __nession_rev
@@ -1118,30 +1695,45 @@ if [ -n "${precmd_functions[(r)__nession_env_sync]:-}" ]; then
   :
 else
   add-zsh-hook precmd __nession_env_sync
-fi
-"#,
-    ),
-    (
-        ".zlogin",
-        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
-if [ -r "${__nession_user_zdotdir}/.zlogin" ]; then
-  . "${__nession_user_zdotdir}/.zlogin"
-fi
-"#,
-    ),
-    (
-        ".zlogout",
-        r#"__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
-if [ -r "${__nession_user_zdotdir}/.zlogout" ]; then
-  . "${__nession_user_zdotdir}/.zlogout"
-fi
-"#,
-    ),
-];
+fi"#;
+
+const ZSH_ZLOGIN_BODY: &str = r#"    if [ -r "$__nession_user_zdotdir/.zlogin" ]; then
+      . "$__nession_user_zdotdir/.zlogin"
+    fi"#;
+
+const ZSH_ZLOGOUT_BODY: &str = r#"    if [ -r "$__nession_user_zdotdir/.zlogout" ]; then
+      . "$__nession_user_zdotdir/.zlogout"
+    fi"#;
+
+fn zsh_adapter_files() -> [(&'static str, String); 5] {
+    [
+        (
+            ".zshenv",
+            zsh_adapter_file("__nession_zshenv_active", ZSH_ZSHENV_BODY, ZSH_ZSHENV_EXTRA),
+        ),
+        (
+            ".zprofile",
+            zsh_adapter_file("__nession_zprofile_active", ZSH_ZPROFILE_BODY, ""),
+        ),
+        (
+            ".zshrc",
+            zsh_adapter_file("__nession_zshrc_active", ZSH_ZSHRC_BODY, ZSH_ZSHRC_EXTRA),
+        ),
+        (
+            ".zlogin",
+            zsh_adapter_file("__nession_zlogin_active", ZSH_ZLOGIN_BODY, ""),
+        ),
+        (
+            ".zlogout",
+            zsh_adapter_file("__nession_zlogout_active", ZSH_ZLOGOUT_BODY, ""),
+        ),
+    ]
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::TestSession;
     use nession_protocol::contracts::env::v1::EnvSource;
 
     fn snapshot(name: &str, vars: &[(&str, &str)]) -> EnvSnapshot {
@@ -1265,23 +1857,32 @@ mod tests {
 
     #[test]
     fn zsh_adapter_keeps_the_users_files_in_the_chain() {
-        let files = ZSH_ADAPTER_FILES
-            .iter()
-            .map(|(name, _)| *name)
-            .collect::<Vec<_>>();
+        let files = zsh_adapter_files();
+        let names = files.iter().map(|(name, _)| *name).collect::<Vec<_>>();
         assert_eq!(
-            files,
+            names,
             vec![".zshenv", ".zprofile", ".zshrc", ".zlogin", ".zlogout"]
         );
-        let zshrc = ZSH_ADAPTER_FILES
+        let zshrc = files
             .iter()
             .find(|(name, _)| *name == ".zshrc")
             .expect("the hook belongs in .zshrc")
-            .1;
+            .1
+            .as_str();
         assert!(zshrc.contains("NESSION_RUNTIME_USER_ZDOTDIR"));
         assert!(zshrc.contains("add-zsh-hook precmd"));
         assert!(zshrc.contains("NESSION_RUNTIME_ENV_RUNTIME"));
         assert!(!zshrc.contains("tmux show-environment"));
+        for (name, content) in &files {
+            assert!(
+                content.contains("__nession_is_managed_zdotdir"),
+                "{name} must refuse a managed adapter as user configuration"
+            );
+            assert!(
+                content.contains(ZSH_ADAPTER_HEADER),
+                "{name} must carry the legacy-recognizable adapter header"
+            );
+        }
     }
 
     #[test]
@@ -3047,5 +3648,1245 @@ esac"#,
             .await
             .expect("B is observable");
         assert!(b.managed_keys.is_empty());
+    }
+
+    // ── original zsh configuration provenance (#4605) ────────────────────────
+
+    /// A manager whose inherited zsh selection is stated explicitly.
+    ///
+    /// This is the canonical producer's input. Production reads it from the
+    /// Agent process environment; a parallel test must not mutate that
+    /// environment, or an unrelated test's shell resolution changes.
+    fn zsh_manager(
+        state_dir: &Path,
+        zdotdir: Option<&str>,
+        user_zdotdir: Option<&str>,
+    ) -> EnvManager {
+        EnvManager::new(state_dir.to_path_buf()).with_inherited_shell_environment(
+            InheritedShellEnvironment {
+                zdotdir: zdotdir.map(str::to_string),
+                user_zdotdir: user_zdotdir.map(str::to_string),
+            },
+        )
+    }
+
+    fn path_string(path: &Path) -> String {
+        path.to_string_lossy().into_owned()
+    }
+
+    async fn installed_adapter(mgr: &EnvManager, session: &str) -> PathBuf {
+        let adapter = mgr.install_shell_adapter(session, Some("/bin/zsh")).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        mgr.session_dir(session).join("shell").join("zsh")
+    }
+
+    #[tokio::test]
+    async fn zsh_origin_preserves_an_absolute_custom_zdotdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom = dir.path().join("custom-zsh");
+        std::fs::create_dir_all(&custom).unwrap();
+        let custom = path_string(&custom);
+
+        let mgr = zsh_manager(&dir.path().join("state"), Some(&custom), None);
+        let configuration = mgr.resolve_zsh_user_configuration().await;
+
+        assert_eq!(configuration.directory.as_deref(), Some(custom.as_str()));
+        assert!(configuration.degraded_reason.is_none());
+    }
+
+    #[tokio::test]
+    async fn zsh_origin_never_copies_another_sessions_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = installed_adapter(&a, "Test").await;
+        let a_adapter = path_string(&a_adapter);
+
+        // The reported launch environment: the Agent inherited Session A's
+        // generated adapter as ZDOTDIR and the same path as its user marker.
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let configuration = b.resolve_zsh_user_configuration().await;
+
+        assert!(
+            configuration.directory.is_none(),
+            "another Session's adapter must never become the user baseline"
+        );
+        assert!(
+            configuration.degraded_reason.is_some(),
+            "the unverifiable original must be reported, not guessed"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_origin_rejects_a_symlink_alias_to_a_managed_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = installed_adapter(&a, "Test").await;
+        let alias = dir.path().join("alias-zsh");
+        std::os::unix::fs::symlink(&a_adapter, &alias).unwrap();
+
+        let b = zsh_manager(&state, Some(&path_string(&alias)), None);
+        let configuration = b.resolve_zsh_user_configuration().await;
+
+        assert!(
+            configuration.directory.is_none(),
+            "a symlink alias must not launder a managed adapter into user configuration"
+        );
+    }
+
+    #[tokio::test]
+    async fn zsh_origin_recovers_a_validated_inherited_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let original = dir.path().join("original-zsh");
+        std::fs::create_dir_all(&original).unwrap();
+        let original = path_string(&original);
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = installed_adapter(&a, "Test").await;
+        let a_adapter = path_string(&a_adapter);
+
+        // The parent shell's marker names the authentic custom directory: it
+        // is absolute and not a managed adapter, so it is recoverable.
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&original));
+        let configuration = b.resolve_zsh_user_configuration().await;
+
+        assert_eq!(
+            configuration.directory.as_deref(),
+            Some(original.as_str()),
+            "a validated marker is the original user directory"
+        );
+    }
+
+    #[tokio::test]
+    async fn zsh_origin_recovers_the_parent_sessions_recorded_origin() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let original = dir.path().join("original-zsh");
+        std::fs::create_dir_all(&original).unwrap();
+        let original_string = path_string(&original);
+
+        let a = zsh_manager(&state, Some(&original_string), None);
+        let adapter = a.install_shell_adapter("Test", Some("/bin/zsh")).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        assert_eq!(
+            adapter.user_zdotdir.as_deref(),
+            Some(original_string.as_str())
+        );
+        a.record_created_binding(
+            "Test",
+            1,
+            &[],
+            &EffectiveOverlay::default(),
+            BTreeMap::new(),
+            &adapter,
+        )
+        .await
+        .expect("the created binding records the validated origin");
+        let a_adapter = path_string(&a.session_dir("Test").join("shell").join("zsh"));
+
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let configuration = b.resolve_zsh_user_configuration().await;
+
+        assert_eq!(
+            configuration.directory.as_deref(),
+            Some(original_string.as_str()),
+            "the parent Session's durable origin must be recovered and revalidated"
+        );
+    }
+
+    #[tokio::test]
+    async fn zsh_origin_rejects_a_marker_that_names_a_managed_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = path_string(&installed_adapter(&a, "Test").await);
+
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let configuration = b.resolve_zsh_user_configuration().await;
+
+        assert!(configuration.directory.is_none());
+        assert!(configuration.degraded_reason.is_some());
+    }
+
+    #[tokio::test]
+    async fn zsh_origin_rejects_a_relative_zdotdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let mgr = zsh_manager(&dir.path().join("state"), Some("relative/zsh"), None);
+        let configuration = mgr.resolve_zsh_user_configuration().await;
+
+        assert!(
+            configuration.directory.is_none(),
+            "a relative ZDOTDIR cannot select a stable user configuration"
+        );
+        assert!(configuration.degraded_reason.is_some());
+    }
+
+    #[tokio::test]
+    async fn zsh_adapter_does_not_copy_a_managed_zdotdir_as_user_configuration() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = path_string(&installed_adapter(&a, "Test").await);
+
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let adapter = b.install_shell_adapter("bbc-spec", Some("/bin/zsh")).await;
+
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        assert!(
+            adapter.user_zdotdir.is_none(),
+            "an unrelated Session's adapter must not be stored as the user baseline"
+        );
+        assert!(!adapter.env.iter().any(|(key, _)| key == USER_ZDOTDIR_VAR));
+        assert!(
+            adapter.warning.is_some(),
+            "the degraded original must be reported to the caller"
+        );
+    }
+
+    #[tokio::test]
+    async fn zsh_adapter_preserves_a_valid_custom_zdotdir() {
+        let dir = tempfile::tempdir().unwrap();
+        let custom = dir.path().join("custom-zsh");
+        std::fs::create_dir_all(&custom).unwrap();
+        let custom = path_string(&custom);
+
+        let mgr = zsh_manager(&dir.path().join("state"), Some(&custom), None);
+        let adapter = mgr.install_shell_adapter("sess", Some("/bin/zsh")).await;
+
+        assert_eq!(adapter.user_zdotdir.as_deref(), Some(custom.as_str()));
+        assert!(adapter
+            .env
+            .iter()
+            .any(|(key, value)| key == USER_ZDOTDIR_VAR && value == &custom));
+        assert!(adapter.warning.is_none());
+    }
+
+    #[tokio::test]
+    async fn inherited_environment_drops_only_managed_shell_controls() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = path_string(&installed_adapter(&a, "Test").await);
+
+        let b = zsh_manager(&state, None, None);
+        let mut inherited = vec![
+            ("ZDOTDIR".to_string(), a_adapter.clone()),
+            (USER_ZDOTDIR_VAR.to_string(), a_adapter.clone()),
+            (LEGACY_USER_ZDOTDIR_VAR.to_string(), a_adapter),
+            ("NESSION_MCP_TOKEN".to_string(), "fixture-token".to_string()),
+            (
+                "NESSION_RUNTIME_ENV_REVISION".to_string(),
+                "/runtime".to_string(),
+            ),
+            ("PATH".to_string(), "/usr/bin:/bin".to_string()),
+        ];
+        assert!(
+            b.sanitize_inherited_environment(&mut inherited),
+            "the managed ZDOTDIR removal is reported for the create path"
+        );
+
+        assert!(
+            !inherited.iter().any(|(key, _)| key == "ZDOTDIR"),
+            "a parent Session's adapter path must not travel into a new Session"
+        );
+        assert!(!inherited.iter().any(|(key, _)| key == USER_ZDOTDIR_VAR));
+        assert!(!inherited
+            .iter()
+            .any(|(key, _)| key == LEGACY_USER_ZDOTDIR_VAR));
+        assert!(inherited.iter().any(|(key, _)| key == "NESSION_MCP_TOKEN"));
+        assert!(inherited.iter().any(|(key, _)| key == "PATH"));
+        assert!(
+            inherited
+                .iter()
+                .any(|(key, _)| key == "NESSION_RUNTIME_ENV_REVISION"),
+            "the prefix policy owns other runtime keys; this boundary only strips shell controls"
+        );
+
+        // A legitimate explicit custom ZDOTDIR is part of the Host baseline.
+        let mut custom = vec![("ZDOTDIR".to_string(), "/opt/custom-zsh".to_string())];
+        assert!(!b.sanitize_inherited_environment(&mut custom));
+        assert_eq!(
+            custom,
+            vec![("ZDOTDIR".to_string(), "/opt/custom-zsh".to_string())]
+        );
+    }
+
+    // ── the generated wrappers, in real zsh processes (#4605 SC-02) ──────────
+
+    #[cfg(unix)]
+    fn zsh_binary() -> Option<&'static str> {
+        ["/bin/zsh", "/usr/bin/zsh"]
+            .into_iter()
+            .find(|path| Path::new(path).exists())
+    }
+
+    /// A disposable HOME whose startup files record each phase they run in.
+    #[cfg(unix)]
+    struct ShellFixture {
+        home: PathBuf,
+        counts: PathBuf,
+        hooks: PathBuf,
+        stderr: PathBuf,
+    }
+
+    #[cfg(unix)]
+    fn shell_fixture(dir: &Path) -> ShellFixture {
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        let counts = dir.join("startup-counts");
+        let hooks = dir.join("precmd-hooks");
+        std::fs::write(
+            home.join(".zshenv"),
+            format!(
+                "printf 'zshenv\\n' >> '{}'\nexport NESSION_USER_VAR=kept\n",
+                counts.display()
+            ),
+        )
+        .unwrap();
+        for (name, phase) in [(".zprofile", "zprofile"), (".zlogin", "zlogin")] {
+            std::fs::write(
+                home.join(name),
+                format!("printf '{phase}\\n' >> '{}'\n", counts.display()),
+            )
+            .unwrap();
+        }
+        std::fs::write(
+            home.join(".zshrc"),
+            format!(
+                "printf 'zshrc\\n' >> '{}'\n\
+                 __user_precmd() {{ printf 'precmd\\n' >> '{}'; }}\n\
+                 autoload -Uz add-zsh-hook\n\
+                 add-zsh-hook precmd __user_precmd\n",
+                counts.display(),
+                hooks.display()
+            ),
+        )
+        .unwrap();
+        ShellFixture {
+            home,
+            counts,
+            hooks,
+            stderr: dir.join("shell-stderr"),
+        }
+    }
+
+    #[cfg(unix)]
+    fn startup_phases(fixture: &ShellFixture) -> Vec<String> {
+        std::fs::read_to_string(&fixture.counts)
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_string)
+            .collect()
+    }
+
+    #[cfg(unix)]
+    fn phase_count(fixture: &ShellFixture, phase: &str) -> usize {
+        startup_phases(fixture)
+            .iter()
+            .filter(|line| *line == phase)
+            .count()
+    }
+
+    #[cfg(unix)]
+    fn shell_stderr(fixture: &ShellFixture) -> String {
+        std::fs::read_to_string(&fixture.stderr).unwrap_or_default()
+    }
+
+    #[cfg(unix)]
+    fn assert_no_recursion(fixture: &ShellFixture) {
+        let stderr = shell_stderr(fixture);
+        assert!(
+            !stderr.contains("recursion") && !stderr.contains("job table full"),
+            "the generated adapter recursed: {stderr}"
+        );
+    }
+
+    /// End a spawned zsh session and prove every generated wrapper, including
+    /// the logout phase, parsed and the login shell exited successfully.
+    #[cfg(unix)]
+    async fn finish_zsh_session(
+        mut child: tokio::process::Child,
+        stdin: tokio::process::ChildStdin,
+        fixture: &ShellFixture,
+    ) {
+        drop(stdin);
+        let status = child.wait().await.expect("the shell exits");
+        assert!(status.success(), "the login shell exited with {status}");
+        let stderr = shell_stderr(fixture);
+        assert!(
+            !stderr.contains("parse error")
+                && !stderr.contains("syntax error")
+                && !stderr.contains("recursion")
+                && !stderr.contains("job table full"),
+            "a generated wrapper failed: {stderr}"
+        );
+    }
+
+    #[cfg(unix)]
+    async fn spawn_zsh_session(
+        shell: &str,
+        adapter: &ShellAdapter,
+        fixture: &ShellFixture,
+        injected_marker: Option<&str>,
+    ) -> (
+        tokio::process::Child,
+        tokio::process::ChildStdin,
+        tokio::io::Lines<tokio::io::BufReader<tokio::process::ChildStdout>>,
+    ) {
+        use std::process::Stdio;
+        use tokio::io::{AsyncBufReadExt, BufReader};
+
+        let stderr = std::fs::File::create(&fixture.stderr).unwrap();
+        // not-tmux: this test launches a real zsh to exercise the generated
+        // Session adapter; it never invokes tmux.
+        let mut command = tokio::process::Command::new(shell);
+        command
+            .args(["-l", "-i"])
+            .env_clear()
+            .env("HOME", &fixture.home)
+            .env(
+                "PATH",
+                std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string()),
+            )
+            .env("SHELL", shell)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::from(stderr));
+        for (key, value) in &adapter.env {
+            command.env(key, value);
+        }
+        if let Some(marker) = injected_marker {
+            command.env(USER_ZDOTDIR_VAR, marker);
+        }
+        let mut child = command.spawn().expect("the shell starts");
+        let stdin = child.stdin.take().expect("piped stdin");
+        let stdout = child.stdout.take().expect("piped stdout");
+        (child, stdin, BufReader::new(stdout).lines())
+    }
+
+    /// Session B created from a contaminated launch environment starts within
+    /// the bounded wait, never sources A's adapter, runs each legitimate phase
+    /// once, and keeps user hooks and ENV revision convergence.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_contamination_across_sessions_never_recurses() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let fixture = shell_fixture(dir.path());
+
+        // Session A's generated adapter is what the Agent inherited as
+        // ZDOTDIR after it was launched from Session A.
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = path_string(&installed_adapter(&a, "Test").await);
+
+        // Session B is created from that contaminated launch environment.
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let adapter = b.install_shell_adapter("bbc-spec", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        let session_dir = b.session_dir("bbc-spec");
+        b.write_runtime_files(
+            &session_dir,
+            1,
+            &EffectiveOverlay {
+                vars: vec![("NESSION_TEST".to_string(), "one".to_string())],
+                warnings: Vec::new(),
+            },
+            &[],
+        )
+        .await
+        .unwrap();
+
+        let (child, mut stdin, mut lines) =
+            spawn_zsh_session(shell, &adapter, &fixture, None).await;
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"READY:$NESSION_USER_VAR ENV:$NESSION_TEST\"",
+            "READY:kept",
+        )
+        .await;
+        assert!(line.contains("ENV:one"), "revision sync was lost: {line}");
+
+        assert_eq!(
+            phase_count(&fixture, "zshenv"),
+            1,
+            "{:?}",
+            startup_phases(&fixture)
+        );
+        assert_eq!(phase_count(&fixture, "zprofile"), 1);
+        assert_eq!(phase_count(&fixture, "zshrc"), 1);
+        assert_eq!(phase_count(&fixture, "zlogin"), 1);
+        assert_no_recursion(&fixture);
+        assert!(
+            std::fs::read_to_string(&fixture.hooks)
+                .unwrap_or_default()
+                .contains("precmd"),
+            "the user precmd hook must survive the generated wrapper"
+        );
+
+        finish_zsh_session(child, stdin, &fixture).await;
+    }
+
+    /// A corrupted marker injected directly into the Session environment is
+    /// refused by the generated wrapper; the user's own configuration still
+    /// loads exactly once.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_contamination_injected_marker_is_refused() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let fixture = shell_fixture(dir.path());
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = path_string(&installed_adapter(&a, "Test").await);
+        let b = zsh_manager(&state, None, None);
+        let adapter = b.install_shell_adapter("bbc-spec", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+
+        let (child, mut stdin, mut lines) =
+            spawn_zsh_session(shell, &adapter, &fixture, Some(&a_adapter)).await;
+        write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"READY:$NESSION_USER_VAR\"",
+            "READY:kept",
+        )
+        .await;
+
+        assert_eq!(
+            phase_count(&fixture, "zshenv"),
+            1,
+            "{:?}",
+            startup_phases(&fixture)
+        );
+        assert_eq!(phase_count(&fixture, "zshrc"), 1);
+        assert_no_recursion(&fixture);
+        let stderr = shell_stderr(&fixture);
+        let notice = stderr
+            .lines()
+            .find(|line| line.contains("refusing a Nession-managed zsh adapter"))
+            .unwrap_or_else(|| panic!("the refusal must be reported: {stderr}"));
+        assert!(
+            !notice.contains(&a_adapter),
+            "the diagnostic must not print environment values: {notice}"
+        );
+
+        finish_zsh_session(child, stdin, &fixture).await;
+    }
+
+    /// A marker whose target no longer exists is a stale path, not user
+    /// configuration: the wrapper falls back to the Session HOME and reports
+    /// the degradation once.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_contamination_missing_marker_falls_back_to_home() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let fixture = shell_fixture(dir.path());
+        let b = zsh_manager(&state, None, None);
+        let adapter = b.install_shell_adapter("bbc-spec", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+        let missing = path_string(&dir.path().join("removed-adapter").join("shell").join("zsh"));
+
+        let (child, mut stdin, mut lines) =
+            spawn_zsh_session(shell, &adapter, &fixture, Some(&missing)).await;
+        write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "echo \"READY:$NESSION_USER_VAR\"",
+            "READY:kept",
+        )
+        .await;
+        assert_eq!(
+            phase_count(&fixture, "zshenv"),
+            1,
+            "{:?}",
+            startup_phases(&fixture)
+        );
+        assert_eq!(phase_count(&fixture, "zshrc"), 1);
+        assert_no_recursion(&fixture);
+        let stderr = shell_stderr(&fixture);
+        assert!(
+            stderr.contains("configured zsh user directory is missing"),
+            "the fallback is reported: {stderr}"
+        );
+
+        finish_zsh_session(child, stdin, &fixture).await;
+    }
+
+    /// A nested shell is a new process: it initializes its own `.zshenv` once
+    /// and does not run interactive-only phases.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_contamination_nested_shell_initializes_once() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let fixture = shell_fixture(dir.path());
+        let b = zsh_manager(&state, None, None);
+        let adapter = b.install_shell_adapter("bbc-spec", Some(shell)).await;
+        assert!(adapter.supported, "{:?}", adapter.reason);
+
+        let (child, mut stdin, mut lines) =
+            spawn_zsh_session(shell, &adapter, &fixture, None).await;
+        write_and_wait(&mut stdin, &mut lines, "echo \"READY\"", "READY").await;
+        let zshenv_before = phase_count(&fixture, "zshenv");
+        let zshrc_before = phase_count(&fixture, "zshrc");
+
+        let line = write_and_wait(
+            &mut stdin,
+            &mut lines,
+            "zsh -c 'echo \"NESTED:$NESSION_USER_VAR\"'",
+            "NESTED:kept",
+        )
+        .await;
+        assert!(line.contains("NESTED:kept"), "{line}");
+        assert_eq!(
+            phase_count(&fixture, "zshenv"),
+            zshenv_before + 1,
+            "the nested shell initializes its own .zshenv exactly once"
+        );
+        assert_eq!(
+            phase_count(&fixture, "zshrc"),
+            zshrc_before,
+            "a non-interactive nested shell must not run .zshrc"
+        );
+        assert_no_recursion(&fixture);
+
+        finish_zsh_session(child, stdin, &fixture).await;
+    }
+
+    // ── real tmux Sessions A and B (#4605 SC-03) ─────────────────────────────
+
+    /// The pre-fix generated `.zshenv`: it trusted the inherited user marker
+    /// and would source another Session's adapter recursively. Used to build a
+    /// realistic legacy repair fixture.
+    #[cfg(unix)]
+    const OLD_ZSH_ZSHENV: &str = r#"# Nession Session-local zsh adapter (#170 Phase B).
+__nession_session_zdotdir="${ZDOTDIR:-$HOME}"
+__nession_user_zdotdir="${NESSION_RUNTIME_USER_ZDOTDIR:-$HOME}"
+if [ -r "${__nession_user_zdotdir}/.zshenv" ]; then
+  . "${__nession_user_zdotdir}/.zshenv"
+fi
+ZDOTDIR="$__nession_session_zdotdir"
+export ZDOTDIR
+"#;
+
+    #[cfg(unix)]
+    async fn tmux_available() -> bool {
+        crate::tmux::cmd::global()
+            .tokio()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .await
+            .is_ok_and(|status| status.success())
+    }
+
+    #[cfg(unix)]
+    async fn create_real_session(
+        mgr: &EnvManager,
+        name: &str,
+        adapter: &ShellAdapter,
+        home: &Path,
+        shell: &str,
+    ) {
+        let mut env = adapter.env.clone();
+        env.push(("HOME".to_string(), path_string(home)));
+        env.push((
+            "PATH".to_string(),
+            std::env::var("PATH").unwrap_or_else(|_| "/usr/bin:/bin".to_string()),
+        ));
+        env.push(("SHELL".to_string(), shell.to_string()));
+        let command = if adapter.command.is_empty() {
+            vec![shell.to_string(), "-l".to_string(), "-i".to_string()]
+        } else {
+            adapter.command.clone()
+        };
+        mgr.tmux()
+            .ops()
+            .new_session(&nession_tmux::ops::NewSession {
+                name: name.to_string(),
+                working_dir: "/tmp".to_string(),
+                width: 80,
+                height: 24,
+                env,
+                command,
+            })
+            .await
+            .expect("tmux creates the fixture Session");
+    }
+
+    #[cfg(unix)]
+    async fn wait_for_pane_text(mgr: &EnvManager, session: &str, marker: &str) -> String {
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+        let mut last_text = String::new();
+        loop {
+            if let Ok(Some((captured, _, _))) =
+                crate::tmux::util::capture_scrollback(mgr.tmux(), session, 400).await
+            {
+                last_text = String::from_utf8_lossy(&captured).into_owned();
+                if last_text.contains(marker) {
+                    return last_text;
+                }
+            }
+            assert!(
+                tokio::time::Instant::now() < deadline,
+                "the pane never showed {marker}: {last_text}"
+            );
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    }
+
+    #[cfg(unix)]
+    async fn tmux_environment(mgr: &EnvManager, session: &str) -> BTreeMap<String, String> {
+        mgr.tmux()
+            .ops()
+            .environment(session)
+            .await
+            .expect("tmux answers the Session environment")
+            .into_iter()
+            .collect()
+    }
+
+    #[cfg(unix)]
+    fn tmux_global_environment() -> String {
+        let output = crate::tmux::cmd::global()
+            .std()
+            .args(["show-environment", "-g"])
+            .output()
+            .expect("tmux answers the global environment");
+        String::from_utf8_lossy(&output.stdout).into_owned()
+    }
+
+    #[cfg(unix)]
+    fn fixture_home(dir: &Path) -> PathBuf {
+        let home = dir.join("home");
+        std::fs::create_dir_all(&home).unwrap();
+        std::fs::write(home.join(".zshrc"), "export NESSION_USER_VAR=kept\n").unwrap();
+        home
+    }
+
+    /// A Session created from a contaminated launch environment receives its
+    /// own adapter as ZDOTDIR, never A's adapter as its user baseline.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_session_isolation_creation_from_contaminated_provenance_uses_the_own_adapter() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let home = fixture_home(dir.path());
+
+        // The Agent was launched from Session A, so it inherited A's adapter.
+        let a = zsh_manager(&state, None, None);
+        let a_adapter = path_string(&installed_adapter(&a, "Test").await);
+
+        // Session B is composed from that contaminated environment through
+        // the canonical producer.
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let adapter_b = b.install_shell_adapter("bbc-spec", Some(shell)).await;
+        assert!(adapter_b.supported, "{:?}", adapter_b.reason);
+        assert!(
+            adapter_b.warning.is_some(),
+            "the degraded original is reported"
+        );
+
+        let session = TestSession::new("4605-create");
+        create_real_session(&b, session.name(), &adapter_b, &home, shell).await;
+
+        let env = tmux_environment(&b, session.name()).await;
+        let own_adapter = path_string(&b.session_dir("bbc-spec").join("shell").join("zsh"));
+        assert_eq!(
+            env.get("ZDOTDIR").map(String::as_str),
+            Some(own_adapter.as_str()),
+            "the Session must select its own generated adapter"
+        );
+        assert!(
+            !env.contains_key(USER_ZDOTDIR_VAR),
+            "another Session's adapter must never be materialized as the user baseline"
+        );
+
+        b.tmux()
+            .ops()
+            .send_keys(session.name(), "echo \"B:$NESSION_USER_VAR\"")
+            .await
+            .expect("the test can ask the shell");
+        let text = wait_for_pane_text(&b, session.name(), "B:kept").await;
+        assert!(
+            !text.contains("recursion") && !text.contains("job table full"),
+            "the Session shell recursed: {text}"
+        );
+        assert!(
+            a.session_dir("Test")
+                .join("shell")
+                .join("zsh")
+                .join(ZSH_ADAPTER_MARKER_FILE)
+                .is_file(),
+            "creating B must not modify A's adapter"
+        );
+    }
+
+    /// Repairing a contaminated Session rewrites its generated adapter and
+    /// owned tmux shell controls, leaves Session A, the global environment,
+    /// identities and live panes intact, and is idempotent.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_session_isolation_repair_preserves_other_sessions_and_is_idempotent() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let home = fixture_home(dir.path());
+
+        // Session A: a healthy Session whose binding must survive B's repair.
+        let a = zsh_manager(&state, None, None);
+        let session_a = TestSession::new("4605-a");
+        let adapter_a = a.install_shell_adapter(session_a.name(), Some(shell)).await;
+        assert!(adapter_a.supported, "{:?}", adapter_a.reason);
+        create_real_session(&a, session_a.name(), &adapter_a, &home, shell).await;
+        a.tmux()
+            .ops()
+            .set_option(session_a.name(), "@nession_instance_id", "fixture-a")
+            .await
+            .unwrap();
+        let profiles_a = vec![profile_ref("a.env")];
+        let snapshots_a = vec![snapshot("a.env", &[("A_ONLY", "a")])];
+        let overlay_a = EnvManager::merge_snapshots(&snapshots_a).unwrap();
+        a.record_created_binding(
+            session_a.name(),
+            5,
+            &profiles_a,
+            &overlay_a,
+            BTreeMap::new(),
+            &adapter_a,
+        )
+        .await
+        .unwrap();
+        a.apply_binding(session_a.name(), 5, &profiles_a, &snapshots_a)
+            .await
+            .expect("A's own binding applies");
+
+        // Session B: created from the contaminated launch environment, then
+        // damaged the way a pre-fix Agent left it.
+        let a_adapter = path_string(&a.session_dir(session_a.name()).join("shell").join("zsh"));
+        let b = zsh_manager(&state, Some(&a_adapter), Some(&a_adapter));
+        let session_b = TestSession::new("4605-b");
+        let adapter_b = b.install_shell_adapter(session_b.name(), Some(shell)).await;
+        assert!(adapter_b.supported, "{:?}", adapter_b.reason);
+        create_real_session(&b, session_b.name(), &adapter_b, &home, shell).await;
+        b.tmux()
+            .ops()
+            .set_option(session_b.name(), "@nession_instance_id", "fixture-b")
+            .await
+            .unwrap();
+        let profiles_b = vec![profile_ref("b.env")];
+        let snapshots_b = vec![snapshot("b.env", &[("B_ONLY", "one")])];
+        let overlay_b = EnvManager::merge_snapshots(&snapshots_b).unwrap();
+        b.record_created_binding(
+            session_b.name(),
+            1,
+            &profiles_b,
+            &overlay_b,
+            BTreeMap::new(),
+            &adapter_b,
+        )
+        .await
+        .unwrap();
+        let b_adapter_dir = b.session_dir(session_b.name()).join("shell").join("zsh");
+        std::fs::write(b_adapter_dir.join(".zshenv"), OLD_ZSH_ZSHENV).unwrap();
+        std::fs::remove_file(b_adapter_dir.join(ZSH_ADAPTER_MARKER_FILE)).unwrap();
+        b.tmux()
+            .ops()
+            .set_environment(session_b.name(), USER_ZDOTDIR_VAR, &a_adapter)
+            .await
+            .expect("the contaminated marker is installed");
+        // The legacy marker is stale-managed here and must be removed; a
+        // normal user credential on the same Session must survive.
+        b.tmux()
+            .ops()
+            .set_environment(session_b.name(), LEGACY_USER_ZDOTDIR_VAR, &a_adapter)
+            .await
+            .unwrap();
+        b.tmux()
+            .ops()
+            .set_environment(session_b.name(), "NESSION_MCP_TOKEN", "fixture-token")
+            .await
+            .unwrap();
+        // A genuinely custom legacy marker on the other Session is legitimate
+        // and must remain part of that Session's preserved environment.
+        a.tmux()
+            .ops()
+            .set_environment(
+                session_a.name(),
+                LEGACY_USER_ZDOTDIR_VAR,
+                "/opt/legacy-custom-zsh",
+            )
+            .await
+            .unwrap();
+
+        // Evidence that must not change.
+        let a_dir = a.session_dir(session_a.name()).join("shell").join("zsh");
+        let a_env_before = tmux_environment(&a, session_a.name()).await;
+        let a_files_before = std::fs::read_to_string(a_dir.join(".zshenv")).unwrap();
+        let a_state_before =
+            std::fs::read_to_string(a.session_dir(session_a.name()).join(BINDING_STATE_FILE))
+                .unwrap();
+        let global_before = tmux_global_environment();
+        let our_sessions = [session_a.name(), session_b.name()];
+        let panes_before: Vec<_> = b
+            .tmux()
+            .ops()
+            .list_panes()
+            .await
+            .unwrap()
+            .into_iter()
+            .filter(|pane| our_sessions.contains(&pane.session_name.as_str()))
+            .collect();
+        assert_eq!(panes_before.len(), 2, "both fixture Sessions have one pane");
+
+        let snapshots_b2 = vec![snapshot("b.env", &[("B_ONLY", "two")])];
+        let outcome = b
+            .apply_binding(session_b.name(), 2, &profiles_b, &snapshots_b2)
+            .await
+            .expect("the repair applies");
+        assert!(
+            outcome
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("zsh adapter") && warning.contains("repaired")),
+            "the repair outcome is reported: {:?}",
+            outcome.warnings
+        );
+
+        let repaired = std::fs::read_to_string(b_adapter_dir.join(".zshenv")).unwrap();
+        assert!(
+            repaired.contains("__nession_is_managed_zdotdir"),
+            "the legacy generated adapter is rewritten with the guarded template"
+        );
+        assert!(
+            b_adapter_dir.join(ZSH_ADAPTER_MARKER_FILE).is_file(),
+            "the repaired adapter carries the managed marker"
+        );
+        let b_env_after = tmux_environment(&b, session_b.name()).await;
+        let b_adapter_string = path_string(&b_adapter_dir);
+        assert_eq!(
+            b_env_after.get("ZDOTDIR").map(String::as_str),
+            Some(b_adapter_string.as_str())
+        );
+        assert!(
+            !b_env_after.contains_key(USER_ZDOTDIR_VAR),
+            "a managed marker is removed when no validated original exists"
+        );
+        assert!(
+            !b_env_after.contains_key(LEGACY_USER_ZDOTDIR_VAR),
+            "a stale managed legacy marker is repaired"
+        );
+        assert_eq!(
+            b_env_after.get("NESSION_MCP_TOKEN").map(String::as_str),
+            Some("fixture-token"),
+            "an ordinary Session credential is not a shell control"
+        );
+        assert_eq!(b_env_after.get("B_ONLY").map(String::as_str), Some("two"));
+
+        // Session A, its binding record, the global environment, identities
+        // and every live pane remain exactly as they were.
+        assert_eq!(tmux_environment(&a, session_a.name()).await, a_env_before);
+        assert_eq!(
+            std::fs::read_to_string(a_dir.join(".zshenv")).unwrap(),
+            a_files_before
+        );
+        assert_eq!(
+            std::fs::read_to_string(a.session_dir(session_a.name()).join(BINDING_STATE_FILE))
+                .unwrap(),
+            a_state_before
+        );
+        let a_observed = a
+            .observe(session_a.name())
+            .await
+            .expect("A remains observable");
+        assert_eq!(a_observed.applied_revision, 5);
+        assert!(a_observed
+            .profiles
+            .iter()
+            .any(|profile| profile.name == "a.env"));
+        assert_eq!(tmux_global_environment(), global_before);
+        assert_eq!(
+            b.tmux()
+                .ops()
+                .show_option(session_a.name(), "@nession_instance_id")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("fixture-a")
+        );
+        assert_eq!(
+            b.tmux()
+                .ops()
+                .show_option(session_b.name(), "@nession_instance_id")
+                .await
+                .unwrap()
+                .as_deref(),
+            Some("fixture-b")
+        );
+        let panes_after = b.tmux().ops().list_panes().await.unwrap();
+        for pane in &panes_before {
+            assert!(
+                panes_after.iter().any(|after| after.pane_id == pane.pane_id
+                    && after.session_name == pane.session_name),
+                "a live pane was destroyed by the repair: {}",
+                pane.pane_id
+            );
+        }
+
+        // A repeated recovery writes nothing and does not report a repair.
+        let snapshots_b3 = vec![snapshot("b.env", &[("B_ONLY", "three")])];
+        let outcome = b
+            .apply_binding(session_b.name(), 3, &profiles_b, &snapshots_b3)
+            .await
+            .expect("the repeated apply succeeds");
+        assert!(
+            !outcome
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("zsh adapter")),
+            "a converged adapter must not report another repair: {:?}",
+            outcome.warnings
+        );
+
+        // Clearing the whole binding still leaves the Session's own shell
+        // controls intact and reports no repair.
+        let cleared = b
+            .apply_binding(session_b.name(), 4, &[], &[])
+            .await
+            .expect("clearing the binding converges");
+        assert!(
+            !cleared
+                .warnings
+                .iter()
+                .any(|warning| warning.contains("zsh adapter")),
+            "{:?}",
+            cleared.warnings
+        );
+        let b_env_cleared = tmux_environment(&b, session_b.name()).await;
+        assert!(!b_env_cleared.contains_key("B_ONLY"));
+        assert_eq!(
+            b_env_cleared.get("ZDOTDIR").map(String::as_str),
+            Some(b_adapter_string.as_str())
+        );
+
+        // A new pane picks up the repaired environment and the user's own
+        // configuration, without a recursion.
+        let window = b
+            .tmux()
+            .ops()
+            .new_window(&nession_tmux::ops::NewWindow {
+                session_name: session_b.name().to_string(),
+                name: "repaired".to_string(),
+                working_dir: "/tmp".to_string(),
+                env: Vec::new(),
+                command: vec![shell.to_string(), "-l".to_string(), "-i".to_string()],
+            })
+            .await
+            .expect("a new pane starts in the repaired Session");
+        b.tmux()
+            .ops()
+            .select_window(&window.window_id)
+            .await
+            .unwrap();
+        b.tmux()
+            .ops()
+            .send_keys(session_b.name(), "echo \"NEWPANE:$NESSION_USER_VAR\"")
+            .await
+            .unwrap();
+        let text = wait_for_pane_text(&b, session_b.name(), "NEWPANE:kept").await;
+        assert!(
+            !text.contains("recursion") && !text.contains("job table full"),
+            "the repaired Session's new pane recursed: {text}"
+        );
+    }
+
+    /// An Agent restart repairs recorded adapters through the startup pass,
+    /// without touching healthy Sessions or needing a binding operation.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_session_isolation_agent_restart_repairs_recorded_adapters() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let home = fixture_home(dir.path());
+
+        let a = zsh_manager(&state, None, None);
+        let session_a = TestSession::new("4605-restart-a");
+        let adapter_a = a.install_shell_adapter(session_a.name(), Some(shell)).await;
+        create_real_session(&a, session_a.name(), &adapter_a, &home, shell).await;
+        a.record_created_binding(
+            session_a.name(),
+            1,
+            &[],
+            &EffectiveOverlay::default(),
+            BTreeMap::new(),
+            &adapter_a,
+        )
+        .await
+        .unwrap();
+
+        let b = zsh_manager(&state, None, None);
+        let session_b = TestSession::new("4605-restart-b");
+        let adapter_b = b.install_shell_adapter(session_b.name(), Some(shell)).await;
+        create_real_session(&b, session_b.name(), &adapter_b, &home, shell).await;
+        b.record_created_binding(
+            session_b.name(),
+            1,
+            &[],
+            &EffectiveOverlay::default(),
+            BTreeMap::new(),
+            &adapter_b,
+        )
+        .await
+        .unwrap();
+        let b_adapter_dir = b.session_dir(session_b.name()).join("shell").join("zsh");
+        std::fs::write(b_adapter_dir.join(".zshenv"), OLD_ZSH_ZSHENV).unwrap();
+        std::fs::remove_file(b_adapter_dir.join(ZSH_ADAPTER_MARKER_FILE)).unwrap();
+        let a_adapter = path_string(&a.session_dir(session_a.name()).join("shell").join("zsh"));
+        b.tmux()
+            .ops()
+            .set_environment(session_b.name(), USER_ZDOTDIR_VAR, &a_adapter)
+            .await
+            .unwrap();
+        let a_files_before = std::fs::read_to_string(
+            a.session_dir(session_a.name())
+                .join("shell")
+                .join("zsh")
+                .join(".zshenv"),
+        )
+        .unwrap();
+
+        // A new EnvManager is the Agent restart: it re-reads the durable
+        // records and the live tmux Sessions, not this process's earlier
+        // in-memory state.
+        let restarted = zsh_manager(&state, None, None);
+        let repaired = restarted.repair_recorded_zsh_adapters().await;
+        assert_eq!(repaired, 1, "only the contaminated Session needed repair");
+
+        let repaired_zshenv = std::fs::read_to_string(b_adapter_dir.join(".zshenv")).unwrap();
+        assert!(repaired_zshenv.contains("__nession_is_managed_zdotdir"));
+        assert!(b_adapter_dir.join(ZSH_ADAPTER_MARKER_FILE).is_file());
+        let env = tmux_environment(&restarted, session_b.name()).await;
+        assert_eq!(
+            env.get("ZDOTDIR").map(String::as_str),
+            Some(path_string(&b_adapter_dir).as_str())
+        );
+        assert!(!env.contains_key(USER_ZDOTDIR_VAR));
+        assert_eq!(
+            std::fs::read_to_string(
+                a.session_dir(session_a.name())
+                    .join("shell")
+                    .join("zsh")
+                    .join(".zshenv")
+            )
+            .unwrap(),
+            a_files_before,
+            "a healthy Session's adapter is not rewritten on restart"
+        );
+
+        // Idempotent: another restart has nothing to repair.
+        let restarted_again = zsh_manager(&state, None, None);
+        assert_eq!(restarted_again.repair_recorded_zsh_adapters().await, 0);
+    }
+
+    /// An untrusted durable record stays explicit: the repair path fails before
+    /// any tmux mutation and leaves the record as found.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn zsh_session_isolation_untrusted_record_stays_explicit() {
+        let Some(shell) = zsh_binary() else {
+            eprintln!("zsh not available on this host; skipping");
+            return;
+        };
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let home = fixture_home(dir.path());
+        let mgr = zsh_manager(&state, None, None);
+        let session = TestSession::new("4605-untrusted");
+        let adapter = mgr.install_shell_adapter(session.name(), Some(shell)).await;
+        create_real_session(&mgr, session.name(), &adapter, &home, shell).await;
+        mgr.record_created_binding(
+            session.name(),
+            1,
+            &[],
+            &EffectiveOverlay::default(),
+            BTreeMap::new(),
+            &adapter,
+        )
+        .await
+        .unwrap();
+        let state_file = mgr.session_dir(session.name()).join(BINDING_STATE_FILE);
+        std::fs::write(&state_file, b"{ damaged").unwrap();
+        let env_before = tmux_environment(&mgr, session.name()).await;
+
+        let error = mgr
+            .apply_binding(
+                session.name(),
+                2,
+                &[profile_ref("b.env")],
+                &[snapshot("b.env", &[("B_ONLY", "x")])],
+            )
+            .await
+            .expect_err("the damaged record fails closed");
+        assert!(
+            format!("{error:#}").contains("cannot parse"),
+            "the error is explicit: {error:#}"
+        );
+        assert_eq!(
+            std::fs::read(&state_file).unwrap(),
+            b"{ damaged",
+            "the untrusted record is preserved as found"
+        );
+        assert_eq!(
+            tmux_environment(&mgr, session.name()).await,
+            env_before,
+            "no tmux mutation runs before the record is trusted"
+        );
     }
 }
