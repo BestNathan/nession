@@ -45,10 +45,66 @@ pub use nession_tmux::process::INHERITED_TMUX_VARS;
 /// The name of nession's own tmux configuration, inside the socket directory.
 const SERVER_CONFIG_FILE: &str = "nession.conf";
 
+/// The historical misspelling of [`tmux_socket::NESSION_TMUX_SOCKET_ENV`]
+/// (missing `I`). It is not a supported name; it is named here only so a
+/// refusal can explain why an override had no effect (#4596).
+const LEGACY_MISSPELLED_SOCKET_ENV: &str = "NESSON_TMUX_SOCKET";
+
 /// Where the server configuration lives for a given socket: beside it, in the
 /// directory nession already owns and creates with 0700.
 fn server_config_path(socket: &Path) -> PathBuf {
     socket.with_file_name(SERVER_CONFIG_FILE)
+}
+
+/// Why a Cargo test binary must not use `socket`, when it must not.
+///
+/// The private socket is owned by the test runner (`scripts/tmux-run-socket.sh`
+/// via `scripts/filtered-test.sh` / `just test`). A test binary that resolved
+/// the shared default socket was not given one; falling back would put its
+/// Sessions on the live Agent's server, and a test killed before its cleanup
+/// would leave them there (#4596). Product binaries and `cargo run` binaries do
+/// not live under `deps/`, so they are never refused.
+fn shared_socket_refusal(socket: &Path) -> Option<String> {
+    shared_socket_refusal_for(
+        socket,
+        tmux_socket::running_under_cargo_test_harness(),
+        std::env::var(LEGACY_MISSPELLED_SOCKET_ENV).ok().as_deref(),
+    )
+}
+
+/// The decision behind [`shared_socket_refusal`], pure over its inputs.
+///
+/// `test_binary` and `misspelled_override` are parameters rather than reads so
+/// both directions can be tested without mutating this process's environment,
+/// which other tests in the same binary observe concurrently.
+fn shared_socket_refusal_for(
+    socket: &Path,
+    test_binary: bool,
+    misspelled_override: Option<&str>,
+) -> Option<String> {
+    if !tmux_socket::refuses_shared_default_socket(socket, test_binary) {
+        return None;
+    }
+
+    let mut message = format!(
+        "refusing the shared tmux socket {} in a Cargo test binary: real-tmux tests must \
+         use a private socket. Run them through scripts/filtered-test.sh, `just test`, or \
+         `./gates/run rust-test-*` (scripts/tmux-run-socket.sh creates one per run), or \
+         export {} to a socket path this run owns.",
+        socket.display(),
+        tmux_socket::NESSION_TMUX_SOCKET_ENV,
+    );
+    if let Some(value) = misspelled_override
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        message.push_str(&format!(
+            " {LEGACY_MISSPELLED_SOCKET_ENV} is set to {value}, but it is not a supported name \
+             (missing `I`); use {}.",
+            tmux_socket::NESSION_TMUX_SOCKET_ENV,
+        ));
+    }
+    Some(message)
 }
 
 /// What that file says.
@@ -194,8 +250,14 @@ impl TmuxCmd {
 /// Errors if the directory cannot be created or the path is too long for a unix
 /// socket. It never falls back to another location: falling back is what put
 /// nession's sessions on the user's socket in the first place.
+///
+/// A Cargo test binary also errors when this resolves the shared default
+/// socket: tests must be given a private socket by their runner (#4596).
 pub fn configure(configured: Option<&str>) -> Result<PathBuf> {
     let socket = tmux_socket::resolve_socket_path(configured);
+    if let Some(message) = shared_socket_refusal(&socket) {
+        anyhow::bail!(message);
+    }
     tmux_socket::prepare_socket_dir(&socket)
         .with_context(|| format!("failed to prepare tmux socket {}", socket.display()))?;
     // The server configuration, written before any tmux command can start a
@@ -232,9 +294,16 @@ pub fn configure(configured: Option<&str>) -> Result<PathBuf> {
 /// CLI paths. The fallback still yields nession's own socket, never tmux's
 /// default one, so it is safe rather than merely convenient. It does not create
 /// the socket directory; tmux reports a clear "error creating" if it is absent.
+///
+/// A Cargo test binary never takes the shared-default fallback: it panics with
+/// the private-socket harness instructions instead (#4596).
 pub fn global() -> &'static TmuxCmd {
     GLOBAL.get_or_init(|| {
-        let cmd = TmuxCmd::new("tmux", tmux_socket::resolve_socket_path(None));
+        let socket = tmux_socket::resolve_socket_path(None);
+        if let Some(message) = shared_socket_refusal(&socket) {
+            panic!("{message}");
+        }
+        let cmd = TmuxCmd::new("tmux", socket);
         // Install the server configuration here too, and not only in
         // [`configure`]. `-f` is read when tmux *starts a server*, so a file
         // written after that has no effect on the server that is already up —
@@ -432,6 +501,73 @@ mod tests {
         let cmd = probe("/tmp/nession-probe/tmux.sock");
         assert_eq!(cmd.bin(), "tmux");
         assert_eq!(cmd.socket_path(), Path::new("/tmp/nession-probe/tmux.sock"));
+    }
+
+    #[test]
+    fn a_cargo_test_binary_refuses_the_shared_default_socket() {
+        // #4596: the refusal is what keeps a bare `cargo test` from creating
+        // Sessions on the live Agent's server and leaving them there when the
+        // test is killed before its cleanup.
+        let default = nession_common::tmux_socket::default_socket_path();
+        let message = shared_socket_refusal(&default)
+            .expect("a Cargo test binary must refuse the shared default socket");
+        assert!(
+            message.contains(nession_common::tmux_socket::NESSION_TMUX_SOCKET_ENV),
+            "the refusal must name the supported override: {message}"
+        );
+        assert!(
+            message.contains("scripts/filtered-test.sh"),
+            "the refusal must name the private-socket harness: {message}"
+        );
+    }
+
+    #[test]
+    fn a_cargo_test_binary_accepts_a_private_socket() {
+        assert!(
+            shared_socket_refusal(Path::new("/tmp/nession-test-tmux.probe/tmux.sock")).is_none(),
+            "the private socket the harness creates must be accepted"
+        );
+    }
+
+    #[test]
+    fn a_non_test_binary_is_never_refused() {
+        // `cargo run` and the installed product binaries live directly under
+        // `<profile>/`, not under `deps/`, and serve the user's own socket.
+        let default = nession_common::tmux_socket::default_socket_path();
+        assert!(shared_socket_refusal_for(&default, false, None).is_none());
+    }
+
+    #[test]
+    fn the_misspelled_override_is_named_in_the_refusal() {
+        // #4596: an earlier Agent session exported `NESSON_TMUX_SOCKET`
+        // (missing `I`). The resolver never read it, so that run silently used
+        // the shared default socket. The refusal points at the misspelling.
+        let default = nession_common::tmux_socket::default_socket_path();
+        let message = shared_socket_refusal_for(&default, true, Some("/tmp/private/tmux.sock"))
+            .expect("the shared default socket must be refused");
+        assert!(
+            message.contains("NESSON_TMUX_SOCKET"),
+            "the refusal must name the misspelled variable: {message}"
+        );
+        assert!(
+            message.contains("missing `I`"),
+            "the refusal must say why the misspelled variable had no effect: {message}"
+        );
+        assert!(
+            message.contains(nession_common::tmux_socket::NESSION_TMUX_SOCKET_ENV),
+            "the refusal must name the supported override: {message}"
+        );
+    }
+
+    #[test]
+    fn a_blank_misspelled_override_is_not_mentioned() {
+        let default = nession_common::tmux_socket::default_socket_path();
+        let message = shared_socket_refusal_for(&default, true, Some("   "))
+            .expect("the shared default socket must be refused");
+        assert!(
+            !message.contains("NESSON_TMUX_SOCKET"),
+            "a blank override changed nothing and must not be reported: {message}"
+        );
     }
 
     #[test]
