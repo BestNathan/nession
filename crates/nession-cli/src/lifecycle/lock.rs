@@ -49,6 +49,41 @@ impl LifecycleLock {
         Self::try_acquire_file(open_lock_file()?)
     }
 
+    /// Acquire with a bounded wait for the upgrade path (#4592 §8.3).
+    ///
+    /// Nonblocking acquisition with capped exponential backoff against a
+    /// monotonic deadline. A timeout returns a retryable diagnostic; it never
+    /// breaks or removes another process's lock and never kills a daemon.
+    /// `on_wait` observes the elapsed wait for throttled progress reporting.
+    pub fn acquire_bounded(
+        wait: std::time::Duration,
+        mut on_wait: impl FnMut(std::time::Duration),
+    ) -> std::result::Result<Self, crate::update::UpdateError> {
+        use crate::update::UpdateError;
+        let start = std::time::Instant::now();
+        let deadline = start + wait;
+        let mut delay = std::time::Duration::from_millis(25);
+        let max_delay = std::time::Duration::from_millis(500);
+        loop {
+            match Self::try_acquire() {
+                Ok(Some(lock)) => return Ok(lock),
+                Ok(None) => {}
+                Err(error) => {
+                    return Err(UpdateError::Io(std::io::Error::other(error.to_string())));
+                }
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return Err(UpdateError::LockTimeout {
+                    waited: start.elapsed(),
+                });
+            }
+            on_wait(start.elapsed());
+            std::thread::sleep(delay.min(deadline - now));
+            delay = (delay * 2).min(max_delay);
+        }
+    }
+
     fn try_acquire_file(file: File) -> Result<Option<Self>> {
         match lock_exclusive_nonblocking(&file) {
             Ok(true) => Ok(Some(Self { _file: file })),

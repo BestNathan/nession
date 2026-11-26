@@ -253,7 +253,8 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             version,
             dry_run,
             yes,
-        } => install::run(version, dry_run, yes).await?,
+            policy,
+        } => install::run(version, dry_run, yes, policy.to_overrides()).await?,
         Commands::Version { action } => match action {
             VersionAction::List => version::run().await?,
         },
@@ -263,7 +264,18 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             dry_run,
             yes,
             include_installer,
-        } => update::run(check, version, dry_run, yes, include_installer).await?,
+            policy,
+        } => {
+            update::run(
+                check,
+                version,
+                dry_run,
+                yes,
+                include_installer,
+                policy.to_overrides(),
+            )
+            .await?
+        }
     }
 
     Ok(())

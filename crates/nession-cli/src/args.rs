@@ -90,6 +90,9 @@ pub enum Commands {
         /// Skip the confirmation prompt
         #[arg(long)]
         yes: bool,
+
+        #[command(flatten)]
+        policy: TransferPolicyArgs,
     },
     /// Inspect installed and running releases
     Version {
@@ -118,7 +121,54 @@ pub enum Commands {
         /// Also download install.sh installer script
         #[arg(long)]
         include_installer: bool,
+
+        #[command(flatten)]
+        policy: TransferPolicyArgs,
     },
+}
+
+/// Explicit, range-validated overrides of the phase-specific upgrade policy
+/// (#4592 §8.1). Each flag overrides its `NESSION_UPDATE_*` environment
+/// variable, which overrides the bounded default. Shared by `install` and
+/// `update` so every entry point resolves one policy.
+#[derive(clap::Args, Debug, Clone, Default)]
+pub struct TransferPolicyArgs {
+    /// DNS/TCP/TLS connection budget in seconds (1-120, default 10)
+    #[arg(long, value_name = "SECS")]
+    pub connect_timeout_secs: Option<u64>,
+
+    /// Per-request metadata/checksum budget in seconds (1-300, default 30)
+    #[arg(long, value_name = "SECS")]
+    pub metadata_timeout_secs: Option<u64>,
+
+    /// Asset no-progress budget in seconds (1-600, default 60)
+    #[arg(long, value_name = "SECS")]
+    pub idle_timeout_secs: Option<u64>,
+
+    /// Total asset transfer budget including retries, seconds (1-7200, default 1800)
+    #[arg(long, value_name = "SECS")]
+    pub transfer_budget_secs: Option<u64>,
+
+    /// Bounded lifecycle-lock wait in seconds (0-600, default 30)
+    #[arg(long, value_name = "SECS")]
+    pub lock_wait_secs: Option<u64>,
+
+    /// Retries after the initial attempt (0-10, default 3)
+    #[arg(long, value_name = "N")]
+    pub retries: Option<u32>,
+}
+
+impl TransferPolicyArgs {
+    pub fn to_overrides(&self) -> crate::update::policy::PolicyOverrides {
+        crate::update::policy::PolicyOverrides {
+            connect_timeout_secs: self.connect_timeout_secs,
+            metadata_timeout_secs: self.metadata_timeout_secs,
+            idle_timeout_secs: self.idle_timeout_secs,
+            transfer_budget_secs: self.transfer_budget_secs,
+            lock_wait_secs: self.lock_wait_secs,
+            retries: self.retries,
+        }
+    }
 }
 
 /// `nession agent …`
@@ -449,14 +499,32 @@ mod tests {
             ),
             ("config server show".to_string(), strings(&["--config"])),
             ("config server set".to_string(), strings(&["--config"])),
-            ("install".to_string(), strings(&["--dry-run", "--yes"])),
+            (
+                "install".to_string(),
+                strings(&[
+                    "--connect-timeout-secs",
+                    "--dry-run",
+                    "--idle-timeout-secs",
+                    "--lock-wait-secs",
+                    "--metadata-timeout-secs",
+                    "--retries",
+                    "--transfer-budget-secs",
+                    "--yes",
+                ]),
+            ),
             ("version list".to_string(), strings(&[])),
             (
                 "update".to_string(),
                 strings(&[
                     "--check",
+                    "--connect-timeout-secs",
                     "--dry-run",
+                    "--idle-timeout-secs",
                     "--include-installer",
+                    "--lock-wait-secs",
+                    "--metadata-timeout-secs",
+                    "--retries",
+                    "--transfer-budget-secs",
                     "--version",
                     "--yes",
                 ]),
