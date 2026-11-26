@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "de52ab8ab279d976b1dd0ab57730624a1efd78dae4938ded8e75a897d361a694",
+  "run_id": 45901108506,
+  "run_attempt": 1,
+  "issue": 4605,
+  "criterion": "SC-03",
+  "criterion_text": "On isolated real Agent/tmux Sessions A and B, create from a contaminated launch environment, reapply/replace/clear Profiles, create panes, restart/reconnect Agent and repair pre-existing bad adapter/owned runtime env: new shells converge to their own correct baseline; other Session profiles/revisions, tmux global env, identity and live panes are preserved. Repeating recovery is idempotent; unrepairable state is explicit and no existing process is falsely reported updated. Include Bash and legacy/runtime key non-regression.",
+  "stage": "staging",
+  "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "contract_sha256": "fda8f74dd5597b7cfffc1fad584bae878e9cda74a4a3af7c13a8d8da0bf737b2",
+  "case_revision": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "case_tree_sha": "96f77f720625a0613b77247315700a384da3e22d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T22:04:01.253Z",
+  "finished_at": "2026-11-26T22:10:22.481Z",
+  "duration_ms": 381227,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Repair converges each Session to its own zsh baseline without disturbing others",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 64aede9ec15eb96de1511d68c27c44cd7d16b598: real tmux Sessions A and B on a private socket — the contaminated launch environment produced B's own validated adapter; a legacy contaminated adapter was repaired on reapply and after an Agent restart while A's profiles/revision, binding record, identities, tmux global environment, live panes and a legitimate legacy marker stayed unchanged; a repeated recovery was silent, a stale legacy marker was removed while NESSION_MCP_TOKEN survived, a damaged durable record stayed explicit with no tmux mutation, and the surviving legacy Bash adapter plus a real Bash prompt remained unchanged"
+        }
+      ],
+      "duration_ms": 361999,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45901108506,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "89445e72f8de6b732d790c1b6993e07566fcf30b",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+        "stage": "staging",
+        "issue": 4605,
+        "criterion": "SC-03",
+        "job_id": 140187886388,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45901108506",
+    "record_path": "runs/2026-11-26/45901108506-1/4605/SC-03.json",
+    "source_result_sha256": "b1c22900e5e23673457998cd2acef16b91018468888a0a2cac67304f50dab231"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45901108506-1",
+    "sha256": "b1c22900e5e23673457998cd2acef16b91018468888a0a2cac67304f50dab231",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45901108506",
+    "durability": "time-limited; object archival not configured"
+  }
+}
