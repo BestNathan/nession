@@ -34,14 +34,30 @@ pub async fn run(config: ServerConfig, ready: Readiness) -> anyhow::Result<()> {
     // logging, the database, or the listener. Both entrypoints reach this
     // function, so validation has one owner.
     let mut config = config;
-    config.apply_env_overrides()?;
-    config.validate()?;
+    // Failures before the runtime log writer exists have no file destination;
+    // the bounded startup capture is where they remain readable (#4600).
+    if let Err(error) = config.apply_env_overrides() {
+        return Err(startup_failure("validate", error));
+    }
+    if let Err(error) = config.validate() {
+        return Err(startup_failure("validate", error));
+    }
 
-    let _log_guard = nession_common::logging::init_logging(
+    let _log_guard = match nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::server_logs_dir()?,
-        "nession-server",
-    )?;
+        nession_common::logging::LogComponent::Server.log_prefix(),
+    ) {
+        Ok(guard) => guard,
+        Err(error) => {
+            let note = nession_common::startup_log::record_or_note(
+                nession_common::logging::LogComponent::Server,
+                "logging",
+                &format!("{error}"),
+            );
+            return Err(anyhow::Error::new(error).context(note));
+        }
+    };
 
     info!("Starting nession-server");
     info!(
@@ -69,4 +85,14 @@ pub async fn run(config: ServerConfig, ready: Readiness) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+/// Attach a bounded startup-capture outcome to a pre-logging failure.
+fn startup_failure(phase: &str, error: anyhow::Error) -> anyhow::Error {
+    let note = nession_common::startup_log::record_or_note(
+        nession_common::logging::LogComponent::Server,
+        phase,
+        &format!("{error:#}"),
+    );
+    error.context(note)
 }

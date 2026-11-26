@@ -274,6 +274,16 @@ the diagnostic. Other archived commands are unaffected.
 The update-check cache is keyed by the writing release; a cache produced by a
 different installed version is ignored. Nothing in selection changes Current.
 
+### Read-only log selection
+
+`nession +<version> agent|server logs` follows the same selection rule but is
+read-only. A selected release reads its own `<version home>/…/logs`; a release
+that predates the logs command is read directly by the Current CLI, which
+exits with a diagnostic and never substitutes Current's history. Logs reads
+skip install-transaction recovery and the background update check, and report
+a pending recovery journal instead of mutating anything. See
+[cli-logs.md](cli-logs.md).
+
 ## Lifecycle: start is idempotent, restart replaces
 
 - `start` on an already-running component reports the live PID and release and
