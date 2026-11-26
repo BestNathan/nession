@@ -10,7 +10,8 @@
 //     a retrievable sanitized startup diagnostic;
 //   - an unusable log directory reports startup capture as unavailable while
 //     preserving the terminal/stderr diagnostic;
-//   - a child stderr flood (a 200 KB invalid value) cannot deadlock startup and
+//   - a child stderr flood (a 100 KB invalid value, above the 64 KiB pipe
+//     buffer but below Linux's per-env-string limit) cannot deadlock startup and
 //     the durable record stays bounded;
 //   - Ctrl-C of `logs -f` stops only the reader, never the daemon.
 const {
@@ -335,7 +336,7 @@ main(async () => {
     const floodEnv = runtimeEnv({
       home: floodHome,
       runtimeDir: floodRuntime,
-      extra: { NESSION_TERMINAL_COLS: '9'.repeat(200_000) },
+      extra: { NESSION_TERMINAL_COLS: '9'.repeat(100_000) },
     });
     fs.writeFileSync(
       path.join(floodHome, 'agent-config.toml'),
@@ -349,7 +350,7 @@ main(async () => {
     const floodStartedAt = Date.now();
     const floodError = mustFail(
       runCli(['agent', 'start'], floodEnv, 15_000),
-      'background start with a 200 KB invalid value',
+      'background start with a 100 KB invalid value',
     );
     const floodElapsed = Date.now() - floodStartedAt;
     assert.ok(
@@ -366,7 +367,7 @@ main(async () => {
     );
     evidence.push({
       type: 'runtime',
-      value: sha + ': a 200 KB invalid value reached the child stderr path; startup ' +
+      value: sha + ': a 100 KB invalid value reached the child stderr path; startup ' +
         'completed in ' + floodElapsed + 'ms and the startup log was bounded at ' +
         floodRecordSize + ' bytes',
     });
