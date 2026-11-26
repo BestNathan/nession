@@ -101,18 +101,8 @@ jobs:
           ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
           ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
         run: bash scripts/ci/acr-registry-login.sh "$ACR_REGISTRY"
-      - name: Install pinned regctl chunked-OCI fallback
+      - uses: ./.github/actions/install-regctl
         if: steps.credentials.outputs.configured == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          curl -fsSL --retry 3 --max-time 60 \
-            -o "$RUNNER_TEMP/regctl" \
-            https://github.com/regclient/regclient/releases/download/v0.11.7/regctl-linux-amd64
-          echo "3737fbbdd791e04e7a831640b681f3397a376498e80e2ad9b1b2d27296f239bc  $RUNNER_TEMP/regctl" |
-            sha256sum -c -
-          chmod 755 "$RUNNER_TEMP/regctl"
-          echo "$RUNNER_TEMP" >> "$GITHUB_PATH"
       - name: Mirror and verify multi-arch ${{ matrix.image }} image
         if: steps.credentials.outputs.configured == 'true'
         shell: bash

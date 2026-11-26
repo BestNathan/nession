@@ -20,6 +20,9 @@ export function selectQualityFamilies(paths) {
       if(p==='.github/workflows/ci-quality.yml')r.rust=r.web=r.tooling=r.native=true;
       else if(p==='.github/workflows/release-production.yml')r.native=true;
       else if(p==='.github/workflows/acceptance-case-smoke.yml')r.tooling=true;
+    } else if(p.startsWith('.github/actions/')) {
+      // Composite actions are workflow definitions consumed by workflows (#4593).
+      r.workflow=true;
     } else if(/^e2e\/fixtures\/agent-development\/[^/]+\.md$/.test(p)) {
       // Provider fixture: E2E's independent trusted Issue/impact plan owns runtime risk.
     } else if(p.startsWith('crates/')) {
