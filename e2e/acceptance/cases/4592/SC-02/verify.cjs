@@ -13,7 +13,7 @@
 //     business state is still readable (no re-initialization).
 const {
   assert, fs, path, targetSha, nessionBin, makeRoot, mkdirPrivate,
-  cliOutput, runBinary, waitFor, waitForTcp, waitForGone,
+  runCliAsync, runBinary, waitFor, waitForTcp, waitForGone,
   freePort, installEnv, readIdentity, sha256File, makeRealReleaseTarball,
   startInstallerFixture, downloadOfficialRelease, BINARIES, main,
 } = require('../../../shared/release-hardening-cases.cjs');
@@ -174,7 +174,17 @@ main(async () => {
     const release = makeRealReleaseTarball(base, targetVersion);
     fixture = await startInstallerFixture(release);
     const upgradeEnv = installEnv({ home, installDir, runtimeDir: runtime, apiBase: fixture.base });
-    const upgrade = cliOutput(['install', targetVersion, '--yes'], upgradeEnv, 180000);
+    // The release fixture is served from this process; a synchronous spawn
+    // would starve its HTTP server and the install would fail with a network
+    // error. Run the CLI asynchronously while the fixture is live.
+    const upgradeResult = await runCliAsync(
+      ['install', targetVersion, '--yes'], upgradeEnv, 180000,
+      'install ' + targetVersion,
+    );
+    const upgrade = {
+      status: upgradeResult.status,
+      output: String(upgradeResult.stdout) + String(upgradeResult.stderr),
+    };
     assert.equal(upgrade.status, 0, 'retention upgrade failed: ' + upgrade.output.slice(-3000));
     await fixture.close();
     fixture = null;
