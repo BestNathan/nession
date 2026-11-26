@@ -2,7 +2,12 @@ schema_version: 1
 issue: 4592
 criterion: SC-02
 stage: staging
-platform: both
+# Isolated runtime Case: the retained-installation contract is platform-
+# independent CLI/filesystem/SQLite/process behavior. A `both` declaration
+# would require a native macOS pair that a manual staging dispatch cannot
+# produce (the macOS job only runs for push events or platform=macos), so the
+# Linux record would be withheld forever.
+platform: linux
 runtime: full-stack-local
 verifiers:
   - type: runtime

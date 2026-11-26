@@ -12,6 +12,21 @@ This document records what that sharing does and does not imply for a Session's
 width, and the evidence #2520 gathered when a standalone 96-column Session was
 observed at 80×24 in a parallel coverage run.
 
+## A test binary never falls back to the shared default
+
+The per-run socket is the only socket a real-tmux test may use. A Cargo
+test/benchmark binary (its executable lives under `<target>/<profile>/deps/`)
+that resolves the shared `/tmp/nession-<uid>/tmux.sock` is refused at
+`crates/nession-agent/src/tmux/cmd.rs` `configure`/`global` (#4596). The
+refusal names the per-run harness (`scripts/filtered-test.sh`, `just test`,
+`./gates/run rust-test-*`) and the supported socket override documented at
+`crates/nession-common/src/tmux_socket.rs`; it never silently creates test
+Sessions on the live Agent's server, where a killed test would leave them
+attachable. Product binaries and `cargo run` output are not under `deps/`, so
+the shipped Agent's default resolution is unchanged. `scripts/tmux-run-socket.sh`
+remains the owner that creates the private socket; the guard only refuses a run
+that never got one.
+
 ## The width invariant under a shared server
 
 - `new_session` is `tmux new-session -d -s <name> -x <cols> -y <rows> -c <cwd>`

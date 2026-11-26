@@ -4,12 +4,12 @@
 #   . "$(dirname "$0")/tmux-run-socket.sh"
 #   trap 'nession_tmux_run_cleanup' EXIT INT TERM
 #
-# Rust tests create real tmux sessions. Without this they land on whatever
-# NESSION_TMUX_SOCKET resolves to by default — nession's own socket, so never
-# the developer's default one, but still shared with a locally running agent and
-# with every other test run on this machine. Two runs sharing a tmux server means
-# one run's teardown kills sessions the other is still using, and the failure
-# looks random (see "测试并发安全" in CLAUDE.md).
+# Rust tests create real tmux sessions. Without this a real-tmux test binary
+# refuses the shared default socket at nession's tmux chokepoint (#4596) instead
+# of silently creating test Sessions on it — the socket a locally running agent
+# serves, shared with every other test run on this machine. Two runs sharing a
+# tmux server means one run's teardown kills sessions the other is still using,
+# and the failure looks random (see "测试并发安全" in CLAUDE.md).
 #
 # mktemp -d gives a path no other run can produce — unlike a timestamp plus an
 # in-process counter, which two processes starting in the same second both

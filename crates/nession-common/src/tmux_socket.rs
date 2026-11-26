@@ -67,6 +67,36 @@ pub fn default_socket_path() -> PathBuf {
         .join("tmux.sock")
 }
 
+/// Whether this process is a Cargo test or benchmark executable.
+///
+/// Cargo places test/bench executables under `<target>/<profile>/deps/`;
+/// product binaries and `cargo run` output live directly under `<profile>/`
+/// (measured: `cargo test` runs `.../debug/deps/probe-<hash>`, `cargo run`
+/// runs `.../debug/probe`). This predicate exists only so test code can refuse
+/// the shared default socket; no product path depends on it.
+pub fn running_under_cargo_test_harness() -> bool {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| {
+            exe.parent()
+                .and_then(Path::file_name)
+                .map(|name| name.to_str() == Some("deps"))
+        })
+        .unwrap_or(false)
+}
+
+/// Whether a Cargo test binary must refuse `socket` because it is the shared
+/// default socket.
+///
+/// `test_binary` is a parameter rather than read here so the predicate can be
+/// exercised in both directions without mutating process state. The refusal
+/// itself belongs to the tmux chokepoint (`nession_agent::tmux::cmd`): a test
+/// that was not given a private socket must fail before it can create a Session
+/// on the live Agent's server.
+pub fn refuses_shared_default_socket(socket: &Path, test_binary: bool) -> bool {
+    test_binary && socket == default_socket_path()
+}
+
 /// Real uid of this process.
 ///
 /// `libc::getuid()` cannot fail and touches no memory, which is what makes the
@@ -260,6 +290,28 @@ mod tests {
         // The whole point of picking a temp-dir path: it stays well short of
         // sun_path even on macOS, where temp_dir() is a long per-user path.
         assert!(check_socket_path_len(&default_socket_path()).is_ok());
+    }
+
+    #[test]
+    fn this_test_process_is_recognized_as_a_cargo_test_binary() {
+        // The refusal in `nession_agent::tmux::cmd` is only worth anything if
+        // the predicate is true in the process that runs the tests. This test
+        // binary lives under `<target>/<profile>/deps/`, as Cargo places every
+        // test executable.
+        assert!(
+            running_under_cargo_test_harness(),
+            "test executables must be recognized by their deps directory"
+        );
+    }
+
+    #[test]
+    fn only_a_test_binary_refuses_the_shared_default_socket() {
+        let default = default_socket_path();
+        let private = PathBuf::from("/tmp/nession-test-tmux.probe/tmux.sock");
+        assert!(refuses_shared_default_socket(&default, true));
+        assert!(!refuses_shared_default_socket(&default, false));
+        assert!(!refuses_shared_default_socket(&private, true));
+        assert!(!refuses_shared_default_socket(&private, false));
     }
 
     #[test]
