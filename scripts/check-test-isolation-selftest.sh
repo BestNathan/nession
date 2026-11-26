@@ -192,6 +192,21 @@ else
     echo "  ✗ MISSED: fresh run root lifecycle: $out"
     fail=$((fail + 1))
 fi
+out=$(env -u NSESSION_TEST_RUNTIME_DIR -u NSESSION_TEST_RUNTIME_MANIFEST \
+    -u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \
+    ANTHROPIC_API_KEY=synthetic-canary GITHUB_TOKEN=synthetic-canary \
+    HTTPS_PROXY=http://127.0.0.1:9 \
+    bash -c '. scripts/test-runtime.sh; nession_test_runtime_init; \
+        if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then echo LEAKED; else echo CLEAN; fi; \
+        nession_test_runtime_cleanup')
+if [[ $out == CLEAN ]]; then
+    echo "  ✓ credentials and proxy endpoints are not forwarded to the test child"
+    pass=$((pass + 1))
+else
+    echo "  ✗ MISSED: ambient credentials/proxies survived init"
+    echo "$out" | sed 's/^/      /'
+    fail=$((fail + 1))
+fi
 rm -rf "$HARNESS_TMP"
 
 echo "→ the committed Test Runtime inventory must be current"

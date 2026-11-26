@@ -5,7 +5,7 @@
   "summary": {
     "crates": 16,
     "entries": 1882,
-    "references": 995,
+    "references": 996,
     "unresolved": 0
   },
   "crates": [
@@ -16202,6 +16202,15 @@
       "effect": "resolve/read",
       "disposition": "tooling-owned-root",
       "reference": "if [[ $root == /tmp/nession-test-runtime.* || $root == /private/tmp/nession-test-runtime.* ]] &&",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 196,
+      "kind": "tmux-socket",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "-u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \\",
       "replacement": "private mktemp/tooling root"
     },
     {

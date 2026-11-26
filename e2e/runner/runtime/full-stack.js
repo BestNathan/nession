@@ -680,7 +680,15 @@ function selfTest() {
     assert.equal(verified.manifest.lifecycle, 'active');
     assert.notEqual(sanitizedEnv(run.root, run.tmuxSocket).HOME, process.env.HOME);
     assert.ok(sanitizedEnv(run.root, run.tmuxSocket).HOME.startsWith(run.root));
-    assert.ok(!('ANTHROPIC_API_KEY' in sanitizedEnv(run.root, run.tmuxSocket)));
+    const previousKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = 'synthetic-canary';
+    try {
+      assert.ok(!('ANTHROPIC_API_KEY' in sanitizedEnv(run.root, run.tmuxSocket)),
+        'a synthetic credential must not be forwarded to a child');
+    } finally {
+      if (previousKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+      else process.env.ANTHROPIC_API_KEY = previousKey;
+    }
     assert.throws(() => assertOwnedPath(run.root, '/tmp/not-this-run', 'probe'), /outside/);
     const lease = acquirePortLease(run.root);
     assert.equal(lease.ports.length, 4);
