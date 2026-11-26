@@ -14,7 +14,7 @@
 const { spawn } = require('node:child_process');
 const {
   assert, fs, path, root, targetSha, nessionBin, makeRoot, mkdirPrivate,
-  cliOutput, runBinary, waitFor, waitForTcp, installEnv, sha256File, tomlString, assertUnder,
+  cliOutput, runBinary, waitFor, waitForTcp, freePort, installEnv, sha256File, tomlString, assertUnder,
   makeRealReleaseTarball, startInstallerFixture, downloadOfficialRelease,
   BINARIES, main,
 } = require('../../../shared/release-hardening-cases.cjs');
