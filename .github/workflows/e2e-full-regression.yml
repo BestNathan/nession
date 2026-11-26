@@ -180,6 +180,11 @@ jobs:
       - name: Build Web and prepare E2E npm runtime
         run: |
           (cd web && npm ci && npm run build)
+          # #4581: pages browser specs serve the Vite-compiled pages/dist via
+          # e2e/helpers/pagesStandalone.ts. Mirror e2e/pagesGlobalSetup.mjs's
+          # credential-free offline build; the fixture injects deterministic
+          # public data (source SHA a×40) at request time.
+          (cd pages && npm ci && PAGES_OFFLINE=1 SOURCE_MAIN_SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa npm run build)
           (cd e2e && npm ci)
       # One browser environment for every visual comparison. `E2E / Tests`
       # produces the committed baselines and runs the selected suites on this
