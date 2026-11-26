@@ -879,7 +879,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   // route switch, not the separate half-open ping mechanism (#2160). A real
   // browser WebSocket close supplies a deterministic loss witness instead of
   // relying on a particular input/probe timer interleaving (#3516).
-  await page.addInitScript(() => {
+  await page.addInitScript((serverPort: string) => {
     const state = window as unknown as {
       __e2eRouteAgentSockets?: WebSocket[];
       __e2eBlockRouteAgentReconnect?: boolean;
@@ -893,7 +893,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
     const Original = window.WebSocket;
     const isServerSocket = (raw: string | URL): boolean => {
       try {
-        return new URL(String(raw)).port === String(E2E_SERVER_PORT);
+        return new URL(String(raw)).port === String(serverPort);
       } catch {
         return false;
       }
@@ -913,7 +913,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
     Guarded.prototype = Original.prototype;
     Object.setPrototypeOf(Guarded, Original);
     window.WebSocket = Guarded;
-  });
+  }, String(E2E_SERVER_PORT));
   page.on('websocket', (socket) => {
     socket.on('framesent', (frame) => {
       if (typeof frame.payload !== 'string') { return; }
@@ -1483,9 +1483,9 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
   // Only sockets that are open are used: an address-plan rebuild can leave a
   // disposed socket in the captured list, and dispatching into it is a no-op.
   const deliver = async (frames: number, text: string) => page.evaluate(
-    ({ name, count, body }: { name: string; count: number; body: string }) => {
+    ({ name, count, body, agentPort }: { name: string; count: number; body: string; agentPort: string }) => {
       const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
-        .__overflowSockets ?? []).filter((s) => s.url.includes(`:${E2E_AGENT_PORT}/`) && s.readyState === 1);
+        .__overflowSockets ?? []).filter((s) => s.url.includes(`:${agentPort}/`) && s.readyState === 1);
       if (sockets.length === 0) {
         return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
           .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
@@ -1507,7 +1507,7 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
       }
       return { ok: true, count, sockets: sockets.length };
     },
-    { name: sessionName, count: frames, body: text },
+    { name: sessionName, count: frames, body: text, agentPort: String(E2E_AGENT_PORT) },
   );
 
   // Prove the boundary routes before relying on it: three tiny frames with a
@@ -1670,9 +1670,9 @@ test('a below-bound writer burst keeps the original renderer (#4303)', async ({ 
   });
 
   const injected = await page.evaluate(
-    ({ name, count, body }: { name: string; count: number; body: string }) => {
+    ({ name, count, body, agentPort }: { name: string; count: number; body: string; agentPort: string }) => {
       const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
-        .__overflowSockets ?? []).filter((s) => s.url.includes(`:${E2E_AGENT_PORT}/`) && s.readyState === 1);
+        .__overflowSockets ?? []).filter((s) => s.url.includes(`:${agentPort}/`) && s.readyState === 1);
       if (sockets.length === 0) {
         return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
           .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
@@ -1692,7 +1692,7 @@ test('a below-bound writer burst keeps the original renderer (#4303)', async ({ 
       }
       return { ok: true, count, sockets: sockets.length };
     },
-    { name: sessionName, count: 200, body: 'B' },
+    { name: sessionName, count: 200, body: 'B', agentPort: String(E2E_AGENT_PORT) },
   );
   expect(injected.ok, `below-bound dispatch (${JSON.stringify(injected)})`).toBe(true);
 
