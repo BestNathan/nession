@@ -26,11 +26,18 @@ run identity.
 The shell and JS owners create a short root under `/tmp`:
 
 ```text
-/tmp/nession-test-runtime.<random>/     (Rust test/gate/coverage runs)
-/tmp/nession-e2e.<random>/              (E2E regression)
-/tmp/nession-acceptance.<random>/       (Acceptance Case runtimes)
-/tmp/nession-acceptance-batch.<random>/ (shared Case batches)
+/tmp/nession-test-runtime.<random>/          (Rust test/gate/coverage runs)
+/tmp/nession-test-runtime.<random>-<label>/  (Acceptance Case runtimes, shared
+                                              Case batches, scenario replays,
+                                              harness self-tests)
+/tmp/nession-e2e.<random>/                   (E2E regression)
 ```
+
+The reaper discovers roots by the two prefixes only. A JS caller's `label` is
+evidence, never the leading name: `createRunRoot` keeps the canonical prefix
+and appends the label as a suffix, so a SIGKILLed run is still discoverable and
+reclaimable. A root name outside these prefixes is neither removed by the JS
+owner nor reclaimed by the sweep.
 
 Short paths are deliberate: tests derive unix sockets inside `TMPDIR`, and
 macOS per-user temporary paths plus a longer root exceed

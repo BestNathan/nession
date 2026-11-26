@@ -121,7 +121,8 @@ async function main() {
   assert.ok(homeA.startsWith(providedRoot.root + path.sep), 'runtime home is outside its root');
   assert.ok(socketA.startsWith(providedRoot.root + path.sep), 'tmux socket is outside its root');
 
-  const identityA = fs.readFileSync(path.join(homeA, '.nession', 'agent', 'identity'), 'utf8').trim();
+  const identityPathA = path.join(homeA, '.nession', 'agent', 'identity');
+  const identityA = fs.readFileSync(identityPathA, 'utf8').trim();
   assert.ok(identityA, 'the provided runtime minted no Agent identity');
 
   // A first creates and holds its own real Session: B must not perturb its
@@ -174,8 +175,17 @@ async function main() {
       cleanupRoot: true,
     });
     const homeB = path.join(runB.root, 'home');
-    const identityB = fs.readFileSync(path.join(homeB, '.nession', 'agent', 'identity'), 'utf8').trim();
-    assert.notEqual(identityB, identityA, 'two Agents must not share an identity file');
+    const identityPathB = path.join(homeB, '.nession', 'agent', 'identity');
+    const identityB = fs.readFileSync(identityPathB, 'utf8').trim();
+    assert.ok(identityB, 'B minted no Agent identity');
+    // The e2e fixture template pins the same explicit agent_id in both homes
+    // (`e2e/fixtures/agent-config.e2e.toml`), so equal values are expected.
+    // Isolation is the owned file path plus unchanged A bytes, not a
+    // different id value:
+    assert.ok(identityPathA.startsWith(providedRoot.root + path.sep),
+      'A identity file is outside its run root');
+    assert.ok(identityPathB.startsWith(runB.root + path.sep), 'B identity file is outside its run root');
+    assert.notEqual(identityPathB, identityPathA, 'two Agents must not read the same identity file');
     const binB = cliInvocation();
     const envB = sanitizedEnv(runB.root, runB.tmux_socket, { NESION_NO_UPDATE_CHECK: '1' });
     const serverUrlB = 'ws://127.0.0.1:' + serverPort + '/ws';
@@ -212,6 +222,8 @@ async function main() {
       state: stateFingerprint(homeA),
       panes: tmuxPanes(socketA),
     };
+    assert.equal(sha256(identityPathA), before.state.identity,
+      'B changed A identity file bytes');
     assert.equal(after.serverPid, before.serverPid, 'A Server PID changed after B ran');
     assert.equal(after.agentPid, before.agentPid, 'A Agent PID changed after B ran');
     assert.ok(isAlive(after.serverPid), 'A Server process was replaced after B ran');
