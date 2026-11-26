@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "07805a35ae45df054bc692d8a19436df493c43e894bb0797152e7369a1fb10d3",
+  "run_id": 45898892756,
+  "run_attempt": 1,
+  "issue": 4605,
+  "criterion": "SC-02",
+  "criterion_text": "Using actual zsh login and interactive/non-login processes, the A→B contamination fixture starts within a bounded timeout, never sources A or recursively sources B, runs each legitimate startup phase once, reaches the expected prompt/exit sentinel, and retains user hooks and ENV revision sync. Direct injection of a corrupted marker is safely rejected by generated wrappers; legitimate nested shells work.",
+  "stage": "staging",
+  "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "contract_sha256": "fda8f74dd5597b7cfffc1fad584bae878e9cda74a4a3af7c13a8d8da0bf737b2",
+  "case_revision": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "case_tree_sha": "84a2f369e123a1418cc501f1baeb7bdbfd0dc36d",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T21:44:15.814Z",
+  "finished_at": "2026-11-26T21:51:59.056Z",
+  "duration_ms": 463241,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Generated zsh wrappers refuse cross-Session adapters and initialize once per phase",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 64aede9ec15eb96de1511d68c27c44cd7d16b598: a real zsh A->B contamination fixture finished within the bounded wait, sourced each user startup phase once, reached the prompt sentinel with the user precmd hook and revision sync intact, ran a nested non-interactive shell through .zshenv once without .zshrc, and refused a directly injected managed marker without recursion"
+        }
+      ],
+      "duration_ms": 442644,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45898892756,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "89445e72f8de6b732d790c1b6993e07566fcf30b",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+        "stage": "staging",
+        "issue": 4605,
+        "criterion": "SC-02",
+        "job_id": 140180321957,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45898892756",
+    "record_path": "runs/2026-11-26/45898892756-1/4605/SC-02.json",
+    "source_result_sha256": "0106ca32b0d6ca6e84aee224930f9912d7e0111cf55fb9025250a89c8d657e76"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45898892756-1",
+    "sha256": "0106ca32b0d6ca6e84aee224930f9912d7e0111cf55fb9025250a89c8d657e76",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45898892756",
+    "durability": "time-limited; object archival not configured"
+  }
+}
