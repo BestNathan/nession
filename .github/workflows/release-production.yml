@@ -11,6 +11,7 @@ env:
 on:
   push:
     branches: [main]
+  workflow_dispatch:
 
 # Serialize releases. promote-production writes the gitops branch; the
 # gitops-writer concurrency group (shared across workflows) plus the
@@ -25,9 +26,11 @@ jobs:
   # Version check — gate for entire workflow
   # ═══════════════════════════════════════════════════════════════════
   version-check:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     outputs:
       version_changed: ${{ steps.check.outputs.version_changed }}
+      repair_version: ${{ steps.repair.outputs.version }}
       rust_version: ${{ steps.check.outputs.rust_version }}
       web_version: ${{ steps.check.outputs.web_version }}
       short_sha: ${{ steps.check.outputs.short_sha }}
@@ -77,6 +80,11 @@ jobs:
           # either never ran or failed. Re-trigger regardless of version change
           # so the same version can be retried without bumping. (#71)
           TAG="v${RUST_VER}"
+          # Manual execution only repairs an already-released production version.
+          if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+            echo 'version_changed=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if ! git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Release tag $TAG not found — release needed (retry or first run)."
             echo "version_changed=true" >> $GITHUB_OUTPUT
@@ -107,6 +115,24 @@ jobs:
                 echo "version_changed=false" >> $GITHUB_OUTPUT
               fi
             fi
+          fi
+
+      - name: Detect existing production version drift
+        id: repair
+        if: steps.check.outputs.version_changed == 'false'
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin gitops
+          core="$(git show FETCH_HEAD:environments/production/nession/kustomization.yaml)"
+          mcp="$(git show FETCH_HEAD:environments/production/mcp/kustomization.yaml)"
+          version="$(sed -nE 's/^  newTag: server-([0-9]+\.[0-9]+\.[0-9]+)$/\1/p' <<< "$core")"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "invalid production server version"; exit 1; }
+          for role in agent ui; do
+            grep -Fxq "  newTag: $role-$version" <<< "$core" || { echo "production core versions differ"; exit 1; }
+          done
+          if ! grep -Fxq "  newTag: mcp-$version" <<< "$mcp"; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
           fi
 
   # ═══════════════════════════════════════════════════════════════════
@@ -478,8 +504,8 @@ jobs:
             agent-bin=/tmp/agent-bin
             web-dist=/tmp/web-dist
 
-  # Standalone MCP host image (#3791). Version-tagged with the common
-  # workspace release; it is not part of the Server/Agent/UI GitOps rollout.
+  # Standalone MCP host image (#3791). Published with the common workspace
+  # release and promoted in the same GitOps commit as Server/Agent/UI.
   docker-mcp-amd64:
     needs: [version-check, regression-ready, build-linux-amd64]
     if: needs.version-check.outputs.version_changed == 'true'
@@ -742,11 +768,40 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      # RUST_VER == WEB_VER guaranteed by version-check; server/agent/ui all
-      # tag from it. gitops-commit.sh refuses non-semver refs for production.
+      - uses: docker/setup-buildx-action@v3
+      # All four roles share the workspace version. The GitOps writer checks
+      # all manifests and writes both overlays atomically.
       - run: ./scripts/gitops-commit.sh production "${{ needs.version-check.outputs.rust_version }}"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Reconcile an already-published version without rebuilding any image.
+  # Same protected production Environment and shared GitOps writer as promotion.
+  repair-production:
+    needs: [version-check]
+    if: needs.version-check.outputs.version_changed == 'false' && needs.version-check.outputs.repair_version != ''
+    environment: production
+    concurrency:
+      group: gitops-writer
+      cancel-in-progress: false
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Verify published release and reconcile current production version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version-check.outputs.repair_version }}
+        run: |
+          set -euo pipefail
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "v$VERSION" --json tagName,isDraft,isPrerelease |
+            jq -e --arg tag "v$VERSION" '.tagName == $tag and .isDraft == false and .isPrerelease == false' >/dev/null
+          ./scripts/gitops-commit.sh production "$VERSION" --repair-current
 
   # ═══════════════════════════════════════════════════════════════════
   # Native macOS runtime qualification (#4584 SC-03). The affected macOS
@@ -903,7 +958,7 @@ jobs:
             ### Docker Images
             - `ghcr.io/${{ github.repository_owner }}/nession:server-${{ needs.version-check.outputs.rust_version }}`
             - `ghcr.io/${{ github.repository_owner }}/nession:agent-${{ needs.version-check.outputs.rust_version }}`
-            - `ghcr.io/${{ github.repository_owner }}/nession:mcp-${{ needs.version-check.outputs.rust_version }}` (standalone MCP host, independently deployed)
+            - `ghcr.io/${{ github.repository_owner }}/nession:mcp-${{ needs.version-check.outputs.rust_version }}` (standalone MCP host, promoted with the production release)
             - `ghcr.io/${{ github.repository_owner }}/nession:ui-${{ needs.version-check.outputs.web_version }}`
 
             ### Native Binaries
