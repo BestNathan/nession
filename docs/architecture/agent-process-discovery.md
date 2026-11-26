@@ -201,11 +201,71 @@ command is `denied`, not an empty command.
 - **Not claimed:** process history/trend storage, auto-kill, signals, resource
   limits or quotas.
 
+## macOS native ABI boundary (#4584)
+
+The macOS reader calls libproc through `libc`. One ABI invariant is load-bearing
+and was the source of a confirmed memory-safety defect:
+
+- **`proc_pid_rusage` writes a full record into the named storage.** The pinned
+  `libc` binding declares the output argument as `*mut rusage_info_t`
+  (`rusage_info_t = *mut c_void`) — a pointer-to-pointer shape — but Apple's
+  libproc treats it as the **address of the output structure** and writes
+  `sizeof(rusage_info_v4)` (~296 bytes) there. `rusage()` therefore passes the
+  address of a full-sized, aligned `rusage_info_v4` buffer cast directly to the
+  binding's argument type. The pre-#4584 code passed `&mut pointer`, the address
+  of a local pointer slot: libproc wrote a full record into 8 bytes of stack,
+  which zeroed the observed counters and is undefined behavior that can corrupt
+  the stack or raise SIGBUS. A non-zero return is mapped to an honest
+  `io::ErrorKind`; a failed read is never a fabricated zero record.
+
+**Incident attribution is separate from the defect.** A real user reported a
+SIGBUS after successful registration on macOS ARM64 v1.0.0. The `rusage` defect
+is confirmed in v1.0.0 and main source independently of that report. No crash
+report (`.ips`) or backtrace was available, so the exact crashing thread of the
+reported incident is **not proven**; the last emitted heartbeat log is not proof
+of the crashing thread. The defect is fixed because it is a real memory-safety
+bug reachable from startup and on-demand discovery, not because it is proven to
+be the incident's root cause.
+
+**Adjacent unsafe boundaries reviewed (#4584 SC-04):**
+
+- `all_pids` — `proc_listpids` null-buffer size probe, then a `Vec<pid_t>` sized
+  from the probe with a `c_int` byte-length bound; the write is bounded by the
+  buffer length. Sound.
+- `bsd_info` / `task_info` — `proc_pidinfo` flavor matches the struct and the
+  passed size is that struct's; the result is accepted only when the returned
+  byte count equals the struct size. Sound.
+- `tty_name` — `devname` returns a pointer into a shared static buffer; a process
+  mutex serializes readers so another caller cannot replace it mid-read. Sound.
+- `executable_path` — `proc_pidpath` into a `PATH_MAX` buffer, bounded by the
+  documented maximum and the returned length. Sound.
+- `command_argv` — `KERN_PROCARGS2` via `sysctl`: a null-pointer size probe, a
+  buffer sized from it, a defensive `ARG_MAX` read bound, and a parser that stops
+  after the declared `argc` and never reads the trailing environment. A growth
+  race between probe and read fails the read rather than overrunning. Sound.
+- `netwatch` macOS watcher — uses the safe `system_configuration` wrappers; the
+  `SCDynamicStore` and its run loop live on one dedicated thread that owns the
+  callback context (and the `UnboundedSender` it points at) for the thread's
+  lifetime. The only `unsafe` is reading the `kCFRunLoopCommonModes` constant.
+  No equivalent pointer/size/lifetime defect found.
+
+**Diagnostic limitations:** no native crash report was available for the
+reported incident; Intel (x86_64) execution proof is tracked separately as
+Pending and is never inferred from ARM64 or Linux.
+
 ## Verification owners
 
 - `crates/nession-agent/src/session/process_discovery/` — unit tests for cgroup
   scope recognition/membership/shared rejection, PPID boundaries, budgets,
-  metric states, redaction, and a real isolated tmux Session.
+  metric states, redaction, and a real isolated tmux Session. The macOS module
+  adds native `rusage` regression tests (#4584 SC-01): real non-zero counters,
+  monotonic repeated sampling, a live same-user child, an honest vanished-PID
+  error, a denied pid-1 read, and a fault-isolated subprocess sampling probe.
+- `scripts/native-macos-runtime-check.sh` + `scripts/lib/native-macos-runtime-driver.mjs`
+  — release-mode native runtime fixture (#4584 SC-02): real CLI/standalone Agent
+  and local Server, isolated 1/106-Session tmux inventories, >= 3 heartbeats, an
+  explicit process-discovery request, Server-restart reconnect, and clean
+  SIGTERM shutdown with Session-survival assertions.
 - `crates/nession-tmux/src/ops.rs` — Pane rows and linked-Window memberships.
 - `crates/nession-server/src/server/handler/tests/server_session_processes_v1.rs`
   — authentication, scoping, relay and refusal behavior.
