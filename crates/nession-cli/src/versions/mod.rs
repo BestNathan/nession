@@ -99,6 +99,113 @@ pub fn is_complete_archive(dir: &Path) -> bool {
             .all(|name| dir.join("bin").join(name).is_file())
 }
 
+/// An archive's proven durable-state coverage (#4592 §5).
+///
+/// Binary availability, snapshot coverage and safe historical runtime
+/// eligibility are three different facts. A complete archive may still be
+/// unsafe to run data-touching commands against: a binary-only archive has no
+/// state at all, and a manifest with gaps or external dependencies cannot
+/// prove the release owns an independent copy of everything it would touch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StateCoverage {
+    /// The manifest proves a complete independent snapshot with no external
+    /// dependencies: data-touching commands may run against this archive.
+    Proven,
+    /// A manifest exists but records gaps or external dependencies.
+    Unproven { reason: String },
+    /// No manifest: a legacy or binary-only archive. Its state is unknown.
+    NoManifest,
+}
+
+/// Classify an archive's state coverage from its manifest (read-only).
+pub fn archive_state_coverage(home: &Path) -> StateCoverage {
+    let Some(manifest) = crate::update::snapshot::read_manifest(home) else {
+        return StateCoverage::NoManifest;
+    };
+    if !manifest.state_complete {
+        return StateCoverage::Unproven {
+            reason: format!(
+                "the snapshot is not state-complete ({})",
+                manifest.gaps.join("; ")
+            ),
+        };
+    }
+    if !manifest.external_dependencies.is_empty() {
+        return StateCoverage::Unproven {
+            reason: format!(
+                "the archived config still depends on paths the archive does not own: {}",
+                manifest.external_dependencies.join(", ")
+            ),
+        };
+    }
+    StateCoverage::Proven
+}
+
+/// Refuse a data-touching command on an archive whose independent state
+/// ownership cannot be proven (#4592 §5). Runs at the Current dispatcher
+/// before `exec`, for legacy versions included.
+fn verify_archive_state_coverage(home: &Path, version: &Version, command: &str) -> Result<()> {
+    match archive_state_coverage(home) {
+        StateCoverage::Proven => Ok(()),
+        StateCoverage::NoManifest => bail!(
+            "release {version} is a binary-complete archive without a proven state snapshot \
+             (no manifest.json); `{command}` is refused. The archive cannot prove it owns an \
+             independent copy of the configuration and identity, and running it could touch \
+             Current's live state or mint a new identity.\n\
+             Fix: inspect it with `nession version inspect {version}`. If it holds your only \
+             copy of the configuration/identity, recover the missing entries with \
+             `nession version recover {version}`; otherwise run `{command}` on Current \
+             (without a version selector)."
+        ),
+        StateCoverage::Unproven { reason } => bail!(
+            "release {version} has unproven state coverage: {reason}. `{command}` is refused \
+             until independent ownership is established.\n\
+             Fix: `nession version inspect {version}` shows the coverage record; run the \
+             command on Current, or reconcile the recorded gaps and dependencies first."
+        ),
+    }
+}
+
+/// The data-touching command named by the args, if any (#4592 §5).
+///
+/// Read-only inspection (`status`, `logs`, `list`, `show`, `agents list`)
+/// stays available on every complete archive; everything that writes config,
+/// identity, sessions or host service state is gated on proven coverage.
+fn mutating_command(args: &[OsString]) -> Option<String> {
+    let mut tokens = Vec::new();
+    let mut index = 1;
+    while let Some(value) = args.get(index) {
+        let token = value.to_str()?;
+        if matches!(token, "--server-url" | "--auth-token") {
+            index += 2;
+            continue;
+        }
+        if token.starts_with('-') {
+            index += 1;
+            continue;
+        }
+        tokens.push(token.to_string());
+        if tokens.len() == 3 {
+            break;
+        }
+        index += 1;
+    }
+    let family = tokens.first()?.as_str();
+    let action = tokens.get(1).map(String::as_str).unwrap_or("");
+    let mutating = match family {
+        "agent" => !matches!(action, "status" | "logs" | ""),
+        "server" => !matches!(action, "status" | ""),
+        "sessions" => !matches!(action, "list" | ""),
+        "config" => tokens.get(2).map(String::as_str) != Some("show"),
+        _ => false,
+    };
+    if mutating {
+        Some(tokens.join(" "))
+    } else {
+        None
+    }
+}
+
 /// The directory whose release binaries own the Current installation.
 ///
 /// `NESSION_INSTALL_DIR` lets the installer and Cases target an isolated tree;
@@ -256,6 +363,12 @@ pub fn prepare<I: IntoIterator<Item = OsString>>(raw_args: I) -> Result<Prepared
             home.display()
         );
     }
+    // A data-touching command must not run against an archive whose
+    // independent state ownership is unproven (#4592 §5): a binary-only or
+    // legacy archive could touch Current's live state or mint a new identity.
+    if let Some(command) = mutating_command(&args) {
+        verify_archive_state_coverage(&home, &version, &command)?;
+    }
     let cli = archived_cli(&version)?;
     // A dangerous lifecycle command must not be executed by a release that
     // predates the shared lock/PID/single-active contract: it would look in
@@ -403,6 +516,7 @@ fn command_name(args: &[OsString]) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::BTreeMap;
 
     #[test]
     fn a_v_prefix_is_normalized() {
@@ -577,5 +691,138 @@ mod tests {
             OsString::from("0.35.0"),
         ];
         assert_eq!(command_name(&args).as_deref(), Some("install"));
+    }
+
+    fn argv(tokens: &[&str]) -> Vec<OsString> {
+        std::iter::once("nession")
+            .chain(tokens.iter().copied())
+            .map(OsString::from)
+            .collect()
+    }
+
+    #[test]
+    fn data_touching_commands_are_recognised() {
+        for tokens in [
+            vec!["agent", "start"],
+            vec!["agent", "restart"],
+            vec!["agent", "stop"],
+            vec!["agent", "install-service"],
+            vec!["server", "start"],
+            vec!["server", "restart"],
+            vec!["sessions", "create"],
+            vec!["sessions", "attach"],
+            vec!["sessions", "kill"],
+            vec!["config", "agent", "init"],
+            vec!["config", "server", "set"],
+        ] {
+            assert!(
+                mutating_command(&argv(&tokens)).is_some(),
+                "{tokens:?} must be gated"
+            );
+        }
+    }
+
+    #[test]
+    fn read_only_commands_stay_available_on_any_archive() {
+        for tokens in [
+            vec!["agent", "status"],
+            vec!["agent", "logs"],
+            vec!["server", "status"],
+            vec!["sessions", "list"],
+            vec!["agents", "list"],
+            vec!["config", "agent", "show"],
+            vec!["config", "server", "show"],
+            vec!["version", "list"],
+        ] {
+            assert_eq!(
+                mutating_command(&argv(&tokens)),
+                None,
+                "{tokens:?} is read-only inspection"
+            );
+        }
+        assert_eq!(
+            mutating_command(&argv(&["--server-url", "ws://x", "sessions", "list"])),
+            None,
+            "global flag values must not shift the classifier"
+        );
+    }
+
+    fn manifest_fixture(
+        state_complete: bool,
+        deps: Vec<String>,
+    ) -> crate::update::snapshot::Manifest {
+        crate::update::snapshot::Manifest {
+            schema: crate::update::snapshot::MANIFEST_SCHEMA,
+            release: "0.35.0".into(),
+            created_by: crate::update::UPGRADE_CONTRACT_TOKEN.into(),
+            binaries: BTreeMap::new(),
+            configs: BTreeMap::new(),
+            state: BTreeMap::new(),
+            references: Vec::new(),
+            gaps: if state_complete {
+                Vec::new()
+            } else {
+                vec!["server/server.db: consistent backup failed".into()]
+            },
+            external_dependencies: deps,
+            state_complete,
+        }
+    }
+
+    #[test]
+    fn a_binary_only_archive_is_refused_for_mutating_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in RELEASE_BINARIES {
+            let path = dir.path().join("bin").join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(&path, "binary").unwrap();
+        }
+        assert_eq!(
+            archive_state_coverage(dir.path()),
+            StateCoverage::NoManifest
+        );
+        let error =
+            verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "agent start")
+                .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(
+            message.contains("without a proven state snapshot"),
+            "{message}"
+        );
+        assert!(message.contains("version inspect 0.35.0"), "{message}");
+        assert!(message.contains("version recover 0.35.0"), "{message}");
+    }
+
+    #[test]
+    fn a_proven_manifest_allows_mutating_commands() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::update::snapshot::write_manifest(dir.path(), &manifest_fixture(true, Vec::new()))
+            .unwrap();
+        assert_eq!(archive_state_coverage(dir.path()), StateCoverage::Proven);
+        verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "sessions create")
+            .unwrap();
+    }
+
+    #[test]
+    fn an_incomplete_or_dependent_manifest_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        crate::update::snapshot::write_manifest(dir.path(), &manifest_fixture(false, Vec::new()))
+            .unwrap();
+        let error =
+            verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "agent start")
+                .unwrap_err();
+        assert!(format!("{error:#}").contains("unproven state coverage"));
+
+        crate::update::snapshot::write_manifest(
+            dir.path(),
+            &manifest_fixture(true, vec!["db_path".into()]),
+        )
+        .unwrap();
+        let error =
+            verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "server start")
+                .unwrap_err();
+        let message = format!("{error:#}");
+        assert!(message.contains("does not own"), "{message}");
+        assert!(message.contains("db_path"), "{message}");
     }
 }

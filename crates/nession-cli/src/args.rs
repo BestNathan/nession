@@ -285,6 +285,18 @@ pub enum ServerAction {
 pub enum VersionAction {
     /// List Current, Archived and Running releases
     List,
+    /// Inspect an archived release: binaries, state coverage, historical
+    /// runtime eligibility and the recovery plan (read-only)
+    Inspect {
+        /// Release version to inspect (SemVer, optional leading v)
+        version: String,
+    },
+    /// Recover missing configuration/identity from an archived release into
+    /// Current; refuses any conflict and never overwrites existing entries
+    Recover {
+        /// Source release version (SemVer, optional leading v)
+        version: String,
+    },
 }
 
 /// `nession agents …`
@@ -513,6 +525,8 @@ mod tests {
                 ]),
             ),
             ("version list".to_string(), strings(&[])),
+            ("version inspect".to_string(), strings(&[])),
+            ("version recover".to_string(), strings(&[])),
             (
                 "update".to_string(),
                 strings(&[

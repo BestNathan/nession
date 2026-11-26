@@ -84,6 +84,8 @@ fn command_path(command: &Commands) -> &'static str {
         Commands::Install { .. } => "install",
         Commands::Version { action } => match action {
             VersionAction::List => "version list",
+            VersionAction::Inspect { .. } => "version inspect",
+            VersionAction::Recover { .. } => "version recover",
         },
         Commands::Update { .. } => "update",
     }
@@ -256,7 +258,9 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             policy,
         } => install::run(version, dry_run, yes, policy.to_overrides()).await?,
         Commands::Version { action } => match action {
-            VersionAction::List => version::run().await?,
+            VersionAction::List => version::list::run().await?,
+            VersionAction::Inspect { version } => version::inspect::run(version)?,
+            VersionAction::Recover { version } => version::recover::run(version)?,
         },
         Commands::Update {
             check,
@@ -315,7 +319,9 @@ mod tests {
         "sessions/kill.rs",
         "sessions/list.rs",
         "update.rs",
-        "version.rs",
+        "version/inspect.rs",
+        "version/list.rs",
+        "version/recover.rs",
     ];
 
     fn collect_rust_files(dir: &Path, root: &Path, out: &mut BTreeSet<String>) {
