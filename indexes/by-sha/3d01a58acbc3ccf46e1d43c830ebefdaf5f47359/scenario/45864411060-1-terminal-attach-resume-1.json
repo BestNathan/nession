@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45864411060,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "feat/4597-test-runtime-isolation",
+    "target_sha": "3d01a58acbc3ccf46e1d43c830ebefdaf5f47359",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45864411060",
+    "scenario_tree_sha": "bdabf5e8e31f31a089a93927615d1bb3a3115318",
+    "original_sha256": "222a3547ca9e0f44ff1cbd2839e2cfbf692a5a2f013f3b3ce665e0b78f37bb8d"
+  },
+  "record": "runs/2026-11-26/45864411060-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "45419a22cb83744358156eb145927e847031eba57afda2c1c2878e547e1bcc66"
+}
