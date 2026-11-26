@@ -12,12 +12,16 @@
 # run when its name matches one of these, so the match is ownership, and the
 # developer's default tmux socket is never addressed):
 #
-#   [test]  ${TMPDIR:-/tmp}/nession-test-tmux.*   — Rust test runs, created by
-#           scripts/tmux-run-socket.sh (mktemp -d)
-#   [e2e]   /tmp/nession-e2e-tmux-*               — e2e runs, created by
-#           e2e/runtime.ts
+#   [runtime] /tmp/nession-test-runtime.*      — current Rust unit, integration,
+#             coverage and gate runs, created by scripts/test-runtime.sh (#4597)
+#   [test]  ${TMPDIR:-/tmp}/nession-test-tmux.*   — legacy Rust test runs,
+#           created by older scripts/tmux-run-socket.sh versions
+#   [e2e]   /tmp/nession-e2e-tmux-*               — legacy e2e runs, created by
+#           older e2e/runtime.ts versions
+#   [e2e]   /tmp/nession-e2e.*                    — current e2e runs, created
+#           by e2e/runtime.ts (#4597)
 #
-# Both hold the run's socket at <dir>/tmux.sock. A whole directory is the
+# All hold the run's socket at <dir>/tmux.sock. A whole directory is the
 # reclaim unit: within an owned run directory, everything is that run's.
 #
 # Safety (the iron law, enforced structurally):
@@ -62,20 +66,44 @@ esac
 
 # ── Discovery: the two project-owned run-directory patterns ─────────────────
 shopt -s nullglob
+runtime_dirs=(/tmp/nession-test-runtime.*)
 test_dirs=("${TMPDIR:-/tmp}"/nession-test-tmux.*)
-e2e_dirs=(/tmp/nession-e2e-tmux-*)
+e2e_dirs=(/tmp/nession-e2e-tmux-* /tmp/nession-e2e.*)
 
 class_of() {
     local dir="$1"
     case "/$dir" in
+        */nession-test-runtime.*) echo runtime ;;
         */nession-test-tmux.*) echo test ;;
         */nession-e2e-tmux-*) echo e2e ;;
+        */nession-e2e.*) echo e2e ;;
         *) echo unknown ;;
     esac
 }
 
 is_owned_dir() {
     [[ $(class_of "$1") != unknown ]]
+}
+
+# Current-regime roots carry an ownership manifest written by the run itself
+# (`scripts/test-runtime.sh`, `e2e/runner/runtime/test-runtime.js`). A directory
+# that only *looks* like our pattern is not proof; it must not be deleted.
+requires_manifest() {
+    case "$1" in
+        */nession-test-runtime.*|*/nession-e2e.*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+run_root_verified() {
+    local dir="$1" manifest="$1/manifest.json" canonical
+    [[ -f $manifest && ! -L $manifest ]] || return 1
+    [[ -f $dir/owner.pid ]] || return 1
+    canonical=$(cd "$dir" && pwd -P) || return 1
+    grep -Fq "\"root\": \"$canonical\"" "$manifest" || return 1
+    grep -Fq "\"uid\": $(id -u)" "$manifest" || return 1
+    grep -Eq '"lifecycle"[[:space:]]*:[[:space:]]*"(active|finished)"' "$manifest" || return 1
+    return 0
 }
 
 # ── Live-run detection ──────────────────────────────────────────────────────
@@ -100,10 +128,10 @@ owner_is_live() {
 # project-owned patterns.
 remove_dir() {
     local dir="$1"
-    if is_owned_dir "$dir"; then
+    if is_owned_dir "$dir" && { ! requires_manifest "$dir" || run_root_verified "$dir"; }; then
         rm -rf "$dir"
     else
-        echo -e "${RED}refusing to remove ${dir} — not a nession run directory${NC}" >&2
+        echo -e "${RED}refusing to remove ${dir} — not a verified nession run directory${NC}" >&2
         return 1
     fi
 }
@@ -123,6 +151,13 @@ reclaim_dir() {
         local owner_pid
         owner_pid=$(<"$dir/owner.pid")
         echo -e "${YELLOW}live run${NC} ${tag} — owner pid ${owner_pid}, not touched"
+        return 0
+    fi
+
+    # A pattern match is not ownership. Current-regime roots must prove their
+    # manifest; an unverified directory is listed and left for a human.
+    if requires_manifest "$dir" && ! run_root_verified "$dir"; then
+        echo -e "${RED}unverified${NC} ${tag} — no valid ownership manifest; not touched" >&2
         return 0
     fi
 
@@ -171,7 +206,7 @@ found=0
 reclaimable=0
 failures=0
 
-for dir in "${test_dirs[@]}" "${e2e_dirs[@]}"; do
+for dir in "${runtime_dirs[@]}" "${test_dirs[@]}" "${e2e_dirs[@]}"; do
     [[ -d $dir ]] || continue
     found=$((found + 1))
     if ! reclaim_dir "$dir"; then

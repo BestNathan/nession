@@ -8,6 +8,7 @@ import {
   staleAttachReplyKeepsNewerSelection,
   staleDialogDoesNotOpenOverNewerSelection,
 } from '../../helpers/attachLatestIntent';
+import { E2E_SERVER_URL } from '../../runtime';
 
 /**
  * Watch the session lists from **before the page navigates** (#1326).
@@ -46,7 +47,7 @@ test.describe('Session lifecycle', () => {
     // Use URL token to skip login. Server runs in no-auth mode (empty auth_token),
     // so any non-empty token is accepted.
     // Use direct WS URL to bypass vite preview's flaky WS proxy.
-    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL));
     await waitForShell(page);
   });
 
@@ -206,7 +207,7 @@ test.describe('Attach latest-intent ownership (#2873)', () => {
   test.beforeEach(async ({ page }) => {
     await installAttachResponseControl(page);
     await page.goto(
-      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
     );
     await waitForShell(page);
   });

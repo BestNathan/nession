@@ -9,6 +9,15 @@ const os = require('node:os');
 const path = require('node:path');
 const process = require('node:process');
 
+const {
+  acquirePortLease,
+  assertOwnedPath,
+  createRunRoot,
+  removeRunRoot,
+  sanitizedEnv,
+  verifyRunRoot,
+} = require('./test-runtime.js');
+
 const DEFAULT_READY_TIMEOUT_MS = 120_000;
 const PROCESS_STOP_TIMEOUT_MS = 5_000;
 
@@ -142,13 +151,8 @@ function renderAgentConfig(
   return output;
 }
 
-function assertOwnedRuntimePath(value, label) {
-  const resolved = path.resolve(requiredText(value, label));
-  const base = path.basename(resolved);
-  if (!base.startsWith('nession-')) {
-    throw new Error(label + ' must be an owned nession-* runtime directory: ' + resolved);
-  }
-  return resolved;
+function assertOwnedRuntimePath(runRoot, value, label) {
+  return assertOwnedPath(runRoot, requiredText(value, label), label);
 }
 
 function assertTargetSha(repoRoot, targetSha) {
@@ -288,7 +292,7 @@ function agentCliVersionsFrom(value) {
   return versions;
 }
 
-function installAgentClis(home, versions) {
+function installAgentClis(home, versions, childEnv) {
   const installed = {};
   for (const [provider, version] of Object.entries(versions)) {
     const prefix = path.join(home, 'agent-clis', provider + '-' + version);
@@ -303,13 +307,16 @@ function installAgentClis(home, versions) {
         '--no-fund',
         AGENT_CLI_PACKAGES[provider] + '@' + version,
       ],
-      { stdio: 'inherit', env: process.env },
+      { stdio: 'inherit', env: childEnv },
     );
     const bin = path.join(prefix, 'node_modules', '.bin', provider);
     if (!existsSync(bin)) {
       throw new Error('e2e agent CLI ' + provider + '@' + version + ' installed no `' + provider + '` binary');
     }
-    const resolved = String(execFileSync(bin, ['--version'], { encoding: 'utf8' })).trim();
+    const resolved = String(execFileSync(bin, ['--version'], {
+      encoding: 'utf8',
+      env: childEnv,
+    })).trim();
     installed[provider] = {
       requested_version: version,
       resolved_version: resolved,
@@ -319,41 +326,68 @@ function installAgentClis(home, versions) {
   return installed;
 }
 
-function verifyAndKillTmux(tmuxSocket) {
+function verifyAndKillTmux(runRoot, tmuxSocket) {
+  assertOwnedPath(runRoot, tmuxSocket, 'tmux socket');
   if (!existsSync(tmuxSocket)) return;
+  let reported = '';
   try {
-    const reported = execFileSync(
+    reported = execFileSync(
       'tmux',
       ['-S', tmuxSocket, 'display-message', '-p', '#{socket_path}'],
       { encoding: 'utf8' },
     ).trim();
-    if (reported !== tmuxSocket) {
-      console.warn(
-        '[e2e runner] refusing socket cleanup: reported ' +
-        reported + ', expected ' + tmuxSocket,
-      );
-      return;
-    }
-    execFileSync('tmux', ['-S', tmuxSocket, 'kill-server'], { stdio: 'ignore' });
   } catch {
-    // No live tmux server on this owned socket.
+    // No live tmux server on this owned socket: a stale socket file with
+    // nothing to kill. The caller may remove the owned socket directory.
+    reported = '';
   }
+  if (reported === '') return;
+  if (reported !== tmuxSocket) {
+    throw new Error(
+      'refusing socket cleanup: server reported ' + reported +
+      ', expected ' + tmuxSocket + ' (#4597)',
+    );
+  }
+  execFileSync('tmux', ['-S', tmuxSocket, 'kill-server'], { stdio: 'ignore' });
 }
 
 async function startFullStackRuntime(options) {
   const repoRoot = path.resolve(requiredText(options?.repoRoot, 'repoRoot'));
-  const home = assertOwnedRuntimePath(options?.home, 'home');
-  const tmuxSocket = path.resolve(requiredText(options?.tmuxSocket, 'tmuxSocket'));
-  const tmuxDir = assertOwnedRuntimePath(path.dirname(tmuxSocket), 'tmux socket directory');
-  const serverPort = positivePort(options?.serverPort, 'serverPort');
-  const agentPort = positivePort(options?.agentPort, 'agentPort');
-  const webPort = positivePort(options?.webPort, 'webPort');
+  // One verified Test Runtime root owns every mutable resource this run
+  // touches. A caller without a manifest-backed root fails closed before any
+  // process starts or any path is removed (#4597).
+  const ownership = verifyRunRoot(requiredText(options?.runRoot, 'runRoot'));
+  const runRoot = ownership.root;
+  const home = assertOwnedRuntimePath(
+    runRoot,
+    options?.home ?? path.join(runRoot, 'home'),
+    'home',
+  );
+  const tmuxSocket = assertOwnedRuntimePath(
+    runRoot,
+    options?.tmuxSocket ?? path.join(runRoot, 'tmux.sock'),
+    'tmux socket',
+  );
+  const tmuxDir = assertOwnedRuntimePath(runRoot, path.dirname(tmuxSocket), 'tmux socket directory');
+  const serverPort = positivePort(
+    options?.serverPort ?? await allocateLoopbackPort(),
+    'serverPort',
+  );
+  const agentPort = positivePort(
+    options?.agentPort ?? await allocateLoopbackPort(),
+    'agentPort',
+  );
+  const webPort = positivePort(
+    options?.webPort ?? await allocateLoopbackPort(),
+    'webPort',
+  );
   const stalledProbePort = positivePort(
-    options?.stalledProbePort ?? agentPort + 1,
+    options?.stalledProbePort ?? await allocateLoopbackPort(),
     'stalledProbePort',
   );
   const readyTimeoutMs = Number(options?.readyTimeoutMs ?? DEFAULT_READY_TIMEOUT_MS);
   const cleanupHome = options?.cleanupHome !== false;
+  const cleanupRoot = options?.cleanupRoot === true;
   const targetSha = assertTargetSha(repoRoot, options?.targetSha);
   // #1866 SC-01: fixture-only browser gates (the design-system browser profile)
   // need the built web app and nothing else. A web-only runtime still proves
@@ -370,20 +404,24 @@ async function startFullStackRuntime(options) {
     path.join(repoRoot, 'e2e', 'fixtures', 'agent-config.e2e.toml'),
   );
 
-  rmSync(home, { recursive: true, force: true });
-  rmSync(tmuxDir, { recursive: true, force: true });
-  mkdirSync(home, { recursive: true });
+  // The root is fresh and ownership-verified; nothing from an earlier run is
+  // inherited, so there is no unverified path to wipe (#4597).
+  mkdirSync(home, { recursive: true, mode: 0o700 });
   mkdirSync(tmuxDir, { recursive: true, mode: 0o700 });
-  writeFileSync(path.join(tmuxDir, 'owner.pid'), String(process.pid));
+  if (tmuxDir !== runRoot) {
+    writeFileSync(path.join(tmuxDir, 'owner.pid'), String(process.pid));
+  }
+
+  const baseEnv = sanitizedEnv(runRoot, tmuxSocket);
 
   // Exact agent CLI versions under test. Installed into the isolated runtime
   // home and prepended to the Agent's PATH; the product code is never told a
   // version, so every version is exercised through the same probe.
   const agentClis = webOnly
     ? {}
-    : installAgentClis(home, agentCliVersionsFrom(options?.agentCliVersions));
+    : installAgentClis(home, agentCliVersionsFrom(options?.agentCliVersions), baseEnv);
   const agentCliBinDirs = Object.values(agentClis).map((cli) => cli.bin_dir);
-  const agentEnvPath = [...agentCliBinDirs, process.env.PATH || ''].join(path.delimiter);
+  const agentEnvPath = [...agentCliBinDirs, baseEnv.PATH || ''].join(path.delimiter);
 
   const configDir = path.join(home, 'runtime-config');
   mkdirSync(configDir, { recursive: true });
@@ -408,18 +446,34 @@ async function startFullStackRuntime(options) {
     }),
   );
 
-  const isolationEnv = {
-    ...process.env,
-    NESSION_TMUX_SOCKET: tmuxSocket,
-    NESSION_HOME: home,
-  };
   const processes = [];
 
   const stop = async () => {
-    for (const entry of [...processes].reverse()) await stopManaged(entry);
-    verifyAndKillTmux(tmuxSocket);
-    rmSync(tmuxDir, { recursive: true, force: true });
-    if (cleanupHome) rmSync(home, { recursive: true, force: true });
+    const failures = [];
+    for (const entry of [...processes].reverse()) {
+      try { await stopManaged(entry); } catch (error) { failures.push(String(error)); }
+    }
+    try { verifyAndKillTmux(runRoot, tmuxSocket); } catch (error) { failures.push(String(error)); }
+    if (tmuxDir !== runRoot) {
+      try {
+        assertOwnedPath(runRoot, tmuxDir, 'socket directory');
+        rmSync(tmuxDir, { recursive: true, force: true });
+      } catch (error) { failures.push(String(error)); }
+    }
+    if (cleanupHome) {
+      try {
+        assertOwnedPath(runRoot, home, 'home');
+        rmSync(home, { recursive: true, force: true });
+      } catch (error) { failures.push(String(error)); }
+    }
+    if (cleanupRoot && failures.length === 0) {
+      try { removeRunRoot(runRoot); } catch (error) { failures.push(String(error)); }
+    }
+    if (failures.length > 0) {
+      // Keep the root and its manifest for the reaper; deleting unverified or
+      // partially stopped resources is how a test run becomes another leak.
+      throw new Error('runtime teardown failed (#4597): ' + failures.join('; '));
+    }
   };
 
   // The Agent is the one process a test may restart: its tmux sessions live in
@@ -431,13 +485,12 @@ async function startFullStackRuntime(options) {
     const agent = binaryCommand(repoRoot, 'nession-agent', 'nession-agent', agentConfig);
     const entry = spawnManaged(agent.command, agent.args, {
       cwd: repoRoot,
-      env: {
-        ...isolationEnv,
+      env: sanitizedEnv(runRoot, tmuxSocket, {
         PATH: agentEnvPath,
         LANG: 'C.UTF-8',
         RUST_LOG: 'info',
         RUST_BACKTRACE: '1',
-      },
+      }),
       label: 'nession-agent',
     });
     processes.push(entry);
@@ -459,11 +512,10 @@ async function startFullStackRuntime(options) {
       const server = binaryCommand(repoRoot, 'nession-server', 'nession-server', serverConfig);
       const serverProcess = spawnManaged(server.command, server.args, {
         cwd: repoRoot,
-        env: {
-          ...isolationEnv,
+        env: sanitizedEnv(runRoot, tmuxSocket, {
           RUST_LOG: 'info',
           RUST_BACKTRACE: '1',
-        },
+        }),
         label: 'nession-server',
       });
       processes.push(serverProcess);
@@ -480,10 +532,9 @@ async function startFullStackRuntime(options) {
       ['run', 'preview', '--', '--host', '127.0.0.1', '--port', String(webPort), '--strictPort'],
       {
         cwd: path.join(repoRoot, 'web'),
-        env: {
-          ...process.env,
+        env: sanitizedEnv(runRoot, tmuxSocket, {
           NESSION_DEV_WS_PROXY: 'http://127.0.0.1:' + serverPort,
-        },
+        }),
         label: 'web-preview',
       },
     );
@@ -496,6 +547,8 @@ async function startFullStackRuntime(options) {
       schema_version: 1,
       target_sha: targetSha,
       profile,
+      run_root: runRoot,
+      run_id: ownership.manifest.run_id,
       home,
       tmux_socket: tmuxSocket,
       // A web-only runtime has no Server/Agent; reporting invented ports would
@@ -530,7 +583,14 @@ async function startFullStackRuntime(options) {
 
     return { ...metadata, stop, restartAgent };
   } catch (error) {
-    await stop();
+    try {
+      await stop();
+    } catch (stopError) {
+      throw new Error(
+        'runtime failed (' + String(error) + ') and teardown failed (' +
+        String(stopError) + ') (#4597)',
+      );
+    }
     throw error;
   }
 }
@@ -611,13 +671,31 @@ function selfTest() {
     if (previousSandboxRoot === undefined) delete process.env.SANDBOX_CGROUP_ROOT;
     else process.env.SANDBOX_CGROUP_ROOT = previousSandboxRoot;
   }
-  console.log('e2e runner runtime self-test: 10 cases passed');
+  // Test Runtime ownership contract: a fresh root verifies, a child
+  // environment is run-owned/sanitized, an outside path is refused, and the
+  // verified root (and its lease) can be removed (#4597).
+  const run = createRunRoot('nession-runtime-selftest');
+  try {
+    const verified = verifyRunRoot(run.root);
+    assert.equal(verified.manifest.lifecycle, 'active');
+    assert.notEqual(sanitizedEnv(run.root, run.tmuxSocket).HOME, process.env.HOME);
+    assert.ok(sanitizedEnv(run.root, run.tmuxSocket).HOME.startsWith(run.root));
+    assert.ok(!('ANTHROPIC_API_KEY' in sanitizedEnv(run.root, run.tmuxSocket)));
+    assert.throws(() => assertOwnedPath(run.root, '/tmp/not-this-run', 'probe'), /outside/);
+    const lease = acquirePortLease(run.root);
+    assert.equal(lease.ports.length, 4);
+    lease.release();
+  } finally {
+    removeRunRoot(run.root);
+  }
+  console.log('e2e runner runtime self-test: 13 cases passed');
 }
 
 module.exports = {
   allocateLoopbackPort,
   assertTargetSha,
   agentCliVersionsFrom,
+  binaryCommand,
   installAgentClis,
   renderAgentConfig,
   renderServerConfig,

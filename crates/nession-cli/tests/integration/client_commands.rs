@@ -1,11 +1,32 @@
 use std::process::Command;
 
+const BIN: &str = env!("CARGO_BIN_EXE_nession");
+
+/// A loopback endpoint nothing is listening on (see session_commands.rs).
+fn refused_endpoint() -> std::io::Result<String> {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0")?;
+    let port = listener.local_addr()?.port();
+    Ok(format!("ws://127.0.0.1:{port}"))
+}
+
+/// Run the real CLI binary under an owned home, never a nested `cargo run`
+/// (#4597 F08).
+fn cli(args: &[&str], server_url: Option<&str>) -> std::io::Result<std::process::Output> {
+    let home = tempfile::tempdir()?;
+    // not-tmux: runs the nession CLI binary, not a tmux process
+    let mut command = Command::new(BIN);
+    command
+        .env(nession_common::paths::NESSION_HOME_ENV, home.path())
+        .env("NESION_NO_UPDATE_CHECK", "1");
+    if let Some(url) = server_url {
+        command.args(["--server-url", url]);
+    }
+    command.args(args).output()
+}
+
 #[test]
 fn test_cli_help() {
-    let output = Command::new("cargo")
-        .args(["run", "--bin", "nession", "--", "--help"])
-        .output()
-        .expect("Failed to execute command");
+    let output = cli(&["--help"], None).unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("Distributed tmux session management system"));
@@ -15,10 +36,7 @@ fn test_cli_help() {
 
 #[test]
 fn test_agents_list_help() {
-    let output = Command::new("cargo")
-        .args(["run", "--bin", "nession", "--", "agents", "list", "--help"])
-        .output()
-        .expect("Failed to execute command");
+    let output = cli(&["agents", "list", "--help"], None).unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("List all agents"));
@@ -26,12 +44,7 @@ fn test_agents_list_help() {
 
 #[test]
 fn test_sessions_list_help() {
-    let output = Command::new("cargo")
-        .args([
-            "run", "--bin", "nession", "--", "sessions", "list", "--help",
-        ])
-        .output()
-        .expect("Failed to execute command");
+    let output = cli(&["sessions", "list", "--help"], None).unwrap();
 
     let stdout = String::from_utf8_lossy(&output.stdout);
     assert!(stdout.contains("List all sessions"));
@@ -40,20 +53,8 @@ fn test_sessions_list_help() {
 
 #[test]
 fn test_agents_list_no_server() {
-    // Should fail gracefully when server is not running
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "--server-url",
-            "ws://localhost:59999",
-            "agents",
-            "list",
-        ])
-        .output()
-        .expect("Failed to execute command");
+    let endpoint = refused_endpoint().unwrap();
+    let output = cli(&["agents", "list"], Some(&endpoint)).unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);
@@ -62,20 +63,8 @@ fn test_agents_list_no_server() {
 
 #[test]
 fn test_sessions_list_no_server() {
-    // Should fail gracefully when server is not running
-    let output = Command::new("cargo")
-        .args([
-            "run",
-            "--bin",
-            "nession",
-            "--",
-            "--server-url",
-            "ws://localhost:59999",
-            "sessions",
-            "list",
-        ])
-        .output()
-        .expect("Failed to execute command");
+    let endpoint = refused_endpoint().unwrap();
+    let output = cli(&["sessions", "list"], Some(&endpoint)).unwrap();
 
     assert!(!output.status.success());
     let stderr = String::from_utf8_lossy(&output.stderr);

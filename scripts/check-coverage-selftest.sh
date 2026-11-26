@@ -18,8 +18,6 @@ trap 'rm -rf "$TMP"' EXIT
 
 FAKEBIN="$TMP/bin"
 mkdir -p "$FAKEBIN"
-SOCKET="$TMP/run/tmux.sock"
-mkdir -p "$TMP/run"
 
 pass=0
 fail=0
@@ -31,9 +29,9 @@ write_cargo() {
 }
 
 run_check() {
-    # An inherited socket keeps tmux-run-socket.sh from creating (and then
-    # trying to clean) a run directory this selftest does not own.
-    PATH="$FAKEBIN:$PATH" NESSION_TMUX_SOCKET="$SOCKET" \
+    # The harness creates (or reuses a verified inherited) Test Runtime root;
+    # a bare inherited NESSION_TMUX_SOCKET is deliberately not trusted (#4597).
+    env -u NESSION_TMUX_SOCKET PATH="$FAKEBIN:$PATH" \
         bash "$ROOT/scripts/check-coverage.sh" 2>&1
 }
 

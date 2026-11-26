@@ -10,7 +10,10 @@ it exercises the production topology — one Agent may host many Sessions on one
 server — and it is the topology in which a width defect would actually matter.
 This document records what that sharing does and does not imply for a Session's
 width, and the evidence #2520 gathered when a standalone 96-column Session was
-observed at 80×24 in a parallel coverage run.
+observed at 80×24 in a parallel coverage run. The cross-resource run identity
+(home, runtime directory, bindings, tool configs, temp dir and child
+environment) is owned by
+[Test Runtime isolation](../engineering/test-runtime-isolation.md) (#4597).
 
 ## A test binary never falls back to the shared default
 

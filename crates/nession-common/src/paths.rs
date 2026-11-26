@@ -27,6 +27,12 @@ pub const RUNTIME_DIR_NAME: &str = "nession";
 /// This governs durable state only. Ephemeral process state (PID files and
 /// readiness markers) is resolved by [`runtime_dir`] instead.
 pub fn nession_home() -> io::Result<PathBuf> {
+    let home = resolve_nession_home()?;
+    crate::test_runtime::ensure_owned_path("durable Nession home", &home)?;
+    Ok(home)
+}
+
+fn resolve_nession_home() -> io::Result<PathBuf> {
     if let Ok(home) = std::env::var(NESSION_HOME_ENV) {
         if !home.is_empty() {
             return Ok(PathBuf::from(home));
@@ -100,7 +106,9 @@ pub fn server_image_build_dir_under(home: &Path) -> PathBuf {
 /// The directory may not exist yet; [`ensure_runtime_dir`] creates it with
 /// private permissions and rejects an unsafe location.
 pub fn runtime_dir() -> io::Result<PathBuf> {
-    resolve_runtime_dir(&RuntimeContext::from_process()).map(|resolved| resolved.dir)
+    let dir = resolve_runtime_dir(&RuntimeContext::from_process())?.dir;
+    crate::test_runtime::ensure_owned_path("Nession runtime directory", &dir)?;
+    Ok(dir)
 }
 
 /// Resolve and create the private Nession runtime directory.
@@ -111,6 +119,7 @@ pub fn runtime_dir() -> io::Result<PathBuf> {
 /// artifacts.
 pub fn ensure_runtime_dir() -> io::Result<PathBuf> {
     let resolved = resolve_runtime_dir(&RuntimeContext::from_process())?;
+    crate::test_runtime::ensure_owned_path("Nession runtime directory", &resolved.dir)?;
     prepare_runtime_dir(&resolved)?;
     Ok(resolved.dir)
 }
@@ -540,12 +549,6 @@ mod tests {
             std::env::set_var(key, value);
             Self { key, previous }
         }
-
-        fn unset(key: &'static str) -> Self {
-            let previous = std::env::var_os(key);
-            std::env::remove_var(key);
-            Self { key, previous }
-        }
     }
 
     impl Drop for EnvSetting {
@@ -786,13 +789,20 @@ mod tests {
 
     /// The actual Darwin default, not a simulated context row: the per-user
     /// temporary directory must be a real absolute directory the OS provides.
+    ///
+    /// Resolved through the pure context rather than [`runtime_dir`]: a test
+    /// binary may not resolve a production runtime path (#4597), and this test
+    /// only observes the OS default, it does not use it.
     #[cfg(target_os = "macos")]
     #[test]
     fn the_real_darwin_runtime_root_is_a_user_temporary_directory() {
-        let _guard = lock_env();
-        let _override = EnvSetting::unset(NESSION_RUNTIME_DIR_ENV);
-
-        let dir = runtime_dir().expect("macOS provides a per-user temporary directory");
+        let mut context = RuntimeContext::from_process();
+        // The harness sets NESION_RUNTIME_DIR; this test observes the OS
+        // default, so ignore the override without mutating process state.
+        context.override_dir = None;
+        let resolved =
+            resolve_runtime_dir(&context).expect("macOS provides a per-user temporary directory");
+        let dir = resolved.dir;
 
         assert!(dir.is_absolute(), "{dir:?}");
         assert!(dir.ends_with(RUNTIME_DIR_NAME), "{dir:?}");
@@ -804,22 +814,21 @@ mod tests {
     }
 
     /// The actual Linux user default when the runner provides XDG_RUNTIME_DIR.
+    ///
+    /// Pure resolution, not [`runtime_dir`], for the same #4597 reason.
     #[cfg(target_os = "linux")]
     #[test]
     fn the_real_linux_runtime_root_uses_xdg_when_available() {
-        let _guard = lock_env();
-        let _override = EnvSetting::unset(NESSION_RUNTIME_DIR_ENV);
         if effective_uid() == 0 {
             return; // Root has its own system contract, covered by the pure tests.
         }
         let Ok(xdg) = std::env::var("XDG_RUNTIME_DIR") else {
             return; // The no-XDG error is covered by the pure negative test.
         };
-
-        assert_eq!(
-            runtime_dir().unwrap(),
-            PathBuf::from(xdg).join(RUNTIME_DIR_NAME)
-        );
+        let mut context = RuntimeContext::from_process();
+        context.override_dir = None;
+        let resolved = resolve_runtime_dir(&context).unwrap();
+        assert_eq!(resolved.dir, PathBuf::from(xdg).join(RUNTIME_DIR_NAME));
     }
 
     #[test]

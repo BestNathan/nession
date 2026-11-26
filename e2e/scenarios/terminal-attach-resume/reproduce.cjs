@@ -12,6 +12,7 @@ const path = require('node:path');
 const {
   startFullStackRuntime, allocateLoopbackPort,
 } = require('../../runner/runtime/full-stack.js');
+const { createRunRoot } = require('../../runner/runtime/test-runtime.js');
 
 const {
   countMarkers, readTmux, sampleBrowser, redactObservation,
@@ -45,8 +46,9 @@ async function oneRun(runIndex, targetSha, output) {
   const started = now();
   const [serverPort, agentPort, stalledProbePort, webPort] = await Promise.all(
     Array.from({ length: 4 }, () => allocateLoopbackPort()));
-  const home = ownedPath('scenario-home');
-  const tmuxDir = ownedPath('scenario-tmux');
+  const run = createRunRoot('nession-scenario-replay');
+  const home = path.join(run.root, 'home');
+  const tmuxDir = path.join(run.root, 'sockets');
   const socket = path.join(tmuxDir, 'tmux.sock');
   const session = sessionSlug('scenario_' + runIndex + '_' + randomBytes(4).toString('hex'));
   const marker = 'REPLAY_SCENARIO_' + session + '_';
@@ -63,8 +65,8 @@ async function oneRun(runIndex, targetSha, output) {
   try {
     runtime = await startFullStackRuntime({
       repoRoot: root, targetSha, profile: 'scenario-terminal-replay',
-      home, tmuxSocket: socket, serverPort, agentPort,
-      stalledProbePort, webPort, cleanupHome: true,
+      runRoot: run.root, home, tmuxSocket: socket, serverPort, agentPort,
+      stalledProbePort, webPort, cleanupHome: true, cleanupRoot: true,
     });
     browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();

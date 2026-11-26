@@ -417,20 +417,39 @@ fn the_root_names_the_work_tree_the_status_describes() {
 
 #[test]
 fn repository_discovery_ignores_an_inherited_git_dir() {
-    // The environment is stripped from every child. If it were not, a stray
-    // GIT_DIR would silently redirect every call to a different repository —
-    // the failure this crate exists to prevent.
-    let dir = repo().unwrap();
+    // Run the probe in a child rather than mutating this process's
+    // environment: `set_var` is process-global and other tests in this binary
+    // run concurrently (#4597 F10). The child is this test binary, filtered to
+    // the ignored probe below, with GIT_DIR set in its own environment.
     let elsewhere = tempfile::tempdir().unwrap();
-    std::env::set_var("GIT_DIR", elsewhere.path());
+    let status = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "inherited_git_dir_probe_child",
+            "--nocapture",
+        ])
+        .env("GIT_DIR", elsewhere.path())
+        .env("NESION_GIT_DIR_PROBE", "1")
+        .status()
+        .expect("spawn the GIT_DIR probe");
+    assert!(status.success(), "the inherited-GIT_DIR probe failed");
+}
 
+/// Runs only as the child of [`repository_discovery_ignores_an_inherited_git_dir`],
+/// which sets `GIT_DIR` in its environment.
+#[test]
+#[ignore = "spawned with GIT_DIR set by repository_discovery_ignores_an_inherited_git_dir"]
+fn inherited_git_dir_probe_child() {
+    if std::env::var_os("NESION_GIT_DIR_PROBE").is_none() {
+        return;
+    }
+    let dir = repo().unwrap();
     let cmd = cmd_for(&dir);
     let root = tokio::runtime::Runtime::new()
         .unwrap()
         .block_on(async { cmd.resolve_root().await })
         .unwrap();
-    std::env::remove_var("GIT_DIR");
-
     assert!(
         root.is_some(),
         "GIT_DIR must not redirect the probe away from the working directory"
