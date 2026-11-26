@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "issue-audit",
+    "github_workflow": "Agent / Issue Audit",
+    "github_run_id": 45779446741,
+    "github_run_attempt": 1,
+    "job": "agent",
+    "repository": "BestNathan/nession",
+    "event": "issues",
+    "unique_run_name": "45779446741-1-issue-4587"
+  },
+  "task": {
+    "id": "issue-4587",
+    "type": "issue-audit",
+    "issue": 4587
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "audit-qwen-01",
+    "role": "auditor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "f38c9a4b-de11-4c06-85ff-fe8ac27b47cb",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "issue-audit",
+      "version": "v1",
+      "sha256": "ab44b4d88bca3c8fea6c034215a8a21533b1a3958d31f982a6a4d937f8c77f1a"
+    }
+  },
+  "execution": {
+    "turns": 8,
+    "model_requests": 2,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 36,
+    "output": 13763,
+    "cache_read": 38927,
+    "cache_write": 19228,
+    "reasoning": null,
+    "total": 71954
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-26T08:00:22.419Z",
+    "finished_at": "2026-11-26T08:04:22.705Z",
+    "agent_duration_ms": 135996,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "needs-review",
+    "preflight_validation": {
+      "observed": true,
+      "calls": 3,
+      "passed": 0,
+      "final_candidate_checked": false,
+      "codes": [
+        "ISSUE_AUDIT_CONTRACT_REJECTED",
+        "ISSUE_AUDIT_CONTRACT_REJECTED",
+        "ISSUE_AUDIT_CONTRACT_REJECTED"
+      ],
+      "evidence_kind": "local-readonly-mcp-proposal-checks"
+    },
+    "rejection_code": "ISSUE_AUDIT_CONTRACT_REJECTED"
+  }
+}
