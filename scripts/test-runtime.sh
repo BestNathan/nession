@@ -154,6 +154,12 @@ nession_test_runtime_export() {
     # provider credentials or proxy endpoints. Cases that need a credential
     # declare their own explicit lane (#4597 SC-05).
     unset SSH_AUTH_SOCK GIT_ASKPASS SSH_ASKPASS
+    # An Agent Session launches this test process with its own shell
+    # provenance (ZDOTDIR and the user-baseline marker). A real-tmux fixture
+    # must not inherit that: zsh would source the developer's startup files
+    # against the run-owned HOME and the session would never reach its own
+    # adapter (#4597; the #4605 regression tests).
+    unset ZDOTDIR NESSION_RUNTIME_USER_ZDOTDIR NESSION_RUNTIME_SESSION_ID ZSH
     unset ANTHROPIC_API_KEY ANTHROPIC_AUTH_TOKEN ANTHROPIC_BASE_URL
     unset OPENAI_API_KEY OPENAI_BASE_URL OPENAI_ORG_ID
     unset GITHUB_TOKEN GH_TOKEN GITHUB_PAT

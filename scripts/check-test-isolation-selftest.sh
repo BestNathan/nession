@@ -195,9 +195,10 @@ fi
 out=$(env -u NSESSION_TEST_RUNTIME_DIR -u NSESSION_TEST_RUNTIME_MANIFEST \
     -u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \
     ANTHROPIC_API_KEY=synthetic-canary GITHUB_TOKEN=synthetic-canary \
-    HTTPS_PROXY=http://127.0.0.1:9 \
+    HTTPS_PROXY=http://127.0.0.1:9 ZDOTDIR=/synthetic ZSH=/synthetic \
+    NESSION_RUNTIME_USER_ZDOTDIR=/synthetic NESSION_RUNTIME_SESSION_ID=synthetic \
     bash -c '. scripts/test-runtime.sh; nession_test_runtime_init; \
-        if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${HTTPS_PROXY:-}" ]; then echo LEAKED; else echo CLEAN; fi; \
+        if [ -n "${ANTHROPIC_API_KEY:-}" ] || [ -n "${GITHUB_TOKEN:-}" ] || [ -n "${HTTPS_PROXY:-}" ] || [ -n "${ZDOTDIR:-}" ] || [ -n "${ZSH:-}" ] || [ -n "${NESSION_RUNTIME_USER_ZDOTDIR:-}" ] || [ -n "${NESSION_RUNTIME_SESSION_ID:-}" ]; then echo LEAKED; else echo CLEAN; fi; \
         nession_test_runtime_cleanup')
 if [[ $out == CLEAN ]]; then
     echo "  ✓ credentials and proxy endpoints are not forwarded to the test child"
