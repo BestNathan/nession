@@ -105,7 +105,7 @@ async function main() {
     webOnly: true,
     runRoot: normal.root,
     home: path.join(normal.root, 'home'),
-    tmuxSocket: normal.tmux_socket,
+    tmuxSocket: normal.tmuxSocket,
     serverPort: s1, agentPort: a1, stalledProbePort: p1, webPort: w1,
     cleanupHome: true,
     cleanupRoot: true,
@@ -141,7 +141,7 @@ async function main() {
       webOnly: true,
       runRoot: partial.root,
       home: path.join(partial.root, 'home'),
-      tmuxSocket: partial.tmux_socket,
+      tmuxSocket: partial.tmuxSocket,
       serverPort: s2, agentPort: a2, stalledProbePort: p2, webPort: w2,
       cleanupHome: true, cleanupRoot: true,
     }));

@@ -54,7 +54,7 @@ async function startPair(label) {
     profile: 'full-stack-local',
     runRoot: run.root,
     home: path.join(run.root, 'home'),
-    tmuxSocket: run.tmux_socket,
+    tmuxSocket: run.tmuxSocket,
     serverPort: ports[0],
     agentPort: ports[1],
     stalledProbePort: ports[2],
@@ -84,7 +84,7 @@ async function main() {
     profile: 'full-stack-local',
     runRoot: forged.root,
     home: link,
-    tmuxSocket: forged.tmux_socket,
+    tmuxSocket: forged.tmuxSocket,
     serverPort: s0, agentPort: a0, stalledProbePort: p0, webPort: w0,
     cleanupHome: true, cleanupRoot: true,
   }), /outside this run's Test Runtime root/);
