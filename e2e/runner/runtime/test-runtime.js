@@ -56,22 +56,43 @@ function assertOwnedPath(root, candidate, label) {
   }
   let ancestor = resolved;
   for (;;) {
+    let metadata = null;
     try {
+      metadata = fs.lstatSync(ancestor);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+    if (metadata !== null) {
+      if (metadata.isSymbolicLink()) {
+        let canonical;
+        try {
+          canonical = fs.realpathSync(ancestor);
+        } catch (error) {
+          throw new Error(
+            `${label} ${resolved} is a symlink that does not resolve (${error.code}); ` +
+            `it cannot be proven inside this run's Test Runtime root ${root} (#4597)`,
+          );
+        }
+        if (!isWithin(fs.realpathSync(root), canonical)) {
+          throw new Error(
+            `${label} ${resolved} resolves outside this run's Test Runtime root ${root} (#4597)`,
+          );
+        }
+        return resolved;
+      }
       const canonical = fs.realpathSync(ancestor);
       if (!isWithin(fs.realpathSync(root), canonical)) {
         throw new Error(
-          `${label} ${resolved} resolves outside this run's Test Runtime root ${root} (#4597)`,
+          `${label} ${resolved} is outside this run's Test Runtime root ${root} (#4597)`,
         );
       }
       return resolved;
-    } catch (error) {
-      if (error.code !== 'ENOENT') throw error;
-      const parent = path.dirname(ancestor);
-      if (parent === ancestor) {
-        throw new Error(`${label} ${resolved} has no existing ancestor inside ${root}`);
-      }
-      ancestor = parent;
     }
+    const parent = path.dirname(ancestor);
+    if (parent === ancestor) {
+      throw new Error(`${label} ${resolved} has no existing ancestor inside ${root}`);
+    }
+    ancestor = parent;
   }
 }
 

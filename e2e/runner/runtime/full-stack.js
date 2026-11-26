@@ -472,6 +472,7 @@ async function startFullStackRuntime(options) {
   );
 
   const processes = [];
+  let serverPid = null;
 
   const stop = async () => {
     const failures = [];
@@ -542,6 +543,7 @@ async function startFullStackRuntime(options) {
         label: 'nession-server',
       });
       processes.push(serverProcess);
+      serverPid = serverProcess.child.pid ?? null;
       await waitForTcp(serverPort, readyTimeoutMs, serverProcess.child, serverProcess.label);
 
       // Preserve the existing E2E stabilization window after server readiness.
@@ -574,6 +576,12 @@ async function startFullStackRuntime(options) {
       run_id: ownership.manifest.run_id,
       home,
       tmux_socket: tmuxSocket,
+      // Process identity for Cases that must prove the same Agent survived a
+      // sibling run. A directly spawned product binary does not write a PID
+      // file; the harness owns these child PIDs.
+      server_pid: serverPid,
+      agent_pid: webOnly ? null : (agentEntry?.child.pid ?? null),
+      web_pid: webProcess.child.pid ?? null,
       // A web-only runtime has no Server/Agent; reporting invented ports would
       // claim a stack that was never started.
       ...(webOnly ? {} : { server_port: serverPort, agent_port: agentPort }),

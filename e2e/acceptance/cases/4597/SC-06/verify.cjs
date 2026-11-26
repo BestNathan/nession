@@ -4,7 +4,7 @@
 // bounded teardown. The reaper proves run ownership: it reclaims a dead
 // verified root, never a live root and never an unverified look-alike.
 const assert = require('node:assert/strict');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const net = require('node:net');
 const path = require('node:path');
@@ -77,21 +77,16 @@ async function waitExit(child, timeoutMs) {
 }
 
 function sweepKill() {
-  try {
-    return {
-      status: 0,
-      output: require('node:child_process').execFileSync(SWEEP, ['--kill'], {
-        cwd: REPO_ROOT,
-        encoding: 'utf8',
-        timeout: 120000,
-      }),
-    };
-  } catch (error) {
-    return {
-      status: typeof error.status === 'number' ? error.status : 1,
-      output: String(error.stdout || '') + String(error.stderr || ''),
-    };
-  }
+  const run = spawnSync(SWEEP, ['--kill'], {
+    cwd: REPO_ROOT,
+    encoding: 'utf8',
+    timeout: 120000,
+  });
+  return {
+    status: typeof run.status === 'number' ? run.status : 1,
+    output: String(run.stdout || '') + String(run.stderr || ''),
+    error: run.error ? String(run.error) : null,
+  };
 }
 
 async function main() {
