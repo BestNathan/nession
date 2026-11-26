@@ -976,3 +976,17 @@
 - Categories: architecture, agent, ci, security, workflows
 - Reason: Record the #4528 exact-head CI barrier — expected obligations frozen from server-side required checks, Quality scope and Issue-selected browser applicability before observation; authenticated Run/attempt/Job/step evidence with bounded pagination and material rerun invalidation; durable `ci_retry` Outbox intent/receipt with readback, no duplicate request, cumulative budgets and stale-head cancellation; and the unified both-receipt feedback plus signed Developer repair input bound to the same Thread/checkpoint. SC-06 remains separately authorized
 - Source: https://github.com/BestNathan/nession/issues/4528
+
+## 2026-11-26T10:40:40Z | update | Nession CLI release versioning and single-active daemons
+- Path: topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, release, storage
+- Reason: Supersede the move-based upgrade rule with the #4592 retention contract — the installation is the stable unit, Current keeps configs/identity/durable state while archives get independent bounded snapshots with coverage manifests; record the target-owned config compatibility probe, journal schema 2 preimage-verified recovery with schema-1 compatibility, coverage-aware archived server paths, the upgrade-contract installer bridge for old move-based CLIs, version inspect/recover operator recovery, the bounded resumable transport policy and the historical state-coverage dispatch gate
+- Source: https://github.com/BestNathan/nession/issues/4592
+
+## 2026-11-26T10:40:40Z | update | Nession runtime directories and daemon process state ownership
+- Path: topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, security, storage
+- Reason: Reconcile the durable-data ownership statement with the #4592 retention contract — the durable home belongs to the installation and is retained in place across upgrades while archives receive independent snapshot copies; runtime process state remains unversioned and never archived
+- Source: https://github.com/BestNathan/nession/issues/4592

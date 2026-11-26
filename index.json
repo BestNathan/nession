@@ -84,7 +84,7 @@
       },
       {
         "title": "Nession CLI release versioning and single-active daemons",
-        "description": "Current/Selected/Running release semantics, archived release homes with their own config and durable state, the install/archive transaction, per-command version dispatch, and idempotent start with restart-only replacement",
+        "description": "Current/Selected/Running release semantics, the installation as the stable unit retained across upgrades, independent archive snapshots with coverage manifests, the bounded resumable upgrade transport, per-command version dispatch with a state-coverage gate, and idempotent start with restart-only replacement",
         "path": "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
         "status": "verified",
         "categories": [
@@ -95,7 +95,7 @@
           "release",
           "storage"
         ],
-        "updated_at": "2026-11-11T06:08:01Z"
+        "updated_at": "2026-11-26T10:40:40Z"
       },
       {
         "title": "Nession instruction architecture and knowledge ownership",
@@ -138,7 +138,7 @@
           "security",
           "storage"
         ],
-        "updated_at": "2026-11-11T06:08:01Z"
+        "updated_at": "2026-11-26T10:40:40Z"
       },
       {
         "title": "Nession Sandbox policy and execution isolation architecture",

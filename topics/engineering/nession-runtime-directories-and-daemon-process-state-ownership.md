@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "cli", "lifecycle", "process", "security", "storage"]
 status: verified
 created_at: 2026-11-10T11:18:40Z
-updated_at: 2026-11-11T06:08:01Z
-sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs"]
+updated_at: 2026-11-26T10:40:40Z
+sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md"]
 ---
 
 # Nession runtime directories and daemon process state ownership
@@ -18,6 +18,9 @@ Docker separates `/var/lib` from `/run`.
 
 - Durable data — configuration, database, Agent identity, Session metadata,
   logs and env bindings — lives under `$NESSION_HOME` (default `~/.nession`).
+  The durable home belongs to the **installation** and is retained in place
+  across release upgrades (#4592); a release archive receives independent
+  snapshot copies, never the moved originals.
 - Process state — Agent/Server PID files and background-start readiness
   markers — lives in an OS runtime directory that a reboot may delete and that
   is never archived with an installed binary version.
@@ -105,7 +108,8 @@ the recorded instance. The grace and settle windows are unchanged.
 - This article covers process-lifecycle state only. Session Environment
   Bindings, Agent identity, databases and logs remain durable `$NESSION_HOME`
   state.
-- The cross-version lifecycle lock and the multi-version release archive are
+- The cross-version lifecycle lock, the retention upgrade transaction and the
+  multi-version release archive are
   owned by [Nession CLI release versioning and single-active daemons](nession-cli-release-versioning-and-single-active-daemons.md); this article owns only the runtime location and process identity themselves.
 - A systemd `RuntimeDirectory=nession` is deliberately not used by the user
   unit: the runtime root is shared by components, and a unit-scoped cleanup must
