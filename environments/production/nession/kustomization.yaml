@@ -11,19 +11,19 @@ commonLabels:
   env: production
 
 resources:
-  - ../../../base/nession
-  - pv-pvc.yaml
+- ../../../base/nession
+- pv-pvc.yaml
 
 images:
 - name: ghcr.io/bestnathan/nession-agent
   newName: ghcr.io/bestnathan/nession
-  newTag: agent-0.35.0
+  newTag: agent-1.0.0
 - name: ghcr.io/bestnathan/nession-server
   newName: ghcr.io/bestnathan/nession
-  newTag: server-0.35.0
+  newTag: server-1.0.0
 - name: ghcr.io/bestnathan/nession-ui
   newName: ghcr.io/bestnathan/nession
-  newTag: ui-0.35.0
+  newTag: ui-1.0.0
 
 patchesStrategicMerge:
 - patch-imagepullsecrets.yaml
