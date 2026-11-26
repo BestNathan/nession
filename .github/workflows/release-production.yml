@@ -969,6 +969,10 @@ jobs:
           registry: ${{ env.ACR_REGISTRY }}
           username: ${{ secrets.ALIYUN_ACR_USERNAME }}
           password: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+      # #4593: the mirror script's chunked ACR fallback fails closed without
+      # regctl on PATH; provide the same pinned binary the staging lane uses.
+      - uses: ./.github/actions/install-regctl
+        if: steps.credentials.outputs.configured == 'true'
       - name: Mirror and verify multi-arch ${{ matrix.image }} image
         if: steps.credentials.outputs.configured == 'true'
         shell: bash

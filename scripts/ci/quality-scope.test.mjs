@@ -45,6 +45,10 @@ test('changed owners select affected Gates',()=>{
   assert.deepEqual(flags(['docs/AGENTS.md']),{...none,instruction:true});
   assert.deepEqual(flags(['.github/workflows/agent-controller-dispatch.yml']),{...none,workflow:true});
 });
+test('composite Actions are workflow surface, not unknown (#4593)',()=>{
+  assert.deepEqual(flags(['.github/actions/install-regctl/action.yml']),{...none,workflow:true});
+  assert.deepEqual(flags(['.github/actions/install-regctl/action.yml','.github/workflows/deploy-staging-acr.yml']),{...none,workflow:true});
+});
 test('unknown paths and unprovable diffs fail conservatively',()=>{
   assert.deepEqual(flags(['scripts/new-checker.sh']),{...none,rust:true,web:true,tooling:true});
   for(const xs of [[],[''],['../escape'],[123],null]){
