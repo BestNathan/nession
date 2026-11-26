@@ -9,10 +9,14 @@ const { run, targetSha, checked, crateTests, assertRan, isolatedTmuxEnv } =
 run(({ evidence }) => {
   const sha = targetSha();
   checked('zsh', ['--version'], 5000);
+  // The macOS Case lane compiles the test target from a cold checkout with
+  // CARGO_INCREMENTAL=0 and -D warnings; 300 s killed cargo while it was still
+  // compiling. The budget covers compilation plus execution; the assertions
+  // and their own bounded waits are unchanged.
   const out = crateTests(
     'nession-agent',
     ['--lib', 'tmux::env::tests::zsh_contamination_'],
-    300000,
+    900000,
     isolatedTmuxEnv('nession-4605-sc02'),
   );
   assertRan(out, [
