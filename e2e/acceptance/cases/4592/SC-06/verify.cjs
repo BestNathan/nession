@@ -11,7 +11,7 @@
 // Also proven: the new CLI's install uses the same owner (same-version no-op),
 // a corrupted checksum is refused, a fresh bootstrap still works, and an
 // unknown version fails closed.
-const { spawnSync } = require('node:child_process');
+const { spawn } = require('node:child_process');
 const {
   assert, fs, path, root, targetSha, nessionBin, makeRoot, mkdirPrivate,
   cliOutput, runBinary, waitFor, waitForTcp, installEnv, sha256File,
@@ -21,12 +21,33 @@ const {
 
 const OLD_VERSION = '1.0.0';
 
+// The release fixture is served from this process; a synchronous spawn would
+// starve its HTTP server and every install would fail with a network error.
+// Run the installer asynchronously and collect its output.
 function runInstaller(script, args, env, timeout = 180000) {
-  const result = spawnSync('sh', [script, ...args], {
-    cwd: root, encoding: 'utf8', timeout, maxBuffer: 8 * 1024 * 1024, env,
+  const child = spawn('sh', [script, ...args], {
+    cwd: root, env, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  if (result.error) throw result.error;
-  return { status: result.status, output: String(result.stdout) + String(result.stderr) };
+  let stdout = '';
+  let stderr = '';
+  child.stdout.setEncoding('utf8');
+  child.stderr.setEncoding('utf8');
+  child.stdout.on('data', (chunk) => { stdout += chunk; });
+  child.stderr.on('data', (chunk) => { stderr += chunk; });
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      child.kill('SIGKILL');
+      reject(new Error('installer did not exit within ' + timeout + 'ms'));
+    }, timeout);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      resolve({ status: code, output: stdout + stderr });
+    });
+  });
 }
 
 main(async () => {
@@ -108,7 +129,7 @@ main(async () => {
 
   try {
     // 1. The fixed installer crosses the old CLI over to the new contract.
-    const bridged = runInstaller(script, ['--version', targetVersion, '--dir', installDir], installerEnv);
+    const bridged = await runInstaller(script, ['--version', targetVersion, '--dir', installDir], installerEnv);
     assert.equal(bridged.status, 0, 'install.sh bridge failed: ' + bridged.output.slice(-3000));
     assert.match(bridged.output, /verified target transaction/);
     assert.doesNotMatch(bridged.output, /Delegating to the installed nession CLI/);
@@ -153,7 +174,7 @@ main(async () => {
       NESSION_RELEASE_BASE_URL: badFixture.releaseBase,
       NESSION_UPDATE_API_URL: badFixture.base,
     };
-    const bad = runInstaller(script, ['--version', targetVersion, '--dir', freshDir], badEnv);
+    const bad = await runInstaller(script, ['--version', targetVersion, '--dir', freshDir], badEnv);
     assert.notEqual(bad.status, 0, 'a corrupted checksum must be refused');
     assert.match(bad.output, /checksum mismatch/);
     assert.ok(!fs.existsSync(path.join(freshDir, 'nession')), 'a corrupt release was published');
@@ -168,7 +189,7 @@ main(async () => {
       NESSION_RELEASE_BASE_URL: goodFixture.releaseBase,
       NESSION_UPDATE_API_URL: goodFixture.base,
     };
-    const fresh = runInstaller(script, ['--version', targetVersion, '--dir', freshGood], goodEnv);
+    const fresh = await runInstaller(script, ['--version', targetVersion, '--dir', freshGood], goodEnv);
     assert.equal(fresh.status, 0, 'fresh bootstrap failed: ' + fresh.output.slice(-2000));
     for (const binary of BINARIES) {
       assert.ok(fs.existsSync(path.join(freshGood, binary)), 'fresh install missing ' + binary);
@@ -177,7 +198,7 @@ main(async () => {
     evidence.push({ type: 'runtime', value: 'Fresh bootstrap installed all three verified binaries' });
 
     // 6. An unknown version fails closed.
-    const unknown = runInstaller(script, ['--version', '99.99.99', '--dir', freshGood], goodEnv);
+    const unknown = await runInstaller(script, ['--version', '99.99.99', '--dir', freshGood], goodEnv);
     assert.notEqual(unknown.status, 0, 'an unknown version must fail closed');
     await goodFixture.close();
     evidence.push({ type: 'runtime', value: 'Unknown version 99.99.99 refused by the installer' });
