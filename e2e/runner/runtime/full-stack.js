@@ -326,7 +326,7 @@ function installAgentClis(home, versions, childEnv) {
   return installed;
 }
 
-function verifyAndKillTmux(runRoot, tmuxSocket) {
+async function verifyAndKillTmux(runRoot, tmuxSocket) {
   assertOwnedPath(runRoot, tmuxSocket, 'tmux socket');
   if (!existsSync(tmuxSocket)) return;
   let reported = '';
@@ -349,6 +349,31 @@ function verifyAndKillTmux(runRoot, tmuxSocket) {
     );
   }
   execFileSync('tmux', ['-S', tmuxSocket, 'kill-server'], { stdio: 'ignore' });
+  // kill-server returns when the server is asked to exit, not when every
+  // Session shell has finished writing to the run-owned HOME. Let the socket
+  // disappear before the caller removes the home, otherwise a shell can
+  // recreate a file while rmSync walks the tree (ENOTEMPTY).
+  for (let attempt = 0; attempt < 100 && existsSync(tmuxSocket); attempt += 1) {
+    await sleep(50);
+  }
+}
+
+/// Remove an owned directory, retrying the narrow window in which a killed
+/// Session shell creates one more file while the tree is being walked.
+async function removeOwnedDirectory(runRoot, dir, label) {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    try {
+      assertOwnedPath(runRoot, dir, label);
+      rmSync(dir, { recursive: true, force: true });
+      return;
+    } catch (error) {
+      if (error.code === 'ENOENT') return;
+      if (!['ENOTEMPTY', 'EBUSY', 'EACCES', 'EPERM'].includes(error.code) || attempt === 19) {
+        throw error;
+      }
+      await sleep(100);
+    }
+  }
 }
 
 async function startFullStackRuntime(options) {
@@ -453,17 +478,15 @@ async function startFullStackRuntime(options) {
     for (const entry of [...processes].reverse()) {
       try { await stopManaged(entry); } catch (error) { failures.push(String(error)); }
     }
-    try { verifyAndKillTmux(runRoot, tmuxSocket); } catch (error) { failures.push(String(error)); }
+    try { await verifyAndKillTmux(runRoot, tmuxSocket); } catch (error) { failures.push(String(error)); }
     if (tmuxDir !== runRoot) {
       try {
-        assertOwnedPath(runRoot, tmuxDir, 'socket directory');
-        rmSync(tmuxDir, { recursive: true, force: true });
+        await removeOwnedDirectory(runRoot, tmuxDir, 'socket directory');
       } catch (error) { failures.push(String(error)); }
     }
     if (cleanupHome) {
       try {
-        assertOwnedPath(runRoot, home, 'home');
-        rmSync(home, { recursive: true, force: true });
+        await removeOwnedDirectory(runRoot, home, 'home');
       } catch (error) { failures.push(String(error)); }
     }
     if (cleanupRoot && failures.length === 0) {
