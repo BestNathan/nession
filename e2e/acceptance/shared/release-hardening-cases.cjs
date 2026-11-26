@@ -78,7 +78,7 @@ function sha256File(file) {
   return crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 }
 
-/** A real release tarball: the target binaries under a versioned asset name. */
+/** A real release tarball: the target binaries under a versioned asset name; the descriptor keeps `version` for startInstallerFixture's metadata tag. */
 function makeRealReleaseTarball(dir, version) {
   const binaries = path.join(dir, 'real-binaries-' + version);
   fs.mkdirSync(binaries, { recursive: true, mode: 0o700 });
@@ -90,7 +90,7 @@ function makeRealReleaseTarball(dir, version) {
   const assetName = 'nession-' + version + '-' + platformString() + '.tar.gz';
   const tarball = path.join(dir, assetName);
   execFileSync('tar', ['-czf', tarball, '-C', binaries, ...BINARIES], { stdio: 'ignore' });
-  return { assetName, tarball, checksum: sha256File(tarball) };
+  return { version, assetName, tarball, checksum: sha256File(tarball) };
 }
 
 function releaseAssetUrl(version, osName, arch) {
