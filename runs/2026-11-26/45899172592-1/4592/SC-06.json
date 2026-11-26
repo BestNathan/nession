@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "9e1ce49b3bb2610a68e571831a1adcd34bbc3400f5f331f11f927e0d069c1119",
+  "run_id": 45899172592,
+  "run_attempt": 1,
+  "issue": 4592,
+  "criterion": "SC-06",
+  "criterion_text": "真实已发布的旧 CLI（包含已支持 install 但使用 move 的版本）经修复后的安装入口首次跨越到新契约时，原配置、身份及业务状态不会被旧事务移走；新 CLI update/install 与新版 install.sh 使用同一迁移 owner；无能力握手的旧入口有明确安全升级路径，文档明确无法追溯改变旧二进制直接 update 的限制；fresh install 和 checksum/错误版本拒绝仍成立。",
+  "stage": "staging",
+  "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "contract_sha256": "14c6ca8b197ac3cd801a1c4cc3e84ece65d3ee810e46961866b993585f91f702",
+  "case_revision": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "case_tree_sha": "8580fa1efc92d2427bae7ef994f799d4e67d414f",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T21:55:32.393Z",
+  "finished_at": "2026-11-26T21:55:40.072Z",
+  "duration_ms": 7679,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "ReferenceError: freePort is not defined\n    at /home/runner/work/nession/nession/workspace/e2e/acceptance/cases/4592/SC-06/verify.cjs:87:22",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the exact-SHA runtime observations did not establish the criterion"
+        }
+      ],
+      "duration_ms": 1686,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45899172592,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "89445e72f8de6b732d790c1b6993e07566fcf30b",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+        "stage": "staging",
+        "issue": 4592,
+        "criterion": "SC-06",
+        "job_id": 140186554584,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45899172592",
+    "record_path": "runs/2026-11-26/45899172592-1/4592/SC-06.json",
+    "source_result_sha256": "24fb9f15bf991c85549d0325a464934298c5e4bc58b6a25554b45dd02cacae31"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45899172592-1",
+    "sha256": "24fb9f15bf991c85549d0325a464934298c5e4bc58b6a25554b45dd02cacae31",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45899172592",
+    "durability": "time-limited; object archival not configured"
+  }
+}
