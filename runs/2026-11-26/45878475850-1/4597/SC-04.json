@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "5bcdfc1cc7c8b13a1ae64c9f2dd7b86fe19fc518209428f7a0eae05138195be9",
+  "run_id": 45878475850,
+  "run_attempt": 1,
+  "issue": 4597,
+  "criterion": "SC-04",
+  "criterion_text": "E2E/Acceptance runner allocates unique roots/ports, binds to owned loopback listeners and publishes run manifest. Two independent runs can coexist, stop/restart one without affecting the other; inherited/forged production-looking home/socket, symlink and foreign owner are rejected before rm/kill, and browser session lifecycle regression passes.",
+  "stage": "staging",
+  "target_sha": "837ef130021b9c5beb93c231c13d2c38b1f6db1a",
+  "contract_sha256": "14783f07b59393336268ff84ffcb5835e9c25475b905638e12eaffa881f6899c",
+  "case_revision": "837ef130021b9c5beb93c231c13d2c38b1f6db1a",
+  "case_tree_sha": "7123e2863b4c96893a5589ab4103222cec319e39",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T18:48:49.801Z",
+  "finished_at": "2026-11-26T18:49:12.398Z",
+  "duration_ms": 22597,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Unique roots/ports/manifests allow two concurrent runs; stopping one leaves the other ready; forged/symlinked/foreign paths are rejected before provisioning (exact SHA 837ef130021b9c5beb93c231c13d2c38b1f6db1a); browser session lifecycle is the E2E Report regression lane",
+      "evidence": [
+        {
+          "type": "negative",
+          "value": "symlink-escape home and a tampered manifest were rejected before provisioning; foreign path untouched"
+        },
+        {
+          "type": "runtime",
+          "value": "two concurrent runs: roots /tmp/nession-test-runtime.AcTFiS-nession-4597-a and /tmp/nession-test-runtime.MQ83on-nession-4597-b, distinct sockets and leased ports; A stopped and removed only its own root/port while B (server pid 4153, agent pid 4172) stayed ready"
+        }
+      ],
+      "duration_ms": 16744,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45878475850,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "837ef130021b9c5beb93c231c13d2c38b1f6db1a",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45878475850",
+    "record_path": "runs/2026-11-26/45878475850-1/4597/SC-04.json",
+    "source_result_sha256": "a793817c58809c020dc46df2a88493e2ff255422e68a0a619a7f36cae27a8bdd"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45878475850-1",
+    "sha256": "a793817c58809c020dc46df2a88493e2ff255422e68a0a619a7f36cae27a8bdd",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45878475850",
+    "durability": "time-limited; object archival not configured"
+  }
+}
