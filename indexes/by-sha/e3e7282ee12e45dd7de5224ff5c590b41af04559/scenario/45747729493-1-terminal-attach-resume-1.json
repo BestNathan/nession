@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45747729493,
+    "run_attempt": 1,
+    "event": "push",
+    "branch": "main",
+    "target_sha": "e3e7282ee12e45dd7de5224ff5c590b41af04559",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45747729493",
+    "scenario_tree_sha": "7b1c0274542b555b1960ce1862c76a537954d31f",
+    "original_sha256": "e4b04792b988beed25cf79b519e628699bf10dcf2438c717447b37fd34b7818d"
+  },
+  "record": "runs/2026-11-26/45747729493-1/scenario/terminal-attach-resume-1.json",
+  "execution_id": "de8add236b9b5f90ec1c1e0692e4784c4f60e7420cb2dcfde4473c2e508fb0ca"
+}
