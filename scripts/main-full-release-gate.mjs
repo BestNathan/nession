@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // Owner: #2323. Read-only, trusted-Main exact-SHA Full release qualification.
 // A green workflow name, prior SHA or skipped per-ID step is NOT a receipt.
+// #4576: #3465 removed Full's push trigger, so an exact-SHA workflow_dispatch
+// is the deliberate release-proof act and is accepted alongside historical
+// push runs. Periodic schedule runs remain diagnostic-only (#3465) and are
+// never release admission. Every job/step/artifact attestation is unchanged.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
@@ -20,7 +24,7 @@ function canonicalRun(run, sha) {
     run.head_repository?.full_name === REPO &&
     run.head_branch === 'main' &&
     run.head_sha === sha &&
-    run.event === 'push' &&
+    ['push', 'workflow_dispatch'].includes(run.event) &&
     Number.isSafeInteger(run.id) && run.id > 0 &&
     Number.isSafeInteger(run.run_attempt) && run.run_attempt > 0;
 }
@@ -74,7 +78,9 @@ export function decideReleaseFull({sha, runs, jobs, artifacts}) {
 
 export async function evaluateReleaseFull({sha,get}) {
   if(!SHA.test(sha)||typeof get!=='function')throw Error('invalid Full release gate scope');
-  const query=new URLSearchParams({head_sha:sha,branch:'main',event:'push',per_page:'100'});
+  // #4576: inventory push and dispatch runs for the exact SHA; canonicalRun
+  // remains the single event/identity filter (schedule stays rejected).
+  const query=new URLSearchParams({head_sha:sha,branch:'main',per_page:'100'});
   const base='/repos/'+REPO+'/actions';
   const list=await get(base+'/workflows/e2e-full-regression.yml/runs?'+query);
   if(!Array.isArray(list?.workflow_runs) || list.workflow_runs.length>100)
@@ -98,7 +104,7 @@ export async function evaluateReleaseFull({sha,get}) {
 async function getGithub(path){
   const token=String(process.env.GH_TOKEN??process.env.GITHUB_TOKEN??'').trim();
   if(!token)throw Error('GitHub Actions read token required');
-  if(!/^\/repos\/BestNathan\/nession\/actions\/(workflows\/e2e-full-regression\.yml\/runs\?head_sha=[0-9a-f]{40}&branch=main&event=push&per_page=100|runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100|runs\/[1-9][0-9]*\/artifacts\?per_page=100)$/.test(path))
+  if(!/^\/repos\/BestNathan\/nession\/actions\/(workflows\/e2e-full-regression\.yml\/runs\?head_sha=[0-9a-f]{40}&branch=main&per_page=100|runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100|runs\/[1-9][0-9]*\/artifacts\?per_page=100)$/.test(path))
     throw Error('refused out-of-scope GitHub read');
   const response=await fetch('https://api.github.com'+path,{
     headers:{Accept:'application/vnd.github+json',Authorization:'Bearer '+token,
@@ -124,6 +130,10 @@ async function selfTest(){
   assert.equal(v().decision,'PASS');
   assert.equal(v({runs:[{...run,head_sha:old}]}).decision,'PENDING');
   assert.equal(v({runs:[{...run,event:'schedule'}]}).decision,'PENDING');
+  // #4576: exact-SHA dispatch is accepted; identity negatives stay rejected.
+  assert.equal(v({runs:[{...run,event:'workflow_dispatch'}]}).decision,'PASS');
+  assert.equal(v({runs:[{...run,event:'workflow_dispatch',head_sha:old}]}).decision,'PENDING');
+  assert.equal(v({runs:[{...run,event:'workflow_dispatch',head_branch:'staging'}]}).decision,'PENDING');
   assert.equal(v({runs:[{...run,status:'in_progress'}]}).decision,'PENDING');
   assert.equal(v({runs:[{...run,conclusion:'failure'}]}).decision,'FAIL');
   assert.equal(v({jobs:[{...job,run_attempt:1}]}).decision,'ERROR');
