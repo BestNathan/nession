@@ -97,7 +97,7 @@ function dispositionOf(file, line, kind, context) {
     }
     if (kind === 'fixed-port' || kind === 'fixed-tmp-path') {
       if (/socks5|proxy/i.test(line)) return 'explicit-test-service';
-      const configLike = /(listen_address|server_url|allowed_origins|tmux_socket_path|--rcfile|agent\.pid|"write":|"path":|no server running|http:\/\/|ws:\/\/|Some\(|Path::new|PathBuf::from|json!|assert|contains|format!|error connecting|classify_|TmuxCommand::new|PathSandbox::new|^\s*"(127\.0\.0\.1|localhost):)/.test(line);
+      const configLike = /(listen_address|server_url|allowed_origins|tmux_socket_path|--rcfile|agent\.pid|"write":|"path":|no server running|http:\/\/|ws:\/\/|Some\(|Path::new|PathBuf::from|json!|assert|contains|format!|error connecting|classify_|TmuxCommand::new|PathSandbox::new|plist|StandardOutPath|StandardErrorPath|<string>|^\s*"(127\.0\.0\.1|localhost):)/.test(line);
       return configLike ? 'path-string-fixture' : 'unresolved';
     }
     if (kind === 'process-spawn' && /socks5|proxy/i.test(line)) {

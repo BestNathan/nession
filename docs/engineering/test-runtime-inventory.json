@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1882,
-    "references": 996,
+    "entries": 1894,
+    "references": 1015,
     "unresolved": 0
   },
   "crates": [
@@ -169,7 +169,7 @@
       "file": "crates/nession-agent/src/runtime.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 900
+      "line": 941
     },
     {
       "file": "crates/nession-agent/src/sandbox_images.rs",
@@ -331,13 +331,13 @@
       "file": "crates/nession-agent/src/tmux/env.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1142
+      "line": 1733
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1657
+      "line": 1711
     },
     {
       "file": "crates/nession-agent/src/tmux/ops.rs",
@@ -721,25 +721,25 @@
       "file": "crates/nession-cli/src/args.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 416
+      "line": 489
     },
     {
       "file": "crates/nession-cli/src/commands/agent/start.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 322
+      "line": 354
     },
     {
       "file": "crates/nession-cli/src/commands/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 288
+      "line": 292
     },
     {
       "file": "crates/nession-cli/src/commands/server/start.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 212
+      "line": 243
     },
     {
       "file": "crates/nession-cli/src/commands/version/mod.rs",
@@ -775,7 +775,7 @@
       "file": "crates/nession-cli/src/lifecycle/pid_file.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 651
+      "line": 712
     },
     {
       "file": "crates/nession-cli/src/lifecycle/process.rs",
@@ -799,13 +799,55 @@
       "file": "crates/nession-cli/src/lifecycle/startup.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 166
+      "line": 243
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/discovery.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 141
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 463
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/format.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 101
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/query.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 320
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/resolve.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 261
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/service.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 303
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/tail.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 290
     },
     {
       "file": "crates/nession-cli/src/service/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1323
+      "line": 1401
     },
     {
       "file": "crates/nession-cli/src/terminal/raw.rs",
@@ -883,7 +925,7 @@
       "file": "crates/nession-cli/src/update/transaction.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1356
+      "line": 1377
     },
     {
       "file": "crates/nession-cli/src/update/version.rs",
@@ -895,7 +937,7 @@
       "file": "crates/nession-cli/src/versions/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 516
+      "line": 648
     },
     {
       "file": "crates/nession-cli/tests/integration/attach_route.rs",
@@ -917,6 +959,12 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/client_commands.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/logs.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 1
@@ -1003,13 +1051,13 @@
       "file": "crates/nession-common/src/logging.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 141
+      "line": 348
     },
     {
       "file": "crates/nession-common/src/paths.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 523
+      "line": 588
     },
     {
       "file": "crates/nession-common/src/readiness.rs",
@@ -1022,6 +1070,12 @@
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 107
+    },
+    {
+      "file": "crates/nession-common/src/startup_log.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 419
     },
     {
       "file": "crates/nession-common/src/tmux_socket.rs",
@@ -6792,6 +6846,21 @@
       "disposition": "e2e-runtime"
     },
     {
+      "file": "e2e/acceptance/cases/4600/SC-05/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4605/SC-02/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4605/SC-03/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
       "file": "e2e/acceptance/cases/565/SC-02/verify.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
@@ -10635,7 +10704,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 1606,
+      "line": 2207,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10644,7 +10713,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 1770,
+      "line": 2371,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10653,7 +10722,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 1871,
+      "line": 2472,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10662,7 +10731,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 1959,
+      "line": 2560,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10671,7 +10740,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2007,
+      "line": 2608,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10680,7 +10749,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2145,
+      "line": 2746,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10689,7 +10758,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2181,
+      "line": 2782,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10698,7 +10767,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2185,
+      "line": 2786,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10707,7 +10776,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2557,
+      "line": 3158,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10716,7 +10785,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2580,
+      "line": 3181,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10725,7 +10794,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 3037,
+      "line": 3638,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10733,8 +10802,44 @@
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
+      "file": "crates/nession-agent/src/tmux/env.rs",
+      "line": 4044,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = tokio::process::Command::new(shell);",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-agent/src/tmux/env.rs",
+      "line": 4063,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut child = command.spawn().expect(\"the shell starts\");",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-agent/src/tmux/env.rs",
+      "line": 4527,
+      "kind": "delete",
+      "effect": "delete",
+      "disposition": "test-runtime-root",
+      "reference": "std::fs::remove_file(b_adapter_dir.join(ZSH_ADAPTER_MARKER_FILE)).unwrap();",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-agent/src/tmux/env.rs",
+      "line": 4786,
+      "kind": "delete",
+      "effect": "delete",
+      "disposition": "test-runtime-root",
+      "reference": "std::fs::remove_file(b_adapter_dir.join(ZSH_ADAPTER_MARKER_FILE)).unwrap();",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 1766,
+      "line": 1822,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10743,7 +10848,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2193,
+      "line": 2249,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10752,7 +10857,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2231,
+      "line": 2287,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10761,7 +10866,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2268,
+      "line": 2324,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10770,7 +10875,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2372,
+      "line": 2428,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10779,7 +10884,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3089,
+      "line": 3145,
       "kind": "fixed-tmp-path",
       "effect": "write",
       "disposition": "path-string-fixture",
@@ -10788,7 +10893,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3276,
+      "line": 3332,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10797,7 +10902,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3327,
+      "line": 3383,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10806,7 +10911,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3379,
+      "line": 3435,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10815,7 +10920,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3430,
+      "line": 3486,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10824,7 +10929,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3492,
+      "line": 3548,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10833,7 +10938,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3493,
+      "line": 3549,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10842,7 +10947,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3553,
+      "line": 3609,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11454,7 +11559,7 @@
     },
     {
       "file": "crates/nession-cli/src/lifecycle/startup.rs",
-      "line": 172,
+      "line": 249,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11463,7 +11568,7 @@
     },
     {
       "file": "crates/nession-cli/src/lifecycle/startup.rs",
-      "line": 176,
+      "line": 253,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11472,7 +11577,7 @@
     },
     {
       "file": "crates/nession-cli/src/lifecycle/startup.rs",
-      "line": 210,
+      "line": 287,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11481,7 +11586,7 @@
     },
     {
       "file": "crates/nession-cli/src/lifecycle/startup.rs",
-      "line": 211,
+      "line": 288,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11490,7 +11595,7 @@
     },
     {
       "file": "crates/nession-cli/src/lifecycle/startup.rs",
-      "line": 267,
+      "line": 344,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11498,8 +11603,134 @@
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
+      "file": "crates/nession-cli/src/lifecycle/startup.rs",
+      "line": 376,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut child = std::process::Command::new(\"sh\")",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/lifecycle/startup.rs",
+      "line": 381,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/lifecycle/startup.rs",
+      "line": 398,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut child = std::process::Command::new(\"sh\")",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/lifecycle/startup.rs",
+      "line": 403,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 498,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 546,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 588,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 636,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 674,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 707,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 719,
+      "kind": "delete",
+      "effect": "delete",
+      "disposition": "test-runtime-root",
+      "reference": "std::fs::remove_file(&path).unwrap();",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/follow.rs",
+      "line": 747,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let follow = tokio::spawn(follow_rolling(",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/service.rs",
+      "line": 318,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "<key>StandardErrorPath</key>\\n  <string>/tmp/nession-agent.launchd.err</string>\\n\\",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/src/local_logs/service.rs",
+      "line": 326,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "Some(\"/tmp/nession-agent.launchd.err\")",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
       "file": "crates/nession-cli/src/service/mod.rs",
-      "line": 1584,
+      "line": 1666,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11508,7 +11739,7 @@
     },
     {
       "file": "crates/nession-cli/src/service/mod.rs",
-      "line": 1705,
+      "line": 1822,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11517,7 +11748,7 @@
     },
     {
       "file": "crates/nession-cli/src/service/mod.rs",
-      "line": 1707,
+      "line": 1824,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11661,7 +11892,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 1433,
+      "line": 1454,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11670,7 +11901,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 1835,
+      "line": 1856,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11679,7 +11910,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 2060,
+      "line": 2081,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11688,7 +11919,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 2101,
+      "line": 2122,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11697,7 +11928,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 585,
+      "line": 717,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11706,7 +11937,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 595,
+      "line": 727,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11903,6 +12134,15 @@
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
+      "file": "crates/nession-cli/tests/integration/logs.rs",
+      "line": 14,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = Command::new(env!(\"CARGO_BIN_EXE_nession\"));",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
       "file": "crates/nession-cli/tests/integration/session_commands.rs",
       "line": 25,
       "kind": "process-spawn",
@@ -12066,7 +12306,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 549,
+      "line": 614,
       "kind": "env-mutation",
       "effect": "resolve/read",
       "disposition": "serialized-unit-env-probe",
@@ -12075,7 +12315,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 557,
+      "line": 622,
       "kind": "env-mutation",
       "effect": "resolve/read",
       "disposition": "serialized-unit-env-probe",
@@ -12084,7 +12324,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 558,
+      "line": 623,
       "kind": "env-mutation",
       "effect": "resolve/read",
       "disposition": "serialized-unit-env-probe",
@@ -12093,7 +12333,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 579,
+      "line": 644,
       "kind": "durable-home",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12102,7 +12342,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 589,
+      "line": 654,
       "kind": "durable-home",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12111,7 +12351,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 600,
+      "line": 665,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12120,7 +12360,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 630,
+      "line": 695,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12129,7 +12369,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 673,
+      "line": 738,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12138,7 +12378,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 677,
+      "line": 742,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12147,7 +12387,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 781,
+      "line": 846,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12156,7 +12396,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 873,
+      "line": 967,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12165,7 +12405,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 899,
+      "line": 993,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12174,7 +12414,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 921,
+      "line": 1015,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12183,7 +12423,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 960,
+      "line": 1054,
       "kind": "durable-home",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12192,7 +12432,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 979,
+      "line": 1073,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
