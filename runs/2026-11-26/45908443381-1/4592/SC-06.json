@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "c37fec7bd53514525ab462f2d66b21cbc7a0501fe5621a2b89044f028c4f536e",
+  "run_id": 45908443381,
+  "run_attempt": 1,
+  "issue": 4592,
+  "criterion": "SC-06",
+  "criterion_text": "真实已发布的旧 CLI（包含已支持 install 但使用 move 的版本）经修复后的安装入口首次跨越到新契约时，原配置、身份及业务状态不会被旧事务移走；新 CLI update/install 与新版 install.sh 使用同一迁移 owner；无能力握手的旧入口有明确安全升级路径，文档明确无法追溯改变旧二进制直接 update 的限制；fresh install 和 checksum/错误版本拒绝仍成立。",
+  "stage": "staging",
+  "target_sha": "bf06c35fe7b09b8a64b0b348f6bf4f5d23c15622",
+  "contract_sha256": "14c6ca8b197ac3cd801a1c4cc3e84ece65d3ee810e46961866b993585f91f702",
+  "case_revision": "bf06c35fe7b09b8a64b0b348f6bf4f5d23c15622",
+  "case_tree_sha": "564641555542a2b4f0cd8a97ddc5a43f149b3f1c",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T23:04:22.277Z",
+  "finished_at": "2026-11-26T23:04:57.074Z",
+  "duration_ms": 34797,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The real move-based v1.0.0 CLI was crossed over by the fixed install.sh through the verified target transaction; config/identity/DB retained, same-owner no-op, checksum/fresh/unknown-version boundaries hold (exact SHA bf06c35fe7b09b8a64b0b348f6bf4f5d23c15622)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Official v1.0.0 supports install but not the upgrade contract; the old install --help probe would have delegated to the move-based path"
+        },
+        {
+          "type": "runtime",
+          "value": "install.sh refused delegation to the move-based v1.0.0 and upgraded through the verified target transaction (SHA bf06c35fe7b09b8a64b0b348f6bf4f5d23c15622)"
+        },
+        {
+          "type": "runtime",
+          "value": "Retention proven across the bridge: configs/identity/DB byte-identical at Current; archive v1.0.0 holds independent copies and a nession-upgrade-v1 manifest"
+        },
+        {
+          "type": "runtime",
+          "value": "Corrupted checksum refused; nothing published"
+        },
+        {
+          "type": "runtime",
+          "value": "Fresh bootstrap installed all three verified binaries"
+        },
+        {
+          "type": "runtime",
+          "value": "Unknown version 99.99.99 refused by the installer"
+        }
+      ],
+      "duration_ms": 28797,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45908443381,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "14219c8a1aa27584daefcc86a5d82f0263b10f60",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "bf06c35fe7b09b8a64b0b348f6bf4f5d23c15622",
+        "stage": "staging",
+        "issue": 4592,
+        "criterion": "SC-06",
+        "job_id": 140210735602,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45908443381",
+    "record_path": "runs/2026-11-26/45908443381-1/4592/SC-06.json",
+    "source_result_sha256": "fed7d8903ba6ffec8c8c67f0033ac11ab42d5ecc248711bca22db1370d794a02"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45908443381-1",
+    "sha256": "fed7d8903ba6ffec8c8c67f0033ac11ab42d5ecc248711bca22db1370d794a02",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45908443381",
+    "durability": "time-limited; object archival not configured"
+  }
+}
