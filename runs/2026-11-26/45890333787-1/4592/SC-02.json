@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8fd4c038698a137cc903337e64a5069a74c11eb4f89c7612e2a2a2a70d5dd3eb",
+  "run_id": 45890333787,
+  "run_attempt": 1,
+  "issue": 4592,
+  "criterion": "SC-02",
+  "criterion_text": "使用真实旧版/目标版 Agent 与 Server 在隔离 HOME 完成停止→升级→启动：Agent ID、认证身份、Session instance metadata、Claude/ENV bindings、Server DB 中的项目/会话/ENV/镜像引用连续；旧 tmux Session 在满足实例及执行所有权兼容时可恢复，不兼容时明确阻止升级或恢复而不重建/误接管；不自动重启进程。",
+  "stage": "staging",
+  "target_sha": "6133f58e55f66bca096338a8d160babd3144746c",
+  "contract_sha256": "14c6ca8b197ac3cd801a1c4cc3e84ece65d3ee810e46961866b993585f91f702",
+  "case_revision": "6133f58e55f66bca096338a8d160babd3144746c",
+  "case_tree_sha": "24149f9dd20aca3fef9214adf5970b3617a437aa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T20:23:34.696Z",
+  "finished_at": "2026-11-26T20:24:10.827Z",
+  "duration_ms": 36130,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "AssertionError [ERR_ASSERTION]: archive config copy differs\n+ actual - expected\n\n+ 'c285afccc487d44731bbf630cd19e06c7aa0aff8e6470b64f5edb1b1f00d6d72'\n- '23e792437c2c5e09dd9dfac644e5bf2a9ae341ac719026095a4f9bda7f99ef75'\n\n    at /home/runner/work/nession/nession/workspace/e2e/acceptance/cases/4592/SC-02/verify.cjs:207:12\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the exact-SHA runtime observations did not establish the criterion"
+        }
+      ],
+      "duration_ms": 25152,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45890333787,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "6133f58e55f66bca096338a8d160babd3144746c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45890333787",
+    "record_path": "runs/2026-11-26/45890333787-1/4592/SC-02.json",
+    "source_result_sha256": "d28020fab018e3e830b2bdd3a5b9302c32ffbc4feda22f06dca1e6d09b8dfb71"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45890333787-1",
+    "sha256": "d28020fab018e3e830b2bdd3a5b9302c32ffbc4feda22f06dca1e6d09b8dfb71",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45890333787",
+    "durability": "time-limited; object archival not configured"
+  }
+}
