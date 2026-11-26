@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "8a4cb9e3c6b4c9bbf1a8cff3be6e4619c548316677ca87dd7a92883d5e1f7688",
+  "run_id": 45872031600,
+  "run_attempt": 1,
+  "issue": 4597,
+  "criterion": "SC-06",
+  "criterion_text": "Normal completion, panic/assert, failed partial startup, timeout, SIGTERM and SIGKILL of a disposable run leave no live owned resources after bounded teardown/reaper; reaper proves run ownership, never kills live/foreign or deletes unverified dirs, and preserves auditable failure evidence. Legacy mixed-socket diagnostics dry-run and require explicit scoped authorization, never name-prefix-only deletion.",
+  "stage": "staging",
+  "target_sha": "20fda08373abf05b20faa0b552f8ad3648a42f7c",
+  "contract_sha256": "14783f07b59393336268ff84ffcb5835e9c25475b905638e12eaffa881f6899c",
+  "case_revision": "20fda08373abf05b20faa0b552f8ad3648a42f7c",
+  "case_tree_sha": "c8c9d099a86443a23b1437984f5e82dbf29afa93",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T18:01:41.360Z",
+  "finished_at": "2026-11-26T18:01:52.776Z",
+  "duration_ms": 11416,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "panic root was not reclaimed after the owner died\n\ntrue !== false",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "normal completion: owned root removed, preview port closed, teardown 16ms"
+        },
+        {
+          "type": "runtime",
+          "value": "failed partial startup: occupied web port rejected; owned root removed"
+        },
+        {
+          "type": "runtime",
+          "value": "SIGTERM: trap removed /tmp/nession-test-runtime.HFiCSO (signal null)"
+        },
+        {
+          "type": "runtime",
+          "value": "SIGKILL: dead verified root /tmp/nession-test-runtime.GTJynT reclaimed; live /tmp/nession-test-runtime.oqdcO9 untouched; unverified look-alike refused"
+        }
+      ],
+      "duration_ms": 5518,
+      "exit_code": 1,
+      "stderr": "\u001b[31merror when starting preview server:\nError: Port 37695 is already in use\n    at Server.onError (file:///home/runner/work/nession/nession/workspace/web/node_modules/vite/dist/node/chunks/dep-BK3b2jBa.js:45596:18)\n    at Server.emit (node:events:514:28)\n    at emitErrorNT (node:net:2478:8)\n    at process.processTicksAndRejections (node:internal/process/task_queues:90:21)\u001b[39m"
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45872031600,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "20fda08373abf05b20faa0b552f8ad3648a42f7c",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45872031600",
+    "record_path": "runs/2026-11-26/45872031600-1/4597/SC-06.json",
+    "source_result_sha256": "a4e3cf34afedbdcf1f30b2e6d76f8098ee10653f4d266a8753816b67bd3a072a"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45872031600-1",
+    "sha256": "a4e3cf34afedbdcf1f30b2e6d76f8098ee10653f4d266a8753816b67bd3a072a",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45872031600",
+    "durability": "time-limited; object archival not configured"
+  }
+}
