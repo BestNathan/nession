@@ -87,7 +87,16 @@ async fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let config = load_config()?;
+    // A config failure happens before runtime logging exists; keep it readable
+    // through the bounded startup capture as well as stderr (#4600).
+    let config = load_config().map_err(|error| {
+        let note = nession_common::startup_log::record_or_note(
+            nession_common::logging::LogComponent::Server,
+            "config",
+            &format!("{error:#}"),
+        );
+        error.context(note)
+    })?;
     // This binary is always started directly — a daemon parent re-execs the CLI,
     // not this — so there is nobody to announce readiness to.
     nession_server::runtime::run(config, nession_common::readiness::Readiness::Unwatched).await

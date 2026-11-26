@@ -53,6 +53,7 @@ fn command_path(command: &Commands) -> &'static str {
             AgentAction::Stop { .. } => "agent stop",
             AgentAction::Restart { .. } => "agent restart",
             AgentAction::Status { .. } => "agent status",
+            AgentAction::Logs { .. } => "agent logs",
             AgentAction::InstallService { .. } => "agent install-service",
             AgentAction::UninstallService => "agent uninstall-service",
         },
@@ -61,6 +62,7 @@ fn command_path(command: &Commands) -> &'static str {
             ServerAction::Stop { .. } => "server stop",
             ServerAction::Restart { .. } => "server restart",
             ServerAction::Status { .. } => "server status",
+            ServerAction::Logs { .. } => "server logs",
         },
         Commands::Agents { .. } => "agents list",
         Commands::Sessions { action } => match action {
@@ -171,6 +173,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 .await?
             }
             AgentAction::Status { pid_file } => agent::status::run(pid_file).await?,
+            AgentAction::Logs(options) => agent::logs::run(options).await?,
             AgentAction::InstallService { config, pid_file } => {
                 agent::install_service::run(config, pid_file)?
             }
@@ -189,6 +192,7 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                 pid_file,
             } => server::restart::run(config, foreground, pid_file).await?,
             ServerAction::Status { pid_file } => server::status::run(pid_file).await?,
+            ServerAction::Logs(options) => server::logs::run(options).await?,
         },
         Commands::Agents { action } => match action {
             AgentsAction::List => {
@@ -297,6 +301,7 @@ mod tests {
     /// without a file (or a file without an entry) fails the inventory test.
     const LEAF_FILES: &[&str] = &[
         "agent/install_service.rs",
+        "agent/logs.rs",
         "agent/restart.rs",
         "agent/start.rs",
         "agent/status.rs",
@@ -310,6 +315,7 @@ mod tests {
         "config/server/set.rs",
         "config/server/show.rs",
         "install.rs",
+        "server/logs.rs",
         "server/restart.rs",
         "server/start.rs",
         "server/status.rs",
@@ -416,6 +422,8 @@ mod tests {
         let rejected: &[&[&str]] = &[
             &["agent", "stop"],
             &["agent", "status"],
+            &["agent", "logs"],
+            &["server", "logs"],
             &["agent", "install-service"],
             &["agent", "uninstall-service"],
             &["server", "start"],

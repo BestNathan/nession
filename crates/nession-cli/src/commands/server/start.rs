@@ -48,8 +48,13 @@ pub(crate) async fn run_with(
     // Ensure durable component directories exist before file operations. The
     // runtime state directory was already created by `StateFiles::from_cli`
     // for the default location.
-    nession_common::paths::ensure_component_dirs()
-        .context("failed to create nession component directories")?;
+    nession_common::paths::ensure_component_dirs().map_err(|error| {
+        let note = record_startup(
+            "logging",
+            &format!("failed to create nession component directories: {error}"),
+        );
+        anyhow::Error::new(error).context(note)
+    })?;
 
     // Already running, decided by ownership rather than by pid (#1016) — the
     // same question the agent path asks, for the same reason. Both locations
@@ -76,7 +81,10 @@ pub(crate) async fn run_with(
         eprintln!("Warning: {warning}");
     }
 
-    let loaded = configuration::load_server(&selection)?;
+    let loaded = configuration::load_server(&selection).map_err(|error| {
+        let note = record_startup("config", &format!("{error:#}"));
+        error.context(note)
+    })?;
     let from_file = loaded.from_file;
     let config = loaded.config;
     let config_path = selection.path.to_string_lossy().into_owned();
@@ -123,6 +131,9 @@ pub(crate) async fn run_with(
         marker.arm(&mut cmd);
 
         let mut child = cmd.spawn().context("failed to spawn server process")?;
+        // Drain stderr from spawn: the readiness wait must never block on a
+        // full pipe, and the retained prefix is the failure sentence.
+        let stderr = startup::capture_child_stderr(&mut child);
 
         match startup::wait_for_ready(&mut child, &marker, startup::STARTUP_TIMEOUT).await {
             startup::Startup::Serving => {
@@ -131,12 +142,16 @@ pub(crate) async fn run_with(
                 println!("PID file: {}", state.current);
             }
             startup::Startup::Exited(status) => {
-                let detail = startup::child_stderr(&mut child);
+                let detail = stderr.finish();
+                let note = record_startup(
+                    "readiness",
+                    &format!("background Server exited before serving ({status}): {detail}"),
+                );
                 let _ = fs::remove_file(&state.current);
                 anyhow::bail!(
-                    "Server exited before it was serving ({status}){}",
+                    "Server exited before it was serving ({status}){}\n{note}",
                     if detail.is_empty() {
-                        "; check the logs".to_string()
+                        "; check `nession server logs`".to_string()
                     } else {
                         format!(": {detail}")
                     }
@@ -144,13 +159,20 @@ pub(crate) async fn run_with(
             }
             startup::Startup::TimedOut => {
                 startup::terminate(&mut child);
-                let detail = startup::child_stderr(&mut child);
+                let detail = stderr.finish();
+                let note = record_startup(
+                    "readiness",
+                    &format!(
+                        "background Server missed the {}s readiness deadline: {detail}",
+                        startup::STARTUP_TIMEOUT.as_secs()
+                    ),
+                );
                 let _ = fs::remove_file(&state.current);
                 anyhow::bail!(
-                    "Server did not report itself serving within {}s{}",
+                    "Server did not report itself serving within {}s{}\n{note}",
                     startup::STARTUP_TIMEOUT.as_secs(),
                     if detail.is_empty() {
-                        "; check the logs".to_string()
+                        "; check `nession server logs`".to_string()
                     } else {
                         format!(": {detail}")
                     }
@@ -201,6 +223,15 @@ pub(crate) fn background_child_command(
         // failure sentence is more useful than "check the logs" (#2869).
         .stderr(Stdio::piped());
     cmd
+}
+
+/// Record one bounded startup diagnostic for this Server home.
+fn record_startup(phase: &str, message: &str) -> String {
+    nession_common::startup_log::record_or_note(
+        nession_common::logging::LogComponent::Server,
+        phase,
+        message,
+    )
 }
 
 /// Run the Server runtime in foreground mode (blocks until shutdown).

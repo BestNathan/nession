@@ -3,6 +3,7 @@ pub mod commands;
 pub mod configuration;
 pub mod connection;
 pub mod lifecycle;
+pub mod local_logs;
 pub mod service;
 pub mod terminal;
 pub mod update;
