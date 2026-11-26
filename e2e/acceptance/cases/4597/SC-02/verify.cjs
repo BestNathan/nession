@@ -169,7 +169,7 @@ async function main() {
       profile: 'full-stack-local',
       runRoot: runB.root,
       home: path.join(runB.root, 'home'),
-      tmuxSocket: runB.tmux_socket,
+      tmuxSocket: runB.tmuxSocket,
       serverPort, agentPort, stalledProbePort: stalledPort, webPort,
       cleanupHome: true,
       cleanupRoot: true,
@@ -187,7 +187,7 @@ async function main() {
     assert.ok(identityPathB.startsWith(runB.root + path.sep), 'B identity file is outside its run root');
     assert.notEqual(identityPathB, identityPathA, 'two Agents must not read the same identity file');
     const binB = cliInvocation();
-    const envB = sanitizedEnv(runB.root, runB.tmux_socket, { NESION_NO_UPDATE_CHECK: '1' });
+    const envB = sanitizedEnv(runB.root, runB.tmuxSocket, { NESION_NO_UPDATE_CHECK: '1' });
     const serverUrlB = 'ws://127.0.0.1:' + serverPort + '/ws';
     const sessionB = 'sc02-owned-' + crypto.randomBytes(4).toString('hex');
     let createB = null;
@@ -200,7 +200,7 @@ async function main() {
       await sleep(2000);
     }
     assert.equal(createB.status, 0, 'create in B: ' + createB.output.slice(-1200));
-    assert.ok(tmuxPanes(runB.tmux_socket).some((line) => line.includes(sessionB + ':')),
+    assert.ok(tmuxPanes(runB.tmuxSocket).some((line) => line.includes(sessionB + ':')),
       'B did not create its Session on its own tmux socket');
     const killB = cliOutput(binB, [
       '--server-url', serverUrlB, 'sessions', 'kill',
@@ -208,10 +208,10 @@ async function main() {
     ], envB);
     assert.equal(killB.status, 0, 'kill in B: ' + killB.output.slice(-1200));
     for (let attempt = 0; attempt < 15; attempt += 1) {
-      if (!tmuxPanes(runB.tmux_socket).some((line) => line.includes(sessionB + ':'))) break;
+      if (!tmuxPanes(runB.tmuxSocket).some((line) => line.includes(sessionB + ':'))) break;
       await sleep(1000);
     }
-    assert.ok(!tmuxPanes(runB.tmux_socket).some((line) => line.includes(sessionB + ':')),
+    assert.ok(!tmuxPanes(runB.tmuxSocket).some((line) => line.includes(sessionB + ':')),
       'B did not clean its own Session');
     await runtimeB.stop();
     runtimeB = null;
