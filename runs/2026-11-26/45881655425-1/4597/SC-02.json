@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "1385bebed44b040545461a201afb6cc5cb0f5b389fa5cee443d3ee1ec1b56056",
+  "run_id": 45881655425,
+  "run_attempt": 1,
+  "issue": 4597,
+  "criterion": "SC-02",
+  "criterion_text": "All real-tmux and Agent tests use owned socket, metadata, binding, shell/workspace and env roots; a synthetic live Agent on a separate socket keeps identical server PID/session/pane identity and configuration/state hashes while test creates, attaches, mutates and cleans its own resources. Include #4596 regression, not a second implementation.",
+  "stage": "staging",
+  "target_sha": "55c1c3025f5033609b4f36a3a38dcbe6c4bfd32d",
+  "contract_sha256": "14783f07b59393336268ff84ffcb5835e9c25475b905638e12eaffa881f6899c",
+  "case_revision": "55c1c3025f5033609b4f36a3a38dcbe6c4bfd32d",
+  "case_tree_sha": "c295a2f7e604daa4656521c88331bbd5827efbed",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T19:13:38.535Z",
+  "finished_at": "2026-11-26T19:13:55.637Z",
+  "duration_ms": 17102,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Two real Agents on separate owned roots; B created and cleaned its own Session without changing A PID/socket/state-hash/pane identity (exact SHA 55c1c3025f5033609b4f36a3a38dcbe6c4bfd32d)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "A: run bdb2ff0ac6f014ab root /tmp/nession-test-runtime.afo3qs-nession-acceptance kept server pid 3836, agent pid 3845, state hashes and 1 tmux pane identities unchanged"
+        },
+        {
+          "type": "runtime",
+          "value": "B: independent root /tmp/nession-test-runtime.2ZfL85-nession-4597-sc02, identity e2e-test-node, created and killed its own Session on its own socket; root removed"
+        }
+      ],
+      "duration_ms": 11195,
+      "exit_code": 0,
+      "stderr": "no server running on /tmp/nession-test-runtime.2ZfL85-nession-4597-sc02/tmux.sock\nno server running on /tmp/nession-test-runtime.2ZfL85-nession-4597-sc02/tmux.sock\nno server running on /tmp/nession-test-runtime.2ZfL85-nession-4597-sc02/tmux.sock"
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45881655425,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "55c1c3025f5033609b4f36a3a38dcbe6c4bfd32d",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45881655425",
+    "record_path": "runs/2026-11-26/45881655425-1/4597/SC-02.json",
+    "source_result_sha256": "6951e5ba8ee9c76edb05fc35a6c535851c297f97bd8d614333f730446b703b6d"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45881655425-1",
+    "sha256": "6951e5ba8ee9c76edb05fc35a6c535851c297f97bd8d614333f730446b703b6d",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45881655425",
+    "durability": "time-limited; object archival not configured"
+  }
+}
