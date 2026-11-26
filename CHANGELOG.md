@@ -990,3 +990,9 @@
 - Categories: architecture, cli, lifecycle, process, security, storage
 - Reason: Reconcile the durable-data ownership statement with the #4592 retention contract — the durable home belongs to the installation and is retained in place across upgrades while archives receive independent snapshot copies; runtime process state remains unversioned and never archived
 - Source: https://github.com/BestNathan/nession/issues/4592
+## 2026-11-26T15:34:16Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, agent, ci, security, workflows
+- Reason: Record #4603 common production image version family, protected repair and Secret validation, GitOps 1.0.1 convergence evidence, and explicit separation of desired state from live ArgoCD/Pod proof
+- Source: https://github.com/BestNathan/nession/issues/4603
