@@ -138,13 +138,19 @@ main(async () => {
     const agentPid = readIdentity(path.join(runtime, 'agent.pid')).pid;
 
     // 2. A real Session through the old CLI: business state in the Server DB.
+    // The client-side `agents`/`sessions` commands deliberately never borrow a
+    // daemon config (#2267): they resolve `--server-url` > NESSION_SERVER_URL >
+    // legacy alias > ws://127.0.0.1:8080, in v1.0.0 and today alike. The Case
+    // must name the Server explicitly instead of relying on the daemon configs.
+    const serverUrl = 'ws://127.0.0.1:' + serverPort + '/ws';
     const sessionName = 'continuity-4592';
     const create = runBinary(oldCli, [
-      'sessions', 'create', '--agent-id', identityBefore, '--name', sessionName,
+      '--server-url', serverUrl, 'sessions', 'create',
+      '--agent-id', identityBefore, '--name', sessionName,
     ], env, 60000);
     assert.equal(create.status, 0, 'old sessions create: ' + create.stdout + create.stderr);
     await waitFor(() => {
-      const list = runBinary(oldCli, ['sessions', 'list'], env, 30000);
+      const list = runBinary(oldCli, ['--server-url', serverUrl, 'sessions', 'list'], env, 30000);
       return list.status === 0 && String(list.stdout).includes(sessionName);
     }, 20000, 'Session visible through the old CLI');
     evidence.push({
@@ -215,10 +221,10 @@ main(async () => {
     const identityAfter = fs.readFileSync(identityFile, 'utf8').trim();
     assert.equal(identityAfter, identityBefore, 'the upgrade changed the persisted Agent identity');
     await waitFor(() => {
-      const list = runBinary(newCli, ['sessions', 'list'], env, 30000);
+      const list = runBinary(newCli, ['--server-url', serverUrl, 'sessions', 'list'], env, 30000);
       return list.status === 0 && String(list.stdout).includes(sessionName);
     }, 30000, 'Session still visible through the new CLI');
-    const finalList = runBinary(newCli, ['sessions', 'list'], env, 30000);
+    const finalList = runBinary(newCli, ['--server-url', serverUrl, 'sessions', 'list'], env, 30000);
     assert.ok(String(finalList.stdout).includes(identityBefore), 'the Session lost its Agent identity association');
     evidence.push({
       type: 'runtime',
