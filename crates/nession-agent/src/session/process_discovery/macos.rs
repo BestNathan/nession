@@ -208,10 +208,27 @@ fn executable_path(pid: u32) -> Option<String> {
 
 fn rusage(pid: u32) -> Result<libc::rusage_info_v4, std::io::ErrorKind> {
     let mut info: libc::rusage_info_v4 = unsafe { std::mem::zeroed() };
-    let mut pointer: libc::rusage_info_t = (&mut info as *mut libc::rusage_info_v4).cast();
-    // SAFETY: the flavor names the struct the buffer actually is.
-    let result =
-        unsafe { libc::proc_pid_rusage(pid as libc::c_int, libc::RUSAGE_INFO_V4, &mut pointer) };
+    // SAFETY: `proc_pid_rusage` writes a full `rusage_info_v4` record into the
+    // storage named by its `buffer` argument. The pinned libc binding declares
+    // that argument as `*mut rusage_info_t` (with `rusage_info_t = *mut c_void`),
+    // a pointer-to-pointer shape, but Apple's libproc ABI treats it as the
+    // address of the output structure itself — it writes `sizeof(rusage_info_v4)`
+    // bytes there. We therefore pass the address of the full-sized, aligned
+    // `info` buffer, cast directly to the binding's exact argument type.
+    //
+    // Passing `&mut pointer` (the address of a local pointer slot, as the
+    // pre-#4584 code did) lets libproc write a ~296-byte record into 8 bytes of
+    // stack: undefined behavior that zeroed the observed counters and could
+    // corrupt the stack / raise SIGBUS. `info` outlives the call, the flavor
+    // names the struct the buffer actually is, and a non-zero return is mapped
+    // to an honest `io::ErrorKind` rather than a fabricated zero record.
+    let result = unsafe {
+        libc::proc_pid_rusage(
+            pid as libc::c_int,
+            libc::RUSAGE_INFO_V4,
+            (&mut info as *mut libc::rusage_info_v4).cast(),
+        )
+    };
     if result != 0 {
         return Err(std::io::Error::last_os_error().kind());
     }
@@ -287,6 +304,154 @@ fn command_argv(pid: u32) -> Option<Vec<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// #4584 SC-01: the output buffer must receive the real record.
+    ///
+    /// The original defect passed `&mut pointer` (the address of a
+    /// pointer-sized stack slot) to `proc_pid_rusage`, so libproc wrote the
+    /// full `rusage_info_v4` record into 8 bytes of stack and the `info`
+    /// buffer stayed zeroed. The test process has executed code, so its CPU
+    /// time, footprint and start abstime must be non-zero; on the original
+    /// boundary this fails (or the corrupted stack kills the process, which
+    /// the subprocess-boundary test below isolates).
+    #[test]
+    fn rusage_reports_real_counters_for_the_current_process() {
+        let info = rusage(std::process::id()).expect("same-user self rusage is readable");
+        assert!(
+            info.ri_user_time + info.ri_system_time > 0,
+            "CPU time must be a sampled counter, not a zeroed buffer: {info:?}"
+        );
+        assert!(
+            info.ri_resident_size > 0,
+            "resident size must be sampled: {info:?}"
+        );
+        assert!(
+            info.ri_phys_footprint > 0,
+            "phys footprint must be sampled: {info:?}"
+        );
+        assert!(
+            info.ri_proc_start_abstime > 0,
+            "start abstime must be sampled: {info:?}"
+        );
+    }
+
+    /// #4584 SC-01: repeated real sampling advances monotonically.
+    #[test]
+    fn rusage_counters_are_monotonic_across_repeated_samples() {
+        let pid = std::process::id();
+        let first = rusage(pid).expect("first sample");
+        // Burn measurable CPU so the second sample must advance.
+        let mut acc = 0u64;
+        for i in 0..3_000_000u64 {
+            acc = acc.wrapping_add(i);
+        }
+        std::hint::black_box(acc);
+        let second = rusage(pid).expect("second sample");
+        assert!(
+            second.ri_user_time + second.ri_system_time
+                >= first.ri_user_time + first.ri_system_time,
+            "CPU counters must not go backwards: {first:?} -> {second:?}"
+        );
+        assert_eq!(
+            second.ri_proc_start_abstime, first.ri_proc_start_abstime,
+            "process start abstime is stable across samples"
+        );
+    }
+
+    /// #4584 SC-01: a live same-user child is sampled; a vanished PID is an
+    /// honest error, never a crash or a fabricated zero record.
+    #[test]
+    fn rusage_samples_a_live_child_and_rejects_a_vanished_pid() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .expect("spawn sleep");
+        let pid = child.id();
+        let info = rusage(pid).expect("live same-user child rusage");
+        assert!(
+            info.ri_proc_start_abstime > 0,
+            "child start abstime must be sampled"
+        );
+        let samples = sample(&[pid]);
+        let child_sample = samples.get(&pid).expect("child sample");
+        assert!(child_sample.alive, "live child must be alive");
+        assert!(
+            child_sample.io_read_bytes.is_some(),
+            "child I/O counters must be present"
+        );
+        let _ = child.kill();
+        let _ = child.wait();
+
+        // A PID above the macOS pid_max ceiling can never be live: the read
+        // must fail honestly instead of writing invalid output or fabricating
+        // a zero record. The exact `ErrorKind` is platform-mapped (libproc's
+        // errno for a gone PID is not stably `NotFound`), so the contract is
+        // "an error, never Ok-with-zeros".
+        let vanished = rusage(999_999);
+        assert!(
+            vanished.is_err(),
+            "a vanished PID must error, got {vanished:?}"
+        );
+        let samples = sample(&[999_999]);
+        assert!(!samples.get(&999_999).expect("sample entry").alive);
+    }
+
+    /// #4584 SC-01: a denied process is reported as denied, not as zeros.
+    /// pid 1 (launchd) is unreadable for a non-root caller.
+    #[test]
+    fn rusage_reports_denied_for_an_unreadable_process() {
+        // SAFETY: geteuid has no pointer arguments.
+        let euid = unsafe { libc::geteuid() };
+        if euid == 0 {
+            // Root can read pid 1; the denial boundary is not exercisable.
+            return;
+        }
+        let denied = rusage(1);
+        assert!(
+            matches!(denied, Err(std::io::ErrorKind::PermissionDenied)),
+            "pid 1 must be PermissionDenied for a non-root caller, got {denied:?}"
+        );
+        // details() consults rusage to distinguish denied from absent; for an
+        // unreadable pid it must report denied, not fabricate a zero metric.
+        assert!(details(1).io_denied, "pid 1 I/O must be reported denied");
+    }
+
+    /// #4584 SC-01: fault-isolated subprocess boundary.
+    ///
+    /// Re-executes this test binary in a child that runs only the heavy
+    /// sampling probe. If the FFI corrupts the stack, the child dies by
+    /// signal and the parent observes the actual exit status instead of the
+    /// whole harness crashing — the diagnostic the Issue asks for.
+    #[test]
+    fn rusage_sampling_survives_a_subprocess_boundary() {
+        let exe = std::env::current_exe().expect("current test exe");
+        let output = std::process::Command::new(exe)
+            .arg("--exact")
+            .arg("session::process_discovery::macos::tests::rusage_subprocess_probe")
+            .env("NESSION_RUSAGE_SUBPROCESS_PROBE", "1")
+            .output()
+            .expect("spawn rusage probe child");
+        assert!(
+            output.status.success(),
+            "rusage probe child died: {:?}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    /// Heavy repeated sampling, run only inside the fault-isolated child.
+    #[test]
+    fn rusage_subprocess_probe() {
+        if std::env::var_os("NESSION_RUSAGE_SUBPROCESS_PROBE").is_none() {
+            return;
+        }
+        let pid = std::process::id();
+        for _ in 0..200 {
+            let info = rusage(pid).expect("probe sample");
+            assert!(info.ri_resident_size > 0, "probe sample must be real");
+        }
+    }
 
     #[test]
     fn a_child_process_is_visible_with_its_command_and_identity() {
