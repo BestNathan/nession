@@ -240,6 +240,31 @@ main(async () => {
         startupFile(badHome) + ' held a retrievable config record',
     });
 
+    // 3b. The same durable diagnostic exists for the Server CLI.
+    fs.writeFileSync(path.join(badHome, 'server-config.toml'), '[server\nnot toml\n');
+    const malformedServer = mustFail(
+      runCli(['server', 'start', '--foreground'], badEnv, 30_000),
+      'foreground Server start with malformed config',
+    );
+    assert.match(malformedServer, /failed to parse server config/, malformedServer);
+    const serverConfigStartup = runCli(
+      ['server', 'logs', '--source', 'startup', '-n', '50'],
+      badEnv,
+      30_000,
+    );
+    mustSucceed(serverConfigStartup, 'server logs --source startup');
+    assert.match(
+      String(serverConfigStartup.stdout),
+      /server config:/,
+      String(serverConfigStartup.stdout),
+    );
+    evidence.push({
+      type: 'runtime',
+      value: sha + ': malformed Server config failed before startup and ' +
+        path.join(badHome, 'server', 'logs', 'startup', 'startup.log') +
+        ' held a retrievable config record',
+    });
+
     // 4. Early validation failure (before runtime logging exists).
     const validateHome = mkdirPrivate(path.join(base, 'validate-home'));
     const validateRuntime = mkdirPrivate(path.join(base, 'validate-runtime'));
