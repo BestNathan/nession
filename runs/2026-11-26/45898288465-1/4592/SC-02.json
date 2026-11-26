@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "7d8c9adc0b10a312bbbf77a1fc504f0aaa55cc5c642c35523953c0e8ec52efba",
+  "run_id": 45898288465,
+  "run_attempt": 1,
+  "issue": 4592,
+  "criterion": "SC-02",
+  "criterion_text": "使用真实旧版/目标版 Agent 与 Server 在隔离 HOME 完成停止→升级→启动：Agent ID、认证身份、Session instance metadata、Claude/ENV bindings、Server DB 中的项目/会话/ENV/镜像引用连续；旧 tmux Session 在满足实例及执行所有权兼容时可恢复，不兼容时明确阻止升级或恢复而不重建/误接管；不自动重启进程。",
+  "stage": "staging",
+  "target_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "contract_sha256": "14c6ca8b197ac3cd801a1c4cc3e84ece65d3ee810e46961866b993585f91f702",
+  "case_revision": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+  "case_tree_sha": "d75b6f6ebbd35a66f75875b2ba0252e760fbeaf7",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T21:31:14.090Z",
+  "finished_at": "2026-11-26T21:32:07.961Z",
+  "duration_ms": 53871,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "Real v1.0.0 -> 1.0.1 stop/upgrade/start retained configs, identity, Server DB and bindings at their Current paths; Session business state is continuous and nothing auto-restarted (exact SHA 64aede9ec15eb96de1511d68c27c44cd7d16b598)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Official v1.0.0 Server/Agent ran; identity agent-43c5c6c3-183b-47f3-bdfd-1fbb3589585c and Session continuity-4592 created before the upgrade"
+        },
+        {
+          "type": "runtime",
+          "value": "Upgraded 1.0.0 -> 1.0.1 through the target retention transaction (SHA 64aede9ec15eb96de1511d68c27c44cd7d16b598)"
+        },
+        {
+          "type": "runtime",
+          "value": "Retention proven: configs/identity/DB/bindings byte-identical at Current; archive v1.0.0 holds independent copies plus manifest.json"
+        },
+        {
+          "type": "runtime",
+          "value": "New Server/Agent started on the retained home; identity agent-43c5c6c3-183b-47f3-bdfd-1fbb3589585c and Session continuity-4592 survived; no process auto-restarted"
+        }
+      ],
+      "duration_ms": 42610,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45898288465,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "64aede9ec15eb96de1511d68c27c44cd7d16b598",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45898288465",
+    "record_path": "runs/2026-11-26/45898288465-1/4592/SC-02.json",
+    "source_result_sha256": "dad7f23401ff6785e13e8a9bc2e0abe7b97ddd825c7a062fcef90efde0ab0ae4"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45898288465-1",
+    "sha256": "dad7f23401ff6785e13e8a9bc2e0abe7b97ddd825c7a062fcef90efde0ab0ae4",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45898288465",
+    "durability": "time-limited; object archival not configured"
+  }
+}
