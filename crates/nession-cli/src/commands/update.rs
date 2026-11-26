@@ -3,6 +3,7 @@
 
 use crate::update::github::GitHubReleaseClient;
 use crate::update::install::{self, InstallRequest};
+use crate::update::policy::PolicyOverrides;
 use crate::update::version::{compare_versions, VersionStatus};
 
 pub async fn run(
@@ -11,6 +12,7 @@ pub async fn run(
     dry_run: bool,
     skip_prompt: bool,
     include_installer: bool,
+    policy_overrides: PolicyOverrides,
 ) -> Result<(), anyhow::Error> {
     if check_only {
         return check(target_version.as_deref()).await;
@@ -23,6 +25,7 @@ pub async fn run(
         // `update` keeps its confirmation prompt; `install` does not.
         prompt: !skip_prompt,
         include_installer,
+        policy_overrides,
     })
     .await
 }

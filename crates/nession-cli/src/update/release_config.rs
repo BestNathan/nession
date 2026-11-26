@@ -1,25 +1,24 @@
-//! Release-scoped server configuration paths.
+//! Release-scoped server configuration paths (archive copies only).
 //!
 //! `config server init` persists the *generated defaults* as absolute paths
-//! (`<home>/server/server.db`, `<home>/server/images/{blobs,build}`). When a
-//! newer release archives the Current home, those strings keep pointing at the
-//! Current root while the state itself moves under `versions/<old>/`. Starting
-//! the archived release would then create or read the wrong database (#3232
-//! F1).
+//! (`<home>/server/server.db`, `<home>/server/images/{blobs,build}`). Since
+//! #4592 an upgrade **retains** Current's config and state in place; only the
+//! archive's independent config copy is rewritten here, and only for paths
+//! whose data was actually captured as an independent snapshot:
 //!
-//! This module owns the distinction the requirement asks for:
-//!
-//! - a value equal to the generated default under the Current home is a
-//!   generated value and moves to the same default under the archived home;
+//! - a generated default whose data was captured moves to the same default
+//!   under the archived home;
+//! - a generated default whose data was *not* captured (e.g. a failed SQLite
+//!   backup, or a referenced-not-copied CAS store) stays verbatim and is
+//!   recorded as an external dependency — the archive must not pretend it owns
+//!   an independent copy it does not have;
 //! - an absolute path outside the Current home is the operator's explicit
-//!   external declaration and is left untouched;
+//!   external declaration and is left untouched (also an external dependency);
 //! - a relative, empty, or Current-home path that is *not* one of the generated
-//!   defaults cannot be relocated safely. Archiving is refused with an
-//!   actionable message instead of silently reading Current data.
+//!   defaults cannot be proven safe. Archiving is refused with an actionable
+//!   message instead of silently sharing Current's live data.
 //!
-//! The inverse (archive → Current) uses the same function with the homes
-//! swapped. The transaction normally restores the exact original text from its
-//! journal; the inverse keeps the classifier honest for diagnostics.
+//! Current's own config is never rewritten by this module.
 
 use anyhow::{bail, Context, Result};
 use nession_common::paths;
@@ -35,6 +34,37 @@ const PATH_FIELDS: [(&str, DefaultPath); 3] = [
     ("image_build_dir", paths::server_image_build_dir_under),
 ];
 
+/// Which release-owned paths the snapshot actually captured as independent
+/// copies. A field whose data was not captured must not be rewritten to the
+/// archive home — that would point at a database/store the archive does not
+/// have (#4592 coverage honesty).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CapturedPaths {
+    pub db: bool,
+    pub blobs: bool,
+    pub build: bool,
+}
+
+impl CapturedPaths {
+    /// Every release-owned path was captured (used by diagnostics/tests).
+    pub fn all() -> Self {
+        Self {
+            db: true,
+            blobs: true,
+            build: true,
+        }
+    }
+
+    fn covers(self, field: &str) -> bool {
+        match field {
+            "db_path" => self.db,
+            "image_blob_dir" => self.blobs,
+            "image_build_dir" => self.build,
+            _ => false,
+        }
+    }
+}
+
 /// What the archive rewrite did to one field.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FieldAction {
@@ -42,6 +72,9 @@ pub enum FieldAction {
     Rewritten,
     /// An explicit external path was kept verbatim.
     Retained,
+    /// A generated default whose data was not captured: kept verbatim and
+    /// recorded as an external dependency on Current's live path.
+    RetainedUncaptured,
     /// The value already named the archived home.
     AlreadyScoped,
 }
@@ -63,8 +96,20 @@ impl RewriteReport {
     pub fn retained(&self) -> impl Iterator<Item = &'static str> + '_ {
         self.actions
             .iter()
-            .filter(|(_, action)| *action == FieldAction::Retained)
+            .filter(|(_, action)| {
+                matches!(
+                    action,
+                    FieldAction::Retained | FieldAction::RetainedUncaptured
+                )
+            })
             .map(|(field, _)| *field)
+    }
+
+    /// Fields whose archived config still names a path the archive does not
+    /// independently own. A non-empty set means the archive is not runnable
+    /// for data-touching commands without those external dependencies.
+    pub fn external_dependencies(&self) -> impl Iterator<Item = &'static str> + '_ {
+        self.retained()
     }
 }
 
@@ -72,18 +117,21 @@ impl RewriteReport {
 enum Decision {
     Rewrite,
     External,
+    RetainUncaptured,
     AlreadyScoped,
 }
 
-/// Rewrite the release-owned paths in a persisted server config.
+/// Rewrite the release-owned paths in the archive's server-config copy.
 ///
-/// `from_home` is the home whose generated defaults the file may contain;
-/// `to_home` is the release home whose defaults replace them. The returned
-/// text preserves unrelated keys, comments and formatting.
+/// `from_home` is the Current home whose generated defaults the file may
+/// contain; `to_home` is the archive home whose defaults replace them — but
+/// only for fields whose data `captured` proves was independently snapshotted.
+/// The returned text preserves unrelated keys, comments and formatting.
 pub fn rewrite_server_config_for_archive(
     content: &str,
     from_home: &Path,
     to_home: &Path,
+    captured: &CapturedPaths,
 ) -> Result<(String, RewriteReport)> {
     let mut document: DocumentMut = content
         .parse()
@@ -102,8 +150,15 @@ pub fn rewrite_server_config_for_archive(
         };
         let from_default = default_under(from_home);
         let to_default = default_under(to_home);
-        let decision = classify(value, &from_default, &to_default, from_home, to_home)
-            .with_context(|| format!("server config field `{field}` cannot be archived safely"))?;
+        let decision = classify(
+            value,
+            &from_default,
+            &to_default,
+            from_home,
+            to_home,
+            captured.covers(field),
+        )
+        .with_context(|| format!("server config field `{field}` cannot be archived safely"))?;
         match decision {
             Decision::Rewrite => {
                 let rendered = to_default.to_string_lossy().into_owned();
@@ -126,6 +181,9 @@ pub fn rewrite_server_config_for_archive(
                 report.actions.push((field, FieldAction::Rewritten));
             }
             Decision::External => report.actions.push((field, FieldAction::Retained)),
+            Decision::RetainUncaptured => report
+                .actions
+                .push((field, FieldAction::RetainedUncaptured)),
             Decision::AlreadyScoped => report.actions.push((field, FieldAction::AlreadyScoped)),
         }
     }
@@ -139,6 +197,7 @@ fn classify(
     to_default: &Path,
     from_home: &Path,
     to_home: &Path,
+    captured: bool,
 ) -> Result<Decision> {
     if value.trim().is_empty() {
         bail!("the path is empty");
@@ -148,7 +207,13 @@ fn classify(
         return Ok(Decision::AlreadyScoped);
     }
     if path == from_default {
-        return Ok(Decision::Rewrite);
+        // Rewriting to the archive home is only honest when the archive
+        // actually holds an independent copy of this data.
+        return Ok(if captured {
+            Decision::Rewrite
+        } else {
+            Decision::RetainUncaptured
+        });
     }
     if !path.is_absolute() {
         bail!(
@@ -193,9 +258,13 @@ mod tests {
     #[test]
     fn generated_defaults_move_with_the_release() {
         let (current, archive) = homes();
-        let (rewritten, report) =
-            rewrite_server_config_for_archive(&generated_config(&current), &current, &archive)
-                .unwrap();
+        let (rewritten, report) = rewrite_server_config_for_archive(
+            &generated_config(&current),
+            &current,
+            &archive,
+            &CapturedPaths::all(),
+        )
+        .unwrap();
 
         assert_eq!(
             report.rewritten().collect::<Vec<_>>(),
@@ -232,7 +301,8 @@ mod tests {
             paths::server_db_path_under(&current).display()
         );
         let (rewritten, _) =
-            rewrite_server_config_for_archive(&config, &current, &archive).unwrap();
+            rewrite_server_config_for_archive(&config, &current, &archive, &CapturedPaths::all())
+                .unwrap();
         assert!(
             rewritten.contains("# primary volume"),
             "the inline comment was lost: {rewritten}"
@@ -247,7 +317,8 @@ mod tests {
                       image_blob_dir = \"/srv/nession/blobs\"\n\
                       image_build_dir = \"/srv/nession/build\"\n";
         let (rewritten, report) =
-            rewrite_server_config_for_archive(config, &current, &archive).unwrap();
+            rewrite_server_config_for_archive(config, &current, &archive, &CapturedPaths::all())
+                .unwrap();
 
         assert_eq!(report.retained().count(), 3);
         assert!(report.rewritten().next().is_none());
@@ -263,7 +334,9 @@ mod tests {
             "db_path = \"{}\"\n",
             current.join("server/custom.db").display()
         );
-        let error = rewrite_server_config_for_archive(&config, &current, &archive).unwrap_err();
+        let error =
+            rewrite_server_config_for_archive(&config, &current, &archive, &CapturedPaths::all())
+                .unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("inside the Current home"), "{message}");
     }
@@ -273,7 +346,13 @@ mod tests {
         let (current, archive) = homes();
         for value in ["nession.db", "", "~/nession.db"] {
             let config = format!("db_path = \"{value}\"\n");
-            let error = rewrite_server_config_for_archive(&config, &current, &archive).unwrap_err();
+            let error = rewrite_server_config_for_archive(
+                &config,
+                &current,
+                &archive,
+                &CapturedPaths::all(),
+            )
+            .unwrap_err();
             assert!(
                 format!("{error:#}").contains("cannot be archived safely"),
                 "value {value:?} must be refused: {error:#}"
@@ -284,17 +363,26 @@ mod tests {
     #[test]
     fn a_non_string_path_is_refused() {
         let (current, archive) = homes();
-        let error =
-            rewrite_server_config_for_archive("db_path = 42\n", &current, &archive).unwrap_err();
+        let error = rewrite_server_config_for_archive(
+            "db_path = 42\n",
+            &current,
+            &archive,
+            &CapturedPaths::all(),
+        )
+        .unwrap_err();
         assert!(format!("{error:#}").contains("not a string path"));
     }
 
     #[test]
     fn invalid_toml_is_refused_before_archiving() {
         let (current, archive) = homes();
-        let error =
-            rewrite_server_config_for_archive("db_path = [unterminated\n", &current, &archive)
-                .unwrap_err();
+        let error = rewrite_server_config_for_archive(
+            "db_path = [unterminated\n",
+            &current,
+            &archive,
+            &CapturedPaths::all(),
+        )
+        .unwrap_err();
         assert!(format!("{error:#}").contains("not valid TOML"));
     }
 
@@ -303,9 +391,67 @@ mod tests {
         let (current, archive) = homes();
         let config = generated_config(&archive);
         let (rewritten, report) =
-            rewrite_server_config_for_archive(&config, &current, &archive).unwrap();
+            rewrite_server_config_for_archive(&config, &current, &archive, &CapturedPaths::all())
+                .unwrap();
         assert_eq!(report.rewritten().count(), 0);
         assert_eq!(rewritten, config);
+    }
+
+    #[test]
+    fn an_uncaptured_generated_default_stays_verbatim_as_a_dependency() {
+        let (current, archive) = homes();
+        // Only the database was captured; the CAS stores were referenced in
+        // place. The archive config must not claim independent blob/build
+        // copies it does not have.
+        let captured = CapturedPaths {
+            db: true,
+            blobs: false,
+            build: false,
+        };
+        let (rewritten, report) = rewrite_server_config_for_archive(
+            &generated_config(&current),
+            &current,
+            &archive,
+            &captured,
+        )
+        .unwrap();
+
+        assert_eq!(report.rewritten().collect::<Vec<_>>(), vec!["db_path"]);
+        assert!(rewritten.contains(&paths::server_db_path_under(&archive).display().to_string()));
+        assert!(rewritten.contains(
+            &paths::server_image_blob_dir_under(&current)
+                .display()
+                .to_string()
+        ));
+        assert!(rewritten.contains(
+            &paths::server_image_build_dir_under(&current)
+                .display()
+                .to_string()
+        ));
+        let deps: Vec<_> = report.external_dependencies().collect();
+        assert_eq!(deps, vec!["image_blob_dir", "image_build_dir"]);
+    }
+
+    #[test]
+    fn a_failed_db_backup_keeps_the_db_path_verbatim() {
+        let (current, archive) = homes();
+        let captured = CapturedPaths {
+            db: false,
+            blobs: true,
+            build: true,
+        };
+        let (rewritten, report) = rewrite_server_config_for_archive(
+            &generated_config(&current),
+            &current,
+            &archive,
+            &captured,
+        )
+        .unwrap();
+        assert!(rewritten.contains(&paths::server_db_path_under(&current).display().to_string()));
+        assert!(!rewritten.contains(&paths::server_db_path_under(&archive).display().to_string()));
+        assert!(report
+            .external_dependencies()
+            .any(|field| field == "db_path"));
     }
 
     #[test]
@@ -316,7 +462,9 @@ mod tests {
             "db_path = \"{}\"\n",
             paths::server_db_path_under(&sibling).display()
         );
-        let (_, report) = rewrite_server_config_for_archive(&config, &current, &archive).unwrap();
+        let (_, report) =
+            rewrite_server_config_for_archive(&config, &current, &archive, &CapturedPaths::all())
+                .unwrap();
         assert_eq!(report.retained().count(), 1);
     }
 }

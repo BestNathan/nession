@@ -36,6 +36,7 @@ jobs:
       tooling: ${{ steps.changed.outputs.tooling }}
       workflow: ${{ steps.changed.outputs.workflow }}
       instruction: ${{ steps.changed.outputs.instruction }}
+      native: ${{ steps.changed.outputs.native }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -197,6 +198,52 @@ jobs:
             cat target/ws-runtime-baseline.json
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+
+  # #4584: native macOS memory-safety and release-mode runtime proof. The
+  # Linux rust-check cannot observe libproc FFI behavior or a real macOS
+  # Agent/Server/tmux runtime, so the native-binary crates select this exact-head
+  # ARM64 lane. It runs the rusage regression and the bounded release-mode
+  # runtime fixture; a failure blocks the PR like any other Quality job.
+  native-macos-check:
+    needs: scope
+    if: needs.scope.outputs.native == 'true'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      RUSTC_WRAPPER: ""
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with: { workspaces: ".", cache-all-crates: "true" }
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Record target OS and architecture
+        run: |
+          echo "uname: $(uname -srm)"
+          test "$(uname -s)" = "Darwin"
+          test "$(uname -m)" = "arm64"
+      - name: Ensure tmux
+        run: command -v tmux >/dev/null || brew install tmux
+      - name: Native macOS process-discovery regression (release)
+        run: |
+          cargo test --release -p nession-agent --lib session::process_discovery:: -- --test-threads=1
+      - name: Build release native binaries
+        run: cargo build --release --bin nession --bin nession-agent --bin nession-server
+      - name: Native release-mode runtime fixture
+        run: ./scripts/native-macos-runtime-check.sh target/release
+      - name: Upload native diagnostics on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-macos-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
+          path: /tmp/nession-native-*/
+          if-no-files-found: warn
+          retention-days: 14
 
   tooling-check:
     needs: scope

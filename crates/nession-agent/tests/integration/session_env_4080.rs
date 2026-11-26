@@ -13,7 +13,7 @@
 //!   override.
 //!
 //! The GitHub API is a loopback fake. The tmux server is the isolated one the
-//! Acceptance Case provides through `NESSON_TMUX_SOCKET`; Session names are
+//! Acceptance Case provides through `NESSION_TMUX_SOCKET`; Session names are
 //! unique so a full-suite run that shares the server cannot collide.
 
 #![allow(clippy::expect_used, clippy::indexing_slicing)]
