@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "mode": "scenario",
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 378682095,
+    "run_id": 45873577442,
+    "run_attempt": 1,
+    "event": "pull_request",
+    "branch": "fix/4597-staging-case-ownership",
+    "target_sha": "d43525f89a7ece4883e09c00fdc52abaf62a09ad",
+    "conclusion": "success",
+    "source_url": "https://github.com/BestNathan/nession/actions/runs/45873577442",
+    "scenario_tree_sha": "bdabf5e8e31f31a089a93927615d1bb3a3115318",
+    "original_sha256": "144513f6679b04658acbd3af2407b71e50f14c40f898e45d75ae88f9649308e5"
+  },
+  "record": "runs/2026-11-26/45873577442-1/scenario/terminal-attach-resume-2.json",
+  "execution_id": "b16d97eb306804f42722a971ea0ec97a899b47fa67ba21d5c899565866883ea0"
+}
