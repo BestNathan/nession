@@ -142,6 +142,58 @@ fi
 rm -f "$TARGET" "$JS_TARGET" "$E2E_TARGET"
 rmdir "$(dirname "$TARGET")" 2>/dev/null
 
+echo "→ the Test Runtime harness refuses inherited production-like paths"
+HARNESS_TMP=$(mktemp -d /tmp/nession-harness-selftest.XXXXXX)
+canary="$HARNESS_TMP/production-home"
+mkdir -p "$canary"
+printf 'sentinel\n' >"$canary/sentinel"
+harness_init() {
+    env -u NSESSION_TEST_RUNTIME_DIR -u NSESSION_TEST_RUNTIME_MANIFEST \
+        -u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \
+        "$@" bash -c '. scripts/test-runtime.sh; nession_test_runtime_init' 2>&1
+}
+out=$(harness_init NESION_HOME="$canary")
+if [[ $? -ne 0 ]] && grep -q 'REFUSED' <<<"$out" && grep -qx 'sentinel' "$canary/sentinel"; then
+    echo "  ✓ inherited production-like home refused before touching the canary"
+    pass=$((pass + 1))
+else
+    echo "  ✗ MISSED: inherited production-like home was not refused"
+    echo "$out" | sed 's/^/      /'
+    fail=$((fail + 1))
+fi
+out=$(harness_init NSESSION_TEST_RUNTIME_DIR="$canary")
+if [[ $? -ne 0 ]] && grep -qE 'incomplete|manifest' <<<"$out"; then
+    echo "  ✓ incomplete inherited capability refused"
+    pass=$((pass + 1))
+else
+    echo "  ✗ MISSED: incomplete capability was accepted"
+    echo "$out" | sed 's/^/      /'
+    fail=$((fail + 1))
+fi
+ln -s "$canary" "$HARNESS_TMP/link"
+out=$(harness_init NSESSION_TEST_RUNTIME_DIR="$HARNESS_TMP/link" NSESSION_TEST_RUNTIME_MANIFEST="$canary/manifest.json")
+if [[ $? -ne 0 ]] && grep -qi 'symlink' <<<"$out"; then
+    echo "  ✓ symlinked inherited root refused"
+    pass=$((pass + 1))
+else
+    echo "  ✗ MISSED: symlinked inherited root was accepted"
+    echo "$out" | sed 's/^/      /'
+    fail=$((fail + 1))
+fi
+out=$(env -u NSESSION_TEST_RUNTIME_DIR -u NSESSION_TEST_RUNTIME_MANIFEST \
+    -u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \
+    bash -c '. scripts/test-runtime.sh; nession_test_runtime_init; printf "%s\n" "$NSESSION_TEST_RUNTIME_DIR"; nession_test_runtime_cleanup')
+root=$(head -n1 <<<"$out")
+if [[ $root == /tmp/nession-test-runtime.* || $root == /private/tmp/nession-test-runtime.* ]] &&
+    [[ ! -e $root ]]; then
+    echo "  ✓ a fresh run root is created and removed by its owner"
+    pass=$((pass + 1))
+else
+    echo "  ✗ MISSED: fresh run root lifecycle: $out"
+    fail=$((fail + 1))
+fi
+rm -rf "$HARNESS_TMP"
+
 echo "→ the committed Test Runtime inventory must be current"
 if node scripts/test-runtime-inventory.mjs --check; then
     echo "  ✓ inventory current, no unresolved reference"

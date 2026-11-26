@@ -220,7 +220,7 @@ function collect() {
 
   // Scan the E2E and tooling entries too; Rust references were collected above.
   for (const entry of entries.filter((item) => !item.file.startsWith('crates/'))) {
-    if (!/\.(ts|tsx|js|mjs|cjs)$/.test(entry.file)) continue;
+    if (!/\.(ts|tsx|js|mjs|cjs|sh)$/.test(entry.file)) continue;
     const lines = readLines(path.join(ROOT, entry.file));
     const caseOwned = /makeRoot|createRunRoot|mkdtemp|tmpdir|freePort|allocateLoopbackPort|mktemp|installEnv/.test(lines.join('\n'));
     for (let i = 0; i < lines.length; i += 1) {

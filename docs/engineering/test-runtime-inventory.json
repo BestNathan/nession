@@ -5,7 +5,7 @@
   "summary": {
     "crates": 16,
     "entries": 1882,
-    "references": 966,
+    "references": 995,
     "unresolved": 0
   },
   "crates": [
@@ -16043,6 +16043,258 @@
       "replacement": "private mktemp/tooling root"
     },
     {
+      "file": "scripts/check-design-tokens-selftest.sh",
+      "line": 8,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "LOG=\"$(mktemp /tmp/nession-design-negative.XXXXXX)\"",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-dev-workspace-selftest.sh",
+      "line": 6,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "TMP=\"$(mktemp -d /tmp/nession-workspace-selftest.XXXXXX)\"",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 64,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = TcpListener::bind(\"127.0.0.1:31235\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 76,
+      "kind": "temp-dir",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = std::env::temp_dir().join(\"nession-probe-fixed.db\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 86,
+      "kind": "durable-home",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = nession_common::paths::nession_home().unwrap();",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 92,
+      "kind": "tmux-socket",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "std::env::set_var(\"NESSON_TMUX_SOCKET\", \"/tmp/probe.sock\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 98,
+      "kind": "env-mutation",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "std::env::set_var(\"PROBE\", \"1\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 99,
+      "kind": "env-mutation",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "std::env::remove_var(\"PROBE\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 102,
+      "kind": "session-metadata",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "probe \"rule 7: production metadata store\" \"SessionMetadataStore::new in an integration test\" \\",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 105,
+      "kind": "session-metadata",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = nession_agent::session::metadata::SessionMetadataStore::new(",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 113,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "await page.goto('/?server_url=' + encodeURIComponent('ws://localhost:19090/ws'));",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 118,
+      "kind": "delete",
+      "effect": "delete",
+      "disposition": "tooling-owned-root",
+      "reference": "fs.rmSync(process.env.HOME, { recursive: true, force: true });\"",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 122,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "spawn('true', [], { env: { ...process.env, CI: '' } });\"",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 129,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "let _own = std::path::Path::new(\"/tmp/nession-probe/tmux.sock\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 146,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "HARNESS_TMP=$(mktemp -d /tmp/nession-harness-selftest.XXXXXX)",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 152,
+      "kind": "tmux-socket",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "-u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \\",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 184,
+      "kind": "tmux-socket",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "-u NESION_HOME -u NESION_RUNTIME_DIR -u NESION_TMUX_SOCKET \\",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-test-isolation-selftest.sh",
+      "line": 187,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "if [[ $root == /tmp/nession-test-runtime.* || $root == /private/tmp/nession-test-runtime.* ]] &&",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 7,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "# goes blind — matching only the string `Command::new(\"tmux\")` reported",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 39,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "probe \"rule 1a: Command::new(\\\"tmux\\\") literal\" \"outside the chokepoint\" \"$RUST_TARGET\" \\",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 41,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = tokio::process::Command::new(\"tmux\")",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 49,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = std::process::Command::new(\"tmux\").arg(\"kill-server\").status();",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 66,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = tokio::process::Command::new(&self.tmux_bin)",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 87,
+      "kind": "env-mutation",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "std::env::set_var(\"TMUX_TMPDIR\", \"/tmp/probe\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 110,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "tmux -S /tmp/nession-probe/tmux.sock new-session -d -s probe'",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 126,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = std::process::Command::new(exe).status();",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 130,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "# construction. `TmuxCommand::new(..)` contains the substring `Command::new(`,",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/check-tmux-socket-selftest.sh",
+      "line": 134,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "tooling-owned-root",
+      "reference": "let _ = TmuxCommand::new(\"tmux\", \"/tmp/probe/tmux.sock\");",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
       "file": "scripts/ci-trigger-scope-selftest.mjs",
       "line": 76,
       "kind": "temp-dir",
@@ -18020,6 +18272,15 @@
       "effect": "delete",
       "disposition": "tooling-owned-root",
       "reference": "rmSync(root, { recursive: true, force: true });",
+      "replacement": "private mktemp/tooling root"
+    },
+    {
+      "file": "scripts/release-version-consistency-selftest.sh",
+      "line": 4,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "tooling-owned-root",
+      "reference": "WORK=\"$(mktemp -d /tmp/nession-version-gate-selftest.XXXXXX)\"",
       "replacement": "private mktemp/tooling root"
     },
     {
