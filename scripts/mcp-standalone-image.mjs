@@ -6,8 +6,8 @@
 // binary, carries no Server/Agent/UI/toolchain payload and no credential, the
 // staging and production lanes publish `mcp-<tag>` with the existing
 // provenance/ACR checks, the deployment sample is independently selectable and
-// read-only, and only staging may add the separately owned MCP GitOps overlay.
-// Other environments must keep the existing three-workload rollout boundary.
+// read-only, and staging and production advance their separate MCP overlay.
+// Other environments keep the existing three-workload rollout boundary.
 //
 // This is a source/deterministic guard, not runtime proof. The staging Case
 // owns container/protocol behavior and registry readback.
@@ -27,12 +27,13 @@ const ACR = '.github/workflows/deploy-staging-acr.yml';
 const VERIFIER = 'scripts/ci/verify-staging-ghcr-source.mjs';
 const MIRROR = 'scripts/mirror-container-images.sh';
 const GITOPS = 'scripts/gitops-commit.sh';
+const SEAL = '.github/workflows/deploy-seal-gitops-secret.yml';
 const DEV_COMPOSE = 'deploy/docker-compose.yml';
 const DOCS = 'docs/architecture/mcp.md';
 
 const SOURCES = [
   DOCKERFILE, COMPOSE, EXAMPLE, STAGING, PRODUCTION, ACR,
-  VERIFIER, MIRROR, GITOPS, DEV_COMPOSE, DOCS,
+  VERIFIER, MIRROR, GITOPS, SEAL, DEV_COMPOSE, DOCS,
 ];
 
 export function loadSources(root = ROOT) {
@@ -184,16 +185,32 @@ export function checkSources(files) {
     '"mcp-${runtime_version}" "ui-${ui_version}"',
   ]);
 
-  // #3902: a distinct staging Argo Application may consume the fourth OCI
-  // role. The existing Nession app still has only three roles, and production,
-  // preprod and staging-01 must never acquire an implicit MCP workload.
+  // Staging and production advance the fourth OCI role in a separate Argo
+  // Application. Other environments must not acquire an implicit MCP workload.
   includes(GITOPS, [
-    'if [[ "${env}" == "staging" ]]; then\n  for img in server agent ui mcp; do',
+    'if [[ "${env}" == "staging" || "${env}" == "production" ]]; then\n  for img in server agent ui mcp; do',
     'for img in server agent ui; do',
-    'if [[ "${env}" == "staging" ]]; then\n  mcp_overlay="${tmp}/environments/staging/mcp"',
+    'if [[ "${env}" == "staging" || "${env}" == "production" ]]; then\n  mcp_overlay="${tmp}/environments/${env}/mcp"',
     'if [[ ! -f "${mcp_overlay}/kustomization.yaml" ]]; then',
     '"ghcr.io/${OWNER}/nession-mcp=${TARGET_IMAGE}:mcp-${ref}"',
+    'if [[ "$repair" == "--repair-current" ]]; then',
+    'grep -Fxq "  newTag: ${role}-${ref}" kustomization.yaml',
+    'git push origin gitops',
   ]);
+  includes(PRODUCTION, [
+    'repair-production:',
+    'if: github.ref == \'refs/heads/main\'',
+    'if: needs.version-check.outputs.version_changed == \'false\' && needs.version-check.outputs.repair_version != \'\'',
+    'environment: production',
+    'gh release view "v$VERSION" --json tagName,isDraft,isPrerelease',
+    './scripts/gitops-commit.sh production "$VERSION" --repair-current',
+  ]);
+  includes(SEAL, [
+    'newTag: mcp-',
+    'docker buildx imagetools inspect --raw',
+    'kubectl kustomize gitops/environments/production/mcp',
+  ]);
+  rejects(SEAL, /924b161/, 'production Secret rotation must not pin the pilot image');
   rejects(GITOPS, /for img in mcp; do/,
     'standalone MCP must not enter generic GitOps rollout');
   rejects(DEV_COMPOSE, /^\s*mcp:\s*$/m,
@@ -258,8 +275,20 @@ function selfTest(files) {
     ['Staging ACR verification drops MCP', GITOPS,
       (t) => replaceOnce(t, 'for img in server agent ui mcp; do', 'for img in server agent ui; do'),
       'missing if [[ "${env}" == "staging" ]]; then'],
+    ['production MCP loses its guarded overlay', GITOPS,
+      (t) => replaceOnce(t, 'if [[ "${env}" == "staging" || "${env}" == "production" ]]; then\\n  mcp_overlay=', 'if [[ "${env}" == "staging" ]]; then\\n  mcp_overlay='),
+      'missing if [[ "${env}" == "staging" || "${env}" == "production" ]]; then'],
+    ['production repair drops released-version check', PRODUCTION,
+      (t) => replaceOnce(t, 'gh release view "v$VERSION" --json tagName,isDraft,isPrerelease', 'true'),
+      'missing gh release view'],
+    ['production repair drops core alignment check', GITOPS,
+      (t) => replaceOnce(t, 'grep -Fxq "  newTag: ${role}-${ref}" kustomization.yaml', 'true'),
+      'missing grep -Fxq'],
+    ['Secret rotation hardcodes pilot SHA', SEAL,
+      (t) => t + '\\n# 924b161\\n',
+      'must not pin the pilot image'],
     ['Staging MCP loses its guarded overlay', GITOPS,
-      (t) => replaceOnce(t, 'if [[ "${env}" == "staging" ]]; then\n  mcp_overlay=',
+      (t) => replaceOnce(t, 'if [[ "${env}" == "staging" || "${env}" == "production" ]]; then\n  mcp_overlay=',
         'if true; then\n  mcp_overlay='),
       'missing if [[ "${env}" == "staging" ]]; then'],
     ['Staging MCP loses fail-closed overlay check', GITOPS,
