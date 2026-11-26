@@ -15870,7 +15870,7 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-02/verify.cjs",
-      "line": 80,
+      "line": 82,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "case-owned-root",
@@ -15879,11 +15879,20 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-02/verify.cjs",
-      "line": 100,
+      "line": 102,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "case-owned-root",
       "reference": "const stdout = execFileSync(invocation.command, [...invocation.args, ...args], {",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
+    },
+    {
+      "file": "e2e/acceptance/cases/4597/SC-04/verify.cjs",
+      "line": 102,
+      "kind": "delete",
+      "effect": "delete",
+      "disposition": "case-owned-root",
+      "reference": "fs.rmSync(foreignHome, { recursive: true, force: true });",
       "replacement": "Case-owned root from makeRoot/createRunRoot"
     },
     {
@@ -15897,16 +15906,7 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-06/verify.cjs",
-      "line": 83,
-      "kind": "process-spawn",
-      "effect": "execute",
-      "disposition": "case-owned-root",
-      "reference": "output: require('node:child_process').execFileSync(SWEEP, ['--kill'], {",
-      "replacement": "Case-owned root from makeRoot/createRunRoot"
-    },
-    {
-      "file": "e2e/acceptance/cases/4597/SC-06/verify.cjs",
-      "line": 166,
+      "line": 161,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "case-owned-root",
@@ -15915,7 +15915,7 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-06/verify.cjs",
-      "line": 167,
+      "line": 162,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "case-owned-root",
@@ -15924,7 +15924,7 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-06/verify.cjs",
-      "line": 191,
+      "line": 186,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "case-owned-root",
@@ -15933,7 +15933,7 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-06/verify.cjs",
-      "line": 208,
+      "line": 203,
       "kind": "delete",
       "effect": "delete",
       "disposition": "case-owned-root",
@@ -15942,7 +15942,7 @@
     },
     {
       "file": "e2e/acceptance/cases/4597/SC-06/verify.cjs",
-      "line": 217,
+      "line": 212,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "read-only-tooling",

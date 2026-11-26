@@ -67,11 +67,13 @@ function stateFingerprint(home) {
   return files;
 }
 
-function pidOf(file) {
+function isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
-    return Number(fs.readFileSync(file, 'utf8').trim());
+    process.kill(pid, 0);
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -142,12 +144,15 @@ async function main() {
   createdA = true;
 
   const before = {
-    serverPid: pidOf(path.join(providedRoot.root, 'runtime', 'server.pid')),
-    agentPid: pidOf(path.join(providedRoot.root, 'runtime', 'agent.pid')),
+    // The harness starts the product binaries directly; their live child PIDs
+    // are the runtime metadata (direct binaries do not write PID files).
+    serverPid: provided.server_pid,
+    agentPid: provided.agent_pid,
     state: stateFingerprint(homeA),
     panes: tmuxPanes(socketA),
   };
-  assert.ok(before.serverPid && before.agentPid, 'the provided runtime has no live PID identity');
+  assert.ok(isAlive(before.serverPid), 'the provided runtime Server is not alive: ' + before.serverPid);
+  assert.ok(isAlive(before.agentPid), 'the provided runtime Agent is not alive: ' + before.agentPid);
   assert.ok(before.panes.some((line) => line.includes(sessionA + ':')),
     'A did not create its own Session on its socket');
 
@@ -202,13 +207,15 @@ async function main() {
     runtimeB = null;
 
     const after = {
-      serverPid: pidOf(path.join(providedRoot.root, 'runtime', 'server.pid')),
-      agentPid: pidOf(path.join(providedRoot.root, 'runtime', 'agent.pid')),
+      serverPid: provided.server_pid,
+      agentPid: provided.agent_pid,
       state: stateFingerprint(homeA),
       panes: tmuxPanes(socketA),
     };
     assert.equal(after.serverPid, before.serverPid, 'A Server PID changed after B ran');
     assert.equal(after.agentPid, before.agentPid, 'A Agent PID changed after B ran');
+    assert.ok(isAlive(after.serverPid), 'A Server process was replaced after B ran');
+    assert.ok(isAlive(after.agentPid), 'A Agent process was replaced after B ran');
     assert.deepEqual(after.state, before.state,
       'A configuration/state hashes changed after B created and cleaned a Session');
     assert.deepEqual(after.panes, before.panes,

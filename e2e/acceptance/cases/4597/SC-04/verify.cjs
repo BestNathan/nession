@@ -23,11 +23,13 @@ const {
 const TARGET = process.env.NESSION_ACCEPTANCE_TARGET_SHA;
 const evidence = [];
 
-function pidOf(file) {
+function isAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
-    return Number(fs.readFileSync(file, 'utf8').trim());
+    process.kill(pid, 0);
+    return true;
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -69,6 +71,8 @@ async function main() {
   // A forged/foreign root is refused before provisioning or deletion.
   const forged = createRunRoot('nession-4597-forged');
   const foreignHome = path.join(require('node:os').tmpdir(), 'foreign-4597-' + process.pid);
+  fs.mkdirSync(foreignHome, { recursive: true });
+  fs.writeFileSync(path.join(foreignHome, 'sentinel'), 'sentinel\n');
   const link = path.join(forged.root, 'home-link');
   fs.symlinkSync(foreignHome, link);
   const [s0, a0, p0, w0] = await Promise.all([
@@ -84,7 +88,8 @@ async function main() {
     serverPort: s0, agentPort: a0, stalledProbePort: p0, webPort: w0,
     cleanupHome: true, cleanupRoot: true,
   }), /outside this run's Test Runtime root/);
-  assert.equal(fs.existsSync(foreignHome), false, 'the foreign target must stay untouched');
+  assert.equal(fs.readFileSync(path.join(foreignHome, 'sentinel'), 'utf8'), 'sentinel\n',
+    'the foreign target must stay untouched');
 
   const tampered = createRunRoot('nession-4597-tampered');
   const manifestPath = path.join(tampered.root, 'manifest.json');
@@ -94,6 +99,7 @@ async function main() {
   fs.writeFileSync(manifestPath, original);
   removeRunRoot(tampered.root);
   removeRunRoot(forged.root);
+  fs.rmSync(foreignHome, { recursive: true, force: true });
   evidence.push({
     type: 'negative',
     value: 'symlink-escape home and a tampered manifest were rejected before provisioning; foreign path untouched',
@@ -119,11 +125,11 @@ async function main() {
       );
       assert.equal(metadata.run_root, verified.root, name + ' runtime.json does not name its root');
       assert.equal(metadata.run_id, verified.manifest.run_id, name + ' runtime.json run_id mismatch');
-      assert.ok(pidOf(path.join(pair.run.root, 'runtime', 'server.pid')), name + ' has no Server PID');
-      assert.ok(pidOf(path.join(pair.run.root, 'runtime', 'agent.pid')), name + ' has no Agent PID');
+      assert.ok(isAlive(pair.runtime.server_pid), name + ' has no live Server PID');
+      assert.ok(isAlive(pair.runtime.agent_pid), name + ' has no live Agent PID');
     }
-    const bServerPid = pidOf(path.join(b.run.root, 'runtime', 'server.pid'));
-    const bAgentPid = pidOf(path.join(b.run.root, 'runtime', 'agent.pid'));
+    const bServerPid = b.runtime.server_pid;
+    const bAgentPid = b.runtime.agent_pid;
 
     // Stopping A removes only A's owned root and closes only A's preview port.
     await a.runtime.stop();
@@ -131,10 +137,8 @@ async function main() {
     assert.equal(fs.existsSync(a.run.root), false, 'stopped run A left its root behind');
     assert.equal(await portAccepts(a.ports[3]), false, 'stopped run A left its web port open');
     assert.equal(await portAccepts(b.ports[3]), true, 'run B lost readiness when A stopped');
-    assert.equal(pidOf(path.join(b.run.root, 'runtime', 'server.pid')), bServerPid,
-      'run B Server PID changed when A stopped');
-    assert.equal(pidOf(path.join(b.run.root, 'runtime', 'agent.pid')), bAgentPid,
-      'run B Agent PID changed when A stopped');
+    assert.ok(isAlive(bServerPid), 'run B Server was replaced when A stopped');
+    assert.ok(isAlive(bAgentPid), 'run B Agent was replaced when A stopped');
     const responseB2 = await fetch(b.runtime.base_url, { redirect: 'manual' });
     assert.ok(responseB2.status < 500, 'run B preview stopped responding after A stopped');
 
