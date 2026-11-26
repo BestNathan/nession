@@ -5,13 +5,35 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {selectQualityFamilies as choose} from './quality-scope.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
-const none={rust:false,web:false,tooling:false,workflow:false,instruction:false};
+const none={rust:false,web:false,tooling:false,workflow:false,instruction:false,native:false};
 const flags=xs=>{const {applicability,...result}=choose(xs);return result;};
 test('fixture-only, web-only, rust-only and terminal protocol diffs',()=>{
   assert.deepEqual(flags(['e2e/fixtures/agent-development/qwen-repair-source.md']),none);
   assert.deepEqual(flags(['web/src/product/terminal/index.tsx']),{...none,web:true,tooling:true});
-  assert.deepEqual(flags(['crates/nession-agent/src/session/runtime.rs']),{...none,rust:true});
+  assert.deepEqual(flags(['crates/nession-agent/src/session/runtime.rs']),{...none,rust:true,native:true});
   assert.deepEqual(flags(['crates/nession-protocol/src/contracts/terminal/v1.rs','web/src/generated/protocol/a.ts']),{...none,rust:true,web:true,tooling:true});
+});
+test('native macOS runtime family selects native-binary crates and their CI owners (#4584)',()=>{
+  // Positive: the native runtime crates and the two workflows that own the
+  // native job select native proof.
+  for(const p of [
+    'crates/nession-agent/src/session/process_discovery/macos.rs',
+    'crates/nession-cli/src/commands/agent/start.rs',
+    'crates/nession-server/src/main.rs',
+    'crates/nession-common/src/config.rs',
+    'crates/nession-runtime/src/lib.rs',
+    'crates/nession-tmux/src/process.rs',
+    'crates/nession-sandbox/src/lib.rs',
+    '.github/workflows/ci-quality.yml',
+    '.github/workflows/release-production.yml',
+  ])assert.equal(flags([p]).native,true,'expected native for '+p);
+  // Negative: a non-native crate, web-only and docs diffs do not select it.
+  for(const p of [
+    'crates/nession-protocol/src/contracts/session/v1.rs',
+    'crates/nession-erofs/src/lib.rs',
+    'web/src/product/terminal/index.tsx',
+    'docs/architecture/agent-process-discovery.md',
+  ])assert.equal(flags([p]).native,false,'expected no native for '+p);
 });
 test('changed owners select affected Gates',()=>{
   assert.deepEqual(flags(['gates/checks/rust-coverage.sh']),{...none,rust:true,tooling:true});
@@ -19,14 +41,14 @@ test('changed owners select affected Gates',()=>{
   assert.deepEqual(flags(['scripts/rust-test-route.mjs']),{...none,rust:true,tooling:true});
   assert.deepEqual(flags(['scripts/filtered-test.sh']),{...none,rust:true,tooling:true});
   assert.deepEqual(flags(['gates/run']),{...none,rust:true,web:true,tooling:true});
-  assert.deepEqual(flags(['.github/workflows/ci-quality.yml']),{...none,rust:true,web:true,tooling:true,workflow:true});
+  assert.deepEqual(flags(['.github/workflows/ci-quality.yml']),{...none,rust:true,web:true,tooling:true,workflow:true,native:true});
   assert.deepEqual(flags(['docs/AGENTS.md']),{...none,instruction:true});
   assert.deepEqual(flags(['.github/workflows/agent-controller-dispatch.yml']),{...none,workflow:true});
 });
 test('unknown paths and unprovable diffs fail conservatively',()=>{
   assert.deepEqual(flags(['scripts/new-checker.sh']),{...none,rust:true,web:true,tooling:true});
   for(const xs of [[],[''],['../escape'],[123],null]){
-    const r=choose(xs);assert.ok(r.rust&&r.web&&r.tooling&&r.workflow&&r.instruction);
+    const r=choose(xs);assert.ok(r.rust&&r.web&&r.tooling&&r.workflow&&r.instruction&&r.native);
     assert.equal(r.applicability,'unknown');
   }
 });
@@ -90,7 +112,7 @@ test('Secret sealing deployment changes are tooling-only, without weakening unkn
   const diff=['.github/workflows/deploy-seal-gitops-secret.yml',...scripts];
   for(const file of scripts) assert.deepEqual(flags([file]),{...none,tooling:true});
   assert.deepEqual(flags(diff),{...none,tooling:true,workflow:true});
-  assert.deepEqual(flags([...diff,'crates/nession-server/src/main.rs']),{...none,rust:true,tooling:true,workflow:true});
+  assert.deepEqual(flags([...diff,'crates/nession-server/src/main.rs']),{...none,rust:true,tooling:true,workflow:true,native:true});
   assert.deepEqual(flags([...diff,'web/src/main.tsx']),{...none,web:true,tooling:true,workflow:true});
   assert.deepEqual(flags(['scripts/ci/seal-gitops-secret-unknown.mjs']),{...none,rust:true,web:true,tooling:true});
 });
