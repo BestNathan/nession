@@ -544,14 +544,19 @@ fn fake_journalctl(home: &TempDir) -> PathBuf {
 #[cfg(target_os = "linux")]
 fn linux_service_command(home: &TempDir, bin: &Path) -> Command {
     let mut command = nession(home);
-    command.env("HOME", home.path()).env(
-        "PATH",
-        format!(
-            "{}:{}",
-            bin.display(),
-            std::env::var("PATH").unwrap_or_default()
-        ),
-    );
+    command
+        .env("HOME", home.path())
+        // The service module honours XDG_CONFIG_HOME before HOME; pin it so
+        // the fixture unit is the one this test registered.
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
+        .env(
+            "PATH",
+            format!(
+                "{}:{}",
+                bin.display(),
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        );
     command
 }
 
@@ -628,6 +633,7 @@ fn a_missing_journalctl_is_reported() {
     let mut command = nession(&home);
     command
         .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join(".config"))
         .env("PATH", &empty_bin)
         .args(["agent", "logs", "--source", "service"]);
     let output = command.output().expect("run logs");
