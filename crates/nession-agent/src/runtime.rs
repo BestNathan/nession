@@ -271,6 +271,15 @@ pub async fn run(
         }
     }
 
+    // Repair generated zsh adapter artifacts left by a pre-#4605 Agent. The
+    // pass is idempotent, touches only recorded zsh Sessions that still exist,
+    // and writes nothing for a converged adapter. A tmux that cannot answer
+    // skips the pass instead of guessing which Sessions are live.
+    let repaired_adapters = tmux_for_client.env().repair_recorded_zsh_adapters().await;
+    if repaired_adapters > 0 {
+        info!("repaired {repaired_adapters} generated zsh Session adapter(s)");
+    }
+
     // One metadata store for the process: the P2P listener and the central
     // connection are two entrypoints into the same Session-owned state (#2789).
     let session_metadata = Arc::new(crate::session::metadata::SessionMetadataStore::new(

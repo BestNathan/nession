@@ -10,7 +10,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use super::cmd::{self, TmuxCmd};
-use super::env::{EffectiveOverlay, EnvManager, ShellAdapter};
+use super::env::{EffectiveOverlay, EnvManager, ShellAdapter, USER_ZDOTDIR_VAR};
 use super::ops::{TmuxDep, TmuxOps};
 use crate::session::metadata::{classify_tmux_error, require_instance, SessionMetadataStore};
 
@@ -486,6 +486,21 @@ impl SessionManager {
     /// has to outlive an Agent process, because tmux Sessions do.
     pub fn with_env_state_dir(mut self, state_dir: PathBuf) -> Self {
         self.env = self.env.with_state_dir(state_dir);
+        self
+    }
+
+    /// State the inherited zsh selection used by this manager's env
+    /// operations.
+    ///
+    /// Production leaves it at the Agent process environment. A test states
+    /// it explicitly so the shell that launched the test process cannot change
+    /// a create's adapter provenance.
+    #[cfg(test)]
+    pub(crate) fn with_inherited_shell_environment(
+        mut self,
+        inherited: crate::tmux::env::InheritedShellEnvironment,
+    ) -> Self {
+        self.env = self.env.with_inherited_shell_environment(inherited);
         self
     }
 
@@ -1096,6 +1111,24 @@ impl SessionManager {
             },
         };
 
+        // The Agent's inherited shell controls are settled once here. A
+        // ZDOTDIR that names a parent Session's generated adapter is removed
+        // before it can become this Session's baseline (#4605); a legitimate
+        // custom ZDOTDIR and ordinary user variables stay part of the
+        // inherited environment.
+        let mut inherited: Vec<(String, String)> = std::env::vars().collect();
+        let stripped_managed_zdotdir = self.env.sanitize_inherited_environment(&mut inherited);
+        // The home this Session's shell will have: an explicit Session HOME
+        // wins over the inherited one. Used to replace a stripped ZDOTDIR and
+        // to make the zsh user-configuration fallback explicit.
+        let effective_home = overlay
+            .vars
+            .iter()
+            .rev()
+            .find(|(key, _)| key == "HOME")
+            .or_else(|| inherited.iter().rev().find(|(key, _)| key == "HOME"))
+            .map(|(_, value)| value.clone());
+
         // A Session with a binding gets a Session-local shell adapter. The
         // adapter is installed before the shell starts, because a zsh adapter
         // is selected by ZDOTDIR and a bash adapter by the launch command.
@@ -1107,7 +1140,24 @@ impl SessionManager {
                     std::env::var("SHELL").ok(),
                     passwd_login_shell(),
                 );
-                self.env.install_shell_adapter(name, shell.as_deref()).await
+                let mut adapter = self.env.install_shell_adapter(name, shell.as_deref()).await;
+                // The inherited environment named a managed adapter, so the
+                // runtime fallback must be stated explicitly too: tmux's
+                // global environment may still carry the stale marker.
+                if stripped_managed_zdotdir
+                    && adapter.shell.as_deref() == Some("zsh")
+                    && adapter.user_zdotdir.is_none()
+                {
+                    if let Some(home) = &effective_home {
+                        adapter
+                            .env
+                            .push((USER_ZDOTDIR_VAR.to_string(), home.clone()));
+                    }
+                }
+                if let Some(warning) = &adapter.warning {
+                    warnings.push(format!("{name}: {warning}"));
+                }
+                adapter
             }
             None => ShellAdapter::unsupported(None, "no Environment Binding"),
         };
@@ -1182,12 +1232,16 @@ impl SessionManager {
 
         // Inherited Agent environment < bounded image defaults (and the
         // image's resolved PATH prepend) < explicit Session/Sandbox ENV.
-        let mut session_env = base_session_environment(
-            std::env::vars().collect(),
-            &image_environment,
-            &overlay.vars,
-            &withheld,
-        );
+        let mut session_env =
+            base_session_environment(inherited, &image_environment, &overlay.vars, &withheld);
+        // Replace the stripped managed ZDOTDIR with the Session's own home.
+        // Without this, tmux's global environment (started by a contaminated
+        // Agent) would still supply the stale adapter path to this Session.
+        if stripped_managed_zdotdir {
+            if let Some(home) = &effective_home {
+                session_env.push(("ZDOTDIR".to_string(), home.clone()));
+            }
+        }
         if !has_ps1 {
             session_env.push(("NESSION_RUNTIME_PS1".to_string(), DEFAULT_PS1.to_string()));
             session_env.push((
@@ -1760,7 +1814,9 @@ mod binding_create_tests {
             return;
         }
         let dir = tempfile::tempdir().unwrap();
-        let mgr = SessionManager::new().with_env_state_dir(dir.path().join("state"));
+        let mgr = SessionManager::new()
+            .with_env_state_dir(dir.path().join("state"))
+            .with_inherited_shell_environment(Default::default());
         let session = TestSession::new("binding-create");
         let name = session.name();
         let cwd = std::env::temp_dir().to_string_lossy().into_owned();
