@@ -61,6 +61,12 @@ function isE2ERunner(file) {
   if (/^scripts\/(e2e-|issue-e2e-|ci\/)/.test(file)) return true;
   if (file.startsWith('.github/workflows/') &&
       E2E_EXECUTOR_WORKFLOWS.has(basename(file))) return true;
+  // #4606: composite actions are workflow-execution units consumed by
+  // workflows (#4593). They can carry executor steps, so the surface stays
+  // risk-bearing like the executor workflows above — never downgraded to
+  // tooling and never left `unknown` (the install-regctl action deadlocked
+  // the #4599 main->staging sync as UNCLASSIFIED_BATCH_SCOPE).
+  if (file.startsWith('.github/actions/')) return true;
   // Browser gates define what browser evidence means; a change there can
   // invalidate prior design/E2E proof even though it cannot alter runtime.
   if (/^gates\/checks\/(e2e|.*playwright|.*browser)/i.test(file)) return true;
@@ -274,6 +280,9 @@ function selfTest() {
     '.github/workflows/e2e-tests.yml',
     '.github/workflows/e2e-full-regression.yml',
     '.github/workflows/acceptance-cases.yml',
+    // #4606: composite actions are risk-bearing workflow-execution units
+    '.github/actions/install-regctl/action.yml',
+    '.github/actions/nession-setup/action.yml',
     'gates/checks/e2e-playwright.sh',
     'gates/checks/design-system-browser.sh',
     'gates/suites/quality-tooling.gates',
@@ -377,6 +386,26 @@ function selfTest() {
     'pages/src/app/App.tsx',
     'unknown/path/that/does/not/exist.ts',
   ]).category, 'unknown', 'an unknown path must still fail closed alongside known Pages paths');
+  // #4606: the exact #4599 integration shape — a composite action alongside
+  // workflow tooling and runtime crates. The action is a recognized
+  // risk-bearing surface, so the batch is known mixed risk, never unknown.
+  const compositeActionConvergence = classifyChangedPaths([
+    '.github/actions/install-regctl/action.yml',
+    '.github/workflows/release-staging.yml',
+    'crates/nession-agent/src/session/process_discovery/macos.rs',
+  ]);
+  assert.equal(compositeActionConvergence.category, 'mixed');
+  assert.equal(compositeActionConvergence.applicable, true);
+  const actionOnly = classifyChangedPaths([
+    '.github/actions/install-regctl/action.yml',
+  ]);
+  assert.equal(actionOnly.category, 'e2e-runner');
+  assert.equal(actionOnly.applicable, true);
+  // Negative: an unrecognized path alongside a composite action still fails closed.
+  assert.equal(classifyChangedPaths([
+    '.github/actions/install-regctl/action.yml',
+    'unknown/path/that/does/not/exist.ts',
+  ]).category, 'unknown', 'an unknown path must still fail closed alongside a composite action');
   // #4477: the Pages migration made pages/scripts/** the trusted build
   // pipeline for the shipped public artifact. They are risk-bearing runtime
   // build inputs (never tooling-only, never unknown) while the Pages test
