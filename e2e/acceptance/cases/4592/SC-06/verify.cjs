@@ -14,7 +14,7 @@
 const { spawn } = require('node:child_process');
 const {
   assert, fs, path, root, targetSha, nessionBin, makeRoot, mkdirPrivate,
-  cliOutput, runBinary, waitFor, waitForTcp, installEnv, sha256File,
+  cliOutput, runBinary, waitFor, waitForTcp, installEnv, sha256File, tomlString, assertUnder,
   makeRealReleaseTarball, startInstallerFixture, downloadOfficialRelease,
   BINARIES, main,
 } = require('../../../shared/release-hardening-cases.cjs');
@@ -148,7 +148,9 @@ main(async () => {
     const manifest = JSON.parse(fs.readFileSync(path.join(archive, 'manifest.json'), 'utf8'));
     assert.equal(manifest.created_by, 'nession-upgrade-v1', 'the archive was not written by the new transaction');
     assert.equal(sha256File(path.join(archive, 'agent-config.toml')), before.agentConfigFile);
-    assert.equal(sha256File(path.join(archive, 'server-config.toml')), before.serverConfigFile);
+    // Coverage-honest archive copy: the captured generated-default db_path is
+    // rewritten into the archive, so the file differs from Current's on purpose.
+    assertUnder(tomlString(path.join(archive, 'server-config.toml'), 'db_path'), archive, 'archive server-config db_path');
     assert.equal(fs.readFileSync(path.join(archive, 'agent', 'identity'), 'utf8').trim(), 'agent-4592-sc06-identity');
     assert.equal(sha256File(path.join(installDir, 'nession')), sha256File(targetBin), 'Current is not the verified target');
     assert.ok(!fs.existsSync(path.join(runtime, 'agent.pid')), 'the bridge auto-started an Agent');
