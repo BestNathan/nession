@@ -9,8 +9,8 @@ use super::{
 use nession_erofs::oci::descriptor::Platform;
 use nession_protocol::contracts::image::v1::{normalize_image_digest, ImageSource};
 use nession_protocol::contracts::session::v1::{
-    ClientManagedCreate, EnvSelectionMode, ManagedImageGrant, ManagedImageObjectGrant,
-    ManagedImageRole, ManagedSessionImages,
+    validate_session_name, ClientManagedCreate, EnvSelectionMode, ManagedImageGrant,
+    ManagedImageObjectGrant, ManagedImageRole, ManagedSessionImages,
 };
 
 use crate::image::{agent_platform, ImageResolution};
@@ -149,6 +149,15 @@ impl ConnectionHandler {
             return Ok(session_create_reply(
                 &msg.id,
                 refusal("agent_id and name are required"),
+            ));
+        }
+        // One creation-time name policy for every Server create route (#4614).
+        // The Agent repeats it at its own boundary; this refusal is earlier
+        // and avoids a round trip that cannot succeed.
+        if let Err(error) = validate_session_name(&name) {
+            return Ok(session_create_reply(
+                &msg.id,
+                refusal(&format!("invalid Session name: {error}")),
             ));
         }
         // The one shared metadata contract validates the initial work context

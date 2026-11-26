@@ -3,13 +3,20 @@ import type { Agent, EnvFileRef } from '@/types';
 import type { Project, ProjectLocation } from '@/product/project/types';
 import type { CreateEnvSelectionMode } from './envSelection';
 
-/** Session names are tmux names: letters, digits, `_`, `-` and `.`. */
+/**
+ * Session names are create-time lowercase slugs (#4614): the name is also the
+ * raw key for Agent-owned per-Session state, and macOS APFS folds case.
+ *
+ * This mirrors `validate_session_name` in
+ * `crates/nession-protocol/src/contracts/session/v1.rs`, the canonical owner;
+ * the Server and Agent remain the authorities.
+ */
 export function validateSessionName(name: string): string | null {
   if (!name.trim()) {
     return 'Session name is required';
   }
-  if (!/^[a-zA-Z0-9_\-.]+$/.test(name.trim())) {
-    return 'Only letters, digits, underscores, hyphens, and dots allowed';
+  if (!/^[a-z0-9][a-z0-9._-]*$/.test(name.trim())) {
+    return 'Only lowercase letters, digits, underscores, hyphens, and dots allowed; start with a letter or digit';
   }
   return null;
 }

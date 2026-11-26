@@ -635,6 +635,41 @@ impl EnvManager {
         }
     }
 
+    /// An existing Session state directory whose name differs from `name` only
+    /// by ASCII case (#4614).
+    ///
+    /// The state root is name-keyed and macOS APFS folds case, so `Test` and
+    /// `test` would be one directory. This is a create-time guard; an exact
+    /// name is the same Session and keeps its existing behavior.
+    pub(crate) async fn case_variant_state_dir(&self, name: &str) -> Result<Option<String>> {
+        let mut entries = match fs::read_dir(&self.state_dir).await {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => {
+                return Err(error).with_context(|| format!("reading {}", self.state_dir.display()));
+            }
+        };
+        while let Some(entry) = entries
+            .next_entry()
+            .await
+            .with_context(|| format!("reading {}", self.state_dir.display()))?
+        {
+            let is_dir = entry
+                .file_type()
+                .await
+                .with_context(|| format!("reading {}", entry.path().display()))?
+                .is_dir();
+            if !is_dir {
+                continue;
+            }
+            let existing = entry.file_name().to_string_lossy().into_owned();
+            if existing != name && existing.eq_ignore_ascii_case(name) {
+                return Ok(Some(existing));
+            }
+        }
+        Ok(None)
+    }
+
     /// Install the Session-local shell adapter for `shell_path`.
     ///
     /// `bash` and `zsh` are the only shells with a proven adapter. Everything
