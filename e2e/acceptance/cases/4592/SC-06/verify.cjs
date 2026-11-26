@@ -164,7 +164,7 @@ main(async () => {
     // 3. The new CLI's install is the same owner: same version is a no-op.
     const noOp = cliOutput(['install', targetVersion, '--yes'], installerEnv, 120000);
     assert.equal(noOp.status, 0, 'new CLI install no-op failed: ' + noOp.output.slice(-2000));
-    assert.match(noOp.output, /already installed/i);
+    assert.match(noOp.output, /already at release/i);
     await fixture.close();
     fixture = null;
 
