@@ -624,10 +624,13 @@ fn a_missing_journalctl_is_reported() {
     let empty_bin = home.path().join("empty-bin");
     std::fs::create_dir_all(&empty_bin).unwrap();
 
-    let output = linux_service_command(&home, &empty_bin)
-        .args(["agent", "logs", "--source", "service"])
-        .output()
-        .expect("run logs");
+    // Only the empty bin directory is on PATH, so journalctl cannot be found.
+    let mut command = nession(&home);
+    command
+        .env("HOME", home.path())
+        .env("PATH", &empty_bin)
+        .args(["agent", "logs", "--source", "service"]);
+    let output = command.output().expect("run logs");
     assert!(!output.status.success());
     let error = String::from_utf8_lossy(&output.stderr);
     assert!(error.contains("journalctl"), "{error}");
