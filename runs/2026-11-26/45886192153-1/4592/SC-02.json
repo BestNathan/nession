@@ -1,0 +1,73 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "627ce52db28a420136ab58fdc6937e1a895fab2036aa0a4d4f338c8a62a58bb9",
+  "run_id": 45886192153,
+  "run_attempt": 1,
+  "issue": 4592,
+  "criterion": "SC-02",
+  "criterion_text": "使用真实旧版/目标版 Agent 与 Server 在隔离 HOME 完成停止→升级→启动：Agent ID、认证身份、Session instance metadata、Claude/ENV bindings、Server DB 中的项目/会话/ENV/镜像引用连续；旧 tmux Session 在满足实例及执行所有权兼容时可恢复，不兼容时明确阻止升级或恢复而不重建/误接管；不自动重启进程。",
+  "stage": "staging",
+  "target_sha": "479ada94786312c5be6c84834bddbe786653ec81",
+  "contract_sha256": "14c6ca8b197ac3cd801a1c4cc3e84ece65d3ee810e46961866b993585f91f702",
+  "case_revision": "479ada94786312c5be6c84834bddbe786653ec81",
+  "case_tree_sha": "24149f9dd20aca3fef9214adf5970b3617a437aa",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Fail",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-26T19:49:52.389Z",
+  "finished_at": "2026-11-26T19:50:14.079Z",
+  "duration_ms": 21691,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Fail",
+      "summary": "AssertionError [ERR_ASSERTION]: retention upgrade failed: install failed:\n  phase: resolve-release\n  category: release-not-found\n  retryable: no\n  Current: unchanged\n  cause: Release 1.0.1 not found\n  next: check the requested version and platform asset\nError: Release 1.0.1 not found\n\nStack backtrace:\n   0: anyhow::error::<impl core::convert::From<E> for anyhow::Error>::from\n   1: <core::result::Result<T,F> as core::ops::try_trait::FromResidual<core::result::Result<core::convert::Infallible,E>>>::from_residual\n   2: nession_cli::update::install::run_inner::{{closure}}\n   3: nession_cli::update::install::run::{{closure}}\n   4: nession_cli::commands::install::run::{{closure}}\n   5: nession_cli::commands::dispatch::{{closure}}\n   6: nession::main::{{closure}}\n   7: <core::pin::Pin<P> as core::future::future::Future>::poll\n   8: tokio::runtime::park::CachedParkThread::block_on::{{closure}}\n   9: tokio::runtime::park::CachedParkThread::block_on\n  10: tokio::runtime::context::blocking::BlockingRegionGuard::block_on\n  11: tokio::runtime::scheduler::multi_thread::MultiThread::block_on::{{closure}}\n  12: tokio::runtime::context::runtime::enter_runtime\n  13: tokio::runtime::scheduler::multi_thread::MultiThread::block_on\n  14: tokio::runtime::runtime::Runtime::block_on_inner\n  15: tokio::runtime::runtime::Runtime::block_on\n  16: nession::main\n  17: core::ops::function::FnOnce::call_once\n  18: std::sys::backtrace::__rust_begin_short_backtrace\n  19: std::rt::lang_start::{{closure}}\n  20: std::rt::lang_start_internal\n  21: std::rt::lang_start\n  22: main\n  23: <unknown>\n  24: __libc_start_main\n  25: _start\n\n\n1 !== 0\n\n    at /home/runner/work/nession/nession/workspace/e2e/acceptance/cases/4592/SC-02/verify.cjs:188:12\n    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the exact-SHA runtime observations did not establish the criterion"
+        }
+      ],
+      "duration_ms": 10722,
+      "exit_code": 1
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45886192153,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "1f4960d791a64729a275b27a06060e541aa33803",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "479ada94786312c5be6c84834bddbe786653ec81",
+        "stage": "staging",
+        "issue": 4592,
+        "criterion": "SC-02",
+        "job_id": 140137380079,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45886192153",
+    "record_path": "runs/2026-11-26/45886192153-1/4592/SC-02.json",
+    "source_result_sha256": "137f440e57eac2c7b0e3025ea5f3cbe2d41fb2c87ccd17825b73a7c7efe56d5c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45886192153-1",
+    "sha256": "137f440e57eac2c7b0e3025ea5f3cbe2d41fb2c87ccd17825b73a7c7efe56d5c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45886192153",
+    "durability": "time-limited; object archival not configured"
+  }
+}
