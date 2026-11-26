@@ -907,6 +907,12 @@ jobs:
 
       - name: Build Web
         if: steps.select.outputs.count != '0'
+        env:
+          # #4620: the cold Web build (TypeScript + Vite with sourcemaps)
+          # exceeds Node's default V8 heap limit on the 14 GB hosted Intel
+          # macOS runner. Raise only this build's old-space limit; the build
+          # inputs, sourcemaps, Case selection and assertions are unchanged.
+          NODE_OPTIONS: --max-old-space-size=8192
         run: cd workspace/web && npm run build
 
       - name: Build Rust runtime
