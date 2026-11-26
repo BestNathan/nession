@@ -4,6 +4,7 @@ mod attach_route;
 mod attach_session;
 mod cli_contract;
 mod client_commands;
+mod logs;
 mod session_commands;
 mod target_resolution;
 mod update;

@@ -107,6 +107,83 @@ pub async fn wait_for_ready(
     }
 }
 
+/// How much of a background child's stderr is kept for its failure sentence.
+///
+/// The reader drains the pipe continuously — a child that writes more than the
+/// pipe buffer must never block the readiness wait — while only this prefix is
+/// retained (#4600 SC-05).
+pub const CHILD_STDERR_LIMIT: usize = 64 * 1024;
+
+/// A background child's stderr, drained from spawn.
+///
+/// `stderr` must be piped. The reader starts immediately, so neither a chatty
+/// child nor a child that fails after writing a lot can deadlock the parent.
+pub struct ChildStderr {
+    shared: std::sync::Arc<std::sync::Mutex<Vec<u8>>>,
+    done: std::sync::mpsc::Receiver<Vec<u8>>,
+}
+
+/// Start draining a background child's stderr.
+pub fn capture_child_stderr(child: &mut std::process::Child) -> ChildStderr {
+    use std::io::Read;
+    let shared = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let (sender, done) = std::sync::mpsc::channel();
+    let Some(mut stderr) = child.stderr.take() else {
+        let _ = sender.send(Vec::new());
+        return ChildStderr { shared, done };
+    };
+    let sink = std::sync::Arc::clone(&shared);
+    std::thread::spawn(move || {
+        let mut buffer = [0u8; 8192];
+        loop {
+            match stderr.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(read) => {
+                    let mut sink = sink
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner);
+                    let remaining = CHILD_STDERR_LIMIT.saturating_sub(sink.len());
+                    let take = remaining.min(read);
+                    sink.extend_from_slice(buffer.get(..take).unwrap_or_default());
+                    // The rest is drained and discarded so the pipe never fills.
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(_) => break,
+            }
+        }
+        let captured = sink
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        let _ = sender.send(captured);
+    });
+    ChildStderr { shared, done }
+}
+
+impl ChildStderr {
+    /// The retained stderr after the child (or its inherited pipe) closed.
+    ///
+    /// Bounded wait: a helper that inherited the write end can keep the pipe
+    /// open after the child itself exited; a snapshot is a better answer than
+    /// a stuck start.
+    pub fn finish(self) -> String {
+        match self
+            .done
+            .recv_timeout(std::time::Duration::from_millis(500))
+        {
+            Ok(bytes) => String::from_utf8_lossy(&bytes).into_owned(),
+            Err(_) => {
+                let bytes = self
+                    .shared
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .clone();
+                String::from_utf8_lossy(&bytes).into_owned()
+            }
+        }
+    }
+}
+
 /// Read a background child's captured stderr after it exited.
 ///
 /// Background children write no terminal of their own; their failure sentence
@@ -290,6 +367,45 @@ mod tests {
             announced_pid(state_file).expect("a recorded pid"),
             written.pid
         );
+    }
+
+    /// #4600 SC-05: a child that floods stderr must not deadlock the parent's
+    /// readiness wait, and only a bounded prefix is retained.
+    #[test]
+    fn a_stderr_flood_is_drained_and_bounded() {
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("i=0; while [ $i -lt 4000 ]; do printf 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\\n' >&2; i=$((i+1)); done")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn flood");
+        let stderr = capture_child_stderr(&mut child);
+        let status = child.wait().expect("wait for flood");
+        assert!(status.success());
+
+        let captured = stderr.finish();
+        assert!(!captured.is_empty());
+        assert!(
+            captured.len() <= CHILD_STDERR_LIMIT,
+            "retained stderr must be bounded: {}",
+            captured.len()
+        );
+    }
+
+    #[test]
+    fn a_child_failure_sentence_is_retained() {
+        let mut child = std::process::Command::new("sh")
+            .arg("-c")
+            .arg("echo 'the failure sentence' >&2; exit 3")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn failing child");
+        let stderr = capture_child_stderr(&mut child);
+        let _ = child.wait();
+
+        assert!(stderr.finish().contains("the failure sentence"));
     }
 
     /// A child that announced but recorded nothing is a disagreement about which

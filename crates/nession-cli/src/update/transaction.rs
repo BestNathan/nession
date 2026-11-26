@@ -131,6 +131,27 @@ pub fn journal_path(home: &Path) -> PathBuf {
     home.join(JOURNAL_FILE)
 }
 
+/// Report a pending install journal for a read-only command without mutating
+/// anything.
+///
+/// `logs` never reads Current's binaries, so it must not trigger recovery; the
+/// operator still learns that the next mutating/Current-reading command will
+/// recover (#4600 SC-04).
+pub fn report_pending_journal_for_read_only_command() {
+    let Ok(home) = nession_common::paths::nession_home() else {
+        return;
+    };
+    let journal = journal_path(&home);
+    if journal.exists() {
+        eprintln!(
+            "nession: an install transaction journal exists at {}; this command is read-only \
+             and did not run recovery or install. Run another command (for example `nession \
+             version list`) to complete or repair it.",
+            journal.display()
+        );
+    }
+}
+
 /// Recover an interrupted install before any CLI command runs.
 ///
 /// Returns `InstallInProgress` rather than blocking when another process holds
