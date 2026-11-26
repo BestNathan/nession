@@ -76,8 +76,14 @@ pub async fn run(
     // width (#2487), and an invalid value fails before any subsystem starts.
     // Both entrypoints reach this function, so the rule has one owner.
     let mut config = config;
-    config.apply_env_overrides()?;
-    config.validate()?;
+    // Failures before the runtime log writer exists have no file destination;
+    // the bounded startup capture is where they remain readable (#4600).
+    if let Err(error) = config.apply_env_overrides() {
+        return Err(startup_failure("validate", error));
+    }
+    if let Err(error) = config.validate() {
+        return Err(startup_failure("validate", error));
+    }
 
     // Hard process-wide outbound ceilings for the peer-to-peer connections
     // (#4504), derived from their class limits over a bounded connection count.
@@ -89,11 +95,24 @@ pub async fn run(
     );
 
     // 1. Initialize logging (stdout + file)
-    let _log_guard = nession_common::logging::init_logging(
+    let _log_guard = match nession_common::logging::init_logging(
         &config.logging,
         &nession_common::paths::agent_logs_dir()?,
-        "nession-agent",
-    )?;
+        nession_common::logging::LogComponent::Agent.log_prefix(),
+    ) {
+        Ok(guard) => guard,
+        Err(error) => {
+            // The log directory itself is unusable; startup capture lives
+            // beside it and may fail for the same reason. Either way the
+            // terminal/stderr diagnostic and this sentence survive.
+            let note = nession_common::startup_log::record_or_note(
+                nession_common::logging::LogComponent::Agent,
+                "logging",
+                &format!("{error}"),
+            );
+            return Err(anyhow::Error::new(error).context(note));
+        }
+    };
 
     info!("nession-agent {} starting", env!("CARGO_PKG_VERSION"));
     info!("Server URL: {}", config.server_url);
@@ -904,6 +923,19 @@ fn extract_port(addr: &str) -> u16 {
         .next()
         .and_then(|p| p.parse().ok())
         .unwrap_or(0)
+}
+
+/// Attach a bounded startup-capture outcome to a pre-logging failure.
+///
+/// The original error stays the cause; the note says where the durable copy
+/// went, or that the same unusable location prevented one.
+fn startup_failure(phase: &str, error: anyhow::Error) -> anyhow::Error {
+    let note = nession_common::startup_log::record_or_note(
+        nession_common::logging::LogComponent::Agent,
+        phase,
+        &format!("{error:#}"),
+    );
+    error.context(note)
 }
 
 #[cfg(test)]

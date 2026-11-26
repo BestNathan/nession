@@ -256,6 +256,8 @@ function readIdentity(file) {
     started_at: Number(identity.started_at),
     kind: identity.kind,
     release_version: identity.version || null,
+    log_dir: identity.log_dir || null,
+    home: identity.home || null,
   };
 }
 

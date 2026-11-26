@@ -263,6 +263,18 @@ pub struct ProcessIdentity {
     /// before it creates a mixed environment. Older records have no version;
     /// that is reported as unknown rather than guessed from a path.
     pub release_version: Option<String>,
+    /// The absolute runtime log directory this process actually writes to,
+    /// recorded by the process itself (#4600).
+    ///
+    /// A reader must not substitute the documented default for a live process
+    /// started under another `NESSION_HOME`: that would present another
+    /// instance's directory as this one's. `None` means the record predates
+    /// this field (or could not record it) and the reader must say the logs
+    /// location is unverified.
+    pub log_dir: Option<String>,
+    /// The absolute `NESSION_HOME` the process resolved, recorded by the
+    /// process itself. `None` is a legacy record and is reported as unknown.
+    pub home: Option<String>,
 }
 
 impl ProcessIdentity {
@@ -278,6 +290,8 @@ impl ProcessIdentity {
             kind,
             config_source: ConfigRecord::Unknown,
             release_version: None,
+            log_dir: None,
+            home: None,
         })
     }
 }
@@ -338,16 +352,52 @@ pub fn write_identity(
     };
     identity.config_source = config_source;
     identity.release_version = Some(env!("CARGO_PKG_VERSION").to_string());
+    // Record the effective log scope only when it can be named without
+    // guessing. A failure to resolve it leaves the fields absent, which a
+    // reader reports as unverified rather than substituting a default.
+    identity.log_dir = identity
+        .kind
+        .log_component()
+        .logs_dir()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .filter(|path| !path.contains(['\n', '\r']));
+    identity.home = nession_common::paths::nession_home()
+        .ok()
+        .map(|path| path.to_string_lossy().into_owned())
+        .filter(|path| !path.contains(['\n', '\r']));
+    let scope_lines = format!(
+        "{}{}",
+        identity
+            .log_dir
+            .as_deref()
+            .map(|dir| format!("log_dir={dir}\n"))
+            .unwrap_or_default(),
+        identity
+            .home
+            .as_deref()
+            .map(|home| format!("home={home}\n"))
+            .unwrap_or_default(),
+    );
     let body = format!(
-        "pid={}\nstarted_at={}\nkind={}\nversion={}\n{}",
+        "pid={}\nstarted_at={}\nkind={}\nversion={}\n{config_lines}{scope_lines}",
         identity.pid,
         identity.started_at,
         identity.kind.as_str(),
         identity.release_version.as_deref().unwrap_or_default(),
-        config_lines
     );
     fs::write(path, body).with_context(|| format!("Failed to write state file: {path}"))?;
     Ok(identity)
+}
+
+impl Component {
+    /// The canonical log-tree owner for this state-file component.
+    pub fn log_component(self) -> nession_common::logging::LogComponent {
+        match self {
+            Component::Agent => nession_common::logging::LogComponent::Agent,
+            Component::Server => nession_common::logging::LogComponent::Server,
+        }
+    }
 }
 
 /// Read the identity recorded at `path`.
@@ -361,6 +411,8 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
     let mut source_kind = None;
     let mut config_path = None;
     let mut release_version = None;
+    let mut log_dir = None;
+    let mut home = None;
     for line in content.lines() {
         let Some((key, value)) = line.split_once('=') else {
             continue;
@@ -372,9 +424,16 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             "config_source" => source_kind = Some(value.trim().to_string()),
             "config_path" => config_path = Some(value.trim().to_string()),
             "version" => release_version = Some(value.trim().to_string()),
+            "log_dir" => log_dir = Some(value.trim().to_string()),
+            "home" => home = Some(value.trim().to_string()),
             _ => {}
         }
     }
+    // An empty or relative scope is not a usable absolute location; report it
+    // as absent rather than presenting a relative path as the live scope.
+    let absolute = |value: Option<String>| value.filter(|path| Path::new(path).is_absolute());
+    let log_dir = absolute(log_dir);
+    let home = absolute(home);
 
     // A legacy `config_path=` line without the source marker is not evidence:
     // the old writer recorded the *selected* path even when it did not exist
@@ -394,6 +453,8 @@ pub fn read_identity(path: &str) -> Result<ProcessIdentity> {
             kind,
             config_source,
             release_version,
+            log_dir,
+            home,
         }),
         // A file the old format wrote — a bare pid — reads as a missing record
         // rather than as an identity, because a bare pid is what this replaces.
@@ -820,6 +881,74 @@ mod tests {
             read_identity(path).unwrap().config_source,
             ConfigRecord::Defaults
         );
+    }
+
+    /// #4600 SC-02: the process records the log directory and home it actually
+    /// resolved, so a reader can name them instead of presenting a default as
+    /// live state.
+    #[test]
+    fn an_identity_records_the_effective_log_scope() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+
+        let written = write_identity(path, Component::Agent, ConfigRecord::Unknown).unwrap();
+        let read = read_identity(path).unwrap();
+
+        assert_eq!(read.log_dir, written.log_dir);
+        assert_eq!(read.home, written.home);
+        let log_dir = written
+            .log_dir
+            .as_deref()
+            .expect("a resolved log directory");
+        assert!(Path::new(log_dir).is_absolute(), "{log_dir}");
+        assert!(log_dir.ends_with("agent/logs"), "{log_dir}");
+        let home = written.home.as_deref().expect("a resolved home");
+        assert!(Path::new(home).is_absolute(), "{home}");
+    }
+
+    /// A legacy record without scope lines reads as unknown, never as the
+    /// current default.
+    #[test]
+    fn an_old_identity_reports_no_log_scope() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+        let current = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "pid={}\nstarted_at={}\nkind=agent\n",
+                current.pid, current.started_at
+            ),
+        )
+        .unwrap();
+
+        let read = read_identity(path).unwrap();
+        assert_eq!(read.log_dir, None);
+        assert_eq!(read.home, None);
+    }
+
+    /// A relative scope line is not a usable location and must not be
+    /// presented as one.
+    #[test]
+    fn a_relative_log_scope_is_not_evidence() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("agent.pid");
+        let path = path.to_str().unwrap();
+        let current = ProcessIdentity::of_current_process(Component::Agent).unwrap();
+        std::fs::write(
+            path,
+            format!(
+                "pid={}\nstarted_at={}\nkind=agent\nlog_dir=relative/logs\nhome=.\n",
+                current.pid, current.started_at
+            ),
+        )
+        .unwrap();
+
+        let read = read_identity(path).unwrap();
+        assert_eq!(read.log_dir, None);
+        assert_eq!(read.home, None);
     }
 
     /// The old writer recorded `config_path` even when the file did not exist

@@ -194,7 +194,7 @@ fn mutating_command(args: &[OsString]) -> Option<String> {
     let action = tokens.get(1).map(String::as_str).unwrap_or("");
     let mutating = match family {
         "agent" => !matches!(action, "status" | "logs" | ""),
-        "server" => !matches!(action, "status" | ""),
+        "server" => !matches!(action, "status" | "logs" | ""),
         "sessions" => !matches!(action, "list" | ""),
         "config" => tokens.get(2).map(String::as_str) != Some("show"),
         _ => false,
@@ -370,6 +370,21 @@ pub fn prepare<I: IntoIterator<Item = OsString>>(raw_args: I) -> Result<Prepared
         verify_archive_state_coverage(&home, &version, &command)?;
     }
     let cli = archived_cli(&version)?;
+    // Read-only logs: the selected release reads its own home. A release that
+    // predates the logs command cannot do that itself; the Current CLI reads
+    // the archive's directory directly instead of falling back to Current
+    // (#4600 SC-04). Nothing here writes or recovers.
+    if let Some(family) = logs_family(&args) {
+        if !archive_supports_logs(&cli, &home, &family) {
+            eprintln!(
+                "nession: release {version} predates `{family} logs`; reading its log \
+                 directory directly (read-only). The archive is not modified and Current \
+                 is not consulted."
+            );
+            dispatch_logs_read_only(&args, &version, &home)?;
+            unreachable!("logs dispatch always execs or exits");
+        }
+    }
     // A dangerous lifecycle command must not be executed by a release that
     // predates the shared lock/PID/single-active contract: it would look in
     // its own home and could start a second daemon (#3232 F2).
@@ -398,6 +413,123 @@ pub fn prepare<I: IntoIterator<Item = OsString>>(raw_args: I) -> Result<Prepared
         let status = command
             .status()
             .with_context(|| format!("failed to run the archived CLI at {}", cli.display()))?;
+        std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+/// Whether the CLI must skip its background update check for `args`.
+///
+/// `logs` is local, read-only diagnostics; it never performs a network update
+/// check (#4600). The other cases are the pre-existing help/version handshakes
+/// and an explicit `NESSION_NO_UPDATE_CHECK`.
+pub fn should_skip_background_check(args: &[OsString]) -> bool {
+    if std::env::var("NESSION_NO_UPDATE_CHECK").is_ok() {
+        return true;
+    }
+    if is_logs_invocation(args) {
+        return true;
+    }
+    args.iter().any(|arg| {
+        matches!(
+            arg.to_str(),
+            Some("--help" | "-h" | "help" | "--version" | "-V" | "--upgrade-config-check")
+        )
+    })
+}
+
+/// Whether this invocation is the read-only `agent|server logs` command.
+///
+/// Used before Clap parses (main) and by the version dispatcher. It must be
+/// tolerant of global flags and their values.
+pub fn is_logs_invocation(args: &[OsString]) -> bool {
+    logs_family(args).is_some()
+}
+
+fn logs_family(args: &[OsString]) -> Option<String> {
+    let (family, action) = two_command_tokens(args)?;
+    if action == "logs" && matches!(family.as_str(), "agent" | "server") {
+        Some(family)
+    } else {
+        None
+    }
+}
+
+/// The first two non-flag command tokens, skipping the global flags that take
+/// a value so a value named `logs` cannot masquerade as the action.
+fn two_command_tokens(args: &[OsString]) -> Option<(String, String)> {
+    let mut tokens = Vec::new();
+    let mut index = 1;
+    while let Some(value) = args.get(index) {
+        let token = value.to_str()?;
+        if matches!(token, "--server-url" | "--auth-token") {
+            index += 2;
+            continue;
+        }
+        if token.starts_with('-') || token.starts_with('+') {
+            index += 1;
+            continue;
+        }
+        tokens.push(token.to_string());
+        if tokens.len() == 2 {
+            break;
+        }
+        index += 1;
+    }
+    match tokens.as_slice() {
+        [family, action] => Some((family.clone(), action.clone())),
+        _ => None,
+    }
+}
+
+/// Probe whether the archived CLI knows the `logs` leaf.
+///
+/// A help probe is a normal child process that exits before doing any work;
+/// its output is discarded. A release without the command exits non-zero (or
+/// with no help), and the caller takes the read-only fallback.
+fn archive_supports_logs(cli: &Path, home: &Path, family: &str) -> bool {
+    Command::new(cli)
+        .args([family, "logs", "--help"])
+        .env(nession_common::paths::NESSION_HOME_ENV, home)
+        .env(NESSION_VERSION_DISPATCHED_ENV, "1")
+        .env_remove(NESSION_VERSION_ENV)
+        .env("NESSION_NO_UPDATE_CHECK", "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false)
+}
+
+/// Run the Current CLI against the selected archive home with the archive's
+/// path, without changing Current or touching the archive.
+fn dispatch_logs_read_only(args: &[OsString], version: &Version, home: &Path) -> Result<()> {
+    let exe = std::env::current_exe().context("cannot resolve the Current CLI executable")?;
+    let mut command = Command::new(&exe);
+    command
+        .args(args.get(1..).unwrap_or(&[]))
+        .env(nession_common::paths::NESSION_HOME_ENV, home)
+        .env_remove(NESSION_VERSION_ENV)
+        .env(NESSION_VERSION_DISPATCHED_ENV, "1")
+        .env("NESSION_NO_UPDATE_CHECK", "1");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let error = command.exec();
+        Err(anyhow::Error::new(error).context(format!(
+            "failed to run the Current CLI at {} for release {version} logs",
+            exe.display()
+        )))
+    }
+    #[cfg(not(unix))]
+    {
+        let status = command.status().with_context(|| {
+            format!(
+                "failed to run the Current CLI at {} for release {version} logs",
+                exe.display()
+            )
+        })?;
         std::process::exit(status.code().unwrap_or(1));
     }
 }
@@ -728,6 +860,7 @@ mod tests {
             vec!["agent", "status"],
             vec!["agent", "logs"],
             vec!["server", "status"],
+            vec!["server", "logs"],
             vec!["sessions", "list"],
             vec!["agents", "list"],
             vec!["config", "agent", "show"],
