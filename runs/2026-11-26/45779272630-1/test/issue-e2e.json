@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "kind": "issue_e2e_run",
+  "target_sha": "f2e59e36ec3980adc55e2c9bcaae09443bc97930",
+  "run_id": 45779272630,
+  "run_attempt": 1,
+  "plan_digest": "2113de2d0cdb141865043ab781e3b4c91faca1251b58b4b0bb881de531853b80",
+  "artifact_digest": "sha256:b41272103ec9a920a7293163dd68bb3cab70e87aa8b03d07e784dc02957cfa82",
+  "results": [
+    {
+      "id": "agent-process-discovery",
+      "result": "Pass",
+      "discovered": 1,
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "assertions": 79
+    }
+  ]
+}
