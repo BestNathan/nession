@@ -26,6 +26,11 @@ const MANIFEST_FILE = 'manifest.json';
 const OWNER_FILE = 'owner.pid';
 const SCHEMA_VERSION = 1;
 
+// `scripts/sweep-test-sessions.sh` discovers run roots by these prefixes. A
+// root whose owner dies hard must stay discoverable, so every name minted here
+// must start with one of them; a caller's label may only be a suffix.
+const RUN_ROOT_PREFIXES = ['nession-test-runtime', 'nession-e2e'];
+
 function processUid() {
   return typeof process.getuid === 'function' ? process.getuid() : 0;
 }
@@ -113,15 +118,38 @@ function writeManifest(root, tmuxSocket) {
 }
 
 /**
+ * The reaper-visible name for a run root.
+ *
+ * The caller's label is evidence, not ownership: the name must keep one of
+ * `RUN_ROOT_PREFIXES` so a SIGKILLed run is still discovered and reclaimed.
+ * A label equal to the prefix is used as-is; any other label becomes a suffix
+ * of the matching canonical prefix (`nession-test-runtime.<random>-<label>`).
+ */
+function runRootName(label) {
+  const text = String(label ?? '').trim() || 'nession-test-runtime';
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(text)) {
+    throw new Error(`Test Runtime label '${text}' is not a safe directory name (#4597)`);
+  }
+  const prefix = text.startsWith('nession-e2e') ? 'nession-e2e' : 'nession-test-runtime';
+  const suffix = text === prefix
+    ? ''
+    : '-' + text.replace(new RegExp('^' + prefix + '[-.]?'), '');
+  return { prefix, suffix };
+}
+
+/**
  * Create a fresh run root under `parent` (default `/tmp`, for short paths).
  * Returns the verified context.
  */
 function createRunRoot(label = 'nession-test-runtime', parent = '/tmp') {
   fs.mkdirSync(parent, { recursive: true });
-  const created = fs.mkdtempSync(path.join(parent, label + '.'));
+  const { prefix, suffix } = runRootName(label);
+  const created = fs.mkdtempSync(path.join(parent, prefix + '.'));
+  const named = suffix ? created + suffix : created;
+  if (named !== created) fs.renameSync(created, named);
   // Canonicalize now: macOS /tmp is a symlink to /private/tmp, and the
   // manifest and every derived socket must agree on one spelling.
-  const root = fs.realpathSync(created);
+  const root = fs.realpathSync(named);
   fs.chmodSync(root, 0o700);
   const tmuxSocket = path.join(root, 'tmux.sock');
   for (const dir of ['home', 'runtime', 'tmp', 'config', 'cache', 'data', 'state']) {
@@ -194,8 +222,11 @@ function verifyRunRoot(root) {
 /** Remove a verified run root; refuses anything that is not ours. */
 function removeRunRoot(root) {
   const verified = verifyRunRoot(root);
-  if (!path.basename(verified.root).startsWith('nession-')) {
-    throw new Error(`refusing to remove ${verified.root}: not a nession run root (#4597)`);
+  const base = path.basename(verified.root);
+  if (!RUN_ROOT_PREFIXES.some((prefix) => base.startsWith(prefix + '.'))) {
+    throw new Error(
+      `refusing to remove ${verified.root}: not a reaper-owned nession run root name (#4597)`,
+    );
   }
   fs.rmSync(verified.root, { recursive: true, force: false });
 }

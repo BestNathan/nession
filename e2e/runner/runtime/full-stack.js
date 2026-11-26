@@ -707,6 +707,12 @@ function selfTest() {
   // verified root (and its lease) can be removed (#4597).
   const run = createRunRoot('nession-runtime-selftest');
   try {
+    // The reaper discovers roots by these prefixes; a custom label is a
+    // suffix so a SIGKILLed run is never invisible to the sweep (#4597).
+    assert.ok(path.basename(run.root).startsWith('nession-test-runtime.'),
+      'a custom-label run root must stay reaper-visible: ' + run.root);
+    assert.ok(path.basename(run.root).endsWith('-nession-runtime-selftest'),
+      'the caller label must remain in the run root name: ' + run.root);
     const verified = verifyRunRoot(run.root);
     assert.equal(verified.manifest.lifecycle, 'active');
     assert.notEqual(sanitizedEnv(run.root, run.tmuxSocket).HOME, process.env.HOME);
@@ -726,6 +732,13 @@ function selfTest() {
     lease.release();
   } finally {
     removeRunRoot(run.root);
+  }
+  const e2eNamed = createRunRoot('nession-e2e');
+  try {
+    assert.ok(path.basename(e2eNamed.root).startsWith('nession-e2e.'),
+      'the E2E class keeps its canonical prefix: ' + e2eNamed.root);
+  } finally {
+    removeRunRoot(e2eNamed.root);
   }
   console.log('e2e runner runtime self-test: 13 cases passed');
 }
