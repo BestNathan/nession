@@ -5,7 +5,7 @@
   "summary": {
     "crates": 16,
     "entries": 1894,
-    "references": 1015,
+    "references": 1016,
     "unresolved": 0
   },
   "crates": [
@@ -15866,6 +15866,15 @@
       "effect": "resolve/read",
       "disposition": "case-owned-root",
       "reference": "const worktree = fs.mkdtempSync(path.join(os.tmpdir(), 'kb-4436-'));",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
+    },
+    {
+      "file": "e2e/acceptance/cases/4592/SC-06/verify.cjs",
+      "line": 28,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "case-owned-root",
+      "reference": "const child = spawn('sh', [script, ...args], {",
       "replacement": "Case-owned root from makeRoot/createRunRoot"
     },
     {
