@@ -5,15 +5,50 @@
 
 pub mod cache;
 pub mod check;
+pub mod config_check;
 pub mod download;
 pub mod github;
 pub mod install;
+pub mod policy;
+pub mod progress;
 pub mod release_config;
 pub mod replace;
+pub mod snapshot;
 pub mod transaction;
 pub mod version;
 
+/// The versioned upgrade-contract capability token (#4592 §6).
+///
+/// `scripts/install.sh` probes `nession --upgrade-contract` instead of
+/// `install --help`: an old CLI that supports `install` may still execute the
+/// superseded move-based transaction, so only a release that advertises this
+/// token may be delegated an upgrade of its own installation.
+pub const UPGRADE_CONTRACT_TOKEN: &str = "nession-upgrade-v1";
+
+/// The capability line printed by `nession --upgrade-contract`.
+pub fn upgrade_contract_line() -> String {
+    format!("{UPGRADE_CONTRACT_TOKEN} {}", env!("CARGO_PKG_VERSION"))
+}
+
+/// The capability line requested by raw args, if any.
+///
+/// Both probes are read-only handshakes that must answer without a resolvable
+/// home or a Clap parse; the entrypoint only prints the returned line.
+pub fn capability_probe_line(args: &[std::ffi::OsString]) -> Option<String> {
+    if args
+        .iter()
+        .any(|argument| argument == "--lifecycle-contract")
+    {
+        return Some(crate::lifecycle::contract_line());
+    }
+    if args.iter().any(|argument| argument == "--upgrade-contract") {
+        return Some(upgrade_contract_line());
+    }
+    None
+}
+
 use std::path::PathBuf;
+use std::time::Duration;
 use thiserror::Error;
 
 /// Errors that can occur during the update process.
@@ -54,6 +89,62 @@ pub enum UpdateError {
 
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
+
+    /// An explicit timeout/retry override is outside its validated range.
+    #[error("invalid upgrade policy: {0}")]
+    Policy(String),
+
+    /// DNS/TCP/TLS or response headers did not arrive within the budget.
+    #[error("connection to {url} timed out after {budget:?}")]
+    ConnectTimeout { url: String, budget: Duration },
+
+    /// An asset transfer received no bytes for the whole no-progress window.
+    #[error("download from {url} stalled: no bytes for {idle:?} after {received} bytes")]
+    IdleTimeout {
+        url: String,
+        idle: Duration,
+        received: u64,
+    },
+
+    /// The total transfer budget (including retries) was exhausted.
+    #[error("download from {url} exceeded its total budget of {budget:?} after {received} bytes")]
+    TransferBudgetExhausted {
+        url: String,
+        budget: Duration,
+        received: u64,
+    },
+
+    /// Every bounded attempt failed; the last cause is preserved.
+    #[error("download from {url} failed after {attempts} attempts: {cause}")]
+    RetryExhausted {
+        url: String,
+        attempts: u32,
+        cause: String,
+    },
+
+    /// A 429 asked for a wait longer than the remaining budget.
+    #[error(
+        "rate limited: Retry-After {retry_after:?} exceeds the remaining budget {remaining:?}"
+    )]
+    RateLimitedRetryAfter {
+        retry_after: Duration,
+        remaining: Duration,
+    },
+
+    /// The lifecycle lock stayed busy for the whole bounded wait.
+    #[error(
+        "the lifecycle lock was busy for {waited:?}; another lifecycle command is running. \
+         Retry once it finishes; Nession never breaks another process's lock."
+    )]
+    LockTimeout { waited: Duration },
+
+    /// The operator (or a deadline) cancelled at a safe boundary.
+    #[error("cancelled during {phase}")]
+    Cancelled { phase: String },
+
+    /// The streamed body did not match its declared length.
+    #[error("download size mismatch: declared {expected} bytes, received {received}")]
+    SizeMismatch { expected: u64, received: u64 },
 }
 
 impl From<reqwest::Error> for UpdateError {

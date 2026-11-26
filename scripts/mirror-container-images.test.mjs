@@ -218,12 +218,32 @@ test('the independently retried ACR mirror builder retains the HTTP/1.1 transpor
 });
 
 test('chunked fallback binary is pinned to an immutable published SHA256',()=>{
-  const workflow=fs.readFileSync(
-    path.join(root,'.github/workflows/deploy-staging-acr.yml'),'utf8');
-  const install=workflow.split('      - name: Install pinned regctl chunked-OCI fallback')[1]
-    ?.split('      - name: Mirror and verify')[0]??'';
-  assert.match(install,/releases\/download\/v0\.11\.7\/regctl-linux-amd64/);
-  assert.match(install,/3737fbbdd791e04e7a831640b681f3397a376498e80e2ad9b1b2d27296f239bc/);
-  assert.match(install,/sha256sum -c -/);
-  assert.match(install,/\$GITHUB_PATH/);
+  // #4593: the pinned install recipe has one owner — the shared composite
+  // action consumed by every workflow that invokes the mirror script.
+  const action=fs.readFileSync(
+    path.join(root,'.github/actions/install-regctl/action.yml'),'utf8');
+  assert.match(action,/using:\s*composite/);
+  assert.match(action,/releases\/download\/v0\.11\.7\/regctl-linux-amd64/);
+  assert.match(action,/3737fbbdd791e04e7a831640b681f3397a376498e80e2ad9b1b2d27296f239bc/);
+  assert.match(action,/sha256sum -c -/);
+  assert.match(action,/chmod 755/);
+  assert.match(action,/\$GITHUB_PATH/);
+  for(const wf of ['release-production.yml','deploy-staging-acr.yml']){
+    const y=fs.readFileSync(path.join(root,'.github/workflows',wf),'utf8');
+    assert.ok(!y.includes('regclient/regclient/releases/download'),
+      wf+' must not duplicate the pinned download recipe outside the shared action');
+  }
+});
+
+test('every mirror workflow installs the shared pinned regctl before invoking the script (#4593)',()=>{
+  // The script's chunked_copy() fails closed without regctl on PATH. A workflow
+  // that invokes the mirror script must provide that prerequisite first, gated
+  // on the same credentials condition as the mirror step itself.
+  for(const wf of ['release-production.yml','deploy-staging-acr.yml']){
+    const y=fs.readFileSync(path.join(root,'.github/workflows',wf),'utf8');
+    const install=y.search(/- uses: \.\/\.github\/actions\/install-regctl\n\s+if: steps\.credentials\.outputs\.configured == 'true'/);
+    const invoke=y.indexOf('bash scripts/mirror-container-images.sh');
+    assert.ok(install>=0,wf+' must install pinned regctl via the shared action under the credentials condition');
+    assert.ok(invoke>install,wf+' must install regctl before invoking the mirror script');
+  }
 });
