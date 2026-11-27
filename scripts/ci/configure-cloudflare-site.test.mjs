@@ -7,9 +7,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   getSite, validateOriginIpv4, validateInputs, cidrContainsIpv4,
-  planRecord, configureSite
+  planRecord, configureSite, buildResultReceipt
 } from './configure-cloudflare-site.mjs';
-import { loadRegistry } from './site-registry/site-registry.mjs';
+import { loadRegistry, buildPlanReceipt } from './site-registry/site-registry.mjs';
 
 const loaded = loadRegistry();
 const zoneId = 'a'.repeat(32);
@@ -400,6 +400,36 @@ test('unapproved, unowned, colliding and stale deletions are blocked', async () 
     mode: 'delete',
     approvals: approval('delete', { fqdn: site.hostname, recordId, recordType: 'CNAME' })
   })), /record identity escaped/);
+});
+
+test('mutation result receipt binds the reviewed plan and carries no secrets', () => {
+  const secretIp = '203.0.113.77';
+  const token = 'super-secret-provider-token-value';
+  const plan = buildPlanReceipt({
+    provider: 'cloudflare', mode: 'plan', environment: 'staging', site: siteId,
+    sourceSha, gitopsRevision, registryHash: loaded.registryHash,
+    operations: [{ site: siteId, kind: 'create' }],
+    observedState: { records: [], auth: token },
+    desiredState: { content: secretIp },
+    runId: '123', runAttempt: '1'
+  });
+  const receipt = buildResultReceipt({
+    mode: 'apply', environment: 'staging', site: siteId,
+    sourceSha, gitopsRevision, registryHash: loaded.registryHash,
+    planReceipt: plan, result: { kind: 'create', verified: true }
+  });
+  assert.equal(receipt.receipt, 'NESSION_SITE_RESULT_V1');
+  assert.equal(receipt.planHash, plan.planHash);
+  assert.equal(receipt.operation, 'create');
+  assert.equal(receipt.verified, true);
+  const serialized = JSON.stringify(receipt);
+  assert.equal(serialized.includes(secretIp), false);
+  assert.equal(serialized.includes(token), false);
+  assert.throws(() => buildResultReceipt({
+    mode: 'apply', environment: 'staging', site: siteId,
+    sourceSha, gitopsRevision, registryHash: loaded.registryHash,
+    planReceipt: null, result: { kind: 'create', verified: true }
+  }), /reviewed plan receipt/);
 });
 
 test('post-delete readback mismatch fails rather than claiming success', async () => {

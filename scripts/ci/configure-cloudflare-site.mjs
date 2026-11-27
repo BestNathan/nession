@@ -377,6 +377,28 @@ async function deleteFlow({
   return { kind: 'delete', verified: true };
 }
 
+// Sanitized mutation result receipt: binds the reviewed plan identity and
+// the observed operation outcome without any provider secret values.
+export function buildResultReceipt({
+  mode, environment, site, sourceSha, gitopsRevision, registryHash,
+  planReceipt, result
+}) {
+  if (!planReceipt || planReceipt.receipt !== 'NESSION_SITE_PLAN_V1') {
+    throw new Error('Result receipt requires the reviewed plan receipt');
+  }
+  return {
+    receipt: 'NESSION_SITE_RESULT_V1',
+    provider: 'cloudflare', mode, environment, site,
+    sourceSha, gitopsRevision, registryHash,
+    planHash: planReceipt.planHash,
+    operation: result.kind,
+    verified: result.verified === true,
+    runId: String(process.env.GITHUB_RUN_ID ?? ''),
+    runAttempt: String(process.env.GITHUB_RUN_ATTEMPT ?? ''),
+    createdAt: new Date().toISOString()
+  };
+}
+
 function readReceiptFile() {
   const file = process.env.SITE_PLAN_RECEIPT;
   if (!file) throw new Error('SITE_PLAN_RECEIPT must reference the reviewed plan receipt artifact');
@@ -411,6 +433,15 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     if (result?.receipt && process.env.SITE_PLAN_OUT) {
       fs.writeFileSync(process.env.SITE_PLAN_OUT, JSON.stringify(result.receipt, null, 2) + '\n', { mode: 0o600 });
       console.log('site=' + siteId + ' sanitized plan receipt written (no provider values)');
+    } else if (needsReceipt && process.env.SITE_PLAN_OUT) {
+      const receipt = buildResultReceipt({
+        mode, environment, site: siteId,
+        sourceSha: context.sourceSha, gitopsRevision: context.gitopsRevision,
+        registryHash: loaded.registryHash,
+        planReceipt: readReceiptFile(), result
+      });
+      fs.writeFileSync(process.env.SITE_PLAN_OUT, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+      console.log('site=' + siteId + ' sanitized result receipt written (no provider values)');
     }
   }).catch(error => {
     console.error('Cloudflare site configuration failed: ' + error.message);
