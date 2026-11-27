@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { expectSelectAnchored } from '../../helpers/selectAnchor';
 import { waitForShell } from '../../helpers/shell';
+import { E2E_RUN_DIR, E2E_SERVER_URL } from '../../runtime';
 
 // Real-stack creation and the fixture's offline branch. Browser execution is
 // CI-only by the repository's E2E policy.
@@ -12,7 +13,7 @@ test.describe('Project Existing-location Session creation', () => {
     test.setTimeout(90_000);
     await page.goto(
       '/?token=e2e-test-token&server_url=' +
-        encodeURIComponent('ws://localhost:19090/ws'),
+        encodeURIComponent(E2E_SERVER_URL),
     );
     await waitForShell(page);
 
@@ -26,7 +27,7 @@ test.describe('Project Existing-location Session creation', () => {
     await expect(projectDialog).toBeVisible();
     await projectDialog.locator('#project-create-name').fill(projectName);
     await projectDialog.getByTestId('project-location-add').click();
-    await projectDialog.locator('#project-create-location-path-0').fill('/tmp/nession-e2e');
+    await projectDialog.locator('#project-create-location-path-0').fill(E2E_RUN_DIR);
     await projectDialog.getByTestId('project-create-submit').click();
 
     await expect(page.getByTestId('project-detail-title')).toHaveText(projectName);

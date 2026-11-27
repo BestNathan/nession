@@ -358,7 +358,7 @@ export async function countInBuffer(page: import('@playwright/test').Page, needl
 /**
  * Put `pty-probe.sh` into the Session's working directory.
  *
- * The PTY's cwd is `/tmp/nession-e2e`, not the checkout, so the committed
+ * The PTY's cwd is the isolated run home, not the checkout, so the committed
  * script cannot be run by path. Base64 keeps the install to one line with
  * nothing for the shell to re-interpret, and keeps the committed script the
  * only copy of itself — an inlined copy here would drift from it silently.
@@ -421,7 +421,7 @@ export function readPane(sessionName: string): { text: string; sha: string; mark
  * Put the repainting inline fixture into the Session's working directory.
  *
  * Same shape as `ptyProbeInstaller` and for the same reason: the PTY's cwd is
- * `/tmp/nession-e2e`, not the checkout, and base64 keeps the committed script
+ * the isolated run home, not the checkout, and base64 keeps the committed script
  * the only copy of itself.
  */
 export function repaintFixtureInstaller(): string {

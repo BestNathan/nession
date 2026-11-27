@@ -1,10 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
+import { E2E_SERVER_URL } from '../../runtime';
 
 // App Attach presentation (#3089). Real tmux/agent stack — CI only.
 const APP_URL =
   '/?token=e2e-test-token&server_url=' +
-  encodeURIComponent('ws://localhost:19090/ws') +
+  encodeURIComponent(E2E_SERVER_URL) +
   '&experience=app';
 
 /**

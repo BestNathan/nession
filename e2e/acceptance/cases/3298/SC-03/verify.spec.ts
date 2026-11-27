@@ -250,7 +250,7 @@ test('SC-03: App sheet and landscape operation preserve the role and footer edge
       (element) => element.scrollHeight > element.clientHeight,
     ),
   ).toBe(true);
-  await page.screenshot({ path: '/tmp/nession-3298-app-landscape.png' });
+  await page.screenshot({ path: test.info().outputPath('app-landscape.png') });
 
   test.info().annotations.push({
     type: 'evidence',

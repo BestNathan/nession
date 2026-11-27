@@ -9,6 +9,7 @@ import {
   E2E_RUN_DIR,
   E2E_SERVER_PORT,
   E2E_STALLED_PROBE_PORT,
+  E2E_TEST_ROOT,
   E2E_TMUX_SOCKET,
   E2E_WEB_PORT,
   E2E_WEB_URL,
@@ -34,6 +35,7 @@ export default async function setup(): Promise<() => Promise<void>> {
     repoRoot: path.resolve(__dirname, '..'),
     targetSha: process.env.NESSION_TARGET_SHA,
     profile: 'e2e-regression',
+    runRoot: E2E_TEST_ROOT,
     home: E2E_RUN_DIR,
     tmuxSocket: E2E_TMUX_SOCKET,
     serverPort: E2E_SERVER_PORT,
@@ -44,11 +46,14 @@ export default async function setup(): Promise<() => Promise<void>> {
     // fixtures, so it only needs the built web preview. Every other caller
     // keeps the full Server/Agent/tmux stack.
     webOnly: process.env.E2E_RUNTIME_WEB_ONLY === '1',
-    // Preserve the old regression-run artifact/debug lifetime: the next run
-    // wipes NESSION_HOME before provisioning, while teardown always removes
-    // processes and this run's isolated tmux server/socket.
+    // The unique run root owns all mutable state; keep its home and runtime
+    // metadata after teardown as debugging evidence, and let the reaper remove
+    // the directory once this owner exits (#4597).
     cleanupHome: false,
+    cleanupRoot: false,
   });
+  // From here the root is evidence, not a config-load leftover.
+  process.env.NSESSION_E2E_RUNTIME_ACTIVE = '1';
 
   if (runtime.base_url !== E2E_WEB_URL) {
     await runtime.stop();

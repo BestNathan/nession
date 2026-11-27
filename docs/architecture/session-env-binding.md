@@ -240,6 +240,17 @@ revision           the revision the overlay represents
 shell-revision     the revision the interactive shell last reported applying
 ```
 
+The directory name is the Session name, and that name is also the tmux identity.
+On a case-insensitive filesystem (macOS APFS folds case and normalization), two
+names that differ only by case would resolve to one directory. New Session names
+are therefore creation-time lowercase slugs matching
+`^[a-z0-9][a-z0-9._-]*$`, owned by `validate_session_name` in
+`nession-protocol`. The Server and Agent both refuse a name outside that policy;
+the Agent also refuses a name that case-folds to a live Session or a surviving
+`env-bindings/<name>` directory. Sessions created before this policy keep their
+names and remain attachable, killable, and addressable — they are never renamed
+by the rule (#4614).
+
 **This is a plaintext copy of the overlay and of any baseline value the binding
 overrides, and it can therefore contain secrets.** It exists so that removing a
 binding restores `MODE=default` rather than silently unsetting it, including

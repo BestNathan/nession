@@ -1361,3 +1361,40 @@ fn an_image_prepare_request_carries_an_explicit_intent() {
         serde_json::from_value(serde_json::to_value(&reply).unwrap()).unwrap();
     assert_eq!(round_trip, reply);
 }
+
+#[test]
+fn lowercase_slug_session_names_are_accepted() {
+    for name in ["a", "z9", "work", "my-session", "a.b_c-1", "123", "a1"] {
+        assert_eq!(validate_session_name(name), Ok(()), "accepts {name:?}");
+    }
+}
+
+#[test]
+fn mixed_case_and_path_like_session_names_are_rejected() {
+    for name in [
+        "Test",
+        "TEST",
+        "test space",
+        "\ttest",
+        "a/b",
+        "a\\b",
+        "a:b",
+        ".hidden",
+        "-hidden",
+        "_hidden",
+        "..",
+        "中文",
+        "café",
+    ] {
+        assert_eq!(
+            validate_session_name(name),
+            Err(SessionNameValidationError::Invalid),
+            "rejects {name:?}"
+        );
+    }
+    assert_eq!(
+        validate_session_name(""),
+        Err(SessionNameValidationError::Empty),
+        "an absent name is its own refusal"
+    );
+}
