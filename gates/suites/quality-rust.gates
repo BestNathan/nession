@@ -18,3 +18,4 @@ instruction-contract
 acceptance-runtime-contract
 acceptance-cases-contract
 release-version-consistency-selftest
+ci-pr-routing-selftest

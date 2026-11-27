@@ -700,6 +700,109 @@ export async function verifyHistoricalPrSourceSuccessor(repository, sourceSha, p
   return true;
 }
 
+// #4669: a same-PR force-push/retarget replaces the accepted source's Git
+// ancestry. GitHub's own HeadRefForcePushedEvent binds the exact accepted
+// source to the merged PR head, but that event is not a content proof. Accept
+// the relation only when every path the source changed has the identical final
+// tree entry (type, mode, blob/submodule SHA) at the merged head, including
+// deletions and the old path of renames. The caller still requires independent
+// exact-head required Quality on BOTH revisions; this function is never a
+// substitute for Quality and never mutates accepted rows.
+export async function verifyForcePushedPrSourceRebind(repository, sourceSha, pr,
+  token, request = githubRequest) {
+  if (!SHA.test(String(sourceSha || '')) || !SHA.test(String(pr?.head?.sha || '')) ||
+      sourceSha === pr.head.sha || !pr?.merged_at ||
+      !['main','staging','gitops'].includes(pr?.base?.ref) ||
+      pr.head?.repo?.full_name !== repository ||
+      pr.base?.repo?.full_name !== repository ||
+      !Number.isSafeInteger(pr?.number) || !token) return false;
+  const {owner,name,prefix}=repoParts(repository);
+  // A complete, unpaginated timeline is required. The REST timeline omits the
+  // before/after pair, so GraphQL is the canonical proof for this relation.
+  const timeline=await request('/graphql',{token,method:'POST',body:{
+    query:'query($owner:String!,$name:String!,$number:Int!){repository(owner:$owner,'+
+      'name:$name){pullRequest(number:$number){number merged headRefOid '+
+      'timelineItems(itemTypes:[HEAD_REF_FORCE_PUSHED_EVENT],first:100){'+
+      'pageInfo{hasNextPage} nodes{__typename ... on HeadRefForcePushedEvent{'+
+      'beforeCommit{oid} afterCommit{oid}}}}}}}',
+    variables:{owner,name,number:pr.number},
+  }});
+  if (Array.isArray(timeline?.errors) && timeline.errors.length > 0) return false;
+  const pull=timeline?.data?.repository?.pullRequest;
+  const nodes=pull?.timelineItems?.nodes;
+  if (!pull || pull.number !== pr.number || pull.merged !== true ||
+      pull.headRefOid !== pr.head.sha ||
+      pull.timelineItems?.pageInfo?.hasNextPage !== false ||
+      !Array.isArray(nodes) || nodes.length === 0 ||
+      !nodes.some(node=>node?.__typename === 'HeadRefForcePushedEvent' &&
+        node.beforeCommit?.oid === sourceSha &&
+        node.afterCommit?.oid === pr.head.sha)) return false;
+  const divergence=await request(prefix+'/compare/'+sourceSha+'...'+pr.head.sha,{token});
+  const base=divergence?.merge_base_commit?.sha;
+  if (divergence?.status !== 'diverged' ||
+      divergence?.base_commit?.sha !== sourceSha ||
+      !SHA.test(String(base || '')) || base === sourceSha || base === pr.head.sha ||
+      !Number.isSafeInteger(divergence?.ahead_by) || divergence.ahead_by <= 0 ||
+      !Number.isSafeInteger(divergence?.behind_by) || divergence.behind_by <= 0)
+    return false;
+  const changes=await request(prefix+'/compare/'+base+'...'+sourceSha,{token});
+  if (changes?.status !== 'ahead' || changes?.base_commit?.sha !== base ||
+      changes?.merge_base_commit?.sha !== base || changes?.behind_by !== 0 ||
+      !Number.isSafeInteger(changes?.ahead_by) || changes.ahead_by <= 0 ||
+      !Array.isArray(changes?.files) || changes.files.length === 0 ||
+      changes.files.length >= 300)
+    return false; // GitHub caps compare files at 300; a capped answer is not proof.
+  const expected=new Map(), absent=new Set();
+  for (const file of changes.files) {
+    const path=file?.filename;
+    if (typeof path !== 'string' || !path || expected.has(path) || absent.has(path))
+      return false;
+    const status=file.status;
+    if (status === 'removed') { absent.add(path); continue; }
+    if (!['added','modified','renamed','copied','changed'].includes(status) ||
+        !SHA.test(String(file?.sha || ''))) return false;
+    expected.set(path,file.sha);
+    if (status === 'renamed') {
+      const previous=file?.previous_filename;
+      if (typeof previous !== 'string' || !previous || previous === path ||
+          expected.has(previous) || absent.has(previous)) return false;
+      absent.add(previous);
+    }
+  }
+  if (expected.size + absent.size === 0) return false;
+  const [sourceTree,mergedTree]=await Promise.all([
+    request(prefix+'/git/trees/'+sourceSha+'?recursive=1',{token}),
+    request(prefix+'/git/trees/'+pr.head.sha+'?recursive=1',{token}),
+  ]);
+  const treeEntries=tree=>{
+    if (!tree || tree.truncated !== false || !Array.isArray(tree.tree)) return null;
+    const entries=new Map();
+    for (const entry of tree.tree) {
+      const mode=String(entry?.mode || '');
+      if (typeof entry?.path !== 'string' || !entry.path ||
+          !['blob','commit','tree'].includes(entry.type) ||
+          (entry.type === 'tree' ? mode !== '040000' :
+            !/^(?:100644|100755|120000|160000)$/.test(mode)) ||
+          !SHA.test(String(entry.sha || '')) || entries.has(entry.path)) return null;
+      entries.set(entry.path,{type:entry.type,mode,sha:entry.sha});
+    }
+    return entries;
+  };
+  const sourceEntries=treeEntries(sourceTree), mergedEntries=treeEntries(mergedTree);
+  if (!sourceEntries || !mergedEntries) return false;
+  for (const [path,sha] of expected) {
+    const sourceEntry=sourceEntries.get(path), mergedEntry=mergedEntries.get(path);
+    if (!sourceEntry || sourceEntry.sha !== sha || !mergedEntry ||
+        mergedEntry.type !== sourceEntry.type ||
+        mergedEntry.mode !== sourceEntry.mode ||
+        mergedEntry.sha !== sourceEntry.sha) return false;
+  }
+  for (const path of absent) {
+    if (sourceEntries.has(path) || mergedEntries.has(path)) return false;
+  }
+  return true;
+}
+
 // #4321: an accepted PR-stage SC proof source may ride a *later* merged
 // fixture/test PR that builds on the implementing PR. #4160 keeps such a
 // `Refs #N` fixture PR out of the implementation relation (it must not block
@@ -755,7 +858,8 @@ export async function verifyDescendantFixtureSource(repository, sourceSha, imple
 }
 
 export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality,
-  verifySuccessor = async () => false, verifyDescendant = async () => null) {
+  verifySuccessor = async () => false, verifyDescendant = async () => null,
+  verifyRebind = async () => false) {
   const criteria = parseSuccessCriteria(extractSection(issue?.body, 'Success Criteria'));
   const report = parseAcceptanceReport(extractSection(issue?.body, 'Acceptance Report'));
   const plan = validateAcceptancePlan(issue?.body, criteria.criteria.keys(), report.rows);
@@ -796,6 +900,18 @@ export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality,
       }
     }
     if (!authorizedPr) {
+      // #4669: a same-PR force-push/retarget has no Git ancestry. Accept only
+      // the authenticated same-PR force-push event plus a byte-identical
+      // changed-path tree; the Quality loop below still checks BOTH heads.
+      for (const pr of candidates) {
+        if (await verifyRebind(head, pr)) {
+          successorHeads.add(pr.head.sha);
+          authorizedPr=true;
+          break;
+        }
+      }
+    }
+    if (!authorizedPr) {
       // #4321: the pinned SC source may be a descendant fixture commit riding a
       // later merged fixture PR that contains the implementation. Authenticate
       // that lineage, then require Quality on the merged fixture head only (the
@@ -809,7 +925,8 @@ export async function qualifyIssuePrSourceForClosure(issue, prs, readQuality,
     }
     if (!authorizedPr) {
       return {qualified:false,
-        reason:id+' accepted source HEAD lacks an authenticated merged-PR successor'};
+        reason:id+' accepted source HEAD lacks an authenticated merged-PR successor '+
+          'or content-preserving force-push rebind'};
     }
     if (!descendantOnly) heads.add(head);
   }
@@ -864,7 +981,8 @@ export async function assessNativeCompletedIssueSource(repository, number, token
     qualityReader ?? (sha => collectPrRequiredQualityAsync(sha,
       path => request(path, {token}))),
     (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request),
-    (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request));
+    (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request),
+    (head,pr)=>verifyForcePushedPrSourceRebind(repository,head,pr,token,request));
   if (!qualified.qualified) {
     return {qualified:false,reason:'PR source Quality: '+qualified.reason};
   }
@@ -920,7 +1038,8 @@ async function reconcileIssue(repository, number, token, { includePr = null,
     qualityReader ?? (head => collectPrRequiredQualityAsync(head,
       path => request(path, {token}))),
     (head,pr)=>verifyHistoricalPrSourceSuccessor(repository,head,pr,token,request),
-    (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request));
+    (head,implPrs)=>verifyDescendantFixtureSource(repository,head,implPrs,token,request),
+    (head,pr)=>verifyForcePushedPrSourceRebind(repository,head,pr,token,request));
   if (!qualified.qualified) {
     return {action:'pending', reason:'PR source Quality: '+qualified.reason,
       prs:prs.map(pr => pr.number)};
@@ -1241,6 +1360,156 @@ async function selfTest() {
       [{number:assocPr.number+1,merged_at:pr.merged_at,head:{repo:sameRepo},
         base:{ref:'main',repo:sameRepo}}]),false,
     'ancestor source associated with a different PR is not accepted');
+
+  // #4669: a same-PR force-push/retarget has no Git ancestry to the accepted
+  // source. The positive fixture requires the exact GitHub force-push pair and
+  // identical final tree entries for every changed path. Negative fixtures
+  // reject every partial proof; both heads still need exact-head Quality.
+  const rebindBase='e'.repeat(40);
+  const modifiedBlob='1'.repeat(40), addedBlob='2'.repeat(40), renamedBlob='3'.repeat(40);
+  const rebindTimeline={data:{repository:{pullRequest:{number:assocPr.number,
+    merged:true,headRefOid:successorSha,timelineItems:{pageInfo:{hasNextPage:false},
+      nodes:[{__typename:'HeadRefForcePushedEvent',beforeCommit:{oid:sha},
+        afterCommit:{oid:successorSha}}]}}}}};
+  const rebindDivergence={status:'diverged',base_commit:{sha},
+    merge_base_commit:{sha:rebindBase},ahead_by:2,behind_by:3};
+  const rebindChanges={status:'ahead',base_commit:{sha:rebindBase},
+    merge_base_commit:{sha:rebindBase},behind_by:0,ahead_by:2,files:[
+      {filename:'scripts/modified.mjs',status:'modified',sha:modifiedBlob},
+      {filename:'scripts/added.mjs',status:'added',sha:addedBlob},
+      {filename:'scripts/renamed.mjs',status:'renamed',sha:renamedBlob,
+        previous_filename:'scripts/old-name.mjs'},
+      {filename:'scripts/removed.mjs',status:'removed'},
+    ]};
+  const treeEntry=(path,mode,blob)=>({path,type:'blob',mode,sha:blob});
+  const rebindSourceTree={truncated:false,tree:[
+    {path:'scripts',type:'tree',mode:'040000',sha:'a'.repeat(40)},
+    treeEntry('scripts/modified.mjs','100644',modifiedBlob),
+    treeEntry('scripts/added.mjs','100644',addedBlob),
+    treeEntry('scripts/renamed.mjs','100755',renamedBlob),
+  ]};
+  const rebindMergedTree={truncated:false,tree:[
+    ...rebindSourceTree.tree,
+    treeEntry('scripts/staging-only.mjs','100644','4'.repeat(40)),
+  ]};
+  const treeWithout=(tree,path)=>({...tree,
+    tree:tree.tree.filter(entry=>entry.path!==path)});
+  const treeWith=(tree,...entries)=>({...tree,tree:[
+    ...tree.tree.filter(entry=>!entries.some(replacement=>replacement.path===entry.path)),
+    ...entries]});
+
+  const repoPrefix='/repos/BestNathan/nession';
+  const rebindRead=(overrides={})=>async path=>{
+    if(path==='/graphql')return overrides.timeline??rebindTimeline;
+    if(path===repoPrefix+'/compare/'+sha+'...'+successorSha)
+      return overrides.divergence??rebindDivergence;
+    if(path===repoPrefix+'/compare/'+rebindBase+'...'+sha)
+      return overrides.changes??rebindChanges;
+    if(path===repoPrefix+'/git/trees/'+sha+'?recursive=1')
+      return overrides.sourceTree??rebindSourceTree;
+    if(path===repoPrefix+'/git/trees/'+successorSha+'?recursive=1')
+      return overrides.mergedTree??rebindMergedTree;
+    throw Error('unexpected force-push rebind evidence path '+path);
+  };
+  const rebind=(overrides={})=>verifyForcePushedPrSourceRebind('BestNathan/nession',
+    sha,assocPr,'fixture-token',rebindRead(overrides));
+  assert.equal(await rebind(),true,
+    'same-PR force-push pair and identical changed-path tree qualify');
+  const rebindQualifier=(overrides={},reader=fixtureQuality)=>
+    qualifyIssuePrSourceForClosure(issue,[assocPr],reader,async()=>false,async()=>null,
+      (head,pr)=>verifyForcePushedPrSourceRebind('BestNathan/nession',head,pr,
+        'fixture-token',rebindRead(overrides)));
+  const rebound=await rebindQualifier();
+  assert.equal(rebound.qualified,true,
+    'closure accepts a content-preserving same-PR force-push rebind');
+  assert.deepEqual(rebound.sources,[sha]);
+  assert.deepEqual(rebound.verified_successors,[successorSha]);
+  assert.equal((await rebindQualifier({}, async head=>head===successorSha
+    ? {status:'fail'} : await fixtureQuality(head))).qualified,false,
+    'the merged force-push head still needs independent exact-head Quality');
+  assert.equal((await rebindQualifier({}, async head=>head===sha
+    ? {status:'fail'} : await fixtureQuality(head))).qualified,false,
+    'the accepted force-pushed source still needs its own exact-head Quality');
+  assert.equal(await verifyForcePushedPrSourceRebind('BestNathan/nession',
+    sha,{...assocPr,merged_at:null},'fixture-token',async()=>{
+      throw Error('unmerged PR must not query force-push history');
+    }),false,'an unmerged PR cannot authorize a force-push rebind');
+  assert.equal(await verifyForcePushedPrSourceRebind('BestNathan/nession',
+    successorSha,assocPr,'fixture-token',async()=>{
+      throw Error('same-head relation must not query force-push history');
+    }),false,'an identical source and head is not a force-push rebind');
+  assert.equal(await verifyForcePushedPrSourceRebind('Unrelated/repository',
+    sha,assocPr,'fixture-token',async()=>{
+      throw Error('foreign repository must not be queried');
+    }),false,'a foreign repository cannot confer force-push authority');
+  assert.equal(await verifyForcePushedPrSourceRebind('BestNathan/nession',sha,
+    {...assocPr,head:{...assocPr.head,repo:{full_name:'attacker/fork'}}},
+    'fixture-token',async()=>{throw Error('foreign head must not be queried');}),false);
+  assert.equal(await verifyForcePushedPrSourceRebind('BestNathan/nession',sha,
+    {...assocPr,base:{ref:'feature',repo:sameRepo}},'fixture-token',
+    async()=>{throw Error('invalid base must not be queried');}),false);
+  for (const [name,overrides] of [
+    ['missing force-push pair',{timeline:{data:{repository:{pullRequest:{
+      number:assocPr.number,merged:true,headRefOid:successorSha,
+      timelineItems:{pageInfo:{hasNextPage:false},nodes:[]}}}}}}],
+    ['reversed force-push pair',{timeline:{data:{repository:{pullRequest:{
+      number:assocPr.number,merged:true,headRefOid:successorSha,
+      timelineItems:{pageInfo:{hasNextPage:false},nodes:[{__typename:
+        'HeadRefForcePushedEvent',beforeCommit:{oid:successorSha},
+        afterCommit:{oid:sha}}]}}}}}}],
+    ['paginated force-push history',{timeline:{data:{repository:{pullRequest:{
+      number:assocPr.number,merged:true,headRefOid:successorSha,
+      timelineItems:{pageInfo:{hasNextPage:true},nodes:[{__typename:
+        'HeadRefForcePushedEvent',beforeCommit:{oid:sha},
+        afterCommit:{oid:successorSha}}]}}}}}}],
+    ['partial GraphQL timeline errors',{timeline:{...rebindTimeline,
+      errors:[{message:'timeline was only partially resolved'}]}}],
+    ['different merged head',{timeline:{data:{repository:{pullRequest:{
+      number:assocPr.number,merged:true,headRefOid:sha,
+      timelineItems:{pageInfo:{hasNextPage:false},nodes:[{__typename:
+        'HeadRefForcePushedEvent',beforeCommit:{oid:sha},
+        afterCommit:{oid:successorSha}}]}}}}}}],
+    ['different pull request',{timeline:{data:{repository:{pullRequest:{
+      number:assocPr.number+1,merged:true,headRefOid:successorSha,
+      timelineItems:{pageInfo:{hasNextPage:false},nodes:[{__typename:
+        'HeadRefForcePushedEvent',beforeCommit:{oid:sha},
+        afterCommit:{oid:successorSha}}]}}}}}}],
+    ['ancestral not diverged',{divergence:{...rebindDivergence,status:'ahead'}}],
+    ['wrong origin revision',{divergence:{...rebindDivergence,
+      base_commit:{sha:successorSha}}}],
+    ['missing merge base',{divergence:{...rebindDivergence,
+      merge_base_commit:{sha:'not-a-sha'}}}],
+    ['no unique merged commits',{divergence:{...rebindDivergence,behind_by:0}}],
+    ['changed-path comparison behind',{changes:{...rebindChanges,behind_by:1}}],
+    ['empty changed-path comparison',{changes:{...rebindChanges,files:[]}}],
+    ['capped changed-path comparison',{changes:{...rebindChanges,files:
+      Array.from({length:300},(_,i)=>({filename:'scripts/f'+i+'.mjs',
+        status:'added',sha:'5'.repeat(40)}))}}],
+    ['unknown changed-path status',{changes:{...rebindChanges,files:[
+      {filename:'scripts/modified.mjs',status:'unchanged',sha:modifiedBlob}]}}],
+    ['deleted path retained at merged head',{mergedTree:{truncated:false,tree:[
+      ...rebindMergedTree.tree,treeEntry('scripts/removed.mjs','100644',
+        '6'.repeat(40))]}}],
+    ['deleted path replaced by directory',{mergedTree:{truncated:false,tree:[
+      ...rebindMergedTree.tree,{path:'scripts/removed.mjs',type:'tree',
+        mode:'040000',sha:'b'.repeat(40)}]}}],
+    ['changed path replaced by directory',{mergedTree:treeWith(rebindMergedTree,
+      {path:'scripts/modified.mjs',type:'tree',mode:'040000',sha:'b'.repeat(40)})}],
+    ['renamed-away path retained at merged head',{mergedTree:{truncated:false,
+      tree:[...rebindMergedTree.tree,treeEntry('scripts/old-name.mjs','100644',
+        '7'.repeat(40))]}}],
+    ['changed blob differs at merged head',{mergedTree:treeWith(rebindMergedTree,
+      treeEntry('scripts/modified.mjs','100644','8'.repeat(40)))}],
+    ['changed mode differs at merged head',{mergedTree:treeWith(rebindMergedTree,
+      treeEntry('scripts/renamed.mjs','100644',renamedBlob))}],
+    ['source tree missing a changed path',{sourceTree:
+      treeWithout(rebindSourceTree,'scripts/modified.mjs')}],
+    ['source tree blob disagrees with compare',{sourceTree:treeWith(rebindSourceTree,
+      treeEntry('scripts/modified.mjs','100644','9'.repeat(40)))}],
+    ['merged tree truncated',{mergedTree:{...rebindMergedTree,truncated:true}}],
+    ['source tree truncated',{sourceTree:{...rebindSourceTree,truncated:true}}],
+  ]) assert.equal(await rebind(overrides),false,
+    'force-push rebind fails closed on '+name);
 
   // #4321: a pinned SC source riding a later merged fixture PR that contains the
   // implementing head qualifies via the descendant path. Required Quality is

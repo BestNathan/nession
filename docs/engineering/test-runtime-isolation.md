@@ -130,6 +130,20 @@ and harness `...process.env` spreads. The same gate runs
 every crate/test entry and every classified resource reference, and fails the
 gate when stale or when any row is unresolved.
 
+The staleness contract is branch-authored. On a single-parent (authored)
+commit, the committed catalog must equal the generator output for that tree.
+A convergence integration head is a pure two-parent merge with no authored
+regeneration commit, so its committed catalog can never contain the union
+tree's new rows. On such a merge commit the checker instead requires the
+committed catalog to be **exactly current for one parent tree** (the branch
+that owns it) while the composed tree still has **zero unresolved**
+references. No parent match, a tampered merge head, or a shallow checkout
+whose parent trees are unavailable fails closed. This keeps the authored-commit
+invariant without asking a synthetic merge to regenerate a generated file;
+`ci-quality.yml`'s tooling job checks out full history so the parent proof is
+possible. `scripts/test-runtime-inventory.mjs --self-test` owns the positive
+and negative fixtures for this contract.
+
 ## Verification
 
 - PR stage: `rust-format`, `rust-clippy`, `rust-test-unit`,
