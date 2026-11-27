@@ -769,12 +769,13 @@ export async function verifyForcePushedPrSourceRebind(repository, sourceSha, pr,
     if (!tree || tree.truncated !== false || !Array.isArray(tree.tree)) return null;
     const entries=new Map();
     for (const entry of tree.tree) {
-      if (entry?.type === 'tree') continue;
+      const mode=String(entry?.mode || '');
       if (typeof entry?.path !== 'string' || !entry.path ||
-          !['blob','commit'].includes(entry.type) ||
-          !/^(?:100644|100755|120000|160000)$/.test(String(entry.mode || '')) ||
+          !['blob','commit','tree'].includes(entry.type) ||
+          (entry.type === 'tree' ? mode !== '040000' :
+            !/^(?:100644|100755|120000|160000)$/.test(mode)) ||
           !SHA.test(String(entry.sha || '')) || entries.has(entry.path)) return null;
-      entries.set(entry.path,{type:entry.type,mode:entry.mode,sha:entry.sha});
+      entries.set(entry.path,{type:entry.type,mode,sha:entry.sha});
     }
     return entries;
   };
@@ -1478,6 +1479,11 @@ async function selfTest() {
     ['deleted path retained at merged head',{mergedTree:{truncated:false,tree:[
       ...rebindMergedTree.tree,treeEntry('scripts/removed.mjs','100644',
         '6'.repeat(40))]}}],
+    ['deleted path replaced by directory',{mergedTree:{truncated:false,tree:[
+      ...rebindMergedTree.tree,{path:'scripts/removed.mjs',type:'tree',
+        mode:'040000',sha:'b'.repeat(40)}]}}],
+    ['changed path replaced by directory',{mergedTree:treeWith(rebindMergedTree,
+      {path:'scripts/modified.mjs',type:'tree',mode:'040000',sha:'b'.repeat(40)})}],
     ['renamed-away path retained at merged head',{mergedTree:{truncated:false,
       tree:[...rebindMergedTree.tree,treeEntry('scripts/old-name.mjs','100644',
         '7'.repeat(40))]}}],
