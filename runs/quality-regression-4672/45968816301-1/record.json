@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "quality-regression-4672",
+  "source_sha": "edcbb7310d3a5f70a78690c2c07a980ced64d639",
+  "source_digest": "7cb8bb5f61813d161d74cf8fb7bb2e1af17028f6a2b29741f358effe8153c834",
+  "entry": "verify.mjs",
+  "workflow": {
+    "id": 45968816301,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/45968816301",
+    "event": "push",
+    "branch": "task/quality-regression-4672",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-27T08:50:55.344Z",
+    "finished_at": "2026-11-27T08:50:55.505Z",
+    "result": {
+      "candidate": "934afefb18c4ec4b9142c14e17a786273a78cbe5",
+      "base": "c30b693a3b3f14ba7ce71f3b243740f0da29cdb1",
+      "exitCode": 0,
+      "output": "✔ fixture-only, web-only, rust-only and terminal protocol diffs (1.897533ms)\n✔ native macOS runtime family selects native-binary crates and their CI owners (#4584) (0.641495ms)\n✔ changed owners select affected Gates (0.35841ms)\n✔ composite Actions are workflow surface, not unknown (#4593) (0.122786ms)\n✔ unknown paths and unprovable diffs fail conservatively (0.20504ms)\n✔ web-check remains required aggregate; main dist waits for it (0.278261ms)\n✔ Case Smoke selects before build, no-case PR skips runtime, main runs generic (0.195876ms)\n✔ legacy PR heads use trusted Main selector without moving source SHA (0.789098ms)\n✔ Web dist proof does not treat no-artifact as a failed attestation (0.243799ms)\n✔ Secret sealing deployment changes are tooling-only, without weakening unknown or runtime routing (0.313215ms)\n✔ unclassified valid paths use Tooling fallback, not heavy-family fanout (#4672) (0.291477ms)\n✔ positive cross-boundary inputs and local fallback remain explicit (0.151208ms)\n✔ Cargo manifest path dependencies remain inside positive Rust input boundary (2.184033ms)\n✔ repository README is a real Rust CLI test input, not ordinary docs (0.117525ms)\n✔ external literal source input guard detects unregistered paths (0.684483ms)\n✔ tracked Rust sources register statically discoverable build and test inputs (41.388727ms)\nℹ tests 16\nℹ suites 0\nℹ pass 16\nℹ fail 0\nℹ cancelled 0\nℹ skipped 0\nℹ todo 0\nℹ duration_ms 101.182747\n",
+      "stderr": ""
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/edcbb7310d3a5f70a78690c2c07a980ced64d639/quality-regression-4672.json"
+}
