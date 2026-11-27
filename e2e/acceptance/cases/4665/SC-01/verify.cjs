@@ -23,6 +23,8 @@ run(({ evidence }) => {
     'composer::tests::a_dimmed_try_hint_is_an_empty_composer',
     'composer::tests::a_focused_hint_with_an_inverted_cursor_character_is_an_empty_composer',
     'composer::tests::a_purely_reverse_video_run_is_not_a_hint',
+    'composer::tests::a_rule_shaped_empty_composer_is_ready',
+    'composer::tests::a_rule_shaped_composer_with_typed_text_is_dirty',
     'composer::tests::typed_text_after_the_prompt_is_dirty',
     'composer::tests::an_unsent_paste_placeholder_is_dirty_even_though_styled',
     'composer::tests::an_overflow_indicator_is_dirty',
