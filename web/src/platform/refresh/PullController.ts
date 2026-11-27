@@ -17,8 +17,13 @@ import {
 
 type Waiter = (outcome: PullOutcome) => void;
 
-/** Automatic reads that a minimum interval may dedupe. */
-const CADENCE_REASONS: readonly RefreshReason[] = ['interval', 'foreground', 'reconnect', 'activate'];
+/**
+ * Automatic reads that a minimum interval may dedupe. A reconnect is not one
+ * of them: it means pushes may have been missed, so it must read even right
+ * after another read. The bus already suppresses a foreground signal that a
+ * reconnect covered.
+ */
+const CADENCE_REASONS: readonly RefreshReason[] = ['interval', 'foreground', 'activate'];
 
 interface Intent {
   reason: RefreshReason;
