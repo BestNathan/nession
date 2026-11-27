@@ -16,6 +16,8 @@ import type {
 const MAX_RECONNECT_DELAY = 30_000;
 const DEFAULT_MAX_RECONNECT_ATTEMPTS = 10;
 const DEFAULT_RECONNECT_BASE_DELAY = 1_000;
+/** Independent physical-dial deadline (#4618 SC-05). */
+const DEFAULT_DIAL_TIMEOUT_MS = 5_000;
 /**
  * Cadence of the long tail past `maxReconnectAttempts`, when the caller asked
  * for `persistentReconnect` (#1263).
@@ -121,6 +123,7 @@ export class WebSocketService implements PluginSurface {
   private reportedRouteExhaustion = false;
   private state: ConnectionState = 'disconnected';
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private dialTimer: ReturnType<typeof setTimeout> | null = null;
   private connectPromise: Promise<void> | null = null;
   private rejectConnect: ((error: Error) => void) | null = null;
   private userClosed = false;
@@ -446,11 +449,21 @@ export class WebSocketService implements PluginSurface {
     this.ws = ws;
     ws.binaryType = 'arraybuffer';
 
+    // Independent dial deadline (#4618 SC-05): a CONNECTING socket whose
+    // browser callbacks never fire must still settle once. Cleared on open
+    // (the handshake owns the post-open timeout) and on any teardown.
+    this.clearDialTimer();
+    this.dialTimer = setTimeout(() => {
+      this.dialTimer = null;
+      this.handleDialTimeout(myGeneration, ws, reject);
+    }, this.options.dialTimeoutMs ?? DEFAULT_DIAL_TIMEOUT_MS);
+
     ws.onopen = () => {
       if (this.generation !== myGeneration) {
         ws.close();
         return;
       }
+      this.clearDialTimer();
       this.diagnose({ event: 'socket-open', generation: myGeneration });
       this.runHandshake(ws, myGeneration, resolve, reject);
     };
@@ -825,12 +838,52 @@ export class WebSocketService implements PluginSurface {
     reject?.(error);
   }
 
+  /**
+   * The physical dial exceeded its deadline with no browser callback (#4618
+   * SC-05). Settle the attempt exactly once and route through the ordinary
+   * loss/retry path; teardown fences any late open/error/close from this socket.
+   */
+  private handleDialTimeout(
+    myGeneration: number,
+    ws: WebSocket,
+    reject: (error: Error) => void,
+  ): void {
+    if (this.disposed || this.userClosed || this.generation !== myGeneration || this.ws !== ws) {
+      return;
+    }
+    this.diagnose({ event: 'dial-timeout', generation: myGeneration });
+    const error = new Error('WebSocket dial timeout');
+    if (this.connectPromise) {
+      this.connectPromise = null;
+      this.rejectConnect = null;
+      reject(error);
+    }
+    const retrying = this.reconnectAttempt > 0
+      || this.options.reconnectOnInitialFailure === true;
+    this.teardownSocket();
+    if (retrying) {
+      this.handleSocketLoss();
+    } else {
+      this.router.failPending(error);
+      this.rejectWaiters(error);
+      this.setState('disconnected');
+    }
+  }
+
+  private clearDialTimer(): void {
+    if (this.dialTimer) {
+      clearTimeout(this.dialTimer);
+      this.dialTimer = null;
+    }
+  }
+
   private teardownSocket(): void {
     // Every path that discards a socket — disconnect, dispose, a terminal dial
     // error, a refused handshake — takes what that socket taught the directory
     // with it. The entries cannot be resolved against a connection that is
     // gone (#3990).
     this.protocols.invalidate();
+    this.clearDialTimer();
     if (!this.ws) {
       return;
     }

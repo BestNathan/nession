@@ -399,6 +399,10 @@ describe('WebSocketService', () => {
       maxReconnectAttempts: 2,
       reconnectBaseDelay: 5,
       persistentReconnect: true,
+      // This case pins the reconnect-reporting cadence, not the dial deadline;
+      // keep the dial window wide so the tail's CONNECTING socket survives the
+      // 20s advance until the test opens it (#4618 dial deadline is tested below).
+      dialTimeoutMs: 60_000,
     });
     const states: string[] = [];
     service.onConnectionStateChange((state) => states.push(state));
@@ -1521,5 +1525,125 @@ describe('inbound envelope validation (#4070)', () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(handler.mock.calls[0]?.[0]).toEqual([1, 2]);
+  });
+});
+
+describe('WebSocketService dial deadline (#4618 SC-05)', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.useFakeTimers();
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    globalThis.WebSocket = OriginalWebSocket;
+  });
+
+  it('settles a CONNECTING dial with no browser callbacks at the deadline', async () => {
+    const diags: { event: string }[] = [];
+    const service = new WebSocketService('ws://server/ws', [], {
+      dialTimeoutMs: 5_000,
+      onDiagnostic: (d) => diags.push(d),
+    });
+    const connected = service.connect();
+    const socket = MockWebSocket.instances[0];
+    expect(socket.readyState).toBe(MockWebSocket.CONNECTING);
+    const rejection = connected.catch((error: Error) => error);
+
+    await flushTimers(5_000);
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/dial timeout/i);
+    expect(service.connectionState).toBe('disconnected');
+    expect(diags.some((d) => d.event === 'dial-timeout')).toBe(true);
+    service.dispose();
+  });
+
+  it('honors a configured dial deadline', async () => {
+    const service = new WebSocketService('ws://server/ws', [], { dialTimeoutMs: 1_000 });
+    const connected = service.connect();
+    const rejection = connected.catch((error: Error) => error);
+    await flushTimers(999);
+    expect(service.connectionState).toBe('connecting');
+    await flushTimers(1);
+    await rejection;
+    expect(service.connectionState).toBe('disconnected');
+    service.dispose();
+  });
+
+  it('routes a dial timeout through recovery when reconnectOnInitialFailure is set', async () => {
+    const service = new WebSocketService('ws://server/ws', [], {
+      dialTimeoutMs: 5_000,
+      reconnectOnInitialFailure: true,
+      reconnectBaseDelay: 1_000,
+    });
+    const connected = service.connect();
+    void connected.catch(() => {});
+    await flushTimers(5_000);
+    expect(service.connectionState).toBe('reconnecting');
+    // The backoff timer dials a fresh physical socket.
+    await flushTimers(1_000);
+    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    service.dispose();
+  });
+
+  it('rejects waiters exactly once on dial timeout', async () => {
+    const service = new WebSocketService('ws://server/ws', [], { dialTimeoutMs: 5_000 });
+    void service.connect().catch(() => {});
+    const waiter = service.waitForConnection(10_000);
+    const rejection = waiter.catch((error: Error) => error);
+    await flushTimers(5_000);
+    const error = await rejection;
+    expect(error).toBeInstanceOf(Error);
+    expect(service.connectionState).toBe('disconnected');
+    service.dispose();
+  });
+
+  it('a late open after the dial deadline cannot resurrect the socket', async () => {
+    const service = new WebSocketService('ws://server/ws', [], { dialTimeoutMs: 5_000 });
+    const connected = service.connect();
+    void connected.catch(() => {});
+    const socket = MockWebSocket.instances[0];
+    await flushTimers(5_000);
+    expect(service.connectionState).toBe('disconnected');
+    // The browser finally fires open on the torn-down socket — it must be inert.
+    socket.open();
+    await drainMicrotasks();
+    expect(service.connectionState).toBe('disconnected');
+    service.dispose();
+  });
+
+  it('dispose rejects the pending connect once and the deadline stays inert', async () => {
+    const service = new WebSocketService('ws://server/ws', [], { dialTimeoutMs: 5_000 });
+    const connected = service.connect();
+    const rejection = connected.catch((error: Error) => error);
+    service.dispose();
+    const error = await rejection;
+    expect((error as Error).message).toMatch(/disposed/i);
+    // The dial timer must not double-settle or throw after dispose.
+    await flushTimers(5_000);
+    expect(service.connectionState).toBe('disconnected');
+  });
+
+  it('open clears the dial deadline; the handshake owns the post-open timeout', async () => {
+    const diags: { event: string }[] = [];
+    const hs = controlledHandshake();
+    const service = new WebSocketService('ws://server/ws', [], {
+      dialTimeoutMs: 5_000,
+      handshake: hs.handshake,
+      onDiagnostic: (d) => diags.push(d),
+    });
+    const connected = service.connect();
+    const socket = MockWebSocket.instances[0];
+    socket.open(); // clears the dial deadline
+    await flushTimers(10_000); // well past the dial deadline
+    expect(diags.some((d) => d.event === 'dial-timeout')).toBe(false);
+    expect(service.connectionState).toBe('connecting'); // handshake still pending
+    hs.resolve();
+    await connected;
+    expect(service.connectionState).toBe('connected');
+    service.dispose();
   });
 });

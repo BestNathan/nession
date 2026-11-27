@@ -123,4 +123,50 @@ describe('AddressAttachPolicy', () => {
     });
     expect(policy.maxReconnectAttempts()).toBe(2);
   });
+
+  describe('healthy-route preservation (#4618 SC-04)', () => {
+    function policyOn(urls: string[], index = 0): AddressAttachPolicy {
+      return new AddressAttachPolicy({
+        attachInfo: makeAttachInfo(),
+        orderedUrls: urls,
+        manualOverride: null,
+        forcedRelay: false,
+        addressUrls: makePlan(urls),
+        addressIndex: index,
+      });
+    }
+
+    it('a latency-only reorder keeps the current selection (no migration)', () => {
+      const policy = policyOn(['ws://a/ws', 'ws://b/ws'], 0);
+      expect(policy.activeUrl).toBe('ws://a/ws');
+      // b becomes faster; the standby plan reorders but the healthy route stays.
+      policy.update({ addressUrls: makePlan(['ws://b/ws', 'ws://a/ws']) });
+      expect(policy.activeUrl).toBe('ws://a/ws');
+      expect(policy.currentIndex).toBe(1);
+    });
+
+    it('a membership change keeps the current selection while it is still a member', () => {
+      const policy = policyOn(['ws://a/ws', 'ws://b/ws']);
+      expect(policy.activeUrl).toBe('ws://a/ws');
+      // A new candidate c appears and b is removed; a (current) survives.
+      policy.update({ addressUrls: makePlan(['ws://c/ws', 'ws://a/ws']) });
+      expect(policy.activeUrl).toBe('ws://a/ws');
+    });
+
+    it('resets to the best candidate only when the current address is removed', () => {
+      const policy = policyOn(['ws://a/ws', 'ws://b/ws'], 0);
+      policy.update({ addressUrls: makePlan(['ws://c/ws', 'ws://b/ws']) });
+      expect(policy.activeUrl).toBe('ws://c/ws');
+      expect(policy.currentIndex).toBe(0);
+    });
+
+    it('still rotates on a real disconnect', () => {
+      const policy = policyOn(['ws://a/ws', 'ws://b/ws', 'ws://c/ws']);
+      // Reorder preserves a (now index 1); a real disconnect still advances.
+      policy.update({ addressUrls: makePlan(['ws://c/ws', 'ws://a/ws', 'ws://b/ws']) });
+      expect(policy.activeUrl).toBe('ws://a/ws');
+      expect(policy.onCandidateDisconnected()).toEqual({ type: 'next-candidate' });
+      expect(policy.activeUrl).toBe('ws://b/ws');
+    });
+  });
 });
