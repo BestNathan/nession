@@ -1,0 +1,15 @@
+schema_version: 1
+issue: 4660
+criterion: SC-07
+stage: staging
+# Isolated runtime Case: the installer bridge contract is platform-independent
+# CLI/filesystem behavior proven against the real published v1.0.1 binary and
+# the candidate target. A native macOS pair is a separately identified
+# supplemental prerequisite; without an approved native lane the macOS readback
+# is reported Pending, not claimed (see the Issue Acceptance Plan).
+platform: linux
+runtime: full-stack-local
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+result_policy: all-pass

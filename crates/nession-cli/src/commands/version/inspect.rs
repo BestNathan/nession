@@ -46,6 +46,12 @@ pub fn run(version: String) -> Result<()> {
             manifest.schema, manifest.created_by
         );
         println!("  state-complete: {}", manifest.state_complete);
+        for entry in &manifest.coverage {
+            println!(
+                "  coverage: {} [{:?}/{:?}] {}",
+                entry.path, entry.class, entry.component, entry.detail
+            );
+        }
         for gap in &manifest.gaps {
             println!("  gap: {gap}");
         }
@@ -60,16 +66,25 @@ pub fn run(version: String) -> Result<()> {
         }
     }
 
-    // 3. Safe historical runtime eligibility.
-    let eligible = versions::is_complete_archive(&home)
-        && versions::archive_state_coverage(&home) == StateCoverage::Proven;
-    if eligible {
-        println!("Historical runtime: eligible for data-touching commands via +{version}");
-    } else {
-        println!(
-            "Historical runtime: BLOCKED for data-touching commands; read-only inspection \
-             (status/logs/list/show) remains available"
-        );
+    // 3. Safe historical runtime eligibility, per component (#4660). Agent and
+    //    Server assess their own required state plus shared dependencies.
+    let complete = versions::is_complete_archive(&home);
+    for (label, component) in [
+        ("Agent", crate::update::snapshot::CoverageComponent::Agent),
+        ("Server", crate::update::snapshot::CoverageComponent::Server),
+    ] {
+        let eligible = complete
+            && versions::archive_component_coverage(&home, component) == StateCoverage::Proven;
+        if eligible {
+            println!(
+                "Historical runtime ({label}): eligible for data-touching commands via +{version}"
+            );
+        } else {
+            println!(
+                "Historical runtime ({label}): BLOCKED for data-touching commands; read-only \
+                 inspection (status/logs/list/show) remains available"
+            );
+        }
     }
 
     // 4. Recovery plan against Current (names and statuses only).
