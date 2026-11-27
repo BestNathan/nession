@@ -1,0 +1,98 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "d130f21af84b7b7f627d791a816f99f3248986fe",
+  "source_tree_sha": "9b6a6a7c2d33843fcbd9ac3906e3476c91d144ec",
+  "run_id": 45990253976,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 45990253976,
+    "run_attempt": 1,
+    "head_sha": "d130f21af84b7b7f627d791a816f99f3248986fe",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-11-27T11:24:42Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "selected",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_selected_run",
+    "run_id": 45990253976,
+    "run_attempt": 1,
+    "sha": "d130f21af84b7b7f627d791a816f99f3248986fe",
+    "event": "push",
+    "branch": "main",
+    "selected_ids": [
+      "agent-process-discovery",
+      "app-attach-presentation",
+      "app-session-operations",
+      "attach-critical-path",
+      "conversation-disclosure-app",
+      "conversation-disclosure-narrow",
+      "conversation-disclosure-web",
+      "files-context-create",
+      "login",
+      "project-session-create",
+      "session-lifecycle",
+      "terminal-attach-bootstrap",
+      "terminal-consistency-faults",
+      "terminal-io"
+    ],
+    "selected_count": 14,
+    "provisioned_runtimes": 1,
+    "reused_full": null,
+    "one_runtime_for_selected_run": true,
+    "evidence": "GitHub API Run/Attempt/job/step outcomes + exact original selected E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "selected",
+    "target_sha": "d130f21af84b7b7f627d791a816f99f3248986fe",
+    "run_id": 45990253976,
+    "run_attempt": 1,
+    "verified_ids": [
+      "agent-process-discovery",
+      "app-attach-presentation",
+      "app-session-operations",
+      "attach-critical-path",
+      "conversation-disclosure-app",
+      "conversation-disclosure-narrow",
+      "conversation-disclosure-web",
+      "files-context-create",
+      "login",
+      "project-session-create",
+      "session-lifecycle",
+      "terminal-attach-bootstrap",
+      "terminal-consistency-faults",
+      "terminal-io"
+    ],
+    "plan_digest": "12be040429f6a1b88af88d780aa03141fc28d0b4aa48df4dc98672c614c065d1",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": {
+    "artifact_id": 15195050584,
+    "name": "issue-e2e-verification",
+    "size_bytes": 55561,
+    "sha256": "6fcfd53ca1853804828a76ddfe107de7897cf4fdb369d3fd235245e418fbe932",
+    "expires_at": "2026-12-11T11:41:00Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "test_job": {
+    "job_id": 140475955062,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 15195050584,
+    "name": "issue-e2e-verification",
+    "size_bytes": 55561,
+    "sha256": "6fcfd53ca1853804828a76ddfe107de7897cf4fdb369d3fd235245e418fbe932",
+    "expires_at": "2026-12-11T11:41:00Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "88d9653f25cfaa975e5e5db70885bd58056ffdfaf337871b1763c0c0de46f6fb"
+}
