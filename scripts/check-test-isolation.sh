@@ -18,8 +18,20 @@
 #      a reserved range still collides between two concurrent runs.
 #   2. No fixed filename under the shared system temp dir. Use
 #      tempfile::tempdir(), whose path is unique per run.
-#   3. A test touching paths::nession_home() must set NESSION_HOME first, or it
-#      reads and writes the developer's real $HOME/.nession.
+#   3. A test touching a production path resolver (nession_home/runtime_dir/...)
+#      must set the matching root env or use an explicit owned root.
+#   4. The misspelled `NESSON_TMUX_SOCKET` is never trusted; the resolver reads
+#      `NESION_TMUX_SOCKET` only (#4596/#4597).
+#   5. No process-global env mutation in integration tests; use an explicit
+#      input seam or a child-local env (#4597 F10).
+#   6. E2E/Acceptance code uses the run-scoped constants from e2e/runtime.ts,
+#      never fixed ports or /tmp/nession-e2e (#4597 F09).
+#   7. Integration tests construct SessionMetadataStore::with_root, never the
+#      production default (#4597 F04).
+#   9. No recursive deletion derived directly from the ambient environment or
+#      caller options; ownership must be verified first (#4597 F03).
+#  10. Harness files never spread process.env into children; build a sanitized
+#      run-owned environment (#4597 F07).
 #
 # Scope: everything under crates/*/tests/, plus the part of each crates/*/src/
 # file that follows its first `#[cfg(test)]`.
@@ -50,14 +62,24 @@ report() {
 
 # Print "<file>:<first-test-line>" for every file with test code.
 # For crates/*/tests/** the whole file counts; for src/** only the region after
-# the first `#[cfg(test)]`.
+# the first real test module (`#[cfg(test)] mod tests`). An inline
+# `#[cfg(test)] use` earlier in a production file must not turn the rest of the
+# file into "test code" — that misclassification hid production resolvers from
+# this check and produced false findings.
 test_regions() {
     find crates -type f -name '*.rs' -path '*/tests/*' 2>/dev/null |
         while IFS= read -r f; do echo "$f:1"; done
     find crates -type f -name '*.rs' -path '*/src/*' 2>/dev/null |
         while IFS= read -r f; do
             local n
-            n=$(grep -n '^\s*#\[cfg(test)\]' "$f" 2>/dev/null | head -1 | cut -d: -f1)
+            n=$(awk '
+                /^[[:space:]]*#\[cfg\(test\)\][[:space:]]*mod / { print NR; exit }
+                /^[[:space:]]*#\[cfg\(test\)\][[:space:]]*$/ {
+                    line = NR
+                    getline next_line
+                    if (next_line ~ /^[[:space:]]*(pub )?mod /) { print line; exit }
+                }
+            ' "$f" 2>/dev/null)
             [[ -n ${n:-} ]] && echo "$f:$n"
         done
 }
@@ -124,17 +146,104 @@ while IFS= read -r region; do
             'use tempfile::tempdir(); two processes starting in the same second produce the same name'
     done < <(grep -nE 'static COUNTER: AtomicU64' "$file" 2>/dev/null)
 
-    # ---- Rule 3: the developer's real config dir --------------------------
-    if grep -qE 'nession_home\(\)' "$file" 2>/dev/null &&
-        ! grep -qE 'NESSION_HOME|NESSION_HOME_ENV' "$file" 2>/dev/null; then
+    # ---- Rule 3: production path resolvers without an owned root -----------
+    if grep -qE 'nession_home\(\)|runtime_dir\(\)|ensure_runtime_dir\(\)|agent_sessions_dir\(\)|agent_claude_bindings_dir\(\)|agent_env_bindings_dir\(\)|server_db_path\(\)' "$file" 2>/dev/null &&
+        ! grep -qE 'NESION_HOME|NESION_RUNTIME_DIR|test_runtime|with_root|runRoot|sanitizedEnv' "$file" 2>/dev/null; then
         while IFS=: read -r ln text; do
             [[ -z ${ln:-} ]] && continue
             ((ln < start)) && continue
-            report "$file" "$ln" "nession_home() without NESSION_HOME (rule 3)" "$text" \
-                'set NESSION_HOME to a tempfile::tempdir() first, or this edits the real $HOME/.nession'
-        done < <(grep -nE 'nession_home\(\)' "$file" 2>/dev/null)
+            # A pure comparison of the resolved default (assert_eq!/assert!)
+            # reads no state and writes nothing; the harness still owns the
+            # path. Only a test that *uses* the resolver is a finding.
+            if sed -n "$((ln > 3 ? ln - 3 : 1)),${ln}p" "$file" 2>/dev/null |
+                grep -qE 'assert(_eq|_ne)?!'; then
+                continue
+            fi
+            report "$file" "$ln" "production path resolver without an owned root (rule 3)" "$text" \
+                'set NESION_HOME/NESION_RUNTIME_DIR (the harness does) or pass an explicit with_root/tempdir root'
+        done < <(grep -nE 'nession_home\(\)|runtime_dir\(\)|ensure_runtime_dir\(\)|agent_sessions_dir\(\)|agent_claude_bindings_dir\(\)|agent_env_bindings_dir\(\)|server_db_path\(\)' "$file" 2>/dev/null)
     fi
 done < <(test_regions)
+
+# ---- Rule 4: the misspelled socket override (repo-wide) -------------------
+while IFS=: read -r f ln text; do
+    [[ -z ${ln:-} ]] && continue
+    case "$f" in
+        crates/nession-agent/src/tmux/cmd.rs) continue ;;
+        docs/*) continue ;;
+        scripts/check-test-isolation.sh) continue ;;
+        scripts/check-test-isolation-selftest.sh) continue ;;
+        scripts/test-runtime-inventory.mjs) continue ;;
+    esac
+    report "$f" "$ln" "misspelled tmux-socket override (rule 4)" "$text" \
+        'use NESION_TMUX_SOCKET (the resolver reads only that name); the tmux-socket chokepoint diagnoses the misspelling'
+done < <(grep -rn 'NESSON_TMUX_SOCKET' crates scripts e2e .github 2>/dev/null |
+    grep -v node_modules | grep -vE ':[0-9]+:[[:space:]]*(//|/\*|\*)')
+
+# ---- Rule 5: process-global env mutation in integration tests -------------
+while IFS=: read -r f ln text; do
+    [[ -z ${ln:-} ]] && continue
+    case "$f" in
+        crates/*/tests/*) ;;
+        *) continue ;;
+    esac
+    report "$f" "$ln" "process-global env mutation in an integration test (rule 5)" "$text" \
+        'use an explicit-input seam, a child-local env, or a focused unit test with a serialized guard'
+done < <(grep -rnE '\bstd::env::(set|remove)_var' crates --include='*.rs' 2>/dev/null |
+    grep -vE ':[0-9]+:[[:space:]]*(//|/\*|\*)')
+
+# ---- Rule 6: fixed E2E/Acceptance endpoints and roots ---------------------
+while IFS=: read -r f ln text; do
+    [[ -z ${ln:-} ]] && continue
+    report "$f" "$ln" "fixed E2E endpoint or run root (rule 6)" "$text" \
+        'import E2E_SERVER_URL/E2E_AGENT_URL/E2E_WEB_ORIGIN/E2E_RUN_DIR from e2e/runtime.ts; the run owns a leased port block and a private root'
+done < <(grep -rnE 'ws://(localhost|127\.0\.0\.1):(19090|19091|19092)|http://localhost:4173|/tmp/nession-e2e' \
+    e2e/tests e2e/helpers e2e/pages e2e/acceptance/cases --include='*.ts' --include='*.js' --include='*.cjs' 2>/dev/null |
+    grep -v node_modules | grep -vE ':[0-9]+:[[:space:]]*(//|/\*|\*)')
+
+# ---- Rule 7: SessionMetadataStore uses the production default -------------
+while IFS=: read -r f ln text; do
+    [[ -z ${ln:-} ]] && continue
+    case "$f" in
+        crates/*/tests/*) ;;
+        *) continue ;;
+    esac
+    report "$f" "$ln" "SessionMetadataStore::new in an integration test (rule 7)" "$text" \
+        'use SessionMetadataStore::with_root with the test tempdir; the default writes into ~/.nession/agent/sessions'
+done < <(grep -rn 'SessionMetadataStore::new' crates --include='*.rs' 2>/dev/null |
+    grep -vE ':[0-9]+:[[:space:]]*(//|/\*|\*)')
+
+# ---- Rule 9: recursive deletion from ambient input ------------------------
+while IFS=: read -r f ln text; do
+    [[ -z ${ln:-} ]] && continue
+    report "$f" "$ln" "recursive deletion of ambient or caller-supplied path (rule 9)" "$text" \
+        'verify the run-root manifest/owner first (assertOwnedPath/removeRunRoot) and delete only an owned path'
+done < <(grep -rnE 'rmSync\(\s*(process\.env|options\??\.|options\.)' \
+    e2e/runner e2e/acceptance e2e/globalSetup.ts e2e/runtime.ts \
+    --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.ts' 2>/dev/null |
+    grep -v node_modules | grep -vE ':[0-9]+:[[:space:]]*(//|/\*|\*)')
+
+# ---- Rule 10: harness spreads the ambient environment ---------------------
+while IFS=: read -r f ln text; do
+    [[ -z ${ln:-} ]] && continue
+    report "$f" "$ln" "harness spreads process.env into a child (rule 10)" "$text" \
+        'build the child environment with sanitizedEnv(runRoot, tmuxSocket, overrides) from e2e/runner/runtime/test-runtime.js'
+done < <(grep -rn '\.\.\.process\.env' \
+    e2e/runner e2e/globalSetup.ts e2e/runtime.ts \
+    --include='*.js' --include='*.mjs' --include='*.cjs' --include='*.ts' 2>/dev/null |
+    grep -v node_modules | grep -vE ':[0-9]+:[[:space:]]*(//|/\*|\*)')
+
+# ---- Machine-readable inventory (#4597 SC-07) -----------------------------
+# The committed inventory is generated, never hand-edited. `--check` fails when
+# it is stale or when a reference is still unclassified. Skipped inside the
+# checker's own selftest, which runs it explicitly once.
+if [ "${NSESSION_TEST_ISOLATION_SELFTEST:-0}" != 1 ] &&
+    command -v node >/dev/null 2>&1 &&
+    [ -f scripts/test-runtime-inventory.mjs ]; then
+    if ! node scripts/test-runtime-inventory.mjs --check; then
+        findings=$((findings + 1))
+    fi
+fi
 
 if [[ $findings -eq 0 ]]; then
     echo -e "${GREEN}Test isolation OK ✓${NC}"

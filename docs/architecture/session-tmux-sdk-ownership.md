@@ -18,6 +18,9 @@ Related owners:
 - [`agent-process-discovery.md`](agent-process-discovery.md) — the read-only
   Session process-membership contract that consumes `TmuxOps::list_panes`;
   it owns the discovery methods, coverage/fallback truth and redaction.
+- [`../engineering/test-runtime-isolation.md`](../engineering/test-runtime-isolation.md)
+  — the cross-resource Test Runtime root that owns test HOME/runtime/tool
+  config/temp dirs, the private tmux socket and child environment (#4597).
 - [`session-activity.md`](session-activity.md) — the capability-reported
   Session work dimension and its Pane-owner fencing. It consumes verified
   Session/Pane identity; it is not a second lifecycle or foreground oracle.

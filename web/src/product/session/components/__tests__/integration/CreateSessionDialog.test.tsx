@@ -376,7 +376,7 @@ describe('CreateSessionDialog', () => {
     await user.click(screen.getByRole('button', { name: 'Create' }));
 
     await waitFor(() => {
-      expect(screen.getByText(/Only letters, digits/)).toBeInTheDocument();
+      expect(screen.getByText(/lowercase/)).toBeInTheDocument();
     });
     expect(createSessionMock).not.toHaveBeenCalled();
   });

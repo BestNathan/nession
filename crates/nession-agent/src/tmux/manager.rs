@@ -3,7 +3,9 @@
 use anyhow::{Context, Result};
 use nession_protocol::contracts::env::v1::{EnvSnapshot, SessionEnvProfile};
 use nession_protocol::contracts::sandbox::v1::{SandboxExecutionReport, SandboxPolicy};
-use nession_protocol::contracts::session::v1::{NormalizedSessionMetadata, SessionMetadata};
+use nession_protocol::contracts::session::v1::{
+    validate_session_name, NormalizedSessionMetadata, SessionMetadata,
+};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -983,6 +985,11 @@ impl SessionManager {
         sandbox_working_dir: Option<&str>,
         initial_metadata: Option<&InitialSessionMetadata<'_>>,
     ) -> Result<SessionCreateOutcome> {
+        // Creation-time name policy (#4614). Read, attach, kill and metadata
+        // routes keep accepting names created before this policy; only a new
+        // Session is constrained.
+        validate_session_name(name).map_err(|error| anyhow::anyhow!("{error}"))?;
+
         // Check memory pressure before creating a new session. This prevents
         // container-level OOM by refusing new sessions when memory usage is too
         // high, rather than letting the entire container die.
@@ -997,6 +1004,16 @@ impl SessionManager {
         let permit = creation_permit(self.socket_path(), name);
         let slot = permit.slot.clone();
         let _serialized = slot.lock().await;
+
+        // The binding state root is name-keyed and APFS folds case, so `Test`
+        // and `test` would be one directory. A surviving case variant is
+        // another Session's state, never this create's to adopt (#4614).
+        if let Some(existing) = self.env.case_variant_state_dir(name).await? {
+            anyhow::bail!(
+                "Session '{existing}' already has Agent-owned state on this Agent; \
+                 Session names are case-insensitive and '{name}' cannot be created"
+            );
+        }
 
         // Delivered by the same `new-session` that creates the Session. If the
         // deadline drops this future while `new-session` is in flight, the
@@ -1020,8 +1037,19 @@ impl SessionManager {
                 .list_sessions()
                 .await
                 .with_context(|| format!("check whether session {name} already exists"))?;
-            if sessions.iter().any(|session| session.name == name) {
-                anyhow::bail!("session {name} already exists; refusing to replace it");
+            if let Some(existing) = sessions
+                .iter()
+                .find(|session| session.name.eq_ignore_ascii_case(name))
+            {
+                if existing.name == name {
+                    anyhow::bail!("session {name} already exists; refusing to replace it");
+                }
+                anyhow::bail!(
+                    "Session '{}' already exists on this Agent; Session names are \
+                     case-insensitive and '{}' cannot be created",
+                    existing.name,
+                    name
+                );
             }
             self.create_session_impl(
                 name,
@@ -3873,5 +3901,132 @@ mod guarded_kill_tests {
             .expect_err("there is no Session to kill");
         let (kind, detail) = error_kind_and_detail(&error);
         assert_eq!(kind, "not_found", "{detail}");
+    }
+}
+
+/// #4614: creation-time Session names are lowercase slugs, and a name that
+/// case-folds to an existing Session or its state directory is refused.
+#[cfg(test)]
+mod session_name_policy_tests {
+    use super::*;
+    use crate::test_support::TestSession;
+
+    /// The refusal happens before any tmux call: this manager has no server
+    /// and no state to write.
+    #[tokio::test]
+    async fn a_name_outside_the_lowercase_slug_policy_is_refused_before_tmux() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let mgr = SessionManager::new().with_env_state_dir(state.clone());
+        let error = mgr
+            .create_session("BadName", SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect_err("uppercase names are refused");
+        let message = format!("{error:#}");
+        assert!(message.contains("lowercase"), "{message}");
+        assert!(
+            !state.join("BadName").exists(),
+            "the refusal must not create state"
+        );
+    }
+
+    /// The state root is name-keyed. A surviving case-variant directory is a
+    /// stale binding; a new create must not silently adopt it.
+    #[tokio::test]
+    async fn a_case_variant_state_directory_is_refused_before_tmux() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        std::fs::create_dir_all(state.join("Legacy")).unwrap();
+        let before = std::fs::read_dir(&state).unwrap().count();
+        let mgr = SessionManager::new().with_env_state_dir(state.clone());
+        let error = mgr
+            .create_session("legacy", SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect_err("the case-variant state directory is refused");
+        let message = format!("{error:#}");
+        assert!(message.contains("case-insensitive"), "{message}");
+        assert_eq!(std::fs::read_dir(&state).unwrap().count(), before);
+    }
+
+    async fn tmux_available() -> bool {
+        cmd::global()
+            .tokio()
+            .arg("-V")
+            .stdout(std::process::Stdio::null())
+            .status()
+            .await
+            .is_ok()
+    }
+
+    fn manager() -> Arc<SessionManager> {
+        let state = tempfile::tempdir().unwrap();
+        Arc::new(
+            SessionManager::new()
+                .with_env_state_dir(Box::leak(Box::new(state)).path().to_path_buf()),
+        )
+    }
+
+    async fn live(mgr: &SessionManager, name: &str) -> bool {
+        mgr.list_sessions()
+            .await
+            .expect("tmux answers the list")
+            .iter()
+            .any(|session| session.name == name)
+    }
+
+    /// A legacy mixed-case Session stays addressable, while a new name that
+    /// only case-folds to it cannot be created.
+    #[tokio::test]
+    async fn a_case_variant_of_a_live_session_is_refused() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        let legacy = TestSession::new("Legacy-Session");
+        let upper = legacy.name().to_string();
+        let lower = upper.to_ascii_lowercase();
+        assert_ne!(upper, lower, "the fixture must differ by case");
+
+        mgr.sdk_ops()
+            .new_session(&nession_tmux::ops::NewSession {
+                name: upper.clone(),
+                working_dir: "/tmp".to_string(),
+                width: 80,
+                height: 24,
+                env: Vec::new(),
+                command: Vec::new(),
+            })
+            .await
+            .expect("the legacy Session is created through tmux directly");
+
+        let error = mgr
+            .create_session(&lower, SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect_err("the case variant is refused");
+        let message = format!("{error:#}");
+        assert!(message.contains("case-insensitive"), "{message}");
+        assert!(live(&mgr, &upper).await, "the legacy Session survives");
+        assert!(!live(&mgr, &lower).await, "no new Session was created");
+
+        mgr.kill_session(&upper)
+            .await
+            .expect("a legacy mixed-case Session remains killable");
+    }
+
+    /// A valid lowercase name still creates.
+    #[tokio::test]
+    async fn a_lowercase_slug_still_creates() {
+        if !tmux_available().await {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let mgr = manager();
+        let session = TestSession::new("lowercase-policy");
+        mgr.create_session(session.name(), SESSION_WIDTH, SESSION_HEIGHT, "/tmp", &[])
+            .await
+            .expect("a lowercase slug is created");
+        assert!(live(&mgr, session.name()).await);
+        mgr.kill_session(session.name()).await.ok();
     }
 }

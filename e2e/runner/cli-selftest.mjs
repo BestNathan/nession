@@ -17,7 +17,14 @@ const cli = path.join(repo, 'e2e', 'run');
 const call = (...args) => {
   const run = spawnSync(process.execPath, [cli, ...args], {
     cwd: repo, encoding: 'utf8', timeout: 10_000,
-    env: { ...process.env, CI: '' },
+    // Tooling selftest: pass the toolchain/locale inputs it needs, not the
+    // ambient environment (#4597 F07/SC-05).
+    env: {
+      PATH: process.env.PATH ?? '',
+      HOME: process.env.HOME ?? os.tmpdir(),
+      LANG: process.env.LANG ?? 'C.UTF-8',
+      CI: '',
+    },
   });
   if (run.error) throw run.error;
   return { code: run.status, stdout: run.stdout, stderr: run.stderr };

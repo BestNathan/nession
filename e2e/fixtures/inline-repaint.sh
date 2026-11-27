@@ -13,12 +13,13 @@
 # byte-for-byte stable and a changed capture means a resize happened.
 #
 # Deterministic by construction: no account, no network, no clock in the
-# output. `REPAINT_LOG` chooses where the redraw log goes (default below);
-# `REPAINT_BLOCK_LINES` changes the block size.
+# output. `REPAINT_LOG` chooses where the redraw log goes; the default is
+# relative to the Session's working directory, which the E2E run root owns, so
+# two concurrent runs cannot share or truncate each other's log (#4597).
 set -u
 
 BLOCK_LINES=${REPAINT_BLOCK_LINES:-20}
-LOG=${REPAINT_LOG:-/tmp/nession-e2e-inline-repaint.log}
+LOG=${REPAINT_LOG:-./inline-repaint.log}
 : > "$LOG"
 
 paint() {

@@ -254,7 +254,15 @@ async fn start_agent_with(
 /// proof a Server+Agent+tmux runtime Case rather than a projection test.
 async fn register_real_agent(server_addr: SocketAddr) -> (ServerClientHandle, Arc<SessionManager>) {
     let tmux = Arc::new(SessionManager::new());
-    let store = Arc::new(SessionMetadataStore::new(Arc::clone(&tmux)));
+    // The store's root must outlive the registration; this TempDir is bounded
+    // by the run root the test harness owns.
+    let root = Box::leak(Box::new(
+        tempfile::tempdir().expect("metadata fixture root"),
+    ));
+    let store = Arc::new(SessionMetadataStore::with_root(
+        Arc::clone(&tmux),
+        root.path().join("sessions"),
+    ));
     let handle =
         register_real_agent_with(server_addr, PROJECT_AGENT, Arc::clone(&tmux), store).await;
     (handle, tmux)
