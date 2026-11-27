@@ -4,7 +4,7 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1894,
+    "entries": 1895,
     "references": 1016,
     "unresolved": 0
   },
@@ -6857,6 +6857,11 @@
     },
     {
       "file": "e2e/acceptance/cases/4605/SC-03/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4620/SC-01/verify.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
     },
