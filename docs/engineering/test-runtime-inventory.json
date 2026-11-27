@@ -4,7 +4,7 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1895,
+    "entries": 1896,
     "references": 1016,
     "unresolved": 0
   },
@@ -331,13 +331,13 @@
       "file": "crates/nession-agent/src/tmux/env.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1733
+      "line": 1768
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1711
+      "line": 1739
     },
     {
       "file": "crates/nession-agent/src/tmux/ops.rs",
@@ -9441,6 +9441,11 @@
       "disposition": "web-unit"
     },
     {
+      "file": "web/src/product/session/model/__tests__/unit/createSessionValidation.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
       "file": "web/src/product/session/model/__tests__/unit/domainState.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
@@ -10709,7 +10714,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2207,
+      "line": 2242,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10718,7 +10723,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2371,
+      "line": 2406,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10727,7 +10732,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2472,
+      "line": 2507,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10736,7 +10741,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2560,
+      "line": 2595,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10745,7 +10750,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2608,
+      "line": 2643,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10754,7 +10759,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2746,
+      "line": 2781,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10763,7 +10768,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2782,
+      "line": 2817,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10772,7 +10777,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 2786,
+      "line": 2821,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10781,7 +10786,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 3158,
+      "line": 3193,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10790,7 +10795,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 3181,
+      "line": 3216,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10799,7 +10804,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 3638,
+      "line": 3673,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10808,7 +10813,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 4044,
+      "line": 4079,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10817,7 +10822,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 4063,
+      "line": 4098,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10826,7 +10831,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 4527,
+      "line": 4562,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10835,7 +10840,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/env.rs",
-      "line": 4786,
+      "line": 4821,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10844,7 +10849,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 1822,
+      "line": 1850,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10853,7 +10858,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2249,
+      "line": 2277,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10862,7 +10867,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2287,
+      "line": 2315,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10871,7 +10876,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2324,
+      "line": 2352,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10880,7 +10885,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 2428,
+      "line": 2456,
       "kind": "temp-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10889,7 +10894,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3145,
+      "line": 3173,
       "kind": "fixed-tmp-path",
       "effect": "write",
       "disposition": "path-string-fixture",
@@ -10898,7 +10903,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3332,
+      "line": 3360,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10907,7 +10912,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3383,
+      "line": 3411,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10916,7 +10921,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3435,
+      "line": 3463,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10925,7 +10930,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3486,
+      "line": 3514,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10934,7 +10939,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3548,
+      "line": 3576,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10943,7 +10948,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3549,
+      "line": 3577,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -10952,7 +10957,7 @@
     },
     {
       "file": "crates/nession-agent/src/tmux/manager.rs",
-      "line": 3609,
+      "line": 3637,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
