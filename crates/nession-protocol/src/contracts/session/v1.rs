@@ -2311,6 +2311,64 @@ impl std::fmt::Display for SessionMetadataValidationError {
 
 impl std::error::Error for SessionMetadataValidationError {}
 
+/// The creation-time Session name policy (#4614).
+///
+/// A Session name is also the raw key for Agent-owned per-Session state
+/// (`<agent>/env-bindings/<session>/`). macOS APFS folds case, so two names
+/// that differ only by case would share one state directory. New names are
+/// therefore lowercase slugs; mixed-case Sessions created before this policy
+/// remain addressable but cannot be created again.
+pub const SESSION_NAME_RULE: &str = "Session names must start with a lowercase letter or digit and contain only lowercase letters, digits, '.', '_' and '-'";
+
+/// A creation-time name that [`validate_session_name`] refuses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SessionNameValidationError {
+    /// The caller supplied no name at all.
+    Empty,
+    /// The name is outside the lowercase-slug policy.
+    Invalid,
+}
+
+impl SessionNameValidationError {
+    /// One sentence the Server and Agent can return to the caller.
+    pub fn message(&self) -> &'static str {
+        match self {
+            Self::Empty => "Session name is required",
+            Self::Invalid => SESSION_NAME_RULE,
+        }
+    }
+}
+
+impl std::fmt::Display for SessionNameValidationError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.message())
+    }
+}
+
+impl std::error::Error for SessionNameValidationError {}
+
+/// Validate a name for a **new** Session.
+///
+/// Only creation is constrained. Reads, attach, kill, metadata and ENV routes
+/// keep accepting names created before this policy.
+pub fn validate_session_name(name: &str) -> Result<(), SessionNameValidationError> {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(SessionNameValidationError::Empty);
+    };
+    let first_ok = first.is_ascii_lowercase() || first.is_ascii_digit();
+    let rest_ok = chars.all(|character| {
+        character.is_ascii_lowercase()
+            || character.is_ascii_digit()
+            || matches!(character, '.' | '_' | '-')
+    });
+    if first_ok && rest_ok {
+        Ok(())
+    } else {
+        Err(SessionNameValidationError::Invalid)
+    }
+}
+
 /// The normalized user fields a successful update persists.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NormalizedSessionMetadata {

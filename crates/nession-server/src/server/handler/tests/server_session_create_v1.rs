@@ -135,6 +135,27 @@ async fn session_create_missing_fields() {
 }
 
 #[tokio::test]
+async fn session_create_refuses_a_name_outside_the_lowercase_slug_policy() {
+    let mut h = handler_with_online_agent().await;
+    h.authenticated_client = true;
+    let action = h
+        .handle_message(proto_msg(
+            "server.session.create",
+            json!({ "agent_id": "a1", "name": "Test" }),
+        ))
+        .await
+        .unwrap();
+    let reply = parse_reply(action);
+    assert_eq!(reply["payload"]["success"], false);
+    let error = reply["payload"]["error"].as_str().unwrap();
+    assert!(error.contains("lowercase"), "unexpected error: {error}");
+    assert!(
+        !error.contains("not connected"),
+        "the name must be refused before any Agent request: {error}"
+    );
+}
+
+#[tokio::test]
 async fn session_create_agent_not_found() {
     let mut h = test_handler("").await;
     h.authenticated_client = true;
