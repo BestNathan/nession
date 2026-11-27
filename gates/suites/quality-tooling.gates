@@ -60,8 +60,10 @@ issue-audit-agent-selftest
 issue-audit-cursor-selftest
 gate-router-contract
 # Deterministic known-violation fixtures for the custom blocking detectors.
+protocol-integrity
 protocol-integrity-selftest
 test-isolation-selftest
+tmux-socket-isolation
 tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
