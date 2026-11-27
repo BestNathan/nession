@@ -1045,3 +1045,10 @@
 - Categories: architecture, security, delivery, registry, workflows
 - Reason: Add reciprocal cross-link to the delivered #4588 canonical hostname and cert-manager TLS consumption contract so the new article has a meaningful incoming link
 - Source: https://github.com/BestNathan/nession/issues/4588
+
+## 2026-11-27T09:56:51Z | update | Nession CI, E2E and acceptance qualification timing
+- Path: topics/workflows/nession-ci-e2e-and-acceptance-qualification-timing.md
+- Topic: workflows
+- Categories: acceptance, ci, e2e, release
+- Reason: Record activated #4672 per-family positive applicability and independent fallback, superseding historical global unknown-path fanout while preserving unverifiable-diff and independent E2E/Case safety; live config-only receipt remains separate
+- Source: https://github.com/BestNathan/nession/issues/4672
