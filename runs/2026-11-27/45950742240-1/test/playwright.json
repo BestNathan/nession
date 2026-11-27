@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "kind": "e2e_test_run",
+  "mode": "test",
+  "target_sha": "903817980286e1dc1175798a35a06f06193fb37d",
+  "source_tree_sha": "9b6a6a7c2d33843fcbd9ac3906e3476c91d144ec",
+  "run_id": 45950742240,
+  "run_attempt": 1,
+  "source": {
+    "repository": "BestNathan/nession",
+    "workflow_id": 382193593,
+    "run_id": 45950742240,
+    "run_attempt": 1,
+    "head_sha": "903817980286e1dc1175798a35a06f06193fb37d",
+    "head_branch": "main",
+    "event": "push"
+  },
+  "started_at": "2026-11-27T06:15:56Z",
+  "status": "Completed",
+  "evaluation": null,
+  "test_scope": "selected",
+  "test_scope_receipt": {
+    "kind": "verified_e2e_selected_run",
+    "run_id": 45950742240,
+    "run_attempt": 1,
+    "sha": "903817980286e1dc1175798a35a06f06193fb37d",
+    "event": "push",
+    "branch": "main",
+    "selected_ids": [
+      "app-session-operations",
+      "files-context-create",
+      "fixture-app",
+      "fixture-env",
+      "fixture-git",
+      "fixture-visual",
+      "fixture-visual-app",
+      "fixture-visual-app-compact",
+      "fixture-visual-app-landscape",
+      "fixture-workspace",
+      "git-github-context",
+      "images-workspace-capability",
+      "project-session-binding",
+      "sandbox-workspace-capability",
+      "session-lifecycle",
+      "sidebar-session-first"
+    ],
+    "selected_count": 16,
+    "provisioned_runtimes": 1,
+    "reused_full": null,
+    "one_runtime_for_selected_run": true,
+    "evidence": "GitHub API Run/Attempt/job/step outcomes + exact original selected E2E job log receipt emitted by the measured run"
+  },
+  "test_scope_assertion": {
+    "scope": "selected",
+    "target_sha": "903817980286e1dc1175798a35a06f06193fb37d",
+    "run_id": 45950742240,
+    "run_attempt": 1,
+    "verified_ids": [
+      "app-session-operations",
+      "files-context-create",
+      "fixture-app",
+      "fixture-env",
+      "fixture-git",
+      "fixture-visual",
+      "fixture-visual-app",
+      "fixture-visual-app-compact",
+      "fixture-visual-app-landscape",
+      "fixture-workspace",
+      "git-github-context",
+      "images-workspace-capability",
+      "project-session-binding",
+      "sandbox-workspace-capability",
+      "session-lifecycle",
+      "sidebar-session-first"
+    ],
+    "plan_digest": "69df9b60a47da01ba52a6786c4778cd1bb54d262f917bde89c9cbff5195d0f48",
+    "evidence": "authenticated SHA256 artifact + independent per-ID assertions"
+  },
+  "selected_e2e_artifact": {
+    "artifact_id": 15178041998,
+    "name": "issue-e2e-verification",
+    "size_bytes": 70389,
+    "sha256": "af09f2c651848935c534f1da32c05cc714a10e79be25470625fb88fe11be2a8e",
+    "expires_at": "2026-12-11T06:43:25Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "test_job": {
+    "job_id": 140345743681,
+    "name": "e2e",
+    "conclusion": "success",
+    "run_attempt": 1
+  },
+  "evidence": {
+    "artifact_id": 15178041998,
+    "name": "issue-e2e-verification",
+    "size_bytes": 70389,
+    "sha256": "af09f2c651848935c534f1da32c05cc714a10e79be25470625fb88fe11be2a8e",
+    "expires_at": "2026-12-11T06:43:25Z",
+    "durability": "GitHub Actions artifact; time-limited, not indefinitely archived"
+  },
+  "execution_id": "902636190f5ba0d6f00458638291737316030bb182ad41c6edb9db8af025cd03"
+}
