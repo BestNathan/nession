@@ -276,21 +276,29 @@ export function independentReplacementContract(issue, previousPr, replacementPr,
   if (criteria.errors.length || report.errors.length || plan.errors.length ||
       !plan.plan || criteria.criteria.size === 0 || criteria.criteria.size > 16)
     return null;
+  // Independent replacement re-evaluates every PR-stage SC at a merged
+  // replacement head. Staging/post-merge rows are outside its scope: the
+  // trusted evaluator selects only PR-stage criteria and the projector applies
+  // only the criteria in this policy, so those rows stay untouched. They must
+  // not make a mixed-stage Issue permanently unreplaceable (#4597).
+  const prCriteria = [...criteria.criteria.keys()]
+    .filter((id) => planStage(plan.plan.get(id)) === 'pr');
+  if (prCriteria.length === 0) return null;
   const oldSources = new Set();
   const selected = [];
-  for (const [id,sc] of criteria.criteria) {
+  for (const id of prCriteria) {
+    const sc = criteria.criteria.get(id);
     const row = report.rows.get(id);
     const match = /^run [1-9]\d*; ref ([a-f0-9]{40}); source agent(?:-[a-z0-9-]+)?;/i
       .exec(String(row?.evidence || ''));
     if (!sc.checked || !row || row.result !== 'Pass' ||
-        planStage(plan.plan.get(id)) !== 'pr' ||
         plan.plan.get(id)?.method !== 'agent' || !match ||
         match[1].toLowerCase() === replacementPr.head.sha)
       return null;
     oldSources.add(match[1].toLowerCase());
     selected.push(id);
   }
-  if (report.rows.size !== selected.length || oldSources.size > 16)
+  if (selected.length !== prCriteria.length || oldSources.size > 16)
     return null;
   return {issue:issue.number, previous_pr:oldId, replacement_pr:newId,
     target_ref:replacementPr.head.sha, comment_id:sourceComment.id,
@@ -1997,6 +2005,27 @@ async function selfTest() {
     previousPr,replacementPr,'BestNathan/nession',replacementComment);
   assert.deepEqual(expectedReplacement?.criteria,['SC-01']);
   assert.deepEqual(expectedReplacement?.old_sources,['b'.repeat(40)]);
+  // #4597: staging/post-merge rows are outside replacement scope. They stay
+  // untouched by the trusted evaluator/projector and must not block a
+  // replacement whose every PR-stage criterion is a historical agent receipt.
+  const mixedBody=body
+    .replace('- [x] SC-01 acceptance is proven',
+      '- [x] SC-01 acceptance is proven\n- [x] SC-02 staging acceptance is proven')
+    .replace('  SC-01:\n    when: pr\n    method: agent',
+      '  SC-01:\n    when: pr\n    method: agent\n' +
+      '  SC-02:\n    when: merged\n    branch: staging\n    method: case')
+    .replace('| SC-01 | Pass | run 100; ref '+sha+'; source agent-qwen; test: exact SHA fixture |',
+      '| SC-01 | Pass | run 100; ref '+'b'.repeat(40)+'; source agent-qwen; test: exact SHA fixture |\n'+
+      '| SC-02 | Pass | run 200; ref '+'9'.repeat(40)+'; source case-runner; case: execution=fixture |');
+  const mixedReplacement=independentReplacementContract({...issue,body:mixedBody},
+    previousPr,replacementPr,'BestNathan/nession',replacementComment);
+  assert.deepEqual(mixedReplacement?.criteria,['SC-01']);
+  assert.deepEqual(mixedReplacement?.old_sources,['b'.repeat(40)]);
+  assert.equal(independentReplacementContract({...issue,body:mixedBody.replace(
+    '| SC-01 | Pass | run 100; ref '+'b'.repeat(40),
+    '| SC-01 | Pending | run 100; ref '+'b'.repeat(40))},
+    previousPr,replacementPr,'BestNathan/nession',replacementComment),null,
+    'a pending PR-stage row is not a historical accepted replacement source');
   for (const invalid of [
     {comment:{...replacementComment,updated_at:'2026-11-19T08:01:00Z'}},
     {comment:{...replacementComment,author_association:'COLLABORATOR'}},
