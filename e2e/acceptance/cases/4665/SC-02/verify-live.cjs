@@ -8,7 +8,7 @@
 const assert = require('node:assert/strict');
 const { targetSha } = require('../../../shared/mcp-cases.cjs');
 const {
-  createSession, enter, getConversation, oneLine, runLive, seedConversation, settleClaude,
+  createSession, enter, getConversation, lastLines, oneLine, runLive, seedConversation, settleClaude,
   startLiveStack, status, submit, waitFor, waitForStatus,
 } = require('../../../shared/claude-live.cjs');
 
@@ -114,7 +114,9 @@ runLive(async ({ evidence }) => {
 
     // Against the now-empty composer a new submit confirms exactly once.
     const sent = await submit(stack, NEW_PROMPT, id);
-    assert.equal(sent.status, 'input_sent');
+    assert.equal(sent.status, 'input_sent',
+      'the submit against the emptied composer must confirm by read-back: ' + JSON.stringify(sent) +
+      '; pane:\n' + lastLines(stack.capture(), 24));
     assert.equal(sent.observation, 'verified');
     assert.equal(sent.conversation_id, id);
     const delivered = await waitFor('the new prompt in the transcript',
