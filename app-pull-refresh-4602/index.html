@@ -1,0 +1,487 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Nession · App Pull Refresh · #4602</title>
+<link rel="stylesheet" href="../prototype-frame-2758/frame.css">
+<style>
+/* Product area only. Approximates the App dark shell; no prototype chrome here. */
+.app{position:absolute;inset:0;display:flex;flex-direction:column;background:#0d1724;color:#dbe9f4;
+  font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;touch-action:pan-y;
+  overscroll-behavior:contain;-webkit-user-select:none;user-select:none}
+.app-header{flex:none;height:64px;display:flex;align-items:center;gap:10px;padding:0 14px;
+  background:#101c2a;border-bottom:1px solid #293b4e}
+.app-header .title{flex:1;min-width:0;font-size:15px;font-weight:650;letter-spacing:-.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.app-icon{height:38px;min-width:38px;padding:0 10px;border-radius:11px;border:1px solid #31475b;
+  background:#19293b;color:#c2d4e4;font-size:15px;display:inline-flex;align-items:center;
+  justify-content:center;cursor:pointer}
+.app-icon:focus-visible{outline:2px solid #91e0c6;outline-offset:2px}
+.app-icon[aria-busy="true"]{opacity:.75;cursor:progress}
+.app-icon svg{width:17px;height:17px}
+.app-icon.spinning svg{animation:np-spin .9s linear infinite}
+@keyframes np-spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.app-icon.spinning svg{animation:none}}
+
+.scrollport{position:relative;flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;
+  -webkit-overflow-scrolling:touch}
+.pull-indicator{position:absolute;top:0;left:0;right:0;height:0;display:flex;align-items:flex-end;
+  justify-content:center;overflow:hidden;pointer-events:none;color:#8ea6b9;font-size:11px;z-index:3}
+.pull-indicator .inner{padding-bottom:9px;display:flex;align-items:center;gap:7px;opacity:0;
+  transition:opacity .12s linear}
+.pull-indicator.active .inner{opacity:1}
+.pull-dot{width:13px;height:13px;border-radius:50%;border:2px solid #4d6b86;border-top-color:#9adcc3}
+.pull-indicator.busy .pull-dot{animation:np-spin .8s linear infinite}
+@media (prefers-reduced-motion:reduce){.pull-indicator.busy .pull-dot{animation:none}}
+.list{padding:12px 14px 132px;transition:transform .16s cubic-bezier(.2,.7,.3,1)}
+.list.dragging{transition:none}
+.row{width:100%;display:flex;align-items:center;justify-content:space-between;gap:12px;
+  border:1px solid #2f455a;border-radius:13px;padding:13px;margin:0 0 9px;background:#172638;
+  color:#dbe9f4;text-align:left;cursor:pointer;font:inherit}
+.row:focus-visible{outline:2px solid #91e0c6;outline-offset:2px}
+.row[aria-selected="true"]{border-color:#5d8f7c;background:#1b3040}
+.row b{display:block;font-size:13px}
+.row small{display:block;font-size:11px;color:#8ea6b9;margin-top:4px}
+.row .chev{color:#90aabe;font-size:17px}
+.state-note{border:1px dashed #42566b;border-radius:14px;padding:18px;color:#a2b9ca;font-size:12.5px;
+  line-height:1.65;margin-bottom:10px}
+.state-note.error{border-style:solid;border-color:#7d4b4b;background:#241a1e;color:#e3b9b9}
+.state-note button{margin-top:11px;background:#bce9d5;color:#174b38;border:0;border-radius:10px;
+  padding:9px 13px;font-size:12px;font-weight:700;cursor:pointer;font-family:inherit}
+.state-note button:focus-visible{outline:2px solid #91e0c6;outline-offset:2px}
+.stale-tag{display:inline-block;margin-left:7px;padding:2px 7px;border-radius:7px;background:#3a2f1c;
+  color:#e0c489;font-size:10px;font-weight:650;vertical-align:middle}
+
+.nested{margin:0 0 10px;border:1px solid #2f455a;border-radius:13px;background:#131f2e}
+.nested-head{padding:10px 12px;font-size:11px;color:#8ea6b9;border-bottom:1px solid #24374a}
+.nested-body{height:150px;overflow-y:auto;padding:9px 12px;overscroll-behavior:contain}
+.nested-body div{padding:8px 0;font-size:12px;color:#b6c9d8;border-bottom:1px solid #1d2c3d}
+
+.terminal{flex:1;min-height:0;overflow-y:auto;padding:14px 15px 132px;
+  font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,monospace;color:#b6c9d8;white-space:pre}
+.terminal .cmd{color:#95e1bf}
+
+.capsule{position:absolute;left:12px;right:12px;bottom:12px;z-index:6;min-height:54px;
+  border:1px solid #435369;border-radius:19px;background:#233347f2;display:flex;gap:8px;
+  padding:7px 9px;align-items:center;box-shadow:0 8px 30px #0009}
+.capsule .plus{height:38px;width:38px;background:none;border:0;color:#d5e2ee;font-size:21px;cursor:pointer}
+.capsule .composer{flex:1;min-width:0;color:#a2b4c7;font-size:11px;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis}
+.capsule .send{height:34px;min-width:34px;border-radius:50%;background:#c3edda;border:0;color:#1c4d3c;
+  font-size:15px;cursor:pointer}
+
+.pager-hint{position:absolute;top:74px;bottom:74px;width:26px;z-index:5;pointer-events:none;opacity:0;
+  transition:opacity .12s linear}
+.pager-hint.left{left:0;background:linear-gradient(90deg,#b6e5ca33,transparent)}
+.pager-hint.right{right:0;background:linear-gradient(270deg,#b6e5ca33,transparent)}
+.pager-hint.on{opacity:1}
+
+.web-compare{padding:16px;border:1px solid #d9dee3;border-radius:12px;background:#fff;color:#20252a;
+  font-family:Inter,-apple-system,sans-serif;max-width:420px}
+.web-compare h4{margin:0 0 8px;font-size:13px}
+.web-compare .disclosure{border:1px solid #e3e7ea;border-radius:10px;padding:10px 12px;font-size:12px;
+  color:#5a6a78;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.web-compare .disclosure button{border:1px solid #d9dee3;background:#fff;border-radius:8px;
+  padding:6px 10px;font-size:12px;cursor:pointer;color:#20252a}
+</style>
+</head>
+<body data-nession-prototype-frame="v1">
+<div class="np-page" data-np-root>
+
+  <header class="np-overview">
+    <nav class="np-breadcrumb">
+      <a href="../index.html" data-nession-gallery-link>Prototype gallery</a>
+      <span>/</span><span>App pull refresh</span>
+    </nav>
+    <span class="np-eyebrow">Requirement #4602 · App interaction</span>
+    <div class="np-header-main">
+      <div>
+        <h1 class="np-title">Host pull-to-refresh, with a visible alternative</h1>
+        <p class="np-subtitle">
+          A downward pull at the top of a host-owned list refreshes the current scope.
+          The header action does the same thing for keyboard, touch and every state —
+          including empty and failed. The gesture never steals the horizontal pager,
+          a nested scroller, or the Terminal.
+        </p>
+      </div>
+      <div class="np-links">
+        <a href="https://github.com/BestNathan/nession/issues/4602">Issue #4602</a>
+        <a href="https://github.com/BestNathan/nession/tree/prototype/app-pull-refresh-4602" data-nession-source-link>View source</a>
+      </div>
+    </div>
+    <div class="np-meta">
+      <span><strong>Surface</strong> App · Sessions at rest</span>
+      <span><strong>Threshold</strong> 64 CSS px</span>
+      <span><strong>Fidelity</strong> mock fixture, no transport</span>
+      <span><strong>Proof</strong> Chromium touch emulation</span>
+    </div>
+  </header>
+
+  <main>
+    <section class="np-preview">
+      <div class="np-section-heading">
+        <div>
+          <h2>Product preview</h2>
+          <p>Drag inside the list. Review controls below are outside the product viewport.</p>
+        </div>
+        <div class="np-preview-toolbar">
+          <button data-np-size="375">375</button>
+          <button data-np-size="390" aria-pressed="true">390</button>
+          <button data-np-size="430">430</button>
+          <button data-np-reset>Reset</button>
+        </div>
+      </div>
+
+      <div class="np-stage">
+        <div class="np-device" data-np-device>
+          <div class="app" id="app">
+            <header class="app-header">
+              <button class="app-icon" id="menuBtn" aria-label="Open sessions menu">☰</button>
+              <span class="title" id="surfaceTitle">Sessions</span>
+              <button class="app-icon" id="refreshBtn" aria-label="Refresh sessions" aria-busy="false">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/>
+                </svg>
+              </button>
+            </header>
+
+            <div class="scrollport" id="scrollport">
+              <div class="pull-indicator" id="indicator" aria-hidden="true">
+                <span class="inner"><span class="pull-dot"></span><span id="pullLabel">Pull to refresh</span></span>
+              </div>
+              <div class="list" id="list"></div>
+            </div>
+
+            <div class="pager-hint left" id="pagerLeft"></div>
+            <div class="pager-hint right" id="pagerRight"></div>
+
+            <div class="capsule">
+              <button class="plus" aria-label="Add context">+</button>
+              <span class="composer">Ask or type a command…</span>
+              <button class="send" aria-label="Send">↑</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <p class="np-stage-label">App target width <span data-np-current-size>390</span> px · 1:1, no scaling</p>
+
+      <div class="np-preview-toolbar" style="margin-top:14px">
+        <strong style="font-size:12px;margin-right:4px">Scenario</strong>
+        <button data-scenario="healthy" aria-pressed="true">Healthy</button>
+        <button data-scenario="empty">Empty</button>
+        <button data-scenario="error">Failure</button>
+        <strong style="font-size:12px;margin:0 4px 0 12px">Surface</strong>
+        <button data-surface="sessions" aria-pressed="true">Sessions list</button>
+        <button data-surface="files">Files (nested)</button>
+        <button data-surface="terminal">Terminal</button>
+        <button id="scrollDown">Scroll list down</button>
+        <button id="resetMock">Reset mock</button>
+      </div>
+    </section>
+
+    <section class="np-details">
+      <h2>What this settles</h2>
+      <p class="np-details-lede">
+        The gesture is an accelerator; the header action is the contract. Both call the same
+        current-scope refresh, and neither owns business data.
+      </p>
+      <div class="np-detail-grid">
+        <div class="np-detail">
+          <h3>Axis lock and threshold</h3>
+          <p>The first movement past 8 px decides the axis for the whole contact. A horizontal
+            contact is surrendered to the Sessions/Workspace pager and the pull never arms.</p>
+          <p>A vertical contact at the list top arms the pull with 0.5 resistance, capped at
+            96 px. Release commits <em>once</em> at ≥ 64 px of raw travel; anything shorter
+            cancels with no request.</p>
+        </div>
+        <div class="np-detail">
+          <h3>Guards</h3>
+          <p>Not at top → ordinary scrolling, no indicator. Nested collection scroller → its own
+            scroll. Terminal → the surface owns its touches. The platform edge guard and the
+            shell's edge band keep their pixels.</p>
+        </div>
+        <div class="np-detail">
+          <h3>Visible alternative</h3>
+          <p>The header Refresh is present in healthy, empty and failed states, is keyboard
+            operable, and reports busy only until its own promise settles. It is not a permanent
+            refresh row and it does not duplicate the header.</p>
+        </div>
+        <div class="np-detail">
+          <h3>Web comparison</h3>
+          <div class="web-compare">
+            <h4>Web keeps the existing disclosure</h4>
+            <div class="disclosure">
+              <span>Filter · Sort</span>
+              <button type="button">⟳ Refresh</button>
+            </div>
+            <p style="font-size:11.5px;color:#5a6a78;margin:9px 0 0">
+              No new toolbar and no global reload: the Sessions disclosure already owns this.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <details class="np-inspector" open>
+        <summary>Gesture log (review only)</summary>
+        <pre id="log">Ready. Drag down inside the list.</pre>
+      </details>
+
+      <div class="np-detail" style="margin-top:12px">
+        <h3>Fidelity gaps</h3>
+        <p>Rows, latency and failure are a deterministic mock. There is no WebSocket, no pull
+          controller, no production token pipeline and no real Capsule measurement. Chromium
+          touch emulation only — no Safari or physical-device claim. The 64 px threshold and
+          0.5 resistance are initial proposals to tune by observation.</p>
+        <p>See <a href="README.md">README.md</a> for the scenario contract, ownership tree and
+          smoke command.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<script src="../prototype-frame-2758/frame.js"></script>
+<script src="gesture.js"></script>
+<script>
+(function () {
+  'use strict';
+  var G = globalThis.NessionPullGesture;
+  var scrollport = document.getElementById('scrollport');
+  var list = document.getElementById('list');
+  var indicator = document.getElementById('indicator');
+  var pullLabel = document.getElementById('pullLabel');
+  var refreshBtn = document.getElementById('refreshBtn');
+  var surfaceTitle = document.getElementById('surfaceTitle');
+  var logEl = document.getElementById('log');
+
+  var state = { scenario: 'healthy', surface: 'sessions', rows: [], selected: null,
+                stale: false, busy: false, lastError: null, requestSeq: 0 };
+  var contact = null;
+  var pointerId = null;
+  var start = null;
+
+  function log(message) {
+    var lines = logEl.textContent.split('\n');
+    lines.push(message);
+    logEl.textContent = lines.slice(-14).join('\n');
+  }
+
+  function fixtureRows() {
+    if (state.scenario === 'empty') { return []; }
+    // Enough rows that the host scrollport genuinely scrolls, so the
+    // "not at top" guard is reachable rather than vacuous.
+    var seed = [
+      { id: 'a1:main', name: 'main', agent: 'studio · online', cmd: 'claude' },
+      { id: 'a1:review', name: 'review', agent: 'studio · online', cmd: 'nvim' },
+      { id: 'a2:build', name: 'build', agent: 'runner · online', cmd: 'cargo test' },
+      { id: 'a2:notes', name: 'notes', agent: 'runner · online', cmd: 'zsh' },
+      { id: 'a3:scratch', name: 'scratch', agent: 'laptop · degraded', cmd: 'bash' }
+    ];
+    var rows = seed.slice();
+    for (var i = 0; i < 9; i += 1) {
+      rows.push({ id: 'a2:task-' + (i + 1), name: 'task-' + (i + 1),
+                  agent: 'runner · online', cmd: 'zsh' });
+    }
+    return rows;
+  }
+
+  function render() {
+    surfaceTitle.textContent = state.surface === 'sessions' ? 'Sessions'
+      : state.surface === 'files' ? 'Files' : 'Terminal';
+    refreshBtn.setAttribute('aria-label', 'Refresh ' + surfaceTitle.textContent.toLowerCase());
+    refreshBtn.setAttribute('aria-busy', String(state.busy));
+    refreshBtn.classList.toggle('spinning', state.busy);
+
+    if (state.surface === 'terminal') {
+      list.className = 'terminal';
+      list.innerHTML = '<span class="cmd">$ cargo test -p nession-server</span>\n'
+        + '   Compiling nession-server v0.36.0\n   Finished test [unoptimized] in 42.1s\n'
+        + 'running 118 tests\ntest result: ok. 118 passed; 0 failed\n\n'
+        + '<span class="cmd">$ </span>';
+      scrollport.scrollTop = 0;
+      return;
+    }
+
+    list.className = 'list';
+    var html = '';
+    if (state.surface === 'files') {
+      html += '<div class="nested"><div class="nested-head">Nested collection scroller — owns its own scroll</div>'
+        + '<div class="nested-body" id="nestedBody">'
+        + Array.from({ length: 14 }, function (_, i) { return '<div>entry-' + (i + 1) + '.rs</div>'; }).join('')
+        + '</div></div>';
+    }
+    if (state.lastError) {
+      html += '<div class="state-note error">Refresh failed: ' + state.lastError
+        + '. Last known rows are kept.<br><button type="button" id="retryBtn">Retry</button></div>';
+    } else if (state.rows.length === 0) {
+      html += '<div class="state-note">No sessions yet. Refresh still works here — the action is '
+        + 'available when the list is empty.</div>';
+    }
+    if (state.stale && !state.lastError) {
+      html += '<div class="state-note">Showing last known data<span class="stale-tag">stale</span></div>';
+    }
+    html += state.rows.map(function (row) {
+      return '<button class="row" data-id="' + row.id + '" aria-selected="'
+        + (state.selected === row.id) + '"><span><b>' + row.name + '</b><small>' + row.agent
+        + ' · ' + row.cmd + '</small></span><span class="chev">›</span></button>';
+    }).join('');
+    list.innerHTML = html;
+
+    var retry = document.getElementById('retryBtn');
+    if (retry) { retry.addEventListener('click', function () { void doRefresh('retry'); }); }
+    list.querySelectorAll('.row').forEach(function (button) {
+      button.addEventListener('click', function () {
+        state.selected = button.getAttribute('data-id');
+        render();
+      });
+    });
+  }
+
+  function setIndicator(distance, mode) {
+    indicator.style.height = distance + 'px';
+    indicator.classList.toggle('active', distance > 4 || mode === 'busy');
+    indicator.classList.toggle('busy', mode === 'busy');
+    pullLabel.textContent = mode === 'busy' ? 'Refreshing…'
+      : distance >= G.RELEASE_THRESHOLD_PX * G.RESISTANCE ? 'Release to refresh' : 'Pull to refresh';
+    list.style.transform = distance > 0 ? 'translateY(' + distance + 'px)' : '';
+  }
+
+  /** One current-scope refresh. Mock latency/outcome; no transport. */
+  function doRefresh(reason) {
+    if (state.busy) { log('coalesced: refresh already running (' + reason + ')'); return Promise.resolve('coalesced'); }
+    state.busy = true;
+    var seq = ++state.requestSeq;
+    var surfaceAtStart = state.surface;
+    render();
+    setIndicator(0, 'busy');
+    log('request #' + seq + ' (' + reason + ') on ' + surfaceAtStart);
+    return new Promise(function (resolve) {
+      setTimeout(function () {
+        // A page switch while running must not drop the result into another surface.
+        if (state.surface !== surfaceAtStart || seq !== state.requestSeq) {
+          state.busy = false; render(); setIndicator(0, 'idle');
+          log('request #' + seq + ' cancelled: surface changed');
+          resolve('cancelled'); return;
+        }
+        state.busy = false;
+        if (state.scenario === 'error') {
+          state.lastError = 'agent did not answer';
+          state.stale = true;
+          log('request #' + seq + ' failed; last known rows kept');
+        } else {
+          state.lastError = null;
+          state.stale = false;
+          state.rows = fixtureRows();
+          log('request #' + seq + ' applied ' + state.rows.length + ' rows');
+        }
+        render();
+        setIndicator(0, 'idle');
+        resolve(state.lastError ? 'failed' : 'applied');
+      }, 700);
+    });
+  }
+
+  refreshBtn.addEventListener('click', function () { void doRefresh('manual'); });
+
+  scrollport.addEventListener('pointerdown', function (event) {
+    if (state.busy) { return; }
+    var nested = event.target.closest && event.target.closest('.nested-body');
+    pointerId = event.pointerId;
+    start = { x: event.clientX, y: event.clientY };
+    contact = G.createContact({
+      surface: nested ? 'nested' : state.surface,
+      atTop: scrollport.scrollTop <= 0
+    });
+    list.classList.add('dragging');
+  });
+
+  scrollport.addEventListener('pointermove', function (event) {
+    if (!contact || event.pointerId !== pointerId) { return; }
+    var dx = event.clientX - start.x;
+    var dy = event.clientY - start.y;
+    var result = G.move(contact, dx, dy);
+    if (result.action === 'pull') {
+      event.preventDefault();
+      setIndicator(result.distance, 'pull');
+    } else if (result.action === 'surrender') {
+      document.getElementById(dx < 0 ? 'pagerRight' : 'pagerLeft').classList.add('on');
+      setIndicator(0, 'idle');
+    } else {
+      setIndicator(0, 'idle');
+    }
+  }, { passive: false });
+
+  function endContact(event) {
+    if (!contact || (event && event.pointerId !== pointerId)) { return; }
+    var result = G.release(contact);
+    list.classList.remove('dragging');
+    document.getElementById('pagerLeft').classList.remove('on');
+    document.getElementById('pagerRight').classList.remove('on');
+    if (result.action === 'commit') {
+      log('release ≥ ' + G.RELEASE_THRESHOLD_PX + 'px → commit');
+      void doRefresh('pull');
+    } else {
+      if (contact.axis === 'vertical' && contact.eligible) {
+        log('release ' + Math.round(contact.rawY) + 'px → cancel, no request');
+      }
+      setIndicator(0, 'idle');
+    }
+    contact = null; pointerId = null; start = null;
+  }
+  scrollport.addEventListener('pointerup', endContact);
+  scrollport.addEventListener('pointercancel', endContact);
+  scrollport.addEventListener('pointerleave', endContact);
+
+  function press(selector, attribute, value) {
+    document.querySelectorAll(selector).forEach(function (button) {
+      button.setAttribute('aria-pressed', String(button.getAttribute(attribute) === value));
+    });
+  }
+
+  document.querySelectorAll('[data-scenario]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      state.scenario = button.getAttribute('data-scenario');
+      state.lastError = null; state.stale = false;
+      state.rows = fixtureRows();
+      press('[data-scenario]', 'data-scenario', state.scenario);
+      render();
+      log('scenario → ' + state.scenario);
+    });
+  });
+
+  document.querySelectorAll('[data-surface]').forEach(function (button) {
+    button.addEventListener('click', function () {
+      state.surface = button.getAttribute('data-surface');
+      state.requestSeq += 1;
+      press('[data-surface]', 'data-surface', state.surface);
+      scrollport.scrollTop = 0;
+      setIndicator(0, 'idle');
+      render();
+      log('surface → ' + state.surface);
+    });
+  });
+
+  document.getElementById('scrollDown').addEventListener('click', function () {
+    scrollport.scrollTop = 220;
+    log('scrollTop = ' + scrollport.scrollTop + ' (pull must not arm)');
+  });
+
+  document.getElementById('resetMock').addEventListener('click', function () {
+    state.scenario = 'healthy'; state.surface = 'sessions'; state.selected = null;
+    state.stale = false; state.busy = false; state.lastError = null; state.requestSeq += 1;
+    state.rows = fixtureRows();
+    press('[data-scenario]', 'data-scenario', 'healthy');
+    press('[data-surface]', 'data-surface', 'sessions');
+    scrollport.scrollTop = 0;
+    setIndicator(0, 'idle');
+    render();
+    logEl.textContent = 'Reset.';
+  });
+
+  state.rows = fixtureRows();
+  render();
+})();
+</script>
+</body>
+</html>

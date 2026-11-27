@@ -96,6 +96,8 @@
 
 | Mobile App Swipe / edge navigation & gesture ownership · #4185 continuous resistance + interruptible settle | [#2724](https://github.com/BestNathan/nession/issues/2724) · [#4185](https://github.com/BestNathan/nession/issues/4185) | [Interactive HTML](mobile-swipe-2724/index.html) · [Scenario & fidelity](mobile-swipe-2724/README.md) |
 
+| App host pull-to-refresh / axis lock, 64px release threshold, non-gesture header action | [#4602](https://github.com/BestNathan/nession/issues/4602) | [Interactive HTML](app-pull-refresh-4602/index.html) · [Scenario & fidelity](app-pull-refresh-4602/README.md) |
+
 Do not add more `prototypes/<topic>` branches. Add another sibling directory here.
 
 ## 2026-11-06 · Whole-gallery presentation refresh
