@@ -1,0 +1,722 @@
+{
+  "schema_version": 1,
+  "trust": "untrusted-task-observation",
+  "provenance": "github-workflow-run-and-independent-exact-source",
+  "task_id": "quality-input-audit-4672",
+  "source_sha": "8139c588504609a84d7f0c234404c82852088a0b",
+  "source_digest": "5f003b0e9009ba305f749aedeb088a016d3fec3c25e725a831cb007a9edde976",
+  "entry": "audit.mjs",
+  "workflow": {
+    "id": 45968301704,
+    "attempt": 1,
+    "url": "https://github.com/BestNathan/nession/actions/runs/45968301704",
+    "event": "push",
+    "branch": "task/quality-input-audit-4672",
+    "conclusion": "success"
+  },
+  "execution": {
+    "status": "Success",
+    "exit_code": 0,
+    "started_at": "2026-11-27T08:46:56.347Z",
+    "finished_at": "2026-11-27T08:46:56.595Z",
+    "result": {
+      "rustFiles": 738,
+      "trackedFiles": 5430,
+      "externalReferences": [
+        {
+          "source": "crates/nession-agent/src/tmux/cmd.rs",
+          "line": 519,
+          "target": "scripts/filtered-test.sh",
+          "rust": true,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/agent.rs",
+          "line": 304,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/agent.rs",
+          "line": 1412,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/agent.rs",
+          "line": 3131,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/agent.rs",
+          "line": 3133,
+          "target": ".claude/settings.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 402,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 405,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 512,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 515,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 577,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 580,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/config.rs",
+          "line": 148,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/config.rs",
+          "line": 160,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/config.rs",
+          "line": 739,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/config.rs",
+          "line": 753,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/connect.rs",
+          "line": 1120,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/mod.rs",
+          "line": 204,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/mod.rs",
+          "line": 307,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/mutate.rs",
+          "line": 1183,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1103,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1106,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1128,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1131,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1184,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1187,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1222,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1225,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 177,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 594,
+          "target": ".claude/settings.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 779,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 805,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 930,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 932,
+          "target": ".claude/settings.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 975,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 977,
+          "target": ".claude/settings.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 996,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 998,
+          "target": ".claude/settings.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 1037,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 12,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 244,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 270,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 302,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 321,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 326,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/security.rs",
+          "line": 67,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/security.rs",
+          "line": 91,
+          "target": "CLAUDE.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/workspace_trust.rs",
+          "line": 1076,
+          "target": ".claude",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-claude-code/src/workspace_trust.rs",
+          "line": 1079,
+          "target": ".mcp.json",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-cli/src/update/download.rs",
+          "line": 904,
+          "target": "README.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 254,
+          "target": "README.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 255,
+          "target": "README.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 259,
+          "target": "README.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-git/tests/invalidation.rs",
+          "line": 19,
+          "target": "README.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-git/tests/invalidation.rs",
+          "line": 32,
+          "target": "README.md",
+          "rust": false,
+          "native": false,
+          "sourceNative": true
+        },
+        {
+          "source": "crates/nession-protocol-codegen/src/lib.rs",
+          "line": 67,
+          "target": "web/src/generated/protocol",
+          "rust": false,
+          "native": false,
+          "sourceNative": false
+        },
+        {
+          "source": "crates/nession-tmux/tests/independence.rs",
+          "line": 20,
+          "target": "Cargo.toml",
+          "rust": true,
+          "native": true,
+          "sourceNative": true
+        }
+      ],
+      "externalCount": 56,
+      "literalIncludes": [
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 871,
+          "value": "../tests/fixtures/long_project_key.txt"
+        },
+        {
+          "source": "crates/nession-runtime/src/metrics.rs",
+          "line": 908,
+          "value": "../assets/ws-runtime-dashboards.json"
+        }
+      ],
+      "dynamicPathCandidates": [
+        {
+          "source": "crates/nession-agent/src/claude_control.rs",
+          "line": 760,
+          "code": ".current_dir(&self.cwd)"
+        },
+        {
+          "source": "crates/nession-agent/tests/integration/session_env_4080.rs",
+          "line": 122,
+          "code": "command.args(args).current_dir(dir.path());"
+        },
+        {
+          "source": "crates/nession-agent/tests/toolchain_chain.rs",
+          "line": 1409,
+          "code": "Path::new(env!(\"CARGO_MANIFEST_DIR\"))"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 133,
+          "code": ".current_dir(&roots.cwd)"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 759,
+          "code": ".current_dir(&roots.cwd)"
+        },
+        {
+          "source": "crates/nession-claude-code/src/memory.rs",
+          "line": 871,
+          "code": "include_str!(\"../tests/fixtures/long_project_key.txt\").trim()"
+        },
+        {
+          "source": "crates/nession-cli/src/commands/mod.rs",
+          "line": 353,
+          "code": "let root = Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"src/commands\");"
+        },
+        {
+          "source": "crates/nession-cli/src/commands/mod.rs",
+          "line": 365,
+          "code": "let root = Path::new(env!(\"CARGO_MANIFEST_DIR\")).join(\"src/commands\");"
+        },
+        {
+          "source": "crates/nession-cli/src/commands/mod.rs",
+          "line": 377,
+          "code": "let main_path: PathBuf = [env!(\"CARGO_MANIFEST_DIR\"), \"src\", \"main.rs\"]"
+        },
+        {
+          "source": "crates/nession-cli/tests/integration/cli_contract.rs",
+          "line": 442,
+          "code": "let readme = std::fs::read_to_string(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../README.md\"))"
+        },
+        {
+          "source": "crates/nession-common/src/test_runtime.rs",
+          "line": 351,
+          "code": "match std::env::current_dir() {"
+        },
+        {
+          "source": "crates/nession-common/src/test_runtime.rs",
+          "line": 608,
+          "code": "assert!(!path_inside(&root, &root.join(\"..\").join(\"escape\")));"
+        },
+        {
+          "source": "crates/nession-erofs/src/build.rs",
+          "line": 1309,
+          "code": ".current_dir(&git_dir)"
+        },
+        {
+          "source": "crates/nession-erofs/src/build.rs",
+          "line": 1330,
+          "code": ".current_dir(&git_dir)"
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 77,
+          "code": "command.current_dir(cwd);"
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 218,
+          "code": ".current_dir(dir)"
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 237,
+          "code": ".current_dir(dir)"
+        },
+        {
+          "source": "crates/nession-git/src/runtime/context.rs",
+          "line": 158,
+          "code": ".current_dir(dir.path())"
+        },
+        {
+          "source": "crates/nession-git/tests/invalidation.rs",
+          "line": 16,
+          "code": ".current_dir(repo)"
+        },
+        {
+          "source": "crates/nession-github/src/agent.rs",
+          "line": 568,
+          "code": ".current_dir(dir.path())"
+        },
+        {
+          "source": "crates/nession-protocol/src/contracts/fixtures.rs",
+          "line": 86,
+          "code": "PathBuf::from(env!(\"CARGO_MANIFEST_DIR\"))"
+        },
+        {
+          "source": "crates/nession-protocol/src/contracts/fixtures.rs",
+          "line": 193,
+          "code": "let root = PathBuf::from(env!(\"CARGO_MANIFEST_DIR\")).join(\"src/contracts\");"
+        },
+        {
+          "source": "crates/nession-runtime/src/metrics.rs",
+          "line": 908,
+          "code": "const DASHBOARDS: &str = include_str!(\"../assets/ws-runtime-dashboards.json\");"
+        },
+        {
+          "source": "crates/nession-runtime/tests/ws_runtime_baseline.rs",
+          "line": 268,
+          "code": ".unwrap_or_else(|_| concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/../../target\").to_string());"
+        },
+        {
+          "source": "crates/nession-sandbox/src/mount/overlay/manager.rs",
+          "line": 2153,
+          "code": "std::fs::read_to_string(concat!(env!(\"CARGO_MANIFEST_DIR\"), \"/Cargo.toml\")).unwrap();"
+        },
+        {
+          "source": "crates/nession-tmux/tests/independence.rs",
+          "line": 12,
+          "code": "PathBuf::from(env!(\"CARGO_MANIFEST_DIR\"))"
+        }
+      ],
+      "rootReferences": [
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 405,
+          "code": "project_file: cwd.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 515,
+          "code": "project_file: cwd.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/cli.rs",
+          "line": 580,
+          "code": "project_file: cwd.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/config.rs",
+          "line": 160,
+          "code": "let project_file = cwd.join(\".mcp.json\");"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/config.rs",
+          "line": 753,
+          "code": "project_file: cwd.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/connect.rs",
+          "line": 1120,
+          "code": "let project = temp.path().join(\"project\").join(\".mcp.json\");"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/mod.rs",
+          "line": 204,
+          "code": "cwd.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/mod.rs",
+          "line": 307,
+          "code": "cwd.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/mutate.rs",
+          "line": 1183,
+          "code": "serde_json::from_str(&std::fs::read_to_string(cwd.join(\".mcp.json\")).unwrap()).unwrap();"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1106,
+          "code": "project_file: temp.path().join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1131,
+          "code": "project_file: temp.path().join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1187,
+          "code": "project_file: temp.path().join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/mcp/probe.rs",
+          "line": 1225,
+          "code": "project_file: temp.path().join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-claude-code/src/scanner.rs",
+          "line": 326,
+          "code": "fs::write(claude.join(\"CLAUDE.md\"), \"# Hello\\n\\nInstructions here.\").unwrap();"
+        },
+        {
+          "source": "crates/nession-claude-code/src/workspace_trust.rs",
+          "line": 1079,
+          "code": "project_file: project.join(\".mcp.json\"),"
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 254,
+          "code": "fs::write(source.join(\"README.md\"), \"first\\n\").unwrap();"
+        },
+        {
+          "source": "crates/nession-erofs/src/git.rs",
+          "line": 259,
+          "code": "fs::write(source.join(\"README.md\"), \"second\\n\").unwrap();"
+        },
+        {
+          "source": "crates/nession-git/tests/invalidation.rs",
+          "line": 19,
+          "code": "std::fs::write(repo.join(\"README.md\"), \"hello\").expect(\"write\");"
+        },
+        {
+          "source": "crates/nession-git/tests/invalidation.rs",
+          "line": 32,
+          "code": "std::fs::write(repo.join(\"README.md\"), \"hello again\").expect(\"write\");"
+        }
+      ]
+    }
+  },
+  "cleanup_on_success": true,
+  "acceptance_result": null,
+  "source_snapshot_path": "sources/8139c588504609a84d7f0c234404c82852088a0b/quality-input-audit-4672.json"
+}
