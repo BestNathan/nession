@@ -132,6 +132,15 @@ pub struct AgentAddress {
     /// `NetworkType::default_priority` when not explicitly set.
     #[serde(default)]
     pub priority: i32,
+    /// Owner-approved HTTP(S) reachability probe endpoint for this ingress
+    /// (#4618). Optional and additive: a peer that omits it is probed through
+    /// the bounded legacy WS-upgrade compatibility path instead. When present
+    /// it is the exact URL a browser may `GET` (credentials omitted) to observe
+    /// `204` + `Nession-Probe: v1`; it must correspond to the same logical WS
+    /// ingress, never an arbitrary discovered host. Absence preserves the old
+    /// meaning, so no contract version bump is required.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub probe_url: Option<String>,
 }
 
 /// Result of the server's TCP reachability probe for an address.

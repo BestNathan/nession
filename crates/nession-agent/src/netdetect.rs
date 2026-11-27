@@ -110,6 +110,7 @@ pub fn detect_local_addresses(port: u16) -> Vec<AgentAddress> {
                 label: Some(label_for(&name, network_type)),
                 network_type,
                 priority: network_type.default_priority(),
+                probe_url: None,
             }
         })
         .collect()
@@ -161,13 +162,24 @@ pub fn build_advertised_addresses(config: &AgentConfig, port: u16) -> Vec<AgentA
         candidates.extend(legacy_to_addresses(ip, port, None));
     }
 
-    let (finalised, dropped) = finalize_addresses(candidates);
+    let (mut finalised, dropped) = finalize_addresses(candidates);
     if dropped > 0 {
         warn!(
             "Advertised address list exceeded the cap; dropped {} lowest-priority entr{}",
             dropped,
             if dropped == 1 { "y" } else { "ies" }
         );
+    }
+    // Advertise the reachability probe endpoint for every address (#4618). An
+    // explicit config `probe_url` wins (reverse-proxy ingress); otherwise the
+    // default is the same authority at the reserved `/probe` path the P2P
+    // listener serves. The browser only probes advertised candidates, so this
+    // is the owner-approved mapping, never a blind scheme/path rewrite of an
+    // arbitrary URL.
+    for addr in &mut finalised {
+        if addr.probe_url.is_none() {
+            addr.probe_url = nession_runtime::probe::default_probe_url(&addr.url);
+        }
     }
     finalised
 }
@@ -300,5 +312,48 @@ mod tests {
             assert!(addr.url.starts_with("ws://"));
             assert!(addr.label.is_some());
         }
+    }
+
+    /// `#4618`: every advertised address carries a probe URL — derived from the
+    /// same authority at the reserved path by default, or the owner-approved
+    /// explicit config value when a reverse proxy needs a different route.
+    #[test]
+    fn advertised_addresses_carry_derived_probe_url() {
+        let mut config = AgentConfig::default();
+        config.disable_address_autodetect = true;
+        config.advertise_addresses = vec![
+            AdvertiseAddress {
+                url: "ws://192.168.1.5:8080/ws".to_string(),
+                label: Some("LAN".to_string()),
+                network_type: NetworkType::Lan,
+                priority: 10,
+                probe_url: None,
+            },
+            AdvertiseAddress {
+                url: "wss://agent.example.com/prefix/ws".to_string(),
+                label: Some("Tunnel".to_string()),
+                network_type: NetworkType::Tunnel,
+                priority: 30,
+                probe_url: Some("https://agent.example.com/custom/probe".to_string()),
+            },
+        ];
+        let addresses = build_advertised_addresses(&config, 8080);
+        let lan = addresses
+            .iter()
+            .find(|a| a.network_type == NetworkType::Lan)
+            .unwrap();
+        assert_eq!(
+            lan.probe_url.as_deref(),
+            Some("http://192.168.1.5:8080/probe")
+        );
+        let tunnel = addresses
+            .iter()
+            .find(|a| a.network_type == NetworkType::Tunnel)
+            .unwrap();
+        assert_eq!(
+            tunnel.probe_url.as_deref(),
+            Some("https://agent.example.com/custom/probe"),
+            "an explicit owner-approved probe_url wins over derivation"
+        );
     }
 }

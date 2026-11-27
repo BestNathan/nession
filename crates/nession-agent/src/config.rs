@@ -107,6 +107,14 @@ pub struct AdvertiseAddress {
     /// server fills in the network-type default.
     #[serde(default)]
     pub priority: i32,
+    /// Owner-approved HTTP(S) probe endpoint for this ingress (#4618). When
+    /// omitted the agent derives the default probe URL from `url`'s authority
+    /// (same listener, reserved `/probe` path). Set this explicitly when a
+    /// reverse proxy prefixes the WS path so the advertised probe URL matches
+    /// the route the proxy actually forwards; it is never sent to an arbitrary
+    /// host and carries no credential.
+    #[serde(default)]
+    pub probe_url: Option<String>,
 }
 
 fn default_network_type() -> NetworkType {
@@ -122,6 +130,7 @@ impl AdvertiseAddress {
             label: self.label,
             network_type: self.network_type,
             priority: self.priority,
+            probe_url: self.probe_url,
         }
     }
 }
@@ -673,12 +682,17 @@ mod tests {
             label: Some("test".to_string()),
             network_type: NetworkType::Tunnel,
             priority: 5,
+            probe_url: Some("https://example.com/probe".to_string()),
         };
         let agent_addr = advertise.into_agent_address();
         assert_eq!(agent_addr.url, "wss://example.com/ws");
         assert_eq!(agent_addr.label, Some("test".to_string()));
         assert_eq!(agent_addr.network_type, NetworkType::Tunnel);
         assert_eq!(agent_addr.priority, 5);
+        assert_eq!(
+            agent_addr.probe_url.as_deref(),
+            Some("https://example.com/probe")
+        );
     }
 
     #[test]
@@ -761,12 +775,14 @@ mod tests {
                     label: None,
                     network_type: NetworkType::Tunnel,
                     priority: 0,
+                    probe_url: None,
                 },
                 AdvertiseAddress {
                     url: "http://staging-agent-nession.bestnathan.top/ws".to_string(),
                     label: None,
                     network_type: NetworkType::Tunnel,
                     priority: 0,
+                    probe_url: None,
                 },
             ],
             ..Default::default()

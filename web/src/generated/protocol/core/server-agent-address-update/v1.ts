@@ -44,7 +44,17 @@ network_type: NetworkType,
  * Connection preference; lower connects first. Defaults from
  * `NetworkType::default_priority` when not explicitly set.
  */
-priority: number, };
+priority: number, 
+/**
+ * Owner-approved HTTP(S) reachability probe endpoint for this ingress
+ * (#4618). Optional and additive: a peer that omits it is probed through
+ * the bounded legacy WS-upgrade compatibility path instead. When present
+ * it is the exact URL a browser may `GET` (credentials omitted) to observe
+ * `204` + `Nession-Probe: v1`; it must correspond to the same logical WS
+ * ingress, never an arbitrary discovered host. Absence preserves the old
+ * meaning, so no contract version bump is required.
+ */
+probe_url?: string | null, };
 export type NetworkType = "lan" | "vpn" | "tunnel" | "public" | "custom";
 
 // ── Operations ──

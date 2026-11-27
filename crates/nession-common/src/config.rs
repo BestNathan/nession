@@ -333,6 +333,17 @@ impl McpConfig {
                 self.path
             );
         }
+        // `/probe` is reserved for the credential-free reachability probe both
+        // runtimes serve (#4618; canonical owner `nession_runtime::probe`).
+        // Claiming it for MCP would shadow the probe route, so refuse the
+        // configuration rather than let the listener mount a collision.
+        if self.path.trim_end_matches('/') == "/probe" {
+            anyhow::bail!(
+                "[mcp] path {:?} is reserved for the reachability probe (#4618); \
+                 choose another absolute HTTP path such as `/mcp`",
+                self.path
+            );
+        }
         if host_token.trim().is_empty() {
             anyhow::bail!(
                 "[mcp] enabled = true requires `{token_name}`: the MCP endpoint carries write \
@@ -790,6 +801,38 @@ mod tests {
         config
             .validate()
             .expect("a configured token makes MCP startable");
+    }
+
+    /// `#4618` SC-01: `/probe` is reserved for the credential-free reachability
+    /// probe. An MCP path that claims it (with or without a trailing slash) is
+    /// refused so the probe route can never be shadowed by a configured MCP
+    /// endpoint.
+    #[test]
+    fn mcp_path_must_not_claim_the_reserved_probe_path() {
+        for path in ["/probe", "/probe/"] {
+            let config = parse_server(&format!(
+                "listen_address = \"127.0.0.1:19090\"\n\
+                 auth_token = \"secret\"\n\
+                 [mcp]\n\
+                 enabled = true\n\
+                 path = {path:?}\n"
+            ));
+            let error = config
+                .validate()
+                .expect_err("a reserved probe path must refuse to start MCP");
+            assert!(error.to_string().contains("reserved"), "{path}: {error}");
+        }
+
+        let config = parse_server(
+            "listen_address = \"127.0.0.1:19090\"\n\
+             auth_token = \"secret\"\n\
+             [mcp]\n\
+             enabled = true\n\
+             path = \"/mcp\"\n",
+        );
+        config
+            .validate()
+            .expect("an ordinary MCP path stays startable");
     }
 
     /// The section's names are the documented ones.
