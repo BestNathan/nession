@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import type { FileOps, FileEntry } from '@/capabilities/files';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
+import { useAppDirectoryList } from '@/capabilities/files/hooks/useAppDirectoryList';
 import {
   FileListEntryRows,
   FileListErrorPanel,
@@ -46,38 +47,13 @@ export function FileList({
   onLongPress,
   onToggleSelect,
 }: FileListProps) {
-  const [entries, setEntries] = useState<FileEntry[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [reloadToken, setReloadToken] = useState(0);
+  const { entries, error, retry } = useAppDirectoryList({
+    fileOps,
+    path,
+    reloadSignal,
+    onEntriesChange,
+  });
   const listRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setError(null);
-    setEntries(null);
-
-    void fileOps.listDir(path).then(
-      ({ entries: listed }) => {
-        if (cancelled) {
-          return;
-        }
-        setEntries(listed);
-        onEntriesChange?.(listed);
-        // #3451: counts are optional metadata, never enumerate every child
-        // directory solely to populate a subtitle. Only navigating into a
-        // folder may issue its own listDir request.
-      },
-      (cause: unknown) => {
-        if (!cancelled) {
-          setError(cause instanceof Error ? cause.message : 'Could not list this directory');
-        }
-      },
-    );
-
-    return () => {
-      cancelled = true;
-    };
-  }, [fileOps, path, reloadToken, reloadSignal, onEntriesChange]);
 
   useEffect(() => {
     if (restoredScrollTop === undefined || entries === null) {
@@ -89,10 +65,10 @@ export function FileList({
     }
   }, [entries, restoredScrollTop, path]);
 
-  if (error !== null) {
-    return (
-      <FileListErrorPanel message={error} onRetry={() => setReloadToken((t) => t + 1)} />
-    );
+  // A failed background refresh keeps the last known rows on screen (stale);
+  // only a failure with no answer yet is the error panel's Retry state.
+  if (error !== null && entries === null) {
+    return <FileListErrorPanel message={error} onRetry={() => retry()} />;
   }
 
   const atRoot = path === '';

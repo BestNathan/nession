@@ -1,3 +1,4 @@
+import { RefreshCw } from 'lucide-react';
 import { useQuickCommands } from '@/capabilities/commands';
 import {
   capsuleCaptionTextClass,
@@ -31,7 +32,7 @@ export function QuickCommandsProjection({
   runCommand: (text: string) => void;
   disabled: boolean;
 }) {
-  const { commands, status, connected, refresh } = useQuickCommands();
+  const { commands, status, connected, refresh, refreshing } = useQuickCommands();
 
   const unavailableReason = disabled
     ? 'Terminal input is unavailable while this Session is not under your control.'
@@ -45,11 +46,24 @@ export function QuickCommandsProjection({
     <div data-testid="quick-commands-body" className="flex min-h-0 flex-1 flex-col">
       <div className="flex items-center justify-between">
         <span className={capsuleCaptionTextClass}>Saved commands</span>
+        <span className="flex items-center gap-[length:var(--nession-terminal-capsule-projection-item-gap)]">
+          {/* #4602: the resting manual entry, available in every state. */}
+          <button
+            type="button"
+            data-testid="quick-commands-refresh"
+            aria-label="Refresh saved commands"
+            aria-busy={refreshing}
+            onClick={() => refresh()}
+            className={capsuleCommandActionClass}
+          >
+            <RefreshCw aria-hidden className={refreshing ? 'animate-spin' : undefined} />
+          </button>
         {status === 'ready' ? (
           <span data-testid="quick-commands-count" className={capsuleCaptionTextClass}>
             {commands.length} {commands.length === 1 ? 'command' : 'commands'}
           </span>
         ) : null}
+        </span>
       </div>
 
       {status === 'loading' ? (

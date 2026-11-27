@@ -8,6 +8,8 @@ import { useDashboardFilter } from './useDashboardFilter';
 import type { StatusFilter, SortField, SortDirection } from '@/product/session/types';
 import { useDashboardModals } from './useDashboardModals';
 import { useRealtimeUpdates } from './useRealtimeUpdates';
+import { useConnectionReadiness } from './useConnectionReadiness';
+import type { PullOutcome } from '@/platform/refresh';
 
 export type { StatusFilter, SortField, SortDirection };
 
@@ -41,6 +43,14 @@ export interface DashboardState {
   /** Insert a Session whose identity the client already holds (#1430), ahead of any list. */
   insertSession: (session: Session) => void;
   fetchSessions: (opts?: FetchSessionsOptions) => Promise<void>;
+  /** Explicit user refresh of the Session list (force re-query). */
+  refreshSessions: () => Promise<PullOutcome>;
+  /** Explicit user refresh of the Agent registry. */
+  refreshAgents: () => Promise<PullOutcome>;
+  refreshingSessions: boolean;
+  refreshingAgents: boolean;
+  sessionsStale: boolean;
+  agentsStale: boolean;
   /** Agents that failed to answer the last force refresh. */
   staleAgents: string[];
   getHeartbeatHistory: (agentId: string) => string[];
@@ -117,12 +127,23 @@ export function filterSessions(
  * Composes agent/session data, filter state, modal state, and realtime
  * subscriptions into the single shape that `<Dashboard>` consumes.
  */
-export function useDashboard(wsService?: WebSocketService): DashboardState {
+export function useDashboard(wsService?: WebSocketService, listsActive = true): DashboardState {
   const service = useWebSocket(wsService);
+  const { connected, generation } = useConnectionReadiness(service);
 
-  // Data
-  const agentData = useAgentData();
-  const sessionData = useSessionData();
+  // Data. Each list owns its state; the shared pull controller owns when it is
+  // read and whether an answer may still be published (#4602). A hidden list
+  // surface stays dirty instead of polling.
+  const agentData = useAgentData({
+    connectionRevision: generation,
+    enabled: connected,
+    active: listsActive,
+  });
+  const sessionData = useSessionData({
+    connectionRevision: generation,
+    enabled: connected,
+    active: listsActive,
+  });
 
   // Realtime subscriptions + initial fetch (service instance keys the
   // re-registration when a reconnect replaces the transport)
@@ -198,6 +219,12 @@ export function useDashboard(wsService?: WebSocketService): DashboardState {
     handleSessionCreated,
     insertSession: sessionData.insertSession,
     fetchSessions,
+    refreshSessions: sessionData.refreshSessions,
+    refreshAgents: agentData.refreshAgents,
+    refreshingSessions: sessionData.refreshingSessions,
+    refreshingAgents: agentData.refreshingAgents,
+    sessionsStale: sessionData.sessionsStale,
+    agentsStale: agentData.agentsStale,
     staleAgents: sessionData.staleAgents,
     getHeartbeatHistory: agentData.getHeartbeatHistory,
     updateAgent: agentData.updateAgent,

@@ -1,6 +1,7 @@
 import { useMemo } from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { cn } from '@/shared/lib/utils';
 import { chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
 import { formatClockTime } from '@/shared/lib/format';
@@ -24,17 +25,32 @@ export function TranscriptList({
   list,
   onSelect,
   touch = false,
+  onRefresh,
+  refreshing,
 }: {
   list: TranscriptsListState;
   onSelect: (id: string) => void;
   /** The App's 44px row floor. Web keeps its tighter pointer row. */
   touch?: boolean;
+  /** Manual refresh of the transcript directory (#4602). */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="transcript-list">
+      {onRefresh ? (
+        <div className="flex shrink-0 items-center justify-end border-b px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)]">
+          <RefreshButton
+            onClick={() => onRefresh()}
+            loading={refreshing ?? false}
+            variant="ghost"
+            ariaLabel="Refresh transcripts"
+          />
+        </div>
+      ) : null}
       {list.loading ? (
         <p
-          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
           data-testid="transcript-list-loading"
         >
           Loading transcripts…
@@ -44,7 +60,7 @@ export function TranscriptList({
           directory, so saying "none" would be a claim the provider did not make. */}
       {!list.loading && list.state === 'unavailable' ? (
         <p
-          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
           data-testid="transcript-unavailable"
         >
           This Session&rsquo;s working directory cannot be established, so its transcripts cannot be listed.
@@ -52,7 +68,7 @@ export function TranscriptList({
       ) : null}
       {list.error ? (
         <p
-          className={cn('px-3 py-4 text-destructive', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-destructive', chromeSansRole('secondary'))}
           data-testid="transcript-error"
         >
           {list.error}
@@ -60,7 +76,7 @@ export function TranscriptList({
       ) : null}
       {!list.loading && !list.error && list.state === 'ready' && list.transcripts.length === 0 ? (
         <p
-          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
           data-testid="transcript-none"
         >
           No transcripts at this working directory.
@@ -72,11 +88,11 @@ export function TranscriptList({
           <li key={transcript.id}>
             <button
               type="button"
-              className={cn('w-full px-3 py-2 text-left hover:bg-muted/50', touch && 'min-h-11')}
+              className={cn('w-full px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)] text-left hover:bg-muted/50', touch && 'min-h-[length:var(--nession-control-md)]')}
               onClick={() => onSelect(transcript.id)}
               data-testid="transcript-open"
             >
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-[var(--nession-shell-space-2)]">
                 <span className={cn('truncate', chromeSansRole('secondary'))}>
                   {transcriptLabel(transcript)}
                 </span>
@@ -136,25 +152,25 @@ function PushedRecord({
       <button
         type="button"
         className={cn(
-          'flex shrink-0 items-center gap-1 border-b px-3 py-2 text-muted-foreground',
+          'flex shrink-0 items-center gap-[var(--nession-shell-space-1)] border-b px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)] text-muted-foreground',
           chromeSansRole('metadata'),
         )}
         onClick={() => onBack()}
         data-testid="transcript-record-back"
       >
-        <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+        <ArrowLeft className="size-[length:var(--nession-icon-sm)]" aria-hidden />
         Transcript
       </button>
       <WorkspaceBoundedScrollport data-testid="transcript-record-push-scroll">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
+        <div className="flex items-center gap-[var(--nession-shell-space-2)] border-b px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]">
           <span className={cn('min-w-0 truncate', chromeSansRole('secondary'))}>{label}</span>
           <span className={cn('ml-auto shrink-0 text-muted-foreground', chromeMonoRole('caption'))}>
             byte {record.offset} · {formatSize(record.size_bytes)}
           </span>
         </div>
-        <div className="px-3 py-2">
+        <div className="px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]">
           <TranscriptRecordDetail parsed={parsed} record={record} />
-          <div className="mt-3 border-t pt-2">
+          <div className="mt-[var(--nession-shell-space-3)] border-t pt-[var(--nession-shell-space-2)]">
             {rawOpen ? (
               <TranscriptRawInspector
                 agentId={agentId}
@@ -215,7 +231,7 @@ export function TranscriptRecordsBody({
     <>
       {records.state === 'not_found' ? (
         <p
-          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
           data-testid="transcript-not-found"
         >
           That transcript is no longer here.
@@ -223,7 +239,7 @@ export function TranscriptRecordsBody({
       ) : null}
       {records.state === 'unavailable' ? (
         <p
-          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
           data-testid="transcript-items-unavailable"
         >
           This Session&rsquo;s working directory cannot be established, so the transcript cannot be read.
@@ -231,7 +247,7 @@ export function TranscriptRecordsBody({
       ) : null}
       {records.error ? (
         <div
-          className="flex shrink-0 flex-wrap items-center gap-2 px-3 py-2"
+          className="flex shrink-0 flex-wrap items-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)]"
           data-testid="transcript-items-error"
         >
           <p className={cn('text-destructive', chromeSansRole('secondary'))}>{records.error}</p>
@@ -242,7 +258,7 @@ export function TranscriptRecordsBody({
       ) : null}
       {records.loading && records.records.length === 0 ? (
         <p
-          className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+          className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
           data-testid="transcript-items-loading"
         >
           Loading the transcript…
@@ -354,6 +370,8 @@ export function TranscriptView({
   onLoadOlder,
   onReload,
   onBack,
+  onRefresh,
+  refreshing,
 }: {
   list: TranscriptsListState;
   records: TranscriptRecordsState;
@@ -365,10 +383,15 @@ export function TranscriptView({
   onLoadOlder: () => void;
   onReload: () => void;
   onBack: () => void;
+  /** Manual refresh of the transcript directory (#4602). */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const view = useTranscriptViewState({ open, agentId, sessionId });
 
-  const renderList = () => <TranscriptList list={list} onSelect={onSelect} />;
+  const renderList = () => (
+    <TranscriptList list={list} onSelect={onSelect} onRefresh={onRefresh} refreshing={refreshing} />
+  );
   const renderDetail = () =>
     view.pushedRecord && layout === 'push' ? (
       <PushedRecord
@@ -406,13 +429,13 @@ export function TranscriptView({
               <button
                 type="button"
                 className={cn(
-                  'flex items-center gap-1 px-3 py-2 text-muted-foreground',
+                  'flex items-center gap-[var(--nession-shell-space-1)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)] text-muted-foreground',
                   chromeSansRole('metadata'),
                 )}
                 onClick={() => onBack()}
                 data-testid="transcript-back"
               >
-                <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                <ArrowLeft className="size-[length:var(--nession-icon-sm)]" aria-hidden />
                 Transcripts
               </button>
             ) : null}
@@ -427,11 +450,11 @@ export function TranscriptView({
 
   return (
     <div className="flex min-h-0 flex-1 flex-row" data-testid="transcript-master-detail">
-      <div className="flex w-72 shrink-0 flex-col border-r border-border">{renderList()}</div>
+      <div className="flex w-[length:var(--nession-transcript-list-width)] shrink-0 flex-col border-r border-border">{renderList()}</div>
       <div className="flex min-h-0 flex-1 flex-col">
         {open === null ? (
           <p
-            className={cn('px-3 py-4 text-muted-foreground', chromeSansRole('secondary'))}
+            className={cn('px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-4)] text-muted-foreground', chromeSansRole('secondary'))}
             data-testid="transcript-nothing-open"
           >
             Choose a transcript to read what the session did.

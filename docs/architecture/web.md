@@ -16,7 +16,7 @@ the design system, the source layout and the lint gate all use one language.
 | **app** | How does Nession compose its experience? | shell, composition root, bootstrap/router/auth, chrome, and the per-experience composition (`app/experiences/{web,app}/`) | `app/` |
 | **product** | What is a Nession product concept? | Session, Terminal, Workspace, Agent, and the **Product Patterns** the design system names | `product/<concept>/` |
 | **capabilities** | What can be discovered, activated or contributed? | Files, Env, Commands, Claude Code, Git… as vertical slices (`Plugin.ts`, `types.ts`, `components/`, `contribution.tsx`) | `capabilities/<name>/` |
-| **platform** | How does the machinery work? | transport, runtime, attach, persistence, contract resolution — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin, `protocol/`) | `platform/<domain>/` |
+| **platform** | How does the machinery work? | transport, runtime, attach, persistence, contract resolution — and framework-level code with no product semantics (the Explorer file-tree framework, the Server plugin, `protocol/`, the pull/refresh lifecycle `refresh/`) | `platform/<domain>/` |
 | **shared** | What is generic and product-agnostic? | generic hooks, pure helpers, the markdown pipeline | `shared/` |
 | **components/ui** | What is a generic UI primitive? | shadcn primitives and wrappers — never Nession semantics | `components/ui/` |
 
@@ -481,6 +481,60 @@ manual attach or re-login to restore it.
 - Transport diagnostics are classified (close code/`wasClean`, handshake failure
   class, physical generation, attempt, Server close reason) and never carry a
   URL, auth token or P2P credential.
+
+## Pull/refresh lifecycle (#4602)
+
+`platform/refresh/` owns **when** a remote read happens and **whether its answer
+may still be published**. It owns no business data: the snapshot type, query
+scope, filters, pagination, mutations and the Jotai/React state a list lives in
+all stay with the Product/Capability that already owns them. There is deliberately
+no resource registry, unified business cache, backend revision directory or new
+consistency protocol.
+
+- `PullController` (React-free) — one owner's state machine for one query
+  context: `idle → queued → pulling → settled` with orthogonal dirty/active/stale
+  flags, a context generation, a monotonic request sequence and an external
+  revision. **Pull and apply are separate**: a snapshot publishes only while all
+  three fences still agree with the moment the read started, so a late reply from
+  a retired context, a superseded request or a transport that cannot abort cannot
+  move data backwards. At most one read is in flight and one further intent is
+  held; everything else merges into those two. A manual force queued behind a
+  normal read waits for the force answer. `onSuperseded` lets an owner with a
+  domain version check (Session foreground-command reconciliation, #1900/#1986)
+  inspect a fenced-out reply and owe exactly one trailing read.
+- `RefreshScheduler` (React-free) — the one place that decides when a queued read
+  may start: global in-flight budget 4, per routing target 2, one bounded queue
+  entry per live controller with manual priority and fair round-robin automatic
+  service, and due times on a single shared timer so no view installs its own
+  `setInterval`.
+- `RefreshSignalBus` — app-level `foreground`/`reconnect` facts only. Activation
+  is a local `active` transition on the controller, so showing one Workspace view
+  never provokes a read burst across cached surfaces. A foreground signal that a
+  reconnect already covered is suppressed.
+- `usePullRefresh` / `RefreshProvider` — the React adapter and the shared runtime.
+  `app/useRefreshSignals` wires the authenticated transport and the existing
+  foreground probe (`useVisibilityReconnect`) into the bus; it owns no probe.
+- `RefreshTelemetry` — low-cardinality counters by surface label and reason
+  (pulls, coalesced, applied, partial, failed, superseded, cancelled, dropped,
+  latency, last success). No session/path/query dimension.
+
+Cadence policy is product semantics and lives with each owner, per the table in
+#4602 §2: Session/Agent and running Image Builds 10–15s; visible Claude
+lists/Files/Sandbox/Project and ordinary mutable lists 30s; Env/Images/config/MCP
+60s. **Git is demand-only (#4455)**: mount/visible entry, target/depth change,
+manual, visible reconnect and mutation; no interval, no watcher, no focus-only
+query. Immutable history, diffs, streaming output and editor drafts are excluded.
+
+The App host owns the pull accelerator (`app/experiences/app/pullRefreshGesture.ts`,
+`useHostPullRefresh.ts`, `HostPullIndicator.tsx`), settled by prototype
+`app-pull-refresh-4602`. The visible header action is the accessible contract in
+every state; the gesture is only an accelerator and surrenders horizontal,
+nested-scroller and Terminal contacts. Web keeps the existing Sessions
+filter/sort/refresh disclosure.
+
+The per-surface policy inventory — owner, context, triggers, cadence, exceptions,
+manual entry and test — is maintained in
+[web-refresh-inventory.md](web-refresh-inventory.md).
 
 ## Quality gates
 

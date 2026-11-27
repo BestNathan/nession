@@ -28,9 +28,18 @@ const SERVER_LIVENESS_TIMEOUT_MS = 5_000;
 export function useVisibilityReconnect(
   wasEverAuthed: boolean,
   wsService: WebSocketService | null,
+  /**
+   * Called once the foreground resume proved the transport live (#4602 §2).
+   * Business lists refresh on this fact, not on `visibilitychange` alone: a
+   * visible page whose peer went silent must not read through a dead socket.
+   * A resume that had to reconnect reports through the connection instead.
+   */
+  onForegroundReady?: () => void,
 ): void {
   const wasBackgrounded = useRef(false);
   const inFlight = useRef(false);
+  const onForegroundReadyRef = useRef(onForegroundReady);
+  onForegroundReadyRef.current = onForegroundReady;
 
   useEffect(() => {
     const handleBackground = () => {
@@ -68,7 +77,9 @@ export function useVisibilityReconnect(
           }
           wsService.reportUnresponsive(generation);
           await wsService.reconnectNow();
+          return;
         }
+        onForegroundReadyRef.current?.();
       };
 
       void resume().catch((error) => {

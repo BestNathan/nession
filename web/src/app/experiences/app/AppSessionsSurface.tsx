@@ -11,6 +11,8 @@ import {
 import { cn } from '@/shared/lib/utils';
 import { Button } from '@/components/ui/button';
 import { RefreshButton } from '@/components/ui/RefreshButton';
+import { HostPullIndicator } from './HostPullIndicator';
+import { useHostPullRefresh } from './useHostPullRefresh';
 import {
   Collapsible,
   CollapsibleContent,
@@ -92,15 +94,15 @@ function SortButton({
   return (
     <button
       type="button"
-      className="flex items-center gap-1 hover:text-foreground"
+      className="flex items-center gap-[var(--nession-shell-space-1)] hover:text-foreground"
       onClick={() => onToggle(field)}
     >
       {label}
       {activeField === field &&
         (direction === 'asc' ? (
-          <ArrowUp className="size-3" />
+          <ArrowUp className="size-[length:var(--nession-icon-sm)]" />
         ) : (
-          <ArrowDown className="size-3" />
+          <ArrowDown className="size-[length:var(--nession-icon-sm)]" />
         ))}
     </button>
   );
@@ -133,10 +135,14 @@ function AgentsDisclosure({
   agents,
   activeAgentId,
   onlineCount,
+  onRefreshAgents,
+  refreshingAgents,
 }: {
   agents: AppSessionsSurfaceProps['agents'];
   activeAgentId: string | null;
   onlineCount: number;
+  onRefreshAgents?: () => void;
+  refreshingAgents?: boolean;
 }) {
   const [agentsOpen, setAgentsOpen] = useState(false);
 
@@ -173,12 +179,22 @@ function AgentsDisclosure({
         <ChevronDown
           aria-hidden
           className={cn(
-            'ml-auto size-4 transition-transform',
+            'ml-auto size-[length:var(--nession-icon-sm)] transition-transform',
             agentsOpen && 'rotate-180',
           )}
         />
       </CollapsibleTrigger>
       <CollapsibleContent>
+        {onRefreshAgents ? (
+          <div className="flex justify-end px-[var(--nession-shell-space-2)]">
+            <RefreshButton
+              onClick={() => onRefreshAgents()}
+              loading={refreshingAgents ?? false}
+              variant="ghost"
+              ariaLabel="Refresh agents"
+            />
+          </div>
+        ) : null}
         <SidebarAgents
           agents={agents}
           activeAgentId={activeAgentId}
@@ -231,7 +247,7 @@ function SessionsFilterTrigger({
       data-testid="session-list-filters"
       onClick={() => onToggle()}
     >
-      <Filter className="size-4" />
+      <Filter className="size-[length:var(--nession-icon-sm)]" />
     </Button>
   );
 }
@@ -267,7 +283,7 @@ function SessionsActiveFilter({
       )}
     >
       {label}
-      <X aria-hidden className="size-3" />
+      <X aria-hidden className="size-[length:var(--nession-icon-sm)]" />
       <span className="sr-only">Clear filter</span>
     </button>
   );
@@ -289,9 +305,9 @@ function SessionsFilterPanel({
   return (
     <div
       data-testid="session-list-filters-panel"
-      className="flex flex-col gap-2"
+      className="flex flex-col gap-[var(--nession-shell-space-2)]"
     >
-      <div className="flex flex-wrap items-center gap-1">
+      <div className="flex flex-wrap items-center gap-[var(--nession-shell-space-1)]">
         {STATUS_FILTERS.map((filter) => {
           const isActive = statusFilter === filter.key;
           return (
@@ -308,7 +324,7 @@ function SessionsFilterPanel({
           );
         })}
       </div>
-      <div className={cn('flex items-center gap-2 text-muted-foreground', bodyAppClass)}>
+      <div className={cn('flex items-center gap-[var(--nession-shell-space-2)] text-muted-foreground', bodyAppClass)}>
         <SortButton
           label="Name"
           field="name"
@@ -526,7 +542,7 @@ function SessionsSearchMiss({
       data-testid="app-sessions-search-miss"
       className="flex h-full flex-col items-center justify-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] text-center text-muted-foreground"
     >
-      <SearchX aria-hidden className="size-8" />
+      <SearchX aria-hidden className="size-[length:var(--nession-control-md)]" />
       <p className={secondaryAppClass}>No sessions match "{searchQuery}"</p>
       <Button
         type="button"
@@ -564,9 +580,13 @@ function SessionsSearchMiss({
 function SessionsHeader({
   createDisabled,
   onCreate,
+  onRefresh,
+  refreshing,
 }: {
   createDisabled: boolean;
   onCreate: () => void;
+  onRefresh: () => void;
+  refreshing: boolean;
 }) {
   return (
     <header
@@ -576,18 +596,30 @@ function SessionsHeader({
       <h1 className={cn('min-w-0 truncate', titleAppClass)}>
         Sessions
       </h1>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
-        className={shellIconButtonClass}
-        aria-label="New Session"
-        data-testid="create-session"
-        disabled={createDisabled}
-        onClick={() => onCreate()}
-      >
-        <Plus className="size-5" />
-      </Button>
+      <div className="flex items-center gap-[var(--nession-shell-space-1)]">
+        {/* #4602 supersedes #1083 §6's resting-chrome ruling for this action:
+            the manual refresh must exist while healthy and empty, hosted in the
+            existing header rather than as a permanent refresh row. The host
+            pull gesture is only an accelerator over the same current-scope read. */}
+        <RefreshButton
+          onClick={() => onRefresh()}
+          loading={refreshing}
+          variant="ghost"
+          ariaLabel="Refresh sessions"
+        />
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon"
+          className={shellIconButtonClass}
+          aria-label="New Session"
+          data-testid="create-session"
+          disabled={createDisabled}
+          onClick={() => onCreate()}
+        >
+          <Plus className="size-[length:var(--nession-icon-md)]" />
+        </Button>
+      </div>
     </header>
   );
 }
@@ -731,6 +763,52 @@ function SessionsChrome({
  * layout, and these are the same controls. The two experiences are exclusive
  * branches of `WorkspaceRegion`, so the ids never meet in one document.
  */
+/**
+ * Healthy infrastructure is invisible; degraded infrastructure is contextual
+ * (#1083 §8). The region is not hidden when healthy — it is not rendered,
+ * because an empty one leaves the strip the last attempt at this left behind.
+ *
+ * #4602 adds the resting header action; this strip keeps the contextual retry
+ * for the degraded case, where a manual refresh is the only thing that helps.
+ * `SidebarFooter` is unchanged and is still what the Web column renders when
+ * healthy; the App overlay draws no foot at all.
+ */
+function SessionsProblemStrip({
+  connectionStatus,
+  domain,
+  nodeCount,
+  onRefresh,
+  loading,
+}: {
+  connectionStatus: AppSessionsSurfaceProps['connectionStatus'];
+  domain: AppSessionsSurfaceProps['domain'];
+  nodeCount: number;
+  onRefresh: () => void;
+  loading: boolean;
+}) {
+  if (connectionStatus === 'connected') { return null; }
+  return (
+    <div
+      data-testid="app-sessions-problem"
+      className="flex shrink-0 items-center gap-[var(--nession-shell-space-2)] border-t px-[var(--nession-shell-space-3)] py-[var(--nession-shell-foot-pad-y)] pb-[max(var(--nession-shell-foot-pad-y),env(safe-area-inset-bottom))]"
+    >
+      <div className="min-w-0 flex-1">
+        <SidebarFooter
+          domain={domain}
+          connectionStatus={connectionStatus}
+          nodeCount={nodeCount}
+        />
+      </div>
+      <RefreshButton
+        onClick={() => onRefresh()}
+        loading={loading}
+        variant="ghost"
+        ariaLabel="Refresh sessions"
+      />
+    </div>
+  );
+}
+
 export function AppSessionsSurface({
   agents,
   filteredSessions,
@@ -738,6 +816,9 @@ export function AppSessionsSurface({
   selectedId,
   clientSessionId,
   loadingSessions,
+  refreshingSessions = false,
+  refreshingAgents = false,
+  onRefreshAgents,
   searchQuery,
   setSearchQuery,
   statusFilter,
@@ -760,6 +841,15 @@ export function AppSessionsSurface({
 }: AppSessionsSurfaceProps) {
   const onlineCount = agents.filter((agent) => agent.status === 'online').length;
   const createDisabled = agents.every((agent) => agent.status !== 'online');
+
+  // The host owns the pull accelerator over the list's own scroll region; the
+  // Sessions layer contributes only its refresh callback and live state.
+  const pull = useHostPullRefresh({
+    surface: 'sessions',
+    enabled: connectionStatus === 'connected',
+    refreshing: refreshingSessions,
+    onRefresh,
+  });
 
   const selectedSession =
     filteredSessions.find((s) => s.session_id === selectedId) ?? null;
@@ -785,7 +875,12 @@ export function AppSessionsSurface({
       data-testid="app-sessions-surface"
       className="bg-sidebar flex h-full min-h-0 w-full flex-col"
     >
-      <SessionsHeader createDisabled={createDisabled} onCreate={onCreate} />
+      <SessionsHeader
+        createDisabled={createDisabled}
+        onCreate={onCreate}
+        onRefresh={onRefresh}
+        refreshing={refreshingSessions}
+      />
       <SessionsChrome
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
@@ -797,7 +892,13 @@ export function AppSessionsSurface({
         sortDirection={sortDirection}
         toggleSort={toggleSort}
       />
-      <SessionsListRegion
+      <div
+        ref={pull.hostRef}
+        data-testid="app-sessions-pull-host"
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <HostPullIndicator distance={pull.distance} phase={pull.phase} />
+        <SessionsListRegion
         buckets={buckets}
         grouped={grouped}
         filteredSessions={filteredSessions}
@@ -817,7 +918,8 @@ export function AppSessionsSurface({
         onCreate={onCreate}
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
-      />
+        />
+      </div>
       {/* Projects are a sibling destination below history and above the
           secondary Agents entry (#3025). They stay reachable with zero
           Sessions, which is why they are not part of the list's footer. */}
@@ -826,43 +928,16 @@ export function AppSessionsSurface({
         agents={agents}
         activeAgentId={activeAgentId}
         onlineCount={onlineCount}
+        onRefreshAgents={onRefreshAgents}
+        refreshingAgents={refreshingAgents}
       />
-      {/* Healthy infrastructure is invisible; degraded infrastructure is
-          contextual (#1083 §8, `information-architecture.md`: "infrastructure
-          context stays quiet when healthy and gains prominence when it affects
-          the work"). The region is not hidden when healthy — it is not rendered,
-          because an empty one leaves the strip the last attempt at this left
-          behind.
-
-          The retry lives here rather than in the resting chrome, which is where
-          #1083 §6 puts it: Sessions already arrive over a live connection, and a
-          permanent refresh gives an implementation concern the same weight as
-          navigation. What is left is the only case a manual refresh helps.
-
-          `SidebarFooter` is unchanged and is still what the Web column renders
-          when healthy — the owner's ruling that the *sidebar's* foot stays
-          visible is about that column, and the mockup draws it there with the
-          rail the App does not have. Its App overlay draws no foot at all. */}
-      {connectionStatus === 'connected' ? null : (
-        <div
-          data-testid="app-sessions-problem"
-          className="flex shrink-0 items-center gap-[var(--nession-shell-space-2)] border-t px-[var(--nession-shell-space-3)] py-[var(--nession-shell-foot-pad-y)] pb-[max(var(--nession-shell-foot-pad-y),env(safe-area-inset-bottom))]"
-        >
-          <div className="min-w-0 flex-1">
-            <SidebarFooter
-              domain={domain}
-              connectionStatus={connectionStatus}
-              nodeCount={agents.length}
-            />
-          </div>
-          <RefreshButton
-            onClick={() => onRefresh()}
-            loading={loadingSessions}
-            variant="ghost"
-            ariaLabel="Refresh sessions"
-          />
-        </div>
-      )}
+      <SessionsProblemStrip
+        connectionStatus={connectionStatus}
+        domain={domain}
+        nodeCount={agents.length}
+        onRefresh={onRefresh}
+        loading={loadingSessions}
+      />
     </div>
   );
 }
