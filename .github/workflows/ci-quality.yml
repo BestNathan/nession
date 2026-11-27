@@ -253,6 +253,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # The Test Runtime inventory merge-head contract proves a two-parent
+          # integration head against the inventory-owning parent tree; a
+          # shallow checkout cannot read those parents and fails closed.
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
