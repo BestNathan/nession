@@ -19,6 +19,12 @@ AGENT_AUTH_TOKEN="${AGENT_AUTH_TOKEN:-}"
 # client to this Agent.
 AGENT_TOKEN="${AGENT_TOKEN:-}"
 AGENT_CONNECT_URL="${AGENT_CONNECT_URL:-}"
+# Canonical advertised WebSocket endpoints (#4588): comma-separated ws/wss URLs
+# projected to [[advertise_addresses]] so a lane can advertise its canonical
+# WSS host alongside the legacy nhome.local connect_url. The canonical
+# AgentConfig reader validates scheme/host; the projection writes through
+# unvalidated like connect_url, so a malformed URL fails the Agent start.
+AGENT_ADVERTISE_URLS="${AGENT_ADVERTISE_URLS:-}"
 # tmux socket. Left empty the agent uses /tmp/nession-<uid>/tmux.sock, which is
 # always writable in a container. Override only if /tmp is unsuitable — do NOT
 # point it at the PVC mount: /data is NFS in this deployment and binding a unix
@@ -82,6 +88,21 @@ if [ -n "${AGENT_TMUX_SOCKET}" ]; then
     echo "tmux_socket_path = \"${AGENT_TMUX_SOCKET}\"" >> ${NESSON_CONFIG_DIR}/agent-config.toml
 fi
 
+# Project the canonical advertised endpoints (#4588). This array-of-tables must
+# follow every top-level key above and precede the [erofs]/[sandbox]/[mcp]
+# tables below, or a later bare key would be parsed inside the last table.
+if [ -n "${AGENT_ADVERTISE_URLS}" ]; then
+    set -f
+    old_ifs=$IFS
+    IFS=,
+    for advertise_url in $AGENT_ADVERTISE_URLS; do
+        [ -n "$advertise_url" ] || continue
+        printf '\n[[advertise_addresses]]\nurl = "%s"\n' "$advertise_url" >> "${NESSON_CONFIG_DIR}/agent-config.toml"
+    done
+    IFS=$old_ifs
+    set +f
+fi
+
 # Only add the EROFS cache section if explicitly set. This table must follow
 # every top-level key above; otherwise a later top-level assignment would be
 # parsed as a member of `[erofs]`.
@@ -117,6 +138,13 @@ fi
 # One OCI default after all existing TOML tables; Agent resolves durable
 # inbound Agent Token before MCP mount, never its outbound Server token.
 "$(dirname "$0")/render-mcp-config.sh" agent >> "${NESSON_CONFIG_DIR}/agent-config.toml"
+
+# Test seam (#4588): an entrypoint test generates the real config into a private
+# NESSON_CONFIG_DIR and exits before nginx/tmux, then feeds the file to the
+# canonical AgentConfig parser. Production never sets this.
+if [ -n "${NESSON_CONFIG_ONLY:-}" ]; then
+    exit 0
+fi
 
 # Generate nginx config
 envsubst '${LISTEN_PORT} ${SERVER_BACKEND}' \

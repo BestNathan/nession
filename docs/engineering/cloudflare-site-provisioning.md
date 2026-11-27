@@ -53,6 +53,34 @@ never created for a name the gateway cannot yet route. Editable desired hosts
 live only on the gitops branch; the registry never writes a second desired
 state.
 
+## cert-manager TLS consumption (#4588)
+
+Publicly trusted TLS for `*.bestnathan.top` is owned by nitops
+(BestNathan/nitops#2): cert-manager, the DNS-01 ClusterIssuer and the single
+wildcard Certificate in the serving `slb` namespace; the target Secret is owned
+exclusively by cert-manager. SLB nginx is the actual client-facing TLS terminator
+and forwards HTTP to Higress — ingress TLS is not assumed to be the effective
+client-facing certificate. Nession installs no cert-manager, issues no second
+wildcard and writes no competing Certificate/Issuer/SealedSecret; it consumes the
+certificate through host/SAN coverage at SLB. Cloudflare Universal SSL still
+terminates public client TLS at the edge.
+
+The legacy staging MCP Higress Origin CA TLS
+(`environments/staging/mcp/sealed-tls.json` → `nession-mcp-staging-tls`) is
+retired, and any consumption switch made, only after a sanitized cutover readback
+receipt is recorded (GitOps revision, actual gateway identity, certificate
+serial/expiry/chain, Run/Attempt; no key material). Rollback restores route/config
+desired state only; it never rolls back cert-manager or deletes shared Secrets.
+The `issue-tls` workflow/script retirement is gated on the same readiness.
+
+Executable owners: `scripts/gitops-host-contract.mjs` (SC-01 canonical hosts,
+backends, preserved nhome.local, dormant MCP) and `scripts/gitops-tls-contract.mjs`
+(SC-03 ownership, readiness-gated retirement), run as the `gitops-host-contract` /
+`gitops-tls-contract` Gates against the `gitops` branch. The canonical host table
+and TLS contract are also in the `gitops` branch README. Live LAN/public probes
+and certificate readback are the separate SCN-07 operational gate (#1616 identity
+lane); a green PR is not a rollout.
+
 ## GitHub Environment configuration
 
 All deployment-specific settings and provider credentials are GitHub
