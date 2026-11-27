@@ -20,8 +20,9 @@ import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useRefreshSignals } from './useRefreshSignals';
 import { useBootstrapTokenConsumption } from './useBootstrapToken';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
+import { deriveServerSocketUrl } from '@/shared/lib/serverSocketUrl';
 
-const DEFAULT_SERVER_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${window.location.host}/ws`;
+const DEFAULT_SERVER_URL = deriveServerSocketUrl(window.location.protocol, window.location.host);
 
 // Every wire-protocol family this app knows how to speak. The singletons bind
 // to whichever service instance installs them (use() in the service

@@ -37,6 +37,8 @@ const pairs = [
   ['mcp-standalone-image', ['mcp-standalone-image-selftest'], 'tooling'],
   ['compose-storage-contract', ['compose-storage-contract-selftest'], 'tooling'],
   ['gitops-storage-contract', ['gitops-storage-contract-selftest'], 'tooling'],
+  ['gitops-host-contract', ['gitops-host-contract-selftest'], 'tooling'],
+  ['gitops-tls-contract', ['gitops-tls-contract-selftest'], 'tooling'],
 ];
 
 const read = p => fs.readFileSync(path.join(ROOT, p), 'utf8');

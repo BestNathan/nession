@@ -7,6 +7,50 @@ reviewed registry and provider implementation live in
 DNS success does not prove external HTTPS, Cloudflare Origin TLS, MCP
 authentication, or Argo CD reconciliation.
 
+## Canonical hostnames and cert-manager TLS consumption (#4588)
+
+The hostname/TLS model below the public edge is owned by #4588 (Nession
+host/TLS migration), #4589 (private-by-default site registry, split DNS and
+MCP-only public exposure) and BestNathan/nitops#2 (cluster certificate
+infrastructure). The current contract:
+
+- Every Server/Agent/UI site has a **canonical single-label** `bestnathan.top`
+  host (`env-service-nession`; production omits the env and server prefix):
+  production `nession` / `agent-nession` / `ui-nession` / `mcp-nession`; staging
+  `staging-nession` / `staging-agent-nession` / `staging-ui-nession` /
+  `staging-mcp-nession`; staging-01 and preprod follow the same env prefix. The
+  nested `<env>.nession.*` names are retained as LAN compatibility during
+  migration and retired only after cutover readback. `nhome.local` hosts and
+  their manual AdGuard records are preserved verbatim.
+- **Certificate ownership is single and external to Nession.** nitops owns
+  cert-manager, the DNS-01 ClusterIssuer and the one wildcard Certificate
+  `*.bestnathan.top` in the serving `slb` namespace; the target Secret is owned
+  exclusively by cert-manager. SLB nginx is the actual client-facing TLS
+  terminator for `*.bestnathan.top` and forwards HTTP to Higress — ingress TLS
+  is not assumed to be the effective client-facing certificate. Nession installs
+  no cert-manager, issues no second wildcard, and writes no competing
+  Certificate/Issuer/SealedSecret. Cloudflare Universal SSL still terminates
+  public client TLS at the edge; only the approved MCP sites may be public.
+- Nession consumes the certificate through host/SAN coverage at SLB. The legacy
+  staging MCP Higress Origin CA TLS (`environments/staging/mcp/sealed-tls.json`
+  → `nession-mcp-staging-tls`) is retired, and any consumption switch made, only
+  after a sanitized cutover readback receipt is recorded (GitOps revision, actual
+  gateway identity, certificate serial/expiry/chain, run/attempt; no key
+  material). Rollback restores route/config desired state only; it never rolls
+  back cert-manager or deletes shared Secrets.
+- The executable contract owners are `scripts/gitops-host-contract.mjs` (SC-01)
+  and `scripts/gitops-tls-contract.mjs` (SC-03), run as the
+  `gitops-host-contract` / `gitops-tls-contract` Gates against the `gitops`
+  branch. The canonical host table and TLS contract are also recorded in the
+  `gitops` branch README. Live LAN/public probes and certificate readback are
+  the separate operational gate (SCN-07, #1616 identity lane); a green PR is not
+  a rollout.
+
+The Origin CA `issue-tls` action documented below is the **legacy** issuance
+path. Its workflow/script retirement is owned by #4589 and is blocked until the
+#4588 cutover readback is recorded and no consumer remains; the generic
+SealedSecret mechanism and protected DNS workflow are preserved.
+
 ## First registered site
 
 | Field | Fixed reviewed value |
@@ -113,12 +157,14 @@ a broken Origin pass.
 The previously deployed staging MCP Origin certificate was self-signed for
 the **old** hostname. After `issue-tls`, verify that the actual Kubernetes
 certificate has rotated to the new SAN, then update and re-seal the
-`staging/MCP_CONFIG_TOML` Host allowlist. The future ConfigMap/ENV-token
-migration (#3914) is a separate change. The GitOps
-`environments/staging/mcp/ingress.yaml` is intentionally excluded from
-Kustomize during the hostname migration (#3945); a separate reviewed
-GitOps activation is required after DNS, both TLS layers, authenticated
-MCP configuration and operator readback are verified.
+`staging/MCP_CONFIG_TOML` Host allowlist. The ConfigMap/ENV-token migration
+(#3914) has since landed: the nonsecret Host allowlist lives in
+`environments/staging/mcp/mcp.toml` and the inbound token in a SealedSecret.
+The GitOps `environments/staging/mcp/ingress.yaml` is now **enrolled** in the
+Kustomization (the #3945 hostname-migration exclusion is historical); the
+canonical host `staging-mcp-nession.bestnathan.top` is active. Under #4588 this
+legacy Higress Origin CA TLS is consumed at the nitops-owned SLB instead, and
+its retirement is gated on the cutover readback receipt described above.
 
 DNS-only `plan/apply` never issues certificates or publishes Kubernetes
 resources. Explicit `issue-tls` does issue and seal the TLS Secret but
