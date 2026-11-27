@@ -101,7 +101,7 @@ pub fn observe_composer(capture: &[u8]) -> ComposerObservation {
         let body = content_body(line);
         if index == prompt_index {
             let run = prompt_text_run(&body);
-            if run.is_empty() || run.iter().copied().all(Cell::hint_styled) {
+            if run.is_empty() || provider_hint_run(&run) {
                 continue;
             }
             return ComposerObservation::Dirty("unsubmitted text in the input box");
@@ -122,6 +122,27 @@ pub fn observe_composer(capture: &[u8]) -> ComposerObservation {
     ComposerObservation::Ready
 }
 
+/// Whether a prompt text run is a provider hint rather than user input.
+///
+/// The TUI renders an empty composer's hint dimmed — but when the input is
+/// focused it draws the cursor by **inverting the hint's first character**
+/// (reverse video) and dimming the rest (`invert(hint[0]) + dim(hint[1..])`,
+/// the v2.1.312/2.1.332 TextInput renderer). So a hint run is either entirely
+/// dim/bright-black, or a reverse-video first character followed by
+/// dim/bright-black.
+///
+/// The "at least one dim/bright-black cell" requirement keeps this fail-closed:
+/// a purely reverse-video run (user text selected in vim VISUAL mode, or a lone
+/// cursor-inverted typed character) is **not** a hint and stays dirty. Typed
+/// input uses the default foreground and is neither dim nor reverse.
+fn provider_hint_run(run: &[Cell]) -> bool {
+    !run.is_empty()
+        && run
+            .iter()
+            .all(|cell| cell.dim || cell.bright_black || cell.reverse)
+        && run.iter().any(|cell| cell.dim || cell.bright_black)
+}
+
 /// One printable character of a capture line, with the SGR state it was
 /// rendered under. Escape sequences themselves are not content.
 #[derive(Debug, Clone, Copy)]
@@ -129,6 +150,7 @@ struct Cell {
     ch: char,
     dim: bool,
     bright_black: bool,
+    reverse: bool,
 }
 
 impl Cell {
@@ -146,6 +168,7 @@ impl Cell {
 struct Sgr {
     dim: bool,
     bright_black: bool,
+    reverse: bool,
 }
 
 impl Sgr {
@@ -158,6 +181,8 @@ impl Sgr {
                 0 => *self = Self::default(),
                 2 => self.dim = true,
                 22 => self.dim = false,
+                7 => self.reverse = true,
+                27 => self.reverse = false,
                 39 => self.bright_black = false,
                 90 => self.bright_black = true,
                 91..=97 | 30..=37 => self.bright_black = false,
@@ -188,6 +213,7 @@ fn annotate(line: &str) -> Vec<Cell> {
                     ch,
                     dim: sgr.dim,
                     bright_black: sgr.bright_black,
+                    reverse: sgr.reverse,
                 });
             }
             continue;
@@ -371,6 +397,43 @@ mod tests {
         assert_eq!(
             observe_composer(&screen(&lines)),
             ComposerObservation::Ready
+        );
+    }
+
+    #[test]
+    fn a_focused_hint_with_an_inverted_cursor_character_is_an_empty_composer() {
+        // The focused TextInput draws the cursor by inverting the hint's first
+        // character (reverse video) and dimming the rest. The inverted first
+        // cell must not turn the empty composer into unsubmitted text (#4665
+        // staging live-cli Fail: the settled happy-path submit was refused).
+        let lines = vec![
+            dim("╭──────────────────────────────────────────╮"),
+            format!(
+                "{} > \u{1b}[7mT\u{1b}[0m{}{}",
+                dim("│"),
+                dim("ry \"fix lint errors\""),
+                dim("│")
+            ),
+            dim("╰──────────────────────────────────────────╯"),
+        ];
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::Ready
+        );
+    }
+
+    #[test]
+    fn a_purely_reverse_video_run_is_not_a_hint() {
+        // User text selected in vim VISUAL mode is reverse video without any
+        // dim cell: it is unsubmitted input, never an empty composer.
+        let lines = vec![
+            "╭──────────────────────────────────────────╮".to_string(),
+            "│ > \u{1b}[7mselected user text\u{1b}[0m│".to_string(),
+            "╰──────────────────────────────────────────╯".to_string(),
+        ];
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::Dirty("unsubmitted text in the input box")
         );
     }
 
