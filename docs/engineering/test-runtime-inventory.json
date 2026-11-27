@@ -4,7 +4,7 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1902,
+    "entries": 1903,
     "references": 1016,
     "unresolved": 0
   },
@@ -8132,6 +8132,11 @@
     },
     {
       "file": "web/src/app/__tests__/integration/useDashboard.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/app/__tests__/integration/useDashboardActiveSignal.test.tsx",
       "owner": "web vitest",
       "disposition": "web-unit"
     },
