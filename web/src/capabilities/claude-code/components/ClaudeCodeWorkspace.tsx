@@ -1,5 +1,6 @@
 import { FileText, FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/shared/lib/utils';
 import { chromeLabelRole, chromeMonoRole, chromeSansRole } from '@/shared/typography/chromeRoles';
@@ -308,14 +309,11 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
               the section that has scopes, rather than beside `Conversations` —
               which is the whole of the flattening this change undoes. */}
-          <div className="flex shrink-0 items-center border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)]">
-            <Tabs value={activeScope} onValueChange={(value) => setActiveScope(value as ClaudeCodeConfigScope)}>
-              <TabsList>
-                <TabsTrigger value="project">Project</TabsTrigger>
-                <TabsTrigger value="global">Global</TabsTrigger>
-              </TabsList>
-            </Tabs>
-          </div>
+          <ConfigScopeBar
+            activeScope={activeScope}
+            onScopeChange={(value) => setActiveScope(value as ClaudeCodeConfigScope)}
+            onRefresh={() => handleRetry(activeScope)}
+          />
           <div className="grid min-h-0 flex-1 grid-cols-[minmax(12rem,18rem)_minmax(0,1fr)]">
             <aside className="min-h-0 border-r">
               {SCOPES.map((scope) => (
@@ -335,6 +333,35 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
             </main>
           </div>
         </div>
+    </div>
+  );
+}
+
+function ConfigScopeBar({
+  activeScope,
+  onScopeChange,
+  onRefresh,
+}: {
+  activeScope: ClaudeCodeConfigScope;
+  onScopeChange: (value: string) => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 items-center border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)]">
+      <Tabs value={activeScope} onValueChange={onScopeChange}>
+        <TabsList>
+          <TabsTrigger value="project">Project</TabsTrigger>
+          <TabsTrigger value="global">Global</TabsTrigger>
+        </TabsList>
+      </Tabs>
+      {/* #4602: resting manual refresh of the current config scope. */}
+      <span className="ml-auto">
+        <RefreshButton
+          onClick={() => onRefresh()}
+          variant="ghost"
+          ariaLabel="Refresh Claude Code configuration"
+        />
+      </span>
     </div>
   );
 }
@@ -370,6 +397,14 @@ function MemoryPane({
 }) {
   return (
     <main className={active ? 'flex min-h-0 flex-1 flex-col' : 'hidden'}>
+      {/* #4602: resting manual refresh of the memory directory. */}
+      <div className="flex shrink-0 justify-end border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)]">
+        <RefreshButton
+          onClick={() => memory.retry()}
+          variant="ghost"
+          ariaLabel="Refresh Claude Code memory"
+        />
+      </div>
       <MemoryView
         memory={memory.memory}
         onOpenFile={(path) => void memory.openFile(path)}
