@@ -481,7 +481,7 @@
       "file": "crates/nession-claude-code/src/composer.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 329
+      "line": 355
     },
     {
       "file": "crates/nession-claude-code/src/conversation_reader.rs",

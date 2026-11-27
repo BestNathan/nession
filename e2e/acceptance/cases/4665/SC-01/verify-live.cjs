@@ -7,7 +7,7 @@
 const assert = require('node:assert/strict');
 const { targetSha } = require('../../../shared/mcp-cases.cjs');
 const {
-  createSession, enter, getConversation, oneLine, runLive, settleClaude, startLiveStack,
+  createSession, enter, getConversation, lastLines, oneLine, runLive, settleClaude, startLiveStack,
   submit, waitFor, waitForStatus,
 } = require('../../../shared/claude-live.cjs');
 
@@ -74,7 +74,9 @@ runLive(async ({ evidence }) => {
     // The happy path still confirms: a normal prompt against the settled idle
     // CLI is input_sent+verified and readable back by the exact id.
     const ok = await submit(stack, OK_PROMPT, id);
-    assert.equal(ok.status, 'input_sent');
+    assert.equal(ok.status, 'input_sent',
+      'the settled happy-path submit must confirm by read-back: ' + JSON.stringify(ok) +
+      '; pane:\n' + lastLines(stack.capture(), 24));
     assert.equal(ok.observation, 'verified');
     assert.equal(ok.conversation_id, id);
     const okConversation = await waitFor('the OK prompt and reply in the same conversation',
