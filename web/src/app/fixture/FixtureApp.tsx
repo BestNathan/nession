@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AppLayout } from '@/app/experiences/app/AppLayout';
 import { useAppLayer } from '@/app/experiences/app/useAppLayer';
@@ -132,6 +132,8 @@ function fixtureSidebarProps({
   onAssociateProject,
   onCreate,
   onConfigure,
+  onRefresh,
+  refreshingSessions,
 }: {
   agents: Agent[];
   filteredSessions: Session[];
@@ -153,6 +155,8 @@ function fixtureSidebarProps({
   onAssociateProject: (session: Session) => void;
   onCreate: () => void;
   onConfigure: (session: Session) => void;
+  onRefresh?: () => void;
+  refreshingSessions?: boolean;
 }) {
   return {
     onAssociateProject,
@@ -175,7 +179,8 @@ function fixtureSidebarProps({
     connectionStatus,
     domain,
     onCreate,
-    onRefresh: () => {},
+    onRefresh: onRefresh ?? (() => {}),
+    refreshingSessions,
     onConfigure,
     onKill: () => {},
     onViewDetails: sessionDetails.onViewDetails,
@@ -357,6 +362,20 @@ function useFixtureAppSurfaces(search: string): void {
   useEffect(() => installWorkspaceSurface(), []);
 }
 
+/**
+ * The fixture's refresh is deterministic: it reports busy for one tick and
+ * settles, so browser proof can observe the action's real state machine without
+ * a transport. Population is unchanged by design.
+ */
+function useFixtureRefresh() {
+  const [refreshingSessions, setRefreshingSessions] = useState(false);
+  const onRefresh = useCallback(() => {
+    setRefreshingSessions(true);
+    setTimeout(() => setRefreshingSessions(false), 250);
+  }, []);
+  return { refreshingSessions, onRefresh };
+}
+
 export function FixtureApp() {
   // Read before the stubs below, because one of them is parameterised by it.
   const search = useLocation().search;
@@ -427,6 +446,7 @@ export function FixtureApp() {
   // The shipped details/edit owner (#2875), against the deterministic stub.
   const sessionDetails = useFixtureSessionDetails(agents, staleAgents);
   const connectionStatus = fixtureConnection(search);
+  const { refreshingSessions, onRefresh: handleFixtureRefresh } = useFixtureRefresh();
 
   const filteredSessions = useMemo(
     () => filterSessions(sessions, agents, { statusFilter, searchQuery, sortField, sortDirection }),
@@ -465,9 +485,8 @@ export function FixtureApp() {
     sortDirection,
     toggleSort,
     isSearchActive,
-    connectionStatus,
-    domain,
-    sessionDetails,
+    connectionStatus, domain,
+    sessionDetails, onRefresh: handleFixtureRefresh, refreshingSessions,
     projectShell: projectLayer.projectShell,
     onAssociateProject: (session) => projectBinding.open(session),
     onCreate: () => setCreateOpen(true),

@@ -239,6 +239,24 @@ explanation is the same dead end one step earlier.
   [interaction-semantics.md](../terminal/interaction-semantics.md#touch-direction-pad-2657).
 - Gestures are accelerators, not the only discoverable or accessible path.
 - Sessions and Workspace must also have visible controls, but those controls should remain visually quiet when they are not the user's current intent.
+- **Host pull-to-refresh (#4602).** A downward vertical drag at the top of a
+  host-owned mutable list is a refresh accelerator: after axis lock, release at
+  ≥ 64 CSS px of raw travel commits one current-scope read; a shorter drag
+  cancels with no request. The host owns the indicator, release, settling and
+  cancellation, including a page switch while a read runs. The gesture never
+  captures a contact that is not at top, a horizontal pager swipe, a nested
+  collection scroller, or the Terminal/editor's own input. It preserves Capsule
+  clearance and uses the existing motion/reduced-motion tokens. The settled
+  interaction is in prototype `app-pull-refresh-4602`.
+- **The manual refresh action is the contract, not the gesture (#4602).** Every
+  mutable list has a visible, keyboard- and touch-operable Refresh in its existing
+  header or disclosure, available even when the list is healthy, empty or failed.
+  For the Sessions layer this supersedes #1083 §6's "no resting refresh" ruling:
+  the action lives in the existing header band (not a permanent refresh row), and
+  the degraded problem strip keeps its contextual retry. Capabilities contribute
+  a refresh callback and state; they never add a second scroll container, page
+  header or gesture. Busy is shown only until that refresh's own promise settles;
+  repeated taps coalesce; a failure keeps the last known rows and offers retry.
 
 ### Swipe contact ownership and feedback (#2724)
 

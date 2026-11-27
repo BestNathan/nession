@@ -50,6 +50,12 @@ The current Web column is **Session-first** (#2851):
 - Filter, sort and refresh live behind one disclosure in the search field. A chosen
   status filter remains visible as a removable chip. Creation is not repeated as a list
   toolbar row.
+- The Sessions refresh in that disclosure is a force re-query of the current scope
+  (#4602); other mutable lists expose their manual refresh through their existing
+  header or toolbar action, never a new global reload or a duplicate toolbar. Every
+  such action reads through the shared pull lifecycle, keeps the last known rows on
+  failure, and shows busy only until its own read settles. The per-surface policy and
+  exceptions are in [../../architecture/web-refresh-inventory.md](../../architecture/web-refresh-inventory.md).
 
 When the Web sidebar is collapsed it reserves a **navigation rail**, not a floating
 control over the work surface (#3075, superseding #2851's 0px tuck-away and the
