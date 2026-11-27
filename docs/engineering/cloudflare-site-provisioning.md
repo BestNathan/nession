@@ -1,143 +1,213 @@
-# Protected Cloudflare site configuration (#3963)
+# Protected site registry and split-DNS configuration (#4589)
 
 This operator-owned [Deploy / Configure Site](../../.github/workflows/deploy-configure-site.yml)
-workflow manages the registered site's **Cloudflare DNS and explicit Origin CA TLS issuance**. The
-reviewed registry and provider implementation live in
-[scripts/ci/configure-cloudflare-site.mjs](../../scripts/ci/configure-cloudflare-site.mjs).
-DNS success does not prove external HTTPS, Cloudflare Origin TLS, MCP
-authentication, or Argo CD reconciliation.
+workflow reconciles the reviewed Nession site registry: **private-by-default LAN
+split-horizon DNS** for every enabled site and **MCP-only public Cloudflare DNS**
+for the explicitly approved allowlist. It extends the original #3963/#3992
+staging-MCP provider; the Cloudflare client is not duplicated.
 
-## First registered site
+Ownership boundaries:
 
-| Field | Fixed reviewed value |
-|---|---|
-| Site key | `staging-mcp` |
-| GitHub Environment | `staging` |
-| Zone | `bestnathan.top` |
-| Hostname | `staging-mcp-nession.bestnathan.top` |
-| Record | `A`, `proxied: true`, TTL Auto |
-| Source | protected GitHub Environment origin IPv4 variable |
+- **#4589 (this contract)** owns the canonical registry, visibility policy,
+  provider adapters, edge-policy fixtures, the Origin CA retirement gate and
+  workflow/script removal plus this documentation.
+- **#4588** owns the GitOps ingress host migration to the canonical names and
+  cert-manager TLS consumption, including legacy GitOps TLS object retirement.
+- **nitops#2** owns cert-manager, the DNS-01 issuer and actual edge/router
+  enforcement. The edge-policy fixture here is a reviewed contract artifact,
+  not a live router configuration.
 
-The Actions dispatcher selects only a reviewed site key and `plan`, `apply` or
-`issue-tls`. It cannot supply a custom domain, Zone, record type or API endpoint.
+DNS success does not prove external HTTPS, MCP authentication, or Argo CD
+reconciliation. PR green is not rollout: live provider readback and LAN/external
+probes are a separate operational gate (SCN-04/07) requiring authorized
+operator execution and, for formal deployed Cases, deployment identity (#1616).
 
-## GitHub Environment setup
+## Canonical registry
 
-In BestNathan/nession → Settings → Environments → `staging`, set:
+[scripts/ci/site-registry/registry.json](../../scripts/ci/site-registry/registry.json)
+is the single reviewed owner of site identity. The validator
+([site-registry.mjs](../../scripts/ci/site-registry/site-registry.mjs)) rejects
+duplicates, multi-label canonical names, unknown environments/services, wrong
+backend/route identity and any public non-MCP declaration.
 
-| Name | Kind | Value |
-|---|---|---|
-| `CLOUDFLARE_API_TOKEN` | Environment **Secret** | **The existing operator-provided Cloudflare API Token is reused for DNS and Origin CA**; it must have rights for both `Zone / DNS / Edit` and `Zone / SSL and Certificates / Edit`. No second Token is required. Its access scope is an operator-owned policy decision. |
-| `CLOUDFLARE_ZONE_ID` | Environment **Variable** | Exact 32-hex-character Zone ID (not account ID). |
-| `CLOUDFLARE_ORIGIN_IPV4` | Environment **Variable** | Real **public IPv4** of the Higress ingress gateway/load balancer, reachable from Cloudflare on port 443. Not Cloudflare anycast IP from a proxied `curl` result. |
+Naming: `env-service-nession.bestnathan.top`, omitting the production environment
+prefix and the server service prefix (`nession`, `agent-nession`, `ui-nession`,
+`mcp-nession`, `staging-nession`, `staging-agent-nession`, …). Each site records
+its canonical `fqdn`, a reviewed `legacyFqdn` migration alias (or `null`),
+visibility, enabled flag, backend service/port, exact route policy, and the
+GitOps manifest that declares its hosts.
 
-Use required reviewers and restrict Environment deployment branches to
-`main`. The workflow also enforces exact repository and main-ref checks,
-reads only this registered site. DNS jobs have read-only GitHub permission; the TLS job uses scoped `contents: write` only to publish encrypted GitOps state.
-Token and origin IP are not printed in the workflow log.
+- All Server/Agent/UI sites are **private**, including staging-01/preprod.
+- Only `staging-mcp` and `production-mcp` are in the public allowlist.
+  `production-mcp` is declared but **not enabled**: its ingress is not enrolled
+  (#4529 pilot); activation requires a reviewed registry change, ingress
+  enrollment and an explicit approval.
+- `nhome.local` and unrelated `bestnathan.top` services are entirely out of
+  scope and preserved.
 
-If exposure of origin IP is an operational concern, restrict access to
-the Environment variables and DNS administration. Do not put the CF API Token,
-MCP bearer tokens, or TLS private keys into normal variables or checked-in
-configuration.
+The render comparison validates pinned GitOps state against the registry.
+During the #4588 migration a site may legitimately still declare its reviewed
+legacy alias (`legacy` status); anything else fails closed. **LAN DNS
+registration requires the canonical host** (`lan-readiness`), so a rewrite is
+never created for a name the gateway cannot yet route. Editable desired hosts
+live only on the gitops branch; the registry never writes a second desired
+state.
 
-## Run
+## GitHub Environment configuration
 
-Choose GitHub Actions → `Deploy / Configure Site` → `Run workflow`,
-branch `main`, site `staging-mcp`.
+All deployment-specific settings and provider credentials are GitHub
+Environment Variables/Secrets bound to protected main-only execution — never
+checked into GitOps, never injected into application/cluster Pods, never
+dispatch inputs. Environment values take precedence; repository-level sharing
+is only acceptable when intentional and protected by main-only execution.
+Values cannot override reviewed identities, visibility, the domain suffix,
+allowlists or backend identity.
 
-1. Run action `plan`. Validate input, active Zone, exact hostname records,
-   Cloudflare's official Edge IP ranges and current desired/observed state.
-   It reports only `create`, `noop`, `update`, or `blocked`.
-   **No provider mutations occur in plan.**
-2. After reviewing the plan and Origin TLS readiness, run `apply`.
-   Only the first registered site's A record may be created or PATCHed.
-   A write is not considered successful until exact provider readback
-   confirms the desired address and proxy state.
-3. Identical runs are no-ops. An existing owned record can be updated, but
-   duplicate A records, CNAME/AAAA conflicts and mismatched unmanaged
-   records are refused. A matching unmanaged record remains untouched; it
-   is not silently adopted. The fixed DNS comment identifies Nession-owned
-   records. The workflow **never deletes** Cloudflare resources.
-4. Editing GitHub Environment variables does **not** automatically dispatch
-   a workflow. Run `plan` and `apply` again for an intended origin change.
+| Name | Kind | Scope | Verified status (2026-11-27, names only) |
+|---|---|---|---|
+| `CLOUDFLARE_API_TOKEN` | **Secret** | public-provider jobs only | existing **repository-level** Secret inherited by environment jobs; environment-scoped override recommended |
+| `CLOUDFLARE_ZONE_ID` | **Variable** | public-provider jobs only | existing **repository-level** Variable |
+| `CLOUDFLARE_ORIGIN_IPV4` | **Secret** | public-provider jobs only | existing **repository-level** Secret (correcting historical doc drift that described an environment Variable) |
+| `SEALED_SECRETS_CERT_PEM` | **Variable** | legacy `issue-tls` only (public controller cert, not a credential) | referenced by the workflow; provision at environment or repository level if absent |
+| `LAN_GATEWAY_IP` | Environment **Variable** | LAN jobs (fixed internal RFC1918 ingress IPv4) | **provision** (not configured anywhere today) |
+| `ADGUARD_API_URL` | Environment **Variable** | LAN jobs (bare `https://<internal-IPv4>[:port]`) | **provision** |
+| `ADGUARD_USERNAME` / `ADGUARD_PASSWORD` | Environment **Secrets** | LAN jobs only | **provision** |
+| `GOST_RELAY_URL` | **Secret** | LAN jobs (reuse the existing protected relay value; no duplicate credential) | existing **repository-level** Secret, already used by main-only identity/readback workflows |
+| `DNS_RESOLVER` | Environment **Variable** | LAN `verify` probes (internal resolver IPv4) | **provision** (optional until verify is used) |
 
-For operational rollback of a Nession-owned A record, restore the prior
-origin IP Environment Variable and run `plan` then `apply`. DNS deletion
-or adoption of an unmanaged record requires separate operator review.
+Environment values take precedence over repository-level values when both
+exist. Repository-level sharing is acceptable only while intentional and
+protected by main-only execution (the workflow's repository/ref guard);
+moving the Cloudflare credentials into environment-scoped secrets with
+main-only branch policies is the recommended hardening, and requires the
+operator to re-enter values (secret values are never read back by automation).
 
-## Issue and seal Cloudflare Origin CA TLS (explicit action)
+Cloudflare secrets are supplied only to public-provider jobs; VPN and AdGuard
+credentials only to LAN jobs. No ACME credential or account key exists in
+Nession (nitops/cert-manager owns DNS-01). The workflow validates presence and
+shape and never prints values. The `staging` Environment currently has no
+server-side protection rules; the workflow enforces main-only execution itself.
+Operators should add a main-only branch policy where compatible with other
+consumers (the retained staging deploy flow also uses `staging`) — protection
+must never be weakened to land this contract. `production` has required
+reviewers; unattended scheduled plans there wait for review by design.
 
-After a successful DNS `apply` verified by Cloudflare API, choose
-`site=staging-mcp`, `action=issue-tls` in the **same** Actions workflow.
+## Execution contract
 
-The same existing `staging/CLOUDFLARE_API_TOKEN` is used in the protected TLS
-job; the workflow first verifies that the exact DNS record is Nession-owned,
-proxied and points to the configured Origin IPv4. Only then does it generate
-an RSA private key and CSR **locally on the runner**, request a certificate
-via Cloudflare `POST /client/v4/certificates` for exactly
-`staging-mcp-nession.bestnathan.top`, and validate the SAN, key match,
-validity and certificate scope.
+Modes (fixed dispatch choices; no arbitrary hostname/IP/URL/shell/branch input):
 
-It uses existing `vars.SEALED_SECRETS_CERT_PEM` to encrypt a strict
-`SealedSecret` offline, reusing the registered Kubernetes identity
-`nession/nession-mcp-staging-tls` and encrypted
-`environments/staging/mcp/sealed-tls.json`. Plaintext key files are
-mode 0600 and removed from the runner. The shared `gitops-writer`
-concurrency group prevents competing GitOps writers.
-There are no extra TLS Environment Secrets to upload; the legacy
-`MCP_TLS_PEM_BUNDLE` manual selection is retired. This is an explicit
-issuance and rotation action, **not** part of repeatable DNS `apply`,
-which remains read-only when `plan` and DNS-only when `apply`.
+- `plan` / `verify` / `plan-delete` — read-only for both providers. `verify`
+  adds independent LAN resolver A/AAAA probes (exact gateway A answer, no
+  public IPv6 fallback).
+- `apply` — re-reads provider state, verifies the reviewed plan receipt
+  (source SHA, GitOps revision, registry hash, environment/site identity,
+  observed and desired state hashes) and the canonical-host readiness, then
+  mutates only the exact reviewed desired records with independent readback.
+- `reconcile` — safe repair of already-approved desired state; sensitive work
+  without a reviewed approval is skipped and reported, never forced.
+- `delete` — exact owned-record removal only, bound to a reviewed approval
+  that records the precise record identity; fresh state is verified
+  immediately before deletion and readback afterwards.
+- `issue-tls` — legacy Origin CA issuance, retained until the retirement gate
+  permits removal (below).
 
-A successful action confirms Cloudflare issued a certificate and GitOps
-received ciphertext, **not** that the Kubernetes Secret was reconciled or
-Higress is serving the new certificate. Confirm the decrypted certificate
-**SAN on the running cluster**. Cloudflare Origin CA certs are trusted by
-Cloudflare on proxied origins using `Full (strict)`, not by direct public
-browsers. The workflow deliberately does **not** change Zone-wide SSL mode.
+Triggers: trusted main site-contract path changes → read-only plan; hourly
+scheduled read-only inventory/drift plan (staging); manual dispatch for all
+modes. Ordinary source/release builds never trigger DNS work, and nothing
+depends on bot-push follow-up events (GitOps writes with `GITHUB_TOKEN` emit no
+workflow runs). Environment Variable edits do not trigger workflows: the
+periodic plan and manual reconcile catch them.
 
-## TLS and application readiness are separate
+Concurrency: mutations serialize across **all** environments by the shared
+`site-dns-writer` authority; read-only plans queue separately; in-flight runs
+are never cancelled. The legacy TLS job keeps the shared `gitops-writer` lock.
 
-The one-label host `staging-mcp-nession.bestnathan.top` can be covered by
-Cloudflare Universal SSL at the **Edge**, provided the Zone/Edge certificate
-is active. That Edge certificate is distinct from the certificate installed
-on **Higress Origin**.
+Receipts: sanitized plan/result receipts (no token, origin IP, gateway IP or
+provider free text) are uploaded as artifacts keyed by source SHA, GitOps
+revision, registry hash, environment/site and Run/Attempt. Apply downloads the
+referenced plan run's receipt only after authenticating the producer run
+(exact workflow path, main branch, exact current source SHA, successful
+completion). A stale plan fails closed. Partial provider failure is observable
+per site; successful independent changes are never automatically undone, and
+AdGuard failure is not hidden by Cloudflare success.
 
-For Cloudflare `Full (strict)`, the Origin certificate must cover the new
-hostname and be a valid publicly trusted CA or Cloudflare Origin CA
-certificate. Origin CA may be trusted by Cloudflare but not by a direct
-off-proxy browser. Do not relax the whole Zone's SSL mode to make
-a broken Origin pass.
+## Approvals
 
-The previously deployed staging MCP Origin certificate was self-signed for
-the **old** hostname. After `issue-tls`, verify that the actual Kubernetes
-certificate has rotated to the new SAN, then update and re-seal the
-`staging/MCP_CONFIG_TOML` Host allowlist. The future ConfigMap/ENV-token
-migration (#3914) is a separate change. The GitOps
-`environments/staging/mcp/ingress.yaml` is intentionally excluded from
-Kustomize during the hostname migration (#3945); a separate reviewed
-GitOps activation is required after DNS, both TLS layers, authenticated
-MCP configuration and operator readback are verified.
+[approvals.json](../../scripts/ci/site-registry/approvals.json) records reviewed
+explicit approvals for sensitive operations: public activation, adoption,
+deletion, visibility transition, origin change, gateway change and Origin CA
+retirement. New approvals bind the exact desired-state scope and the registry
+content hash at review time; any registry change requires a fresh reviewed
+approval. The existing staging-MCP public activation is recorded as #3963/#3992
+lineage authorizing maintenance of exactly that reviewed state. Consumed
+one-time approvals should be pruned in the next reviewed registry PR. GitHub
+Environment protection (required reviewers for `production`) remains the
+runtime gate and is never weakened.
 
-DNS-only `plan/apply` never issues certificates or publishes Kubernetes
-resources. Explicit `issue-tls` does issue and seal the TLS Secret but
-**does not** activate public Ingress or alter the Zone's SSL mode.
-Never emit plaintext secrets or use insecure TLS verification with bearer tokens.
+## LAN DNS (AdGuard Home)
+
+[configure-adguard-dns.mjs](../../scripts/ci/configure-adguard-dns.mjs)
+implements list/add/update/delete exactly as the installed API supports
+(update = delete + add), comparing exact domain and answer with independent
+readback. The registry is the durable reviewed managed-record inventory
+(expected domain + `LAN_GATEWAY_IP` answer); ownership is never inferred from
+suffixes, caches or artifacts. Matching unmanaged records remain untouched and
+are never silently adopted; conflicting answers and duplicate collisions fail
+closed. `nhome.local`, unrelated rewrites, wildcards and TXT handling are never
+changed.
+
+Execution is solely through the protected main-owned job-scoped GOST/VPN
+([site-dns-tunnel.sh](../../scripts/ci/site-dns-tunnel.sh), reusing the #1616
+ownership pattern): the relay is scoped to the validated AdGuard endpoint only,
+the actual endpoint/port/TLS/authentication and rewrite API are preflighted,
+and job-owned processes/aliases/files are cleaned up on `always()`. The
+K8s-API-only identity tunnel is not proof of AdGuard routing. There is no
+Kubernetes CronJob, DNS reconciler controller, ExternalDNS, or AdGuard
+credential in Kubernetes.
+
+## Public edge policy
+
+[edge-policy.mjs](../../scripts/ci/site-registry/edge-policy.mjs) renders the
+reviewed allow/deny contract and the checked-in
+[edge-policy.fixture.json](../../scripts/ci/site-registry/edge-policy.fixture.json):
+only approved enabled Nession MCP hosts with exact `/mcp` pass; private/unknown
+Host/SNI (including direct-IP forced Host and SNI mismatch), alternate paths,
+spoofed forwarding headers and non-Cloudflare direct-origin sources are denied
+with no wildcard or private-route fallback. nitops#2 consumes this contract for
+actual enforcement; CF Universal SSL is unchanged and MCP origin policy must be
+Full (strict) effective, never a blind zone-wide change.
+
+## Legacy Origin CA retirement
+
+[retire-origin-ca.mjs](../../scripts/ci/site-registry/retire-origin-ca.mjs) gates
+removal of the `issue-tls` action and Origin CA implementation on **both**:
+
+1. a recorded #4588 cutover readiness
+   ([origin-ca-cutover-readiness.json](../../scripts/ci/site-registry/origin-ca-cutover-readiness.json):
+   `status=recorded`, `cutoverVerified=true`, exact GitOps revision,
+   authenticated edge TLS readback Run identity, approver and date), and
+2. zero remaining consumers in source and GitOps (deterministic identifier
+   scan; the gate itself and docs are allowlisted).
+
+Until then the mechanism remains available and the source invariant passes as
+`mechanism-present`. Retirement removes only TLS issuance: public DNS and the
+generic SealedSecret mechanism are preserved, #4588 owns the legacy GitOps TLS
+objects, and retirement/rollback never republishes private DNS.
 
 ## Errors
 
-- Bad IP or Cloudflare Edge IP: supply the true public Higress gateway.
-- Wrong Zone: verify `CLOUDFLARE_ZONE_ID` belongs to active `bestnathan.top`.
-- DNS blocked: inspect duplicate/conflicting/unowned records in Cloudflare
-  manually; do not automatically delete or adopt them.
-- HTTP/API errors: check Token permissions and Environment approvals.
-- Post-write readback mismatch: the action **failed**; run plan again and
-  inspect current provider state before retrying.
+- Missing/invalid Environment values: provision the exact names above; the
+  workflow fails closed without guessing.
+- Stale plan: re-run `plan`, review the new receipt, then `apply`.
+- Conflict/unowned record: inspect the provider manually; never auto-delete or
+  adopt. Deletion/adoption requires a reviewed approval bound to the exact record.
+- Legacy-host pending: complete the #4588 canonical host migration for the
+  site before LAN registration.
+- VPN/preflight failure: the LAN job fails closed and cleans up; check relay
+  policy and the approved endpoint, never widen the tunnel scope.
 
 Relevant Cloudflare documentation:
 - https://developers.cloudflare.com/api/resources/dns/subresources/records/
 - https://developers.cloudflare.com/api/resources/ips/methods/list/
 - https://developers.cloudflare.com/api/resources/zones/methods/get/
 - https://developers.cloudflare.com/ssl/edge-certificates/universal-ssl/limitations/
-- https://developers.cloudflare.com/ssl/origin-configuration/origin-ca/
