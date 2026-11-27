@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { claudeCodeApi } from '../ClaudeCodePlugin';
 import type {
   ClaudeCodeTranscriptItem,
   ClaudeCodeTranscriptsResponse,
 } from '../types';
+import { usePullRefresh, type PullRefreshPolicy } from '@/platform/refresh';
 
 /**
  * The exact Nession↔transcript binding, as the `transcripts` unit reports it
@@ -41,6 +42,17 @@ const EMPTY: TranscriptsListState = {
   error: null,
 };
 
+/** A visible Claude list on the ordinary mutable-list cadence (#4602 §2). */
+const TRANSCRIPTS_POLICY: PullRefreshPolicy = {
+  intervalMs: 30_000,
+  minIntervalMs: 3_000,
+  timeoutMs: 15_000,
+  onForeground: true,
+  onReconnect: true,
+  onActivate: true,
+  autoRetry: true,
+};
+
 function message(error: unknown): string {
   return error instanceof Error ? error.message : 'Unable to list the transcripts';
 }
@@ -48,9 +60,11 @@ function message(error: unknown): string {
 /**
  * The transcripts visible at one Session's cwd, and the exact binding.
  *
- * Not polled, for the reason the conversation list is not: the list answers
- * "what is here", which does not grow under a reader the way a timeline does.
- * A new transcript or a moved binding is one `refresh` away.
+ * The directory is a mutable remote list: a new transcript or a moved binding
+ * appears without the reader doing anything. #4602 supersedes the earlier
+ * "manual only" decision for this list — it reads while visible on the ordinary
+ * cadence, on show/resume/reconnect, and on an explicit refresh. The transcript
+ * *records* timeline is immutable history and keeps its own live-tail owner.
  *
  * The subagents are listed and are not selected here. Which transcript to open
  * is the caller's decision — a list that auto-opened the session's own
@@ -59,67 +73,61 @@ function message(error: unknown): string {
 export function useTranscripts({
   agentId,
   sessionId,
+  active = true,
+  enabled = true,
 }: {
   agentId: string | undefined;
   sessionId: string | undefined;
+  active?: boolean;
+  enabled?: boolean;
 }) {
   const [list, setList] = useState<TranscriptsListState>(EMPTY);
   const contextKey = agentId && sessionId ? `${agentId}:${sessionId}` : null;
-  const contextRef = useRef<string | null>(contextKey);
-  const requestId = useRef(0);
 
-  const fetchList = useCallback(
-    async (key: string, id: number) => {
-      const response = await claudeCodeApi.claudeCodeTranscripts({
-        agent_id: agentId as string,
-        session_id: sessionId as string,
-        limit: LIST_LIMIT,
-      });
-      if (contextRef.current !== key || requestId.current !== id) {
-        return;
-      }
-      setList({
-        state: response.state,
-        transcripts: response.items ?? [],
-        binding: response.binding ?? null,
-        loading: false,
-        error:
-          response.state === 'error'
-            ? (response.error ?? 'The transcripts could not be listed')
-            : null,
-      });
-    },
-    [agentId, sessionId],
-  );
-
-  const failIfCurrent = useCallback((key: string, id: number, error: unknown) => {
-    if (contextRef.current !== key || requestId.current !== id) {
-      return;
-    }
-    setList((current) => ({ ...current, loading: false, error: message(error) }));
+  const apply = useCallback((response: ClaudeCodeTranscriptsResponse) => {
+    setList({
+      state: response.state,
+      transcripts: response.items ?? [],
+      binding: response.binding ?? null,
+      loading: false,
+      error:
+        response.state === 'error'
+          ? (response.error ?? 'The transcripts could not be listed')
+          : null,
+    });
   }, []);
 
+  const { refresh: pull, status } = usePullRefresh<ClaudeCodeTranscriptsResponse>({
+    context: ['claude-transcripts', contextKey],
+    active: active && contextKey !== null,
+    enabled: enabled && contextKey !== null,
+    pull: () => claudeCodeApi.claudeCodeTranscripts({
+      agent_id: agentId as string,
+      session_id: sessionId as string,
+      limit: LIST_LIMIT,
+    }),
+    apply,
+    policy: TRANSCRIPTS_POLICY,
+    label: 'claude-transcripts',
+  });
+
   // A Session change is a different directory: nothing about the old one may
-  // remain on screen — not the items, not the binding.
+  // remain on screen — not the items, not the binding. The controller retires
+  // the old read; this clears the projection it would otherwise leave behind.
   useEffect(() => {
-    contextRef.current = contextKey;
-    const id = ++requestId.current;
     setList(EMPTY);
-    if (!contextKey) {
-      return;
-    }
-    void fetchList(contextKey, id).catch((e: unknown) => failIfCurrent(contextKey, id, e));
-  }, [contextKey, fetchList, failIfCurrent]);
+  }, [contextKey]);
 
-  /** Ask again — the only refresh the list gets, by design. */
   const refresh = useCallback(() => {
-    const key = contextRef.current;
-    if (!key) {
-      return;
-    }
-    const id = ++requestId.current;
-    void fetchList(key, id).catch((e: unknown) => failIfCurrent(key, id, e));
-  }, [failIfCurrent, fetchList]);
+    if (!contextKey) { return; }
+    void pull('manual');
+  }, [contextKey, pull]);
 
-  return { list, refresh };
+  return {
+    list: { ...list, loading: list.loading || status.loading },
+    refresh,
+    refreshing: status.refreshing,
+    stale: status.stale,
+    error: list.error ?? (status.error ? message(status.error) : null),
+  };
 }

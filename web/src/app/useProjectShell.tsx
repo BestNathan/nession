@@ -40,6 +40,8 @@ export function useProjectShell(
     selectedProjectId: state.selectedProjectId,
     onCreate: dialogs.openCreate,
     onRetry: () => { void projects.refresh(); },
+    onRefresh: () => { void projects.refresh(); },
+    refreshing: projects.refreshing,
     onSelect: (project) => state.handleSelectProject(project.project_id),
     onClose: state.handleCloseProject,
     onRename: dialogs.openRename,

@@ -1,5 +1,6 @@
 import { FolderKanban, MoreHorizontal, Pencil, Plus, Settings, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -34,28 +35,38 @@ export function ProjectNavSection({
       data-navigation-section="projects"
       data-variant={variant}
       aria-label="Projects"
-      className={cn('flex shrink-0 flex-col', shell.projects.length === 0 && 'pb-1')}
+      className={cn('flex shrink-0 flex-col', shell.projects.length === 0 && 'pb-[var(--nession-projects-section-inset-y)]')}
     >
       <SidebarSectionHead
         label="Projects"
         action={
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            data-testid="project-create"
-            aria-label="Create Project"
-            title="Create Project"
-            onClick={() => shell.onCreate()}
-            className="size-6 text-muted-foreground hover:text-foreground"
-          >
-            <Plus className="size-4" aria-hidden />
-          </Button>
+          <span className="flex items-center">
+            {shell.onRefresh ? (
+              <RefreshButton
+                onClick={() => shell.onRefresh?.()}
+                loading={shell.refreshing ?? false}
+                variant="ghost"
+                ariaLabel="Refresh projects"
+              />
+            ) : null}
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              data-testid="project-create"
+              aria-label="Create Project"
+              title="Create Project"
+              onClick={() => shell.onCreate()}
+              className="size-[length:var(--nession-projects-create-button-size)] text-muted-foreground hover:text-foreground"
+            >
+              <Plus className="size-[length:var(--nession-projects-row-icon-size)]" aria-hidden />
+            </Button>
+          </span>
         }
       />
-      <div className="flex min-h-0 flex-col overflow-y-auto pb-1">
+      <div className="flex min-h-0 flex-col overflow-y-auto pb-[var(--nession-projects-section-inset-y)]">
         {shell.error ? (
-          <div className={cn('flex items-center justify-between gap-2 px-2 py-1 text-destructive', chromeSansRole('secondary'))}>
+          <div className={cn('flex items-center justify-between gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)] text-destructive', chromeSansRole('secondary'))}>
             <span className="min-w-0 truncate" data-testid="projects-error">
               {shell.error}
             </span>
@@ -70,13 +81,13 @@ export function ProjectNavSection({
             </Button>
           </div>
         ) : shell.loading && shell.projects.length === 0 ? (
-          <p className={cn('px-2 py-1 text-muted-foreground', chromeSansRole('secondary'))}>
+          <p className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)] text-muted-foreground', chromeSansRole('secondary'))}>
             Loading Projects…
           </p>
         ) : shell.projects.length === 0 ? (
           <p
             data-testid="projects-empty"
-            className={cn('px-2 py-1 text-muted-foreground', chromeSansRole('secondary'))}
+            className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)] text-muted-foreground', chromeSansRole('secondary'))}
           >
             No Projects yet
           </p>
@@ -103,11 +114,11 @@ function ProjectRow({ project, shell }: { project: Project; shell: ProjectShellP
         aria-current={selected ? 'page' : undefined}
         onClick={() => shell.onSelect(project)}
         className={cn(
-          'h-auto min-w-0 flex-1 justify-start gap-2 rounded-[var(--nession-radius-surface)] px-2 py-1.5 text-left',
+          'h-auto min-w-0 flex-1 justify-start gap-[var(--nession-shell-space-2)] rounded-[var(--nession-radius-surface)] px-[var(--nession-shell-space-2)] py-[var(--nession-projects-row-inset-y)] text-left',
           selected && 'bg-accent text-accent-foreground',
         )}
       >
-        <FolderKanban className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        <FolderKanban className="size-[length:var(--nession-projects-row-icon-size)] shrink-0 text-muted-foreground" aria-hidden />
         <span className="flex min-w-0 flex-col">
           <span data-testid="project-item-title" className="truncate">
             {project.name}
@@ -126,13 +137,13 @@ function ProjectRow({ project, shell }: { project: Project; shell: ProjectShellP
               variant="ghost"
               data-testid={`project-actions-${project.project_id}`}
               aria-label={`Manage ${project.name}`}
-              className="mt-0.5 shrink-0 text-muted-foreground hover:text-foreground max-lg:size-11"
+              className="mt-[var(--nession-projects-actions-offset-y)] shrink-0 text-muted-foreground hover:text-foreground max-lg:size-[length:var(--nession-projects-actions-touch-size)]"
             />
           }
         >
-          <MoreHorizontal className="size-4" />
+          <MoreHorizontal className="size-[length:var(--nession-projects-row-icon-size)]" />
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuContent align="end" className="w-[var(--nession-projects-menu-width)]">
           <DropdownMenuItem
             data-testid={`project-actions-rename-${project.project_id}`}
             onClick={() => shell.onRename(project)}

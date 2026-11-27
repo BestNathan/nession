@@ -208,7 +208,12 @@ describe('useAppConnection', () => {
     // The restore flag has to clear in a StrictMode build exactly as it does in
     // a production one: it gates the visibility-reconnect path, so leaving it
     // set would send a doomed handshake on every tab focus.
-    expect(vi.mocked(useVisibilityReconnect)).toHaveBeenLastCalledWith(false, result.current.wsService);
+    expect(vi.mocked(useVisibilityReconnect)).toHaveBeenLastCalledWith(
+      false,
+      result.current.wsService,
+      // #4602: the foreground-ready callback that publishes the refresh signal.
+      expect.any(Function),
+    );
   });
 
   it('a fresh explicit auth refusal after reconnection returns to login', async () => {

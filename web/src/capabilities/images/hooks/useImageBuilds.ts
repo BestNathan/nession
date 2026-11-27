@@ -6,6 +6,7 @@ import {
   type ImageBuildStatus,
 } from '../ImagesPlugin';
 import { IMAGE_PAGE_SIZE } from '../model';
+import { usePullRefresh, type PullRefreshPolicy } from '@/platform/refresh';
 
 export interface ImageBuildsState {
   builds: ImageBuildDescriptor[];
@@ -16,6 +17,8 @@ export interface ImageBuildsState {
   sources: ImageBuildSourceKind[];
   query: string;
   loading: boolean;
+  refreshing: boolean;
+  stale: boolean;
   error: string | null;
   actionError: string | null;
   hasPrevious: boolean;
@@ -134,104 +137,120 @@ interface BuildPageSelection {
   query: string;
 }
 
-/** Reads one authoritative page and applies pushed transitions to it. */
+/** Running builds are live work: the fast cadence (#4602 §2). */
+const BUILDS_POLICY: PullRefreshPolicy = {
+  intervalMs: 12_000,
+  minIntervalMs: 2_000,
+  timeoutMs: 15_000,
+  onForeground: true,
+  onReconnect: true,
+  onActivate: true,
+  autoRetry: true,
+};
+
+interface BuildPageAnswer {
+  builds: ImageBuildDescriptor[];
+  total: number;
+}
+
+/**
+ * Reads one authoritative page and applies pushed transitions to it.
+ *
+ * The page's filter selection is the read context (#4602): an older query's
+ * reply can no longer land on a newer selection. A push is applied to a record
+ * only while that record still belongs to the filtered page — a transition that
+ * moves it out of the filter, or a new build that belongs in it, re-reads the
+ * authoritative page instead of patching the list and guessing a total.
+ */
 function useBuildPage(selection: BuildPageSelection) {
   const { limit, offset, setOffset, statuses, sources, query } = selection;
   const [builds, setBuilds] = useState<ImageBuildDescriptor[]>([]);
   const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [revision, setRevision] = useState(0);
-  const previousState = useRef(imagesApi.connectionState());
-  const pageState = useRef({ builds, total, offset, statuses, sources, query, limit });
   const statusKey = useMemo(() => [...statuses].sort().join(','), [statuses]);
   const sourceKey = useMemo(() => [...sources].sort().join(','), [sources]);
 
-  useEffect(() => {
-    pageState.current = { builds, total, offset, statuses, sources, query, limit };
-  }, [builds, total, offset, statuses, sources, query, limit]);
+  // Assigned during render, not in an effect: a push arriving between a filter
+  // change and its effect must already see the new selection.
+  const pageState = useRef({ builds, total, offset, statuses, sources, query, limit });
+  pageState.current = { builds, total, offset, statuses, sources, query, limit };
 
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    void imagesApi
-      .listBuilds({ offset, limit, statuses, sources, query })
-      .then((page) => {
-        if (cancelled) {
-          return;
-        }
-        // A page whose records expired under the current offset falls back to
-        // the last page that still exists instead of claiming the history is
-        // empty.
-        if (page.builds.length === 0 && page.total > 0 && offset > 0) {
-          const lastStart = Math.floor((page.total - 1) / limit) * limit;
-          if (lastStart !== offset) {
-            setOffset(lastStart);
-            return;
-          }
-        }
-        setBuilds(page.builds);
-        setTotal(page.total);
-        setError(null);
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) {
-          return;
-        }
-        setBuilds([]);
-        setTotal(0);
-        setError(cause instanceof Error ? cause.message : 'Image builds could not be loaded');
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [limit, offset, query, revision, setOffset, sourceKey, sources, statusKey, statuses]);
+  const apply = useCallback((page: BuildPageAnswer) => {
+    // A page whose records expired under the current offset falls back to
+    // the last page that still exists instead of claiming the history is
+    // empty.
+    if (page.builds.length === 0 && page.total > 0 && offset > 0) {
+      const lastStart = Math.floor((page.total - 1) / limit) * limit;
+      if (lastStart !== offset) {
+        setOffset(lastStart);
+        return;
+      }
+    }
+    setBuilds(page.builds);
+    setTotal(page.total);
+  }, [offset, limit, setOffset]);
 
-  useEffect(
-    () =>
-      imagesApi.onBuildChanged((build) => {
-        const page = pageState.current;
-        const index = page.builds.findIndex(
-          (candidate) => candidate.build_id === build.build_id,
-        );
-        if (index >= 0) {
-          const next = [...page.builds];
-          next[index] = build;
-          setBuilds(next);
-          return;
-        }
-        // A build entering this filtered page is only added when the page
-        // starts at the newest record; otherwise the page is re-read.
-        if (
-          page.offset === 0
-          && buildMatches(build, page.statuses, page.sources, page.query)
-        ) {
-          setBuilds([build, ...page.builds].slice(0, page.limit));
-          setTotal(page.total + 1);
-        }
-      }),
-    [],
-  );
+  const { refresh: pull, invalidate, status } = usePullRefresh<BuildPageAnswer>({
+    context: ['image-builds', offset, limit, statusKey, sourceKey, query],
+    pull: () => imagesApi.listBuilds({ offset, limit, statuses, sources, query }),
+    apply,
+    policy: BUILDS_POLICY,
+    label: 'image-builds',
+  });
+
+  const invalidateRef = useRef(invalidate);
+  invalidateRef.current = invalidate;
+  const pullRef = useRef(pull);
+  pullRef.current = pull;
+  const previousConnection = useRef(imagesApi.connectionState());
 
   useEffect(
     () =>
       imagesApi.onConnectionStateChange((state) => {
         // A new physical connection may have missed pushes: the durable
-        // inventory is authoritative and is re-read once it is back.
-        if (previousState.current !== 'connected' && state === 'connected') {
-          setRevision((current) => current + 1);
+        // inventory is authoritative and is re-read once it is back. The read
+        // goes through the controller, so it shares the fence and budget and
+        // coalesces with a foreground signal from the app composition.
+        if (previousConnection.current !== 'connected' && state === 'connected') {
+          void pullRef.current('reconnect');
         }
-        previousState.current = state;
+        previousConnection.current = state;
       }),
     [],
   );
 
-  const refresh = useCallback(() => setRevision((current) => current + 1), []);
+  useEffect(
+    () =>
+      imagesApi.onBuildChanged((build) => {
+        const page = pageState.current;
+        const matches = buildMatches(build, page.statuses, page.sources, page.query);
+        const index = page.builds.findIndex(
+          (candidate) => candidate.build_id === build.build_id,
+        );
+        if (index >= 0) {
+          if (!matches) {
+            // The transition moved this record out of the active filter. The
+            // page's membership and count are the Server's to answer.
+            invalidateRef.current('invalidate');
+            return;
+          }
+          const next = [...page.builds];
+          next[index] = build;
+          setBuilds(next);
+          return;
+        }
+        if (matches) {
+          // A build entering this filtered page changes both membership and
+          // total. Re-read rather than fabricating a row and a count.
+          invalidateRef.current('invalidate');
+        }
+      }),
+    [],
+  );
+
+  const refresh = useCallback(() => {
+    void pull('manual');
+  }, [pull]);
+
   const applyRecord = useCallback((build: ImageBuildDescriptor) => {
     setBuilds((current) => {
       const index = current.findIndex(
@@ -246,7 +265,16 @@ function useBuildPage(selection: BuildPageSelection) {
     });
   }, []);
 
-  return { builds, total, loading, error, refresh, applyRecord };
+  return {
+    builds,
+    total,
+    loading: status.loading,
+    refreshing: status.refreshing,
+    stale: status.stale,
+    error: status.error,
+    refresh,
+    applyRecord,
+  };
 }
 
 /** Cancel/retry bound to the observed attempt; a refusal re-reads the page. */
@@ -313,6 +341,8 @@ export function useImageBuilds(limit = IMAGE_PAGE_SIZE): ImageBuildsState {
     sources: filters.sources,
     query: filters.query,
     loading: page.loading,
+    refreshing: page.refreshing,
+    stale: page.stale,
     error: page.error,
     actionError: actions.actionError,
     hasPrevious: filters.offset > 0,

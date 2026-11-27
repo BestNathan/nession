@@ -100,6 +100,7 @@ See `docs/architecture/web.md` for the complete layer model. E2E Playwright live
 
 - Jotai atoms live in their owner's `state/` (`product/<concept>/state/`, `platform/<domain>/state/`). `src/atoms/` is gone. Prefer small domain atoms over mega-stores. **State follows ownership, not state-management technology** — "it is a Jotai atom" is not a boundary, and there is no central state directory to default into (#801 Phase 5).
 - Session / attach / file flows go through app-composition and owner hooks rather than embedding WebSocket calls deep in presentational components.
+- Remote list reads go through `platform/refresh` (`usePullRefresh`): the controller owns when a read happens and whether its answer may publish; the owner keeps its data, scope, filters and mutations. Do not add a per-view `setInterval`, a hand-written request fence, or a second refresh path beside the controller. Cadence policy and the per-surface inventory live with the owners and in `docs/architecture/web-refresh-inventory.md`; Git stays demand-only (#4455).
 - Terminal attach supports relay (via server) and P2P (direct to agent). Preserve the existing `ConnectionManager` / transport boundaries.
 - A new capability should expose an owner-owned API/plugin boundary rather than leaking transport concerns into UI composition.
 

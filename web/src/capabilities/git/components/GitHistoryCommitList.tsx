@@ -1,6 +1,7 @@
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { formatBytes } from '../state';
 import type { GitCommit } from '../types';
 
@@ -37,6 +38,15 @@ export function GitHistoryCommitList({
       viewportClassName="max-h-[50%] flex-none border-b lg:max-h-none lg:shrink lg:border-b-0 lg:border-r"
     >
       <div data-testid="git-commit-list" className="flex flex-col p-[var(--nession-shell-space-1)]">
+        {/* #4455 demand-only: the manual re-read of the history listing, visible
+            rather than sr-only. No interval or watcher is added. */}
+        <div className="flex shrink-0 items-center justify-end px-[var(--nession-shell-space-1)] pb-[var(--nession-shell-space-1)]">
+          <RefreshButton
+            onClick={() => onRefresh()}
+            variant="ghost"
+            ariaLabel="Refresh"
+          />
+        </div>
         {commits.map((commit) => (
           <CommitRow
             key={commit.hash}
@@ -80,9 +90,6 @@ export function GitHistoryCommitList({
             History truncated — {formatBytes(truncatedBytes)} not read.
           </p>
         ) : null}
-        <button type="button" className="sr-only" onClick={onRefresh}>
-          Refresh
-        </button>
       </div>
     </WorkspaceBoundedScrollport>
   );

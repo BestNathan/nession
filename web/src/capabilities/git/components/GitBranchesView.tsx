@@ -1,6 +1,8 @@
+import type { ReactNode } from 'react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { useGitBranches } from '../hooks/useGitBranches';
 import { describeUnavailable, formatBytes } from '../state';
 import { GitNotice } from './GitNotice';
@@ -32,57 +34,52 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
-  const { branches, loading, error } = useGitBranches({ agentId, sessionId });
+  const { branches, loading, error, refresh } = useGitBranches({ agentId, sessionId });
 
+  // #4455 demand-only: this section reads on open and on an explicit refresh —
+  // the toolbar below is the manual entry, never an interval or watcher.
+  let body: ReactNode;
   if (loading) {
-    return <GitNotice testId="git-branches-loading">Reading branches…</GitNotice>;
-  }
-  if (error) {
-    return (
+    body = <GitNotice testId="git-branches-loading">Reading branches…</GitNotice>;
+  } else if (error) {
+    body = (
       <GitNotice testId="git-branches-error" destructive>
         {error}
       </GitNotice>
     );
-  }
-  if (!branches) {
-    return <GitNotice testId="git-branches-empty">No branches yet.</GitNotice>;
-  }
-  if (branches.state !== 'ok') {
-    return (
+  } else if (!branches) {
+    body = <GitNotice testId="git-branches-empty">No branches yet.</GitNotice>;
+  } else if (branches.state !== 'ok') {
+    body = (
       <div
         data-testid="git-branches-unavailable"
         data-state={branches.state}
-        className="flex h-full min-h-0 items-center justify-center px-6 text-center"
+        className="flex h-full min-h-0 items-center justify-center px-[var(--nession-shell-space-5)] text-center"
       >
         <p className={cn('max-w-sm text-muted-foreground', chromeSansRole('secondary'))}>
           {describeUnavailable(branches).title}
         </p>
       </div>
     );
-  }
-
-  const { branches: rows, limit, truncated, truncated_bytes } = branches.branches;
-
-  if (rows.length === 0) {
+  } else if (branches.branches.branches.length === 0) {
     // A repository with no commits has no branches. That is `git init` and
     // nothing else — a state, not a failure.
-    return (
+    body = (
       <GitNotice testId="git-branches-none">
         This repository has no branches yet.
       </GitNotice>
     );
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* #4188: the Branches section is a declared `bounded` App surface
-          (GitWorkspace), so this list is the internal scroll owner. It spends
-          the host-measured inset here instead of leaving a long ref listing
-          clipped by the bounded region with no way to reach its end. */}
+  } else {
+    const { branches: rows, limit, truncated, truncated_bytes } = branches.branches;
+    body = (
+      /* #4188: the Branches section is a declared `bounded` App surface
+         (GitWorkspace), so this list is the internal scroll owner. It spends
+         the host-measured inset here instead of leaving a long ref listing
+         clipped by the bounded region with no way to reach its end. */
       <WorkspaceBoundedScrollport
         data-testid="git-branch-list"
         viewportClassName="flex flex-col"
-        className="p-1"
+        className="p-[var(--nession-shell-space-1)]"
       >
         {rows.map((branch) => (
           <BranchRow key={branch.name} branch={branch} />
@@ -90,7 +87,7 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
         {rows.length >= limit ? (
           <p
             data-testid="git-branches-more"
-            className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
+            className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}
           >
             Showing {limit} of this repository&rsquo;s branches. The rest are not
             loaded.
@@ -99,12 +96,25 @@ export function GitBranchesView({ ctx }: { ctx: WorkspaceContext }) {
         {truncated ? (
           <p
             data-testid="git-branches-truncated"
-            className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
+            className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}
           >
             Branch listing truncated — {formatBytes(truncated_bytes)} not read.
           </p>
         ) : null}
       </WorkspaceBoundedScrollport>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-end border-b px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)]">
+        <RefreshButton
+          onClick={() => refresh()}
+          variant="ghost"
+          ariaLabel="Refresh branches"
+        />
+      </div>
+      {body}
     </div>
   );
 }
@@ -116,11 +126,11 @@ function BranchRow({ branch }: { branch: GitBranch }) {
       data-branch={branch.name}
       data-current={branch.current ? 'true' : undefined}
       className={cn(
-        'flex flex-col gap-0.5 rounded-[var(--nession-radius-surface)] px-2 py-1.5',
+        'flex flex-col gap-[var(--nession-rhythm-fact-stack)] rounded-[var(--nession-radius-surface)] px-[var(--nession-shell-space-2)] py-[var(--nession-rhythm-field-stack)]',
         branch.current && 'bg-accent text-accent-foreground',
       )}
     >
-      <span className={cn('flex items-center gap-1.5', chromeSansRole('secondary'))}>
+      <span className={cn('flex items-center gap-[var(--nession-rhythm-field-stack)]', chromeSansRole('secondary'))}>
         {/* The marker git itself prints, in the same place it prints it, so a
             list read here and a list read in a terminal agree line for line. */}
         {branch.current ? (

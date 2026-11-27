@@ -54,6 +54,9 @@ export interface WorkspaceRegionProps {
   fileOps: FileOps | null;
   onCreate: () => void;
   onRefresh: () => void;
+  refreshingSessions?: boolean;
+  refreshingAgents?: boolean;
+  onRefreshAgents?: () => void;
   onSelect: (session: Session) => void;
   onOpenWorktreeSession?: (worktree: import('@/capabilities/git/types').GitWorktree) => Promise<void>;
   onConfigure: (session: Session) => void;
@@ -89,7 +92,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
     connectionStatus, agents, filteredSessions, sessions = filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
     sortField, sortDirection, toggleSort, isSearchActive, selectedSession,
-    selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, onSelect,
+    selectedAgent, domain, surface, tool, fileOps, onCreate, onRefresh, refreshingSessions, refreshingAgents, onRefreshAgents, onSelect,
     onConfigure, onKill, onViewSessionDetails, onEditSessionDetails,
     onSurfaceChange, onToolChange, onOpenWorktreeSession, isWide,
     experienceOverride, showList, onBackToSessions, onCloseDrawer, terminal,
@@ -142,7 +145,7 @@ export function WorkspaceRegion(props: WorkspaceRegionProps) {
   const sidebarProps = {
     agents, filteredSessions, totalSessionCount, staleAgents, selectedId, clientSessionId, connectionStatus, domain,
     loadingSessions, searchQuery, setSearchQuery, statusFilter, setStatusFilter,
-    sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh,
+    sortField, sortDirection, toggleSort, isSearchActive, onCreate, onRefresh, refreshingSessions, refreshingAgents, onRefreshAgents,
     onConfigure, onKill, onViewDetails: onViewSessionDetails, onEditDetails: onEditSessionDetails,
     onAssociateProject: (session: Session) => projectBinding.open(session),
     projectShell,
