@@ -755,9 +755,13 @@ pub fn compose_mcp_tool_providers(
     // #4073: `claude.enter` prepares Claude's own Workspace Trust immediately
     // before launch, resolved from this same live Session view.
     let trust = Arc::new(WorkspaceTrust::new(context));
+    // #4665: submit confirms delivery through the same canonical reader the
+    // read Tools use — one transcript authority, not a second parser.
+    let submit_reader: Arc<dyn nession_claude_code::conversation_reader::ClaudeConversationReader> =
+        reader.clone();
     vec![Arc::new(ClaudeCodeToolProvider::new(
         agent_id,
-        Arc::new(AgentClaudeControl::new(agent_id, tmux)),
+        Arc::new(AgentClaudeControl::new(agent_id, tmux, submit_reader)),
         reader,
         trust,
     ))]
