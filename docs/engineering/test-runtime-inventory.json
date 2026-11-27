@@ -4,7 +4,7 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1913,
+    "entries": 1916,
     "references": 1022,
     "unresolved": 0
   },
@@ -6879,6 +6879,16 @@
       "disposition": "e2e-runtime"
     },
     {
+      "file": "e2e/acceptance/cases/4618/SC-07/verify.spec.js",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4618/SC-09/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
       "file": "e2e/acceptance/cases/4620/SC-01/verify.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
@@ -9105,6 +9115,11 @@
     },
     {
       "file": "web/src/platform/probe/__tests__/unit/httpProbe.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/platform/probe/__tests__/unit/probeBenchmark.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
     },

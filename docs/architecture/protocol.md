@@ -496,7 +496,10 @@ permission change that alters observable behaviour.
 
 Do **not** upgrade for a bug fix, an internal refactor, a new optional field
 whose absence preserves the old meaning, or a new response field consumers
-already tolerate.
+already tolerate. For example, `AgentAddress.probe_url` (#4618) is an additive
+`Option<String>` (`serde(default, skip_serializing_if = "Option::is_none")`):
+a peer that omits it is probed through the legacy WS-upgrade compatibility path,
+so mixed-version clients/servers/agents stay compatible without a version bump.
 
 The only in-place field rename is the owner-approved **pre-release**
 normalization documented in [Transport field names](#transport-field-names);

@@ -42,6 +42,9 @@ Examples:
 - Agent online, Session active, attachment failed → explain attach failure; do not call it an Agent outage.
 - Server transport reconnecting while the Session and attachment are known → keep the work surface mounted and state the recovery; do not fall back to Login or discard the detached Terminal.
 - Explicit Agent/Location detail → all applicable dimensions may be shown for diagnosis.
+- Reachability probe vs transport health (#4618): an HTTP probe observation is not transport authority. A failed probe does not by itself retire a healthy authenticated route, and a successful probe does not clear a WS failure budget. Surface "awaiting network / reconnecting" while recovery runs; only an explicit auth refusal is terminal.
+- Finite foreground budget (#4618): after a bounded foreground attempt budget the restore spinner yields to the mounted work surface with a manual Retry, while background recovery continues. Do not spin indefinitely over a recoverable outage.
+- Address detail / Re-test (#4618): per-address probe facts (pending marker, last result, measuredAt, method `http` / `legacy-ws`, reason) are published individually by the probe scheduler as each probe settles — not a single batched verdict. The detail surface presents them per row; a Re-test refreshes unchanged addresses without a remount.
 
 ## Canonical states
 
