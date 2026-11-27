@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "kind": "agent_execution_trace",
+  "identity": {
+    "workflow_id": "agent-staging-convergence-review",
+    "github_run_id": 44986721235,
+    "github_run_attempt": 1,
+    "unique_run_name": "44986721235-1-conflict-4258",
+    "repository": "BestNathan/nession"
+  },
+  "task": {
+    "id": "conflict-4258",
+    "type": "staging-convergence-conflict-review",
+    "issue": 2953,
+    "target_sha": "dccf01014b3055067bde44145f78f7934cae2859",
+    "pr": 4258
+  },
+  "agent": {
+    "id": "staging-convergence-reviewer",
+    "role": "analyst",
+    "provider": "claude-code",
+    "harness_sha256": null
+  },
+  "timing": {
+    "started_at": "2026-11-22T04:50:08.364Z",
+    "finished_at": "2026-11-22T04:50:08.364Z"
+  },
+  "coverage": {
+    "model": "unobserved",
+    "tools": "unobserved",
+    "skills": "unobserved",
+    "mcp": "unobserved"
+  },
+  "events": []
+}
