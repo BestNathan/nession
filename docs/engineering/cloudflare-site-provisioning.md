@@ -63,17 +63,24 @@ is only acceptable when intentional and protected by main-only execution.
 Values cannot override reviewed identities, visibility, the domain suffix,
 allowlists or backend identity.
 
-| Name | Kind | Scope | Status |
+| Name | Kind | Scope | Verified status (2026-11-27, names only) |
 |---|---|---|---|
-| `CLOUDFLARE_API_TOKEN` | Environment **Secret** | public-provider jobs (`staging` today; `production` for future MCP activation) | existing in `staging` |
-| `CLOUDFLARE_ZONE_ID` | Environment **Variable** | public-provider jobs | existing in `staging` |
-| `CLOUDFLARE_ORIGIN_IPV4` | Environment **Secret** | public-provider jobs | existing in `staging` (**Secret**, correcting historical doc drift that described a Variable) |
-| `SEALED_SECRETS_CERT_PEM` | Environment **Variable** | legacy `issue-tls` only (public controller cert, not a credential) | existing |
-| `LAN_GATEWAY_IP` | Environment **Variable** | LAN jobs (fixed internal RFC1918 ingress IPv4) | **provision** |
+| `CLOUDFLARE_API_TOKEN` | **Secret** | public-provider jobs only | existing **repository-level** Secret inherited by environment jobs; environment-scoped override recommended |
+| `CLOUDFLARE_ZONE_ID` | **Variable** | public-provider jobs only | existing **repository-level** Variable |
+| `CLOUDFLARE_ORIGIN_IPV4` | **Secret** | public-provider jobs only | existing **repository-level** Secret (correcting historical doc drift that described an environment Variable) |
+| `SEALED_SECRETS_CERT_PEM` | **Variable** | legacy `issue-tls` only (public controller cert, not a credential) | referenced by the workflow; provision at environment or repository level if absent |
+| `LAN_GATEWAY_IP` | Environment **Variable** | LAN jobs (fixed internal RFC1918 ingress IPv4) | **provision** (not configured anywhere today) |
 | `ADGUARD_API_URL` | Environment **Variable** | LAN jobs (bare `https://<internal-IPv4>[:port]`) | **provision** |
 | `ADGUARD_USERNAME` / `ADGUARD_PASSWORD` | Environment **Secrets** | LAN jobs only | **provision** |
-| `GOST_RELAY_URL` | Environment **Secret** | LAN jobs (reuse the existing protected relay value; operator confirms relay policy permits the LAN environment scope) | exists in `nession-staging-identity`; **provision for the LAN execution environment** |
+| `GOST_RELAY_URL` | **Secret** | LAN jobs (reuse the existing protected relay value; no duplicate credential) | existing **repository-level** Secret, already used by main-only identity/readback workflows |
 | `DNS_RESOLVER` | Environment **Variable** | LAN `verify` probes (internal resolver IPv4) | **provision** (optional until verify is used) |
+
+Environment values take precedence over repository-level values when both
+exist. Repository-level sharing is acceptable only while intentional and
+protected by main-only execution (the workflow's repository/ref guard);
+moving the Cloudflare credentials into environment-scoped secrets with
+main-only branch policies is the recommended hardening, and requires the
+operator to re-enter values (secret values are never read back by automation).
 
 Cloudflare secrets are supplied only to public-provider jobs; VPN and AdGuard
 credentials only to LAN jobs. No ACME credential or account key exists in
