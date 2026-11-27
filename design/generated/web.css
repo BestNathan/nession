@@ -274,6 +274,13 @@
   --nession-overlay-dialog-z: 50;
   --nession-overlay-anchored-z: 100;
   --nession-overlay-tooltip-z: 110;
+  --nession-projects-section-inset-y: 4px;
+  --nession-projects-create-button-size: 24px;
+  --nession-projects-row-icon-size: 16px;
+  --nession-projects-row-inset-y: 6px;
+  --nession-projects-actions-touch-size: 44px;
+  --nession-projects-actions-offset-y: 2px;
+  --nession-projects-menu-width: 192px;
 }
 
 .dark {

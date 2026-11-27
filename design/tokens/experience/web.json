@@ -685,5 +685,36 @@
     "tooltipZ": {
       "value": 110
     }
+  },
+  "projects": {
+    "$description": "Projects navigation section geometry (#3025). Established pixel baselines preserved through the #4602 token migration; surface-specific, not the cross-Experience rhythm scale.",
+    "sectionInsetY": {
+      "$description": "Bottom inset of the section when empty; preserves the established 4px pb-1.",
+      "value": "4px"
+    },
+    "createButtonSize": {
+      "$description": "Create Project icon button box; preserves the established 24px size-6.",
+      "value": "24px"
+    },
+    "rowIconSize": {
+      "$description": "Project row and menu glyph size; preserves the established 16px size-4.",
+      "value": "16px"
+    },
+    "rowInsetY": {
+      "$description": "Project row vertical padding; preserves the established 6px py-1.5.",
+      "value": "6px"
+    },
+    "actionsTouchSize": {
+      "$description": "Narrow-viewport project actions touch target; preserves the established 44px size-11.",
+      "value": "44px"
+    },
+    "actionsOffsetY": {
+      "$description": "Project actions button top offset; preserves the established 2px mt-0.5.",
+      "value": "2px"
+    },
+    "menuWidth": {
+      "$description": "Project actions dropdown width; preserves the established 192px w-48.",
+      "value": "192px"
+    }
   }
 }
