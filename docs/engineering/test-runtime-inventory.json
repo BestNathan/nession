@@ -4,7 +4,7 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1896,
+    "entries": 1902,
     "references": 1016,
     "unresolved": 0
   },
@@ -8311,6 +8311,11 @@
       "disposition": "web-unit"
     },
     {
+      "file": "web/src/app/experiences/app/__tests__/unit/pullRefreshGesture.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
       "file": "web/src/app/experiences/app/__tests__/unit/useAppFilesSelection.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
@@ -8851,6 +8856,11 @@
       "disposition": "web-unit"
     },
     {
+      "file": "web/src/capabilities/images/hooks/__tests__/integration/useImageBuilds.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
       "file": "web/src/capabilities/mcp-ui/__tests__/integration/McpKitView.test.tsx",
       "owner": "web vitest",
       "disposition": "web-unit"
@@ -9057,6 +9067,26 @@
     },
     {
       "file": "web/src/platform/protocol/__tests__/unit/resolve.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/platform/refresh/__tests__/integration/usePullRefresh.test.tsx",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/platform/refresh/__tests__/unit/PullController.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/platform/refresh/__tests__/unit/RefreshScheduler.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/platform/refresh/__tests__/unit/RefreshSignalBus.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
     },
