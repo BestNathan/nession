@@ -15,7 +15,10 @@
 // (after the first `#[cfg(test)]`), `e2e/tests`, `e2e/helpers`,
 // `e2e/acceptance/cases`, `web/src/**/*.test.*`, and `scripts/**` selftests.
 
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -62,8 +65,8 @@ function walk(dir, predicate, out = []) {
   return out;
 }
 
-function rel(full) {
-  return path.relative(ROOT, full).split(path.sep).join('/');
+function rel(full, root = ROOT) {
+  return path.relative(root, full).split(path.sep).join('/');
 }
 
 function readLines(full) {
@@ -155,19 +158,19 @@ function entryRow(file, owner, disposition, extra = {}) {
   return { file, owner, disposition, ...extra };
 }
 
-function collect() {
-  const crates = fs.readdirSync(path.join(ROOT, 'crates'), { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(ROOT, 'crates', entry.name, 'Cargo.toml')))
+function collect(root = ROOT) {
+  const crates = fs.readdirSync(path.join(root, 'crates'), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && fs.existsSync(path.join(root, 'crates', entry.name, 'Cargo.toml')))
     .map((entry) => 'crates/' + entry.name)
     .sort();
 
   const entries = [];
   const references = [];
 
-  const rustFiles = walk(path.join(ROOT, 'crates'), (full) => full.endsWith('.rs'));
+  const rustFiles = walk(path.join(root, 'crates'), (full) => full.endsWith('.rs'));
 
   for (const full of rustFiles.sort()) {
-    const file = rel(full);
+    const file = rel(full, root);
     if (PROBE_RE.test(file)) continue;
     const lines = readLines(full);
     let start = 1;
@@ -197,23 +200,23 @@ function collect() {
     }
   }
 
-  for (const full of walk(path.join(ROOT, 'e2e'), (f) =>
+  for (const full of walk(path.join(root, 'e2e'), (f) =>
     /\.(spec|test)\.(ts|tsx|js|mjs|cjs)$/.test(f) ||
     /\/verify[^/]*\.(js|cjs|mjs|ts)$/.test(f), []).sort()) {
-    const file = rel(full);
+    const file = rel(full, root);
     if (PROBE_RE.test(file)) continue;
     entries.push(entryRow(file, 'e2e/runner/runtime/full-stack.js', 'e2e-runtime'));
   }
 
-  for (const full of walk(path.join(ROOT, 'web', 'src'), (f) =>
+  for (const full of walk(path.join(root, 'web', 'src'), (f) =>
     /\.(test|spec)\.(ts|tsx|js|jsx)$/.test(f)).sort()) {
-    const file = rel(full);
+    const file = rel(full, root);
     entries.push(entryRow(file, 'web vitest', 'web-unit'));
   }
 
-  for (const full of walk(path.join(ROOT, 'scripts'), (f) =>
+  for (const full of walk(path.join(root, 'scripts'), (f) =>
     /(selftest|\.test\.)\.(mjs|js|sh)$/.test(f)).sort()) {
-    const file = rel(full);
+    const file = rel(full, root);
     if (PROBE_RE.test(file)) continue;
     entries.push(entryRow(file, 'scripts tooling', 'tooling'));
   }
@@ -221,7 +224,7 @@ function collect() {
   // Scan the E2E and tooling entries too; Rust references were collected above.
   for (const entry of entries.filter((item) => !item.file.startsWith('crates/'))) {
     if (!/\.(ts|tsx|js|mjs|cjs|sh)$/.test(entry.file)) continue;
-    const lines = readLines(path.join(ROOT, entry.file));
+    const lines = readLines(path.join(root, entry.file));
     const caseOwned = /makeRoot|createRunRoot|mkdtemp|tmpdir|freePort|allocateLoopbackPort|mktemp|installEnv/.test(lines.join('\n'));
     for (let i = 0; i < lines.length; i += 1) {
       const line = lines[i];
@@ -263,25 +266,299 @@ function collect() {
   };
 }
 
-function main() {
-  const check = process.argv.includes('--check');
-  const inventory = collect();
+function inventoryText(root = ROOT) {
+  return JSON.stringify(collect(root), null, 2) + '\n';
+}
+
+function git(args) {
+  return execFileSync('git', ['-C', ROOT, ...args], {
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+}
+
+/** Parent commits of HEAD; empty when HEAD is not a commit or has one parent. */
+function headParents() {
+  try {
+    const line = git(['rev-list', '--parents', '-n', '1', 'HEAD']).trim();
+    return line.split(/\s+/).filter(Boolean).slice(1);
+  } catch {
+    return [];
+  }
+}
+
+/** Materialize an exact parent tree in a fresh temp dir; null when unavailable. */
+function extractCommitTree(commit) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-inventory-parent.'));
+  try {
+    execFileSync('bash', ['-c',
+      'git -C "$1" archive --format=tar "$2" | tar -x -C "$3"',
+      'bash', ROOT, commit, dir], { stdio: ['ignore', 'ignore', 'pipe'] });
+    return dir;
+  } catch {
+    fs.rmSync(dir, { recursive: true, force: true });
+    return null;
+  }
+}
+
+function reportUnresolved(inventory) {
+  console.error('[test-runtime-inventory] ' + inventory.summary.unresolved +
+    ' unresolved reference(s):');
+  for (const row of inventory.references.filter((item) => item.disposition === 'unresolved')) {
+    console.error('  ' + row.file + ':' + row.line + ' [' + row.kind + '] ' + row.reference);
+  }
+}
+
+// The staleness contract is branch-authored: the committed catalog must be
+// current for the tree it is committed on. A convergence integration head is a
+// pure two-parent composition with no authored regeneration commit, so its
+// catalog can never contain the union tree's new rows. On such a merge commit
+// the committed file must be exactly current for one parent branch that owns
+// it, and the composed tree must still introduce no unresolved reference.
+// Authored single-parent commits keep the original exact-equality rule.
+function checkInventory() {
+  const inventory = collect(ROOT);
   const text = JSON.stringify(inventory, null, 2) + '\n';
-  if (check) {
-    const file = path.join(ROOT, OUTPUT);
-    const committed = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
-    if (committed !== text) {
-      console.error('[test-runtime-inventory] the committed inventory is stale; run `node ' + OUTPUT.replace('docs/engineering/test-runtime-inventory.json', 'scripts/test-runtime-inventory.mjs') + '`');
-    }
-    if (inventory.summary.unresolved > 0) {
-      console.error('[test-runtime-inventory] ' + inventory.summary.unresolved + ' unresolved reference(s):');
-      for (const row of inventory.references.filter((item) => item.disposition === 'unresolved')) {
-        console.error('  ' + row.file + ':' + row.line + ' [' + row.kind + '] ' + row.reference);
+  const file = path.join(ROOT, OUTPUT);
+  const committed = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+  const parents = committed === text ? [] : headParents();
+  let ownerParent = null;
+  let unavailableParent = null;
+  if (parents.length >= 2) {
+    for (const parent of parents) {
+      const dir = extractCommitTree(parent);
+      if (dir === null) {
+        unavailableParent = parent;
+        continue;
+      }
+      try {
+        if (inventoryText(dir) === committed) {
+          ownerParent = parent;
+          break;
+        }
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
       }
     }
-    if (committed !== text || inventory.summary.unresolved > 0) process.exitCode = 1;
+  }
+  if (committed !== text && !ownerParent) {
+    console.error('[test-runtime-inventory] the committed inventory is stale; run `node ' +
+      OUTPUT.replace('docs/engineering/test-runtime-inventory.json',
+        'scripts/test-runtime-inventory.mjs') + '`');
+    if (unavailableParent) {
+      console.error('[test-runtime-inventory] merge parent ' + unavailableParent +
+        ' is not available in this checkout; the merge-head contract needs full history ' +
+        '(fetch-depth: 0)');
+    } else if (parents.length >= 2) {
+      console.error('[test-runtime-inventory] no parent tree of this merge commit generates ' +
+        'the committed inventory; regenerate it on the owning branch before merging');
+    } else {
+      let shallow = false;
+      try {
+        shallow = git(['rev-parse', '--is-shallow-repository']).trim() === 'true';
+      } catch { /* not a git checkout: the generic stale message stands */ }
+      if (shallow) {
+        console.error('[test-runtime-inventory] this is a shallow checkout; the merge-head ' +
+          'contract cannot see the parent trees (fetch full history, fetch-depth: 0)');
+      }
+    }
+  }
+  if (inventory.summary.unresolved > 0) reportUnresolved(inventory);
+  if (ownerParent) {
+    console.log('[test-runtime-inventory] merge head: the committed inventory is current for ' +
+      'owner parent ' + ownerParent + '; the composed tree has ' +
+      inventory.summary.unresolved + ' unresolved reference(s)');
+  }
+  if ((committed !== text && !ownerParent) || inventory.summary.unresolved > 0) {
+    process.exitCode = 1;
+  }
+}
+
+// ── Merge-head contract self-test ───────────────────────────────────────────
+// A tiny git fixture proves the authored, merge-owner-parent, composed-
+// unresolved and tampered-head cases. The checker copy runs from the fixture
+// repository so its ROOT is the fixture, exactly like a real checkout.
+
+function fixtureEnv() {
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) {
+    if (key.startsWith('GIT_')) delete env[key];
+  }
+  return env;
+}
+
+function fixtureGit(root, args) {
+  return execFileSync('git', ['-C', root, ...args], {
+    encoding: 'utf8',
+    env: fixtureEnv(),
+  }).trim();
+}
+
+function fixtureCommit(root, message) {
+  fixtureGit(root, ['add', '-A']);
+  fixtureGit(root, ['-c', 'user.name=fixture', '-c', 'user.email=fixture@example.invalid',
+    'commit', '-q', '-m', message]);
+  return fixtureGit(root, ['rev-parse', 'HEAD']);
+}
+
+function fixtureRun(root, args = []) {
+  const run = spawnSync(process.execPath,
+    [path.join(root, 'scripts', 'test-runtime-inventory.mjs'), ...args],
+    { cwd: root, encoding: 'utf8', env: fixtureEnv() });
+  return {
+    status: typeof run.status === 'number' ? run.status : 1,
+    output: String(run.stdout || '') + String(run.stderr || ''),
+  };
+}
+
+function fixtureWriteCase(root, name) {
+  const dir = path.join(root, 'e2e', 'acceptance', 'cases', 'fixture', name);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'verify.js'),
+    "'use strict';\n" +
+    "const { spawn } = require('node:child_process');\n" +
+    "const runRoot = process.env.CASE_RUN_ROOT;\n" +
+    "spawn('tmux', ['-S', runRoot + '/tmux.sock']);\n");
+}
+
+function fixtureWriteUnresolvedRust(root) {
+  const dir = path.join(root, 'crates', 'fixture', 'tests');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'port.rs'),
+    '#[test]\nfn fixed_port() {\n' +
+    '    let addr = "127.0.0.1:19090";\n' +
+    '    assert!(!addr.is_empty());\n}\n');
+}
+
+/** A git fixture with a generated inventory committed at `base`. */
+function fixtureRepo() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'nession-inventory-selftest.'));
+  fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+  fs.copyFileSync(fileURLToPath(import.meta.url),
+    path.join(root, 'scripts', 'test-runtime-inventory.mjs'));
+  fs.mkdirSync(path.join(root, 'crates', 'fixture', 'src'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'crates', 'fixture', 'Cargo.toml'),
+    '[package]\nname = "fixture"\nversion = "0.0.0"\n');
+  fs.writeFileSync(path.join(root, 'crates', 'fixture', 'src', 'lib.rs'), 'pub fn ok() {}\n');
+  fixtureGit(root, ['init', '-q']);
+  fixtureGit(root, ['config', 'user.name', 'fixture']);
+  fixtureGit(root, ['config', 'user.email', 'fixture@example.invalid']);
+  fixtureCommit(root, 'base');
+  const generated = fixtureRun(root);
+  if (generated.status !== 0) throw new Error('fixture inventory generation failed: ' + generated.output);
+  const base = fixtureCommit(root, 'inventory');
+  return { root, base };
+}
+
+function selfTest() {
+  // 1. An authored commit with a current catalog passes.
+  {
+    const { root } = fixtureRepo();
+    try {
+      const run = fixtureRun(root, ['--check']);
+      assert.equal(run.status, 0, 'authored commit with current inventory must pass: ' + run.output);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  // 2. A single-parent authored commit with an un-regenerated reference fails.
+  {
+    const { root, base } = fixtureRepo();
+    try {
+      fixtureGit(root, ['checkout', '-q', base]);
+      fixtureWriteCase(root, 'stale');
+      fixtureCommit(root, 'stale authored commit');
+      const run = fixtureRun(root, ['--check']);
+      assert.equal(run.status, 1, 'stale authored commit must fail');
+      assert.match(run.output, /stale/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  // 3. A two-parent integration head whose catalog is current for the owning
+  //    parent passes; the other parent's classified reference may be new.
+  {
+    const { root, base } = fixtureRepo();
+    try {
+      fixtureGit(root, ['checkout', '-q', '-b', 'stage-side', base]);
+      fixtureWriteCase(root, 'stage');
+      fixtureRun(root);
+      fixtureCommit(root, 'stage inventory');
+      fixtureGit(root, ['checkout', '-q', '-b', 'main-side', base]);
+      fixtureWriteCase(root, 'main');
+      fixtureCommit(root, 'main reference');
+      fixtureGit(root, ['checkout', '-q', 'stage-side']);
+      fixtureGit(root, ['merge', '-q', '--no-ff', 'main-side', '-m', 'integration']);
+      const run = fixtureRun(root, ['--check']);
+      assert.equal(run.status, 0, 'merge head current for its owner parent must pass: ' + run.output);
+      assert.match(run.output, /current for owner parent/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  // 4. The composed tree must still have zero unresolved references even when
+  //    the committed catalog is current for an owner parent.
+  {
+    const { root, base } = fixtureRepo();
+    try {
+      fixtureGit(root, ['checkout', '-q', '-b', 'stage-side', base]);
+      fixtureWriteCase(root, 'stage');
+      fixtureRun(root);
+      fixtureCommit(root, 'stage inventory');
+      fixtureGit(root, ['checkout', '-q', '-b', 'main-side', base]);
+      fixtureWriteUnresolvedRust(root);
+      fixtureCommit(root, 'unresolved reference');
+      fixtureGit(root, ['checkout', '-q', 'stage-side']);
+      fixtureGit(root, ['merge', '-q', '--no-ff', 'main-side', '-m', 'integration']);
+      const run = fixtureRun(root, ['--check']);
+      assert.equal(run.status, 1, 'a composed unresolved reference must fail');
+      assert.match(run.output, /unresolved reference/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  // 5. A merge head whose catalog matches no parent tree fails closed.
+  {
+    const { root, base } = fixtureRepo();
+    try {
+      fixtureGit(root, ['checkout', '-q', '-b', 'stage-side', base]);
+      fixtureWriteCase(root, 'stage');
+      fixtureRun(root);
+      fixtureCommit(root, 'stage inventory');
+      fixtureGit(root, ['checkout', '-q', '-b', 'main-side', base]);
+      fixtureWriteCase(root, 'main');
+      fixtureCommit(root, 'main reference');
+      fixtureGit(root, ['checkout', '-q', 'stage-side']);
+      fixtureGit(root, ['merge', '-q', '--no-ff', 'main-side', '-m', 'integration']);
+      fs.appendFileSync(path.join(root, OUTPUT), '\n');
+      fixtureGit(root, ['add', '-A']);
+      fixtureGit(root, ['commit', '--amend', '-q', '--no-edit']);
+      const run = fixtureRun(root, ['--check']);
+      assert.equal(run.status, 1, 'a tampered merge head must fail closed');
+      assert.match(run.output, /stale/);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  }
+
+  console.log('[test-runtime-inventory] merge-head contract self-test: 5 fixtures passed');
+}
+
+function main() {
+  if (process.argv.includes('--self-test')) {
+    selfTest();
     return;
   }
+  if (process.argv.includes('--check')) {
+    checkInventory();
+    return;
+  }
+  const inventory = collect(ROOT);
+  const text = JSON.stringify(inventory, null, 2) + '\n';
   fs.mkdirSync(path.dirname(path.join(ROOT, OUTPUT)), { recursive: true });
   fs.writeFileSync(path.join(ROOT, OUTPUT), text);
   console.log('[test-runtime-inventory] wrote ' + OUTPUT + ': ' +
