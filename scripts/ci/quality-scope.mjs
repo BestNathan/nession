@@ -77,6 +77,8 @@ export function explainQualityFamilies(paths) {
       hit('native','cargo-workspace-input');
     }
     if(p.startsWith('web/src/generated/protocol/'))hit('rust','rust-codegen-output');
+    // CLI integration tests read the root README as a real parser/schema fixture.
+    if(p==='README.md')hit('rust','cli-documentation-contract-input');
     if(webInput(p)){
       hit('web','web-design-input');
       hit('tooling','web-design-input');

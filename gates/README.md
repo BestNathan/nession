@@ -98,7 +98,7 @@ be narrowed.
 
 | Family | Positive inputs / unresolved boundary |
 |---|---|
-| Rust | Workspace crates, Cargo/toolchain/config, protocol generated output, Rust checker owners (coverage, test route, codegen, worktree/cache, handler locality), deployment inputs used by runtime/tmux checks, shared recipes/Quality workflow; unresolved scripts/shared Gates |
+| Rust | Workspace crates, Cargo/toolchain/config, protocol generated output, root README (CLI parser/schema fixture), Rust checker owners (coverage, test route, codegen, worktree/cache, handler locality), deployment inputs used by runtime/tmux checks, shared recipes/Quality workflow; unresolved scripts/shared Gates |
 | Native | Agent/CLI/Server and their local Cargo dependencies, Cargo configuration/lock, the native fixture and its Node driver, owning Quality/release workflows |
 | Web | Web/design inputs, protocol crates, Web checker owners, shared recipes/Quality workflow; unresolved scripts/shared Gates |
 | Tooling | Repository scripts/Gates, Web/design, deployment, hooks, E2E/automation/Pages and unclassified paths |
@@ -106,7 +106,10 @@ be narrowed.
 | Instruction | Repository instruction/Skill graph and hook inputs |
 
 The Cargo manifest regression verifies local workspace/path dependency coverage,
-including native transitive dependencies. When introducing an out-of-tree build
+including native transitive dependencies. The source-input guard also checks
+literal Rust includes and manifest-relative references; it runs in both Rust
+and Tooling Quality suites. Arbitrary dynamically constructed paths still
+require owner review. When introducing an out-of-tree build
 asset, embedded fixture, new check dependency or native fixture input, register
 its actual path family in the selector and extend its positive and negative
 fixtures in the same PR. Keep unknown diagnostics distinct from an inability to

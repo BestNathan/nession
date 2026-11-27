@@ -180,3 +180,73 @@ test('Cargo manifest path dependencies remain inside positive Rust input boundar
     }
   }
 });
+
+test('repository README is a real Rust CLI test input, not ordinary docs',()=>{
+  assert.deepEqual(flags(['README.md']),{...none,rust:true});
+  assert.deepEqual(flags(['docs/architecture/ordinary.md']),none);
+  assert.equal(explain(['README.md']).reasons.rust[0].rule,'cli-documentation-contract-input');
+});
+
+// A bounded guard for statically discoverable source inputs. Rust macros and
+// manifest-relative literals can refer outside the workspace crate subtree.
+// Arbitrary dynamic paths cannot be proven by this scanner: the external
+// input registration rule and owner review still apply.
+function sourceInputReferences(file,text){
+  const crate=file.split('/').slice(0,2).join('/');
+  const out=[];
+  const append=(value,relativeTo,kind)=>{
+    const target=path.posix.normalize(path.posix.join(relativeTo,value.replace(/^\/+/,'')));
+    out.push({target,kind});
+  };
+  for(const m of text.matchAll(/\binclude(?:_str|_bytes)?!\s*\(\s*(?:r#*)?"([^"\n]+)"/g))
+    append(m[1],path.posix.dirname(file),'include');
+  for(const m of text.matchAll(/\bconcat!\s*\(\s*env!\s*\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*"([^"\n]+)"/g))
+    append(m[1],crate,'manifest-relative');
+  return out;
+}
+function unregisteredSourceInputs(file,text){
+  return sourceInputReferences(file,text).filter(({target,kind})=>{
+    // The WS baseline explicitly writes to this ignored output directory;
+    // this is not a checked-in test input. Keep the exception source-bound.
+    if(file==='crates/nession-runtime/tests/ws_runtime_baseline.rs' &&
+       target==='target' && kind==='manifest-relative')return false;
+    if(target==='..' || target.startsWith('../'))return true;
+    if(!choose([target]).rust)return true;
+    // Native builds can consume embedded resources outside the crate tree.
+    // Do not require Native for Rust-only runtime test reads (e.g. CLI README).
+    return kind==='include' && choose([file]).native && !choose([target]).native;
+  });
+}
+test('external literal source input guard detects unregistered paths',()=>{
+  const file='crates/nession-cli/tests/integration/cli_contract.rs';
+  assert.deepEqual(unregisteredSourceInputs(file,'read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"))'),[]);
+  assert.deepEqual(unregisteredSourceInputs(file,'read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../../new-area/settings.json"))'),[
+    {target:'new-area/settings.json',kind:'manifest-relative'}
+  ]);
+  assert.deepEqual(unregisteredSourceInputs('crates/nession-agent/src/lib.rs','include_bytes!("../../../new-area/payload.bin")'),[
+    {target:'new-area/payload.bin',kind:'include'}
+  ]);
+  assert.deepEqual(unregisteredSourceInputs('crates/nession-runtime/src/metrics.rs','include_str!("../assets/ws-runtime-dashboards.json")'),[]);
+});
+test('tracked Rust sources register statically discoverable build and test inputs',()=>{
+  const failures=[];
+  function visit(dir){
+    for(const ent of fs.readdirSync(path.join(root,dir),{withFileTypes:true})){
+      const rel=dir+'/'+ent.name;
+      if(ent.isDirectory()){
+        if(ent.name!=='target' && ent.name!=='.git')visit(rel);
+      } else if(ent.isFile() && rel.endsWith('.rs')){
+        const content=fs.readFileSync(path.join(root,rel),'utf8');
+        for(const input of unregisteredSourceInputs(rel,content))
+          failures.push(rel+' -> '+input.target+' ('+input.kind+')');
+      }
+    }
+  }
+  visit('crates');
+  assert.deepEqual(failures,[],'register the actual Rust/native source input boundary');
+  // This guard must execute when Rust source changes, not only on Tooling diffs.
+  for(const suite of ['quality-rust','quality-tooling']){
+    const contents=fs.readFileSync(path.join(root,'gates/suites/'+suite+'.gates'),'utf8');
+    assert.ok(contents.split('\n').includes('ci-pr-routing-selftest'),'missing '+suite+' source-input guard');
+  }
+});
