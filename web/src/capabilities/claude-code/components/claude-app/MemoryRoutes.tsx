@@ -1,3 +1,4 @@
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { MemoryView } from '../MemoryView';
 import type { ClaudeAppData } from './model';
 
@@ -6,6 +7,14 @@ export function MemoryRoute({ data }: { data: ClaudeAppData }) {
   const memory = data.state.memory;
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="claude-app-memory">
+      {/* #4602: resting manual refresh of the memory directory. */}
+      <div className="flex shrink-0 justify-end border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)]">
+        <RefreshButton
+          onClick={() => memory.retry()}
+          variant="ghost"
+          ariaLabel="Refresh Claude Code memory"
+        />
+      </div>
       <MemoryView
         memory={memory.memory}
         layout="push"

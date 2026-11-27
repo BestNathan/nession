@@ -3,10 +3,13 @@ import {
   workspaceApi,
   type AgentWorkspaceDescriptor,
 } from '../WorkspacePlugin';
+import { usePullRefresh, type PullRefreshPolicy } from '@/platform/refresh';
 
 export interface AgentWorkspacesState {
   workspaces: AgentWorkspaceDescriptor[];
   loading: boolean;
+  refreshing: boolean;
+  stale: boolean;
   error: string | null;
   busy: boolean;
   actionError: string | null;
@@ -16,61 +19,52 @@ export interface AgentWorkspacesState {
   clearActionError: () => void;
 }
 
+/** A visible Sandbox list on the ordinary mutable-list cadence (#4602 §2). */
+const WORKSPACES_POLICY: PullRefreshPolicy = {
+  intervalMs: 30_000,
+  minIntervalMs: 3_000,
+  timeoutMs: 15_000,
+  onForeground: true,
+  onReconnect: true,
+  onActivate: true,
+  autoRetry: true,
+};
+
 /**
  * The current Session Agent's managed Workspace inventory (#3407, #3408).
  *
  * Reads never synthesize a registry: an unavailable Agent shows the transport
  * error and an empty inventory stays empty. Create is idempotent by name on
  * the Agent; delete is refused there while a Workspace is attached.
+ *
+ * The read lifecycle belongs to the shared pull controller (#4602). Create and
+ * remove keep their authoritative post-state projection and then owe one
+ * targeted read, so a concurrent change elsewhere is not missed.
  */
 export function useAgentWorkspaces(sessionId: string | null): AgentWorkspacesState {
   const [workspaces, setWorkspaces] = useState<AgentWorkspaceDescriptor[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [revision, setRevision] = useState(0);
 
+  const { refresh: pull, invalidate, status } = usePullRefresh<AgentWorkspaceDescriptor[]>({
+    context: ['agent-workspaces', sessionId],
+    active: sessionId !== null,
+    enabled: sessionId !== null,
+    pull: () => workspaceApi.list(sessionId as string),
+    apply: setWorkspaces,
+    policy: WORKSPACES_POLICY,
+    label: 'agent-workspaces',
+  });
+
+  // A different Session is a different Agent's inventory: nothing about the
+  // previous one may remain on screen.
   useEffect(() => {
-    if (sessionId === null) {
-      setWorkspaces([]);
-      setLoading(false);
-      setError(null);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    workspaceApi
-      .list(sessionId)
-      .then((next) => {
-        if (!cancelled) {
-          setWorkspaces(next);
-        }
-      })
-      .catch((failure: unknown) => {
-        if (!cancelled) {
-          setWorkspaces([]);
-          setError(
-            failure instanceof Error
-              ? failure.message
-              : 'The Agent Workspace inventory is unavailable',
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionId, revision]);
+    setWorkspaces([]);
+  }, [sessionId]);
 
   const refresh = useCallback(() => {
-    setRevision((current) => current + 1);
-  }, []);
+    void pull('manual');
+  }, [pull]);
 
   const create = useCallback(
     async (name: string): Promise<AgentWorkspaceDescriptor | null> => {
@@ -92,6 +86,7 @@ export function useAgentWorkspaces(sessionId: string | null): AgentWorkspacesSta
             index === existing ? created : workspace,
           );
         });
+        invalidate('mutation');
         return created;
       } catch (failure: unknown) {
         setActionError(
@@ -102,7 +97,7 @@ export function useAgentWorkspaces(sessionId: string | null): AgentWorkspacesSta
         setBusy(false);
       }
     },
-    [sessionId],
+    [sessionId, invalidate],
   );
 
   const remove = useCallback(
@@ -117,6 +112,7 @@ export function useAgentWorkspaces(sessionId: string | null): AgentWorkspacesSta
         setWorkspaces((current) =>
           current.filter((workspace) => workspace.workspace_id !== workspaceId),
         );
+        invalidate('mutation');
         return true;
       } catch (failure: unknown) {
         setActionError(
@@ -127,7 +123,7 @@ export function useAgentWorkspaces(sessionId: string | null): AgentWorkspacesSta
         setBusy(false);
       }
     },
-    [sessionId],
+    [sessionId, invalidate],
   );
 
   const clearActionError = useCallback(() => {
@@ -136,8 +132,10 @@ export function useAgentWorkspaces(sessionId: string | null): AgentWorkspacesSta
 
   return {
     workspaces,
-    loading,
-    error,
+    loading: status.loading,
+    refreshing: status.refreshing,
+    stale: status.stale,
+    error: status.error,
     busy,
     actionError,
     refresh,

@@ -55,6 +55,9 @@ export interface ProjectShellProps {
   selectedProjectId: string | null;
   onCreate: () => void;
   onRetry: () => void;
+  /** #4602: resting manual refresh of the Project list, available when healthy. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
   onSelect: (project: Project) => void;
   onClose: () => void;
   onRename: (project: Project) => void;

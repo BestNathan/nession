@@ -35,7 +35,7 @@ function ShellNotices({
       {error ? (
         <div
           data-testid="shell-error"
-          className={cn('flex shrink-0 items-center gap-2 bg-destructive/10 px-3 py-2 text-destructive', chromeSansRole('body'))}
+          className={cn('flex shrink-0 items-center gap-[var(--nession-shell-space-2)] bg-destructive/10 px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)] text-destructive', chromeSansRole('body'))}
         >
           <span className="min-w-0 flex-1">{error}</span>
           <Tooltip>
@@ -45,20 +45,20 @@ function ShellNotices({
                   type="button"
                   variant="ghost"
                   size="icon"
-                  className="size-5"
+                  className="size-[length:var(--nession-control-sm)]"
                   aria-label="Dismiss error"
                   onClick={() => onDismiss()}
                 />
               }
             >
-              <X className="size-3" />
+              <X className="size-[length:var(--nession-icon-sm)]" />
             </TooltipTrigger>
             <TooltipContent side="bottom">Dismiss</TooltipContent>
           </Tooltip>
         </div>
       ) : null}
       {connectionStatus === 'disconnected' && onRetry ? (
-        <div role="status" className="flex shrink-0 items-center justify-center gap-2 px-3 py-1 text-muted-foreground">
+        <div role="status" className="flex shrink-0 items-center justify-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-1)] text-muted-foreground">
           <span className={chromeSansRole('secondary')}>Connection unavailable</span>
           <Button type="button" size="sm" variant="ghost" onClick={onRetry}>Retry</Button>
         </div>
@@ -127,7 +127,7 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
       <div
         data-testid="shell"
         data-sf-design="polish"
-        className="shell flex h-[100dvh] flex-col bg-background"
+        className="shell flex h-dvh flex-col bg-background"
       >
         <ShellNotices
           error={data.error}
@@ -136,8 +136,8 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
           onRetry={onRetry}
         />
         {state.isRestoringDeepLink ? (
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3">
-            <Loader2 className="size-8 animate-spin text-muted-foreground" />
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-[var(--nession-shell-space-3)]">
+            <Loader2 className="size-[length:var(--nession-control-md)] animate-spin text-muted-foreground" />
             <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Restoring terminal session…</p>
           </div>
         ) : (
@@ -166,7 +166,10 @@ export function Shell({ connectionStatus, onRetry }: ShellProps) {
             tool={state.tool}
             fileOps={state.fileOps}
             onCreate={() => data.setShowCreateModal(true)}
-            onRefresh={() => { void data.fetchSessions({ force: true }); }}
+            onRefresh={() => { void data.refreshSessions(); }}
+            refreshingSessions={data.refreshingSessions}
+            refreshingAgents={data.refreshingAgents}
+            onRefreshAgents={() => { void data.refreshAgents(); }}
             onSelect={state.handleSelect}
             onOpenWorktreeSession={state.handleOpenWorktreeSession}
             onConfigure={state.openAttachSettings}

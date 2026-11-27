@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { workspaceFixedContextClearanceClass } from '@/shared/lib/workspaceScrollClearance';
@@ -25,11 +26,11 @@ export function ConfigurationRoute({ data }: { data: ClaudeAppData }) {
   const activeScope = state.activeScope;
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="claude-app-configuration">
-      <div className="flex shrink-0 items-center border-b px-4 py-2">
+      <div className="flex shrink-0 items-center border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)]">
         <div
           role="group"
           aria-label="Claude configuration scope"
-          className="flex gap-1 rounded-[var(--nession-radius-control)] bg-muted p-1"
+          className="flex gap-[var(--nession-shell-space-1)] rounded-[var(--nession-radius-control)] bg-muted p-[var(--nession-shell-space-1)]"
         >
           {CONFIG_SCOPES.map((scope) => (
             <Button
@@ -45,6 +46,14 @@ export function ConfigurationRoute({ data }: { data: ClaudeAppData }) {
             </Button>
           ))}
         </div>
+        {/* #4602: resting manual refresh of the current config scope. */}
+        <span className="ml-auto">
+          <RefreshButton
+            onClick={() => state.handleRetry(activeScope)}
+            variant="ghost"
+            ariaLabel="Refresh Claude Code configuration"
+          />
+        </span>
       </div>
       <ScopePanel
         state={state.scopeStates[activeScope]}
@@ -61,7 +70,7 @@ export function ConfigurationRoute({ data }: { data: ClaudeAppData }) {
       <p
         data-workspace-fixed-role="context"
         data-testid="claude-app-configuration-note"
-        className={cn('shrink-0 px-4 py-2 text-muted-foreground', chromeSansRole('caption'), workspaceFixedContextClearanceClass)}
+        className={cn('shrink-0 px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('caption'), workspaceFixedContextClearanceClass)}
       >
         Configuration is read-only here. Editing belongs to an explicitly authorized
         operation.

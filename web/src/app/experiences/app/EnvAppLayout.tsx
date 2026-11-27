@@ -157,6 +157,8 @@ function RootDepth({
           onNew={screen.startNew}
           onImport={env.openImport}
           onRetry={() => void profiles.refresh()}
+          onRefresh={() => void profiles.refresh()}
+          refreshing={profiles.refreshing}
           restoredScrollTop={listScrollTop.current}
           onScrollSnapshot={(top) => {
             listScrollTop.current = top;

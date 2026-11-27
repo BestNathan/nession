@@ -932,3 +932,73 @@ test.describe('App keyboard avoidance (#3523)', () => {
     await resetVisualViewport(page);
   });
 });
+
+// #4602 SC-05: the manual refresh action is the contract in every state, and the
+// host pull is only an accelerator over the same current-scope read.
+test.describe('App manual refresh and host pull (#4602)', () => {
+  async function openSessions(page: Page, query = '') {
+    await page.goto(`/#/fixture/app${query}`);
+    await page.getByTestId('app-header-sessions').first().click();
+    await expect(page.getByTestId('app-layer-sessions')).toBeInViewport();
+  }
+
+  async function dragPull(page: Page, dx: number, dy: number) {
+    await page.evaluate(([dx, dy]) => {
+      const host = document.querySelector('[data-testid="app-sessions-pull-host"]');
+      if (!host) { throw new Error('pull host missing'); }
+      const rect = host.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + 30;
+      host.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 1, clientX: x, clientY: y, bubbles: true }));
+      for (let i = 1; i <= 6; i += 1) {
+        host.dispatchEvent(new PointerEvent('pointermove', {
+          pointerId: 1, clientX: x + (dx * i) / 6, clientY: y + (dy * i) / 6, bubbles: true, cancelable: true,
+        }));
+      }
+      host.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1, clientX: x + dx, clientY: y + dy, bubbles: true }));
+    }, [dx, dy]);
+  }
+
+  test('the header Refresh exists while healthy and reports its own busy state', async ({ page }) => {
+    await openSessions(page);
+    const header = page.getByTestId('app-sessions-header');
+    const refresh = header.getByLabel('Refresh sessions');
+    await expect(refresh).toBeVisible();
+    await refresh.click();
+    await expect(page.getByTestId('app-pull-indicator')).toHaveAttribute('data-phase', 'busy');
+    await expect(page.getByTestId('app-pull-indicator')).toHaveAttribute('data-phase', 'idle', { timeout: 3000 });
+  });
+
+  test('the header Refresh exists when the list is empty', async ({ page }) => {
+    await openSessions(page, '?sessions=none');
+    await expect(page.getByTestId('app-sessions-empty')).toBeVisible();
+    await expect(page.getByTestId('app-sessions-header').getByLabel('Refresh sessions')).toBeVisible();
+  });
+
+  test('a qualified pull commits one refresh; a short pull commits none', async ({ page }) => {
+    await openSessions(page);
+    const indicator = page.getByTestId('app-pull-indicator');
+
+    await dragPull(page, 0, 30);
+    await expect(indicator).toHaveAttribute('data-phase', 'idle');
+
+    await dragPull(page, 0, 90);
+    await expect(indicator).toHaveAttribute('data-phase', 'busy');
+    await expect(indicator).toHaveAttribute('data-phase', 'idle', { timeout: 3000 });
+  });
+
+  test('a horizontal swipe and a non-top drag never arm the pull', async ({ page }) => {
+    await openSessions(page);
+    const indicator = page.getByTestId('app-pull-indicator');
+
+    await dragPull(page, 90, 10);
+    await expect(indicator).toHaveAttribute('data-phase', 'idle');
+
+    await page.evaluate(() => {
+      const viewport = document.querySelector('[data-testid="app-sessions-pull-host"] [data-slot="scroll-area-viewport"]');
+      if (viewport) { viewport.scrollTop = 200; }
+    });
+    await dragPull(page, 0, 90);
+    await expect(indicator).toHaveAttribute('data-phase', 'idle');
+  });
+});

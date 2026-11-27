@@ -68,7 +68,18 @@ function useSessionSelectionCommands(commands: {
 }
 
 export function useShellState() {
-  const data = useDashboard();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { isWide, showList, showDetail, openDetail, openList } =
+    useMobileNav(selectedId);
+  // The sidebar/global lists read periodically only while their surface is
+  // actually displayed (#4602 §2); a hidden list stays dirty until shown.
+  // The shell's global lists always have a visible consumer: the sidebar column
+  // on wide, the list pane on narrow, and — while a Session is open — the
+  // Terminal header and Project chip, which derive from the Session/Project
+  // lists even when the list pane itself is hidden. `showList` is only the
+  // mobile-pane flag, so gating on it (or on pane visibility) starves those
+  // consumers (#4602). Hidden *capability* views pause via their own `active`.
+  const data = useDashboard(undefined, true);
   const {
     agents,
     sessions,
@@ -90,7 +101,6 @@ export function useShellState() {
   } = useAttachFlow();
   const attachDialogIntent = useAtomValue(attachDialogIntentAtom);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const {
     selectedProjectId,
     selectProject: handleSelectProject,
@@ -98,8 +108,6 @@ export function useShellState() {
   } = useProjectSelection();
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
-  const { isWide, showList, showDetail, openDetail, openList } =
-    useMobileNav(selectedId);
 
   const { selectedSession, selectedAgent, domain } = useSelectedSession({
     sessions,

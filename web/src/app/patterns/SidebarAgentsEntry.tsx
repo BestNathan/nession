@@ -3,6 +3,7 @@ import { ChevronDown, Server } from 'lucide-react';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { SidebarAgents } from '@/app/patterns/SidebarAgents';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { shellMotionClass } from '@/app/shellStyles';
 import type { Agent } from '@/types';
 
@@ -19,10 +20,15 @@ export function SidebarAgentsEntry({
   agents,
   activeAgentId,
   onlineCount,
+  onRefresh,
+  refreshing,
 }: {
   agents: Agent[];
   activeAgentId: string | null;
   onlineCount: number;
+  /** Manual refresh of the Agent registry (#4602), drawn in the disclosure. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const countLabel = `${agents.length} ${agents.length === 1 ? 'agent' : 'agents'}, ${onlineCount} online`;
@@ -49,15 +55,25 @@ export function SidebarAgentsEntry({
         </span>
         <ChevronDown
           aria-hidden
-          className={cn('size-4 shrink-0 transition-transform', open && 'rotate-180')}
+          className={cn('size-[length:var(--nession-icon-md)] shrink-0 transition-transform', open && 'rotate-180')}
         />
       </button>
       {open ? (
         <div
           id="sidebar-agents-panel"
           data-testid="sidebar-agents-panel"
-          className="max-h-[min(40vh,20rem)] overflow-y-auto px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)]"
+          className="max-h-[var(--nession-shell-agents-panel-max-height)] overflow-y-auto px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)]"
         >
+          {onRefresh ? (
+            <div className="flex justify-end px-[var(--nession-shell-space-2)]">
+              <RefreshButton
+                onClick={() => onRefresh()}
+                loading={refreshing ?? false}
+                variant="ghost"
+                ariaLabel="Refresh agents"
+              />
+            </div>
+          ) : null}
           <p className={cn('px-[var(--nession-shell-space-2)] pb-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}>
             Infrastructure context. Sessions stay reachable when their Agent is offline.
           </p>
@@ -68,7 +84,7 @@ export function SidebarAgentsEntry({
               showSectionHead={false}
             />
           ) : (
-            <p className={cn('px-[var(--nession-shell-space-2)] py-2 text-muted-foreground', chromeSansRole('metadata'))}>
+            <p className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}>
               No Agents registered.
             </p>
           )}
