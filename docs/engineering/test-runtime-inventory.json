@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1911,
-    "references": 1023,
+    "entries": 1912,
+    "references": 1026,
     "unresolved": 0
   },
   "crates": [
@@ -971,6 +971,12 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/client_commands.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 1
@@ -12227,6 +12233,33 @@
       "effect": "execute",
       "disposition": "test-runtime-root",
       "reference": "let mut command = Command::new(BIN);",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 103,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let status = Command::new(\"tar\")",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 121,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"server_url = \\\"ws://127.0.0.1:19099/ws\\\"\\nauth_token = \\\"\\\"\\n\",",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 169,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = Command::new(\"sh\");",
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
