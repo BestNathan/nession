@@ -1,0 +1,5 @@
+{
+  "status": "pending",
+  "issue": 4588,
+  "note": "Recorded cutover readiness is required before Origin CA retirement. After #4588 verifies cert-manager TLS at the actual edge and readback, a reviewed PR sets status=recorded with cutoverVerified=true, the exact gitopsRevision, the authenticated edge TLS readback Run identity, approvedBy and verifiedAt. Until then the issue-tls mechanism remains available and retirement is blocked."
+}

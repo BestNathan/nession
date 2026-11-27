@@ -289,8 +289,8 @@ pub struct AgentConfig {
     #[serde(default)]
     pub advertise_address: Option<String>,
     /// Public WebSocket URL that clients use to connect to this agent (legacy).
-    /// Must be a complete URL including protocol and `/ws` path
-    /// (e.g. "wss://agent.nession.nhome.local/ws").
+    /// Must be a complete `ws://` or `wss://` URL including protocol and `/ws`
+    /// path (e.g. "wss://agent-nession.bestnathan.top/ws").
     /// When set, the server returns this URL verbatim to clients during session
     /// attach instead of constructing one from the agent's IP and port.
     /// Superseded by `advertise_addresses`; kept for backward compatibility.
@@ -468,6 +468,16 @@ impl AgentConfig {
     pub fn validate(&self) -> anyhow::Result<()> {
         validate_terminal_cols(self.terminal_cols).map_err(anyhow::Error::msg)?;
         self.erofs.validate()?;
+        // Advertised endpoints are returned to clients verbatim during attach
+        // (#4588). Refuse a non-WebSocket scheme or a hostless/credentialed URL
+        // before the runtime starts, so a misconfiguration cannot downgrade the
+        // transport a client derives from its own page or leak userinfo.
+        if let Some(url) = &self.connect_url {
+            validate_advertised_ws_url(url, "connect_url")?;
+        }
+        for (index, address) in self.advertise_addresses.iter().enumerate() {
+            validate_advertised_ws_url(&address.url, &format!("advertise_addresses[{index}].url"))?;
+        }
         // Embedded MCP's inbound token is validated against the *resolved*
         // token in `server::mcp::build`: `agent_token` may be empty here
         // because the runtime provisions one before the listener is built.
@@ -514,6 +524,49 @@ impl AgentConfig {
             explicit: false,
         })
     }
+}
+
+/// Refuse an advertised client endpoint that is not a host-bearing WebSocket
+/// URL (#4588).
+///
+/// `connect_url` and `advertise_addresses[].url` reach the browser verbatim.
+/// Only `ws://` / `wss://` with a non-empty host is a valid advertised
+/// endpoint: any other scheme (`http`, `https`, `javascript`, `file`, …) would
+/// downgrade or bypass the secure transport the client derives from its own
+/// page, and userinfo (`user:pass@host`) would leak a credential into every
+/// attach reply. The canonical reader fails closed before the listener binds,
+/// mirroring the Server's origin-allowlist validation.
+fn validate_advertised_ws_url(url: &str, key: &str) -> anyhow::Result<()> {
+    let trimmed = url.trim();
+    let authority_and_path = trimmed
+        .strip_prefix("ws://")
+        .or_else(|| trimmed.strip_prefix("wss://"))
+        .ok_or_else(|| {
+            anyhow::anyhow!("{key} must be a ws:// or wss:// WebSocket URL; got {url:?}")
+        })?;
+    let authority = authority_and_path
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("");
+    if authority.is_empty()
+        || authority.contains('@')
+        || authority
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+    {
+        anyhow::bail!("{key} must name a bare host[:port] without userinfo; got {url:?}");
+    }
+    // IPv6 literals are bracketed; the host is the bracketed body. Otherwise
+    // an optional trailing `:port` is split off and the host must remain.
+    let host = if let Some(rest) = authority.strip_prefix('[') {
+        rest.split(']').next().unwrap_or("")
+    } else {
+        authority.rsplit_once(':').map_or(authority, |(h, _)| h)
+    };
+    if host.is_empty() {
+        anyhow::bail!("{key} must name a non-empty host; got {url:?}");
+    }
+    Ok(())
 }
 
 fn default_erofs_storage_dir() -> anyhow::Result<PathBuf> {
@@ -636,6 +689,125 @@ mod tests {
         assert!(advertise.label.is_none());
         assert_eq!(advertise.network_type, NetworkType::Tunnel);
         assert_eq!(advertise.priority, 0);
+    }
+
+    fn config_with_connect_url(url: &str) -> AgentConfig {
+        AgentConfig {
+            connect_url: Some(url.to_string()),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn advertised_endpoints_accept_canonical_wss_and_legacy_lan_ws() {
+        // #4588: the canonical single-label WSS hosts and the preserved
+        // nhome.local LAN endpoint are both valid advertised WebSocket URLs.
+        for url in [
+            "wss://agent-nession.bestnathan.top/ws",
+            "wss://staging-agent-nession.bestnathan.top/ws",
+            "wss://staging-01-agent-nession.bestnathan.top/ws",
+            "wss://preprod-agent-nession.bestnathan.top/ws",
+            "ws://agent.nession.nhome.local/ws",
+            "ws://staging.agent.nession.nhome.local/ws",
+            "ws://[::1]:19090/ws",
+        ] {
+            config_with_connect_url(url)
+                .validate()
+                .unwrap_or_else(|error| panic!("{url} must validate: {error}"));
+        }
+    }
+
+    #[test]
+    fn advertised_endpoints_reject_non_websocket_schemes() {
+        // A non-WebSocket scheme would downgrade or bypass the transport the
+        // client derives from its own page; the canonical reader fails closed.
+        for url in [
+            "http://agent-nession.bestnathan.top/ws",
+            "https://agent-nession.bestnathan.top/ws",
+            "javascript:alert(1)",
+            "file:///etc/passwd",
+            "agent-nession.bestnathan.top/ws",
+            "",
+        ] {
+            let error = config_with_connect_url(url)
+                .validate()
+                .expect_err("non-ws scheme must be refused");
+            assert!(error.to_string().contains("connect_url"), "{error}");
+        }
+    }
+
+    #[test]
+    fn advertised_endpoints_reject_hostless_or_credentialed_urls() {
+        for url in [
+            "ws://",
+            "wss:///ws",
+            "ws://:8080/ws",
+            "wss://user:pass@agent-nession.bestnathan.top/ws",
+            "wss://agent nession.bestnathan.top/ws",
+        ] {
+            assert!(
+                config_with_connect_url(url).validate().is_err(),
+                "{url} must be refused"
+            );
+        }
+    }
+
+    #[test]
+    fn advertise_addresses_validation_names_the_indexed_key() {
+        let config = AgentConfig {
+            advertise_addresses: vec![
+                AdvertiseAddress {
+                    url: "wss://staging-agent-nession.bestnathan.top/ws".to_string(),
+                    label: None,
+                    network_type: NetworkType::Tunnel,
+                    priority: 0,
+                },
+                AdvertiseAddress {
+                    url: "http://staging-agent-nession.bestnathan.top/ws".to_string(),
+                    label: None,
+                    network_type: NetworkType::Tunnel,
+                    priority: 0,
+                },
+            ],
+            ..Default::default()
+        };
+        let error = config.validate().expect_err("http advertise URL refused");
+        assert!(
+            error.to_string().contains("advertise_addresses[1].url"),
+            "{error}"
+        );
+    }
+
+    #[test]
+    fn entrypoint_advertise_projection_parses_and_validates() {
+        // The exact TOML shape deploy/entrypoint-agent.sh projects from
+        // AGENT_ADVERTISE_URLS: one url-only table per comma-separated URL,
+        // defaults filled by the canonical reader.
+        let toml_str = r#"
+agent_id = "test-agent"
+server_url = "ws://nession-server-staging:18080"
+auth_token = "token123"
+connect_url = "ws://staging.agent.nession.nhome.local/ws"
+
+[[advertise_addresses]]
+url = "wss://staging-agent-nession.bestnathan.top/ws"
+
+[[advertise_addresses]]
+url = "wss://staging-01-agent-nession.bestnathan.top/ws"
+"#;
+        let config: AgentConfig = toml::from_str(toml_str).unwrap();
+        config
+            .validate()
+            .expect("projected advertise URLs validate");
+        assert_eq!(config.advertise_addresses.len(), 2);
+        assert_eq!(
+            config.advertise_addresses[0].url,
+            "wss://staging-agent-nession.bestnathan.top/ws"
+        );
+        assert_eq!(
+            config.advertise_addresses[0].network_type,
+            NetworkType::Tunnel
+        );
     }
 
     #[test]
