@@ -73,7 +73,11 @@ export function useShellState() {
     useMobileNav(selectedId);
   // The sidebar/global lists read periodically only while their surface is
   // actually displayed (#4602 §2); a hidden list stays dirty until shown.
-  const data = useDashboard(undefined, showList);
+  // The sidebar/global lists are displayed whenever the wide column exists or
+  // the narrow list pane is shown. `showList` alone is the *mobile pane* flag
+  // and is false on wide screens, where the sidebar is still visible — gating
+  // on it alone would leave the desktop lists unread (#4602).
+  const data = useDashboard(undefined, isWide || showList);
   const {
     agents,
     sessions,
