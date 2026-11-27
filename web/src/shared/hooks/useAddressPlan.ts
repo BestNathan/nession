@@ -4,8 +4,10 @@ import type { AttachInfo } from '@/types';
 interface AddressPlanInput {
   /**
    * Browser-tested URLs resolved upstream (in the attach dialog, or a saved
-   * profile's cached order). When provided, they are used as-is with NO
-   * re-testing — the browser already measured them.
+   * profile's cached order). They rank the CURRENT advertisement's membership
+   * best-first, but are reconciled against it (#4618 SC-06): an address the
+   * fresh inventory removed is dropped, and a newly advertised address is
+   * appended in advertisement order. No re-testing happens here.
    */
   orderedUrls: string[] | null;
   /** Manual single-address override (skips ordering, single-entry plan). */
@@ -45,19 +47,32 @@ export function useAddressPlan(
       return [manualUrl];
     }
 
-    // 2. The measured order, when one is already in hand. An EMPTY array is
-    //    not an order — it means this attach has no measurement yet.
-    if (orderedUrls && orderedUrls.length > 0) {
-      return orderedUrls;
+    // 2. The advertisement's own membership is authoritative (#4618 SC-06).
+    //    The agent priority-sorts its address list
+    //    (`crates/nession-common/src/address.rs`: de-duplicate, stable sort by
+    //    priority), so the first entry is the right first attempt and rotation
+    //    walks the rest.
+    const candidates = attachInfo.addresses ?? [];
+    const membership = candidates.map((candidate) => candidate.url);
+
+    // 3. The measured order, reconciled against CURRENT membership. A stale
+    //    orderedUrls from a previous attach must never resurrect an address
+    //    the fresh advertisement removed, and a newly advertised address is
+    //    appended in advertisement order rather than dropped. An EMPTY measured
+    //    order is not an order — it means nothing has settled yet.
+    if (orderedUrls && orderedUrls.length > 0 && membership.length > 0) {
+      const memberSet = new Set(membership);
+      const measured = orderedUrls.filter((url) => memberSet.has(url));
+      const measuredSet = new Set(measured);
+      const remaining = membership.filter((url) => !measuredSet.has(url));
+      const plan = [...measured, ...remaining];
+      if (plan.length > 0) {
+        return plan;
+      }
     }
 
-    // 3. The advertisement's own order. The agent priority-sorts its address
-    //    list (`crates/nession-common/src/address.rs`: de-duplicate, stable
-    //    sort by priority), so the first entry is the right first attempt and
-    //    rotation walks the rest.
-    const candidates = attachInfo.addresses ?? [];
-    if (candidates.length > 0) {
-      return candidates.map((candidate) => candidate.url);
+    if (membership.length > 0) {
+      return membership;
     }
 
     // 4. No candidates at all — the legacy single address.

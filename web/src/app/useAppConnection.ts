@@ -18,8 +18,10 @@ import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
 import { useRefreshSignals } from './useRefreshSignals';
+import { useProbeLifecycle } from './useProbeLifecycle';
 import { useBootstrapTokenConsumption } from './useBootstrapToken';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
+import { probeScheduler } from '@/platform/probe';
 import { deriveServerSocketUrl } from '@/shared/lib/serverSocketUrl';
 
 const DEFAULT_SERVER_URL = deriveServerSocketUrl(window.location.protocol, window.location.host);
@@ -57,6 +59,10 @@ class AuthenticationRejectedError extends Error {
 
 function retryCurrentTransport(service: WebSocketService | null): void {
   sessionRuntimeRegistry.resumeForeground();
+  // A manual Retry refreshes the current probe/inventory as well as waking the
+  // transport (#4618): recovery re-reads reachability rather than replaying a
+  // stale candidate order.
+  probeScheduler.refresh(null, 'manual');
   void service?.reconnectNow().catch((error) => console.error('[connection] Retry failed:', error));
 }
 
@@ -259,6 +265,16 @@ export function useAppConnection() {
   // Owns foreground recovery (useVisibilityReconnect) and publishes the
   // reconnect/foreground facts business lists refresh on (#4602).
   useRefreshSignals(wasEverAuthed, wsService);
+
+  // Network-aware reachability probing (#4618): observes the active Server and
+  // wakes on lifecycle/transport facts. Recovery authority stays with the
+  // transport below — a probe success never clears a WS failure budget.
+  useProbeLifecycle({
+    wasEverAuthed,
+    isAuthenticated: connectionStatus === 'connected' && wsService !== null,
+    serverUrl,
+    connectionStatus,
+  });
 
   const handleRetry = useCallback(() => retryCurrentTransport(wsService), [wsService]);
 

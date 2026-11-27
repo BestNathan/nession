@@ -120,6 +120,13 @@ export interface ProbedAddress {
   priority: number;
   status: AddressStatus;
   rtt_ms?: number; // Last successful probe round-trip, milliseconds
+  /**
+   * Owner-approved HTTP(S) reachability probe endpoint for this ingress
+   * (#4618). Additive: absent on a legacy peer, which the browser probes
+   * through the bounded WS-upgrade compatibility path instead. When present
+   * the browser GETs it (credentials omitted) and validates `Nession-Probe: v1`.
+   */
+  probe_url?: string | null;
 }
 
 /** Result of the client's own latency test against one address. */

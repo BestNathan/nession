@@ -15,25 +15,34 @@ vi.mock('@/capabilities/env', async (importOriginal) => ({
 }));
 
 /**
- * Only `testAddresses` is mocked — the ordering a caller reads is the real one,
- * so these tests exercise the dialog's own probe rather than a seeded result.
- * The dialog used to read a cache filled by an app-level poll; it now measures
- * the candidates it was handed, with the attach reply's credential (#1091).
+ * The dialog now subscribes to the shared probe scheduler (#4618). These
+ * candidates advertise no `probe_url`, so the scheduler measures them through
+ * the bounded legacy WS path — `measureLatency` is the double, and the ordering
+ * a caller reads is the real `orderByLatency`. Latencies are assigned to URLs
+ * in the order the scheduler first probes them (inventory order).
  */
-const { testAddressesMock } = vi.hoisted(() => ({ testAddressesMock: vi.fn() }));
+const probeControl = vi.hoisted(() => ({
+  queue: [] as (number | null)[],
+  assigned: new Map<string, number | null>(),
+  measureLatencyMock: vi.fn(),
+}));
 
 vi.mock('@/shared/lib/addressSelection', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/shared/lib/addressSelection')>()),
-  testAddresses: testAddressesMock,
+  measureLatency: probeControl.measureLatencyMock,
 }));
 
-/** Every candidate answers with the given latency, in the order given. */
+probeControl.measureLatencyMock.mockImplementation(async (url: string): Promise<AddressLatency> => {
+  if (!probeControl.assigned.has(url)) {
+    probeControl.assigned.set(url, probeControl.queue.length > 0 ? probeControl.queue.shift()! : null);
+  }
+  return { url, latencyMs: probeControl.assigned.get(url) ?? null };
+});
+
+/** Every candidate answers with the given latency, in probe order. */
 function measures(...latencies: (number | null)[]): void {
-  testAddressesMock.mockImplementation(async (addresses: { url: string }[]) =>
-    addresses.map(
-      (a, i): AddressLatency => ({ url: a.url, latencyMs: latencies[i] ?? null }),
-    ),
-  );
+  probeControl.queue = [...latencies];
+  probeControl.assigned.clear();
 }
 
 vi.mock('@/product/session', () => ({
@@ -130,9 +139,9 @@ describe('AttachDialog', () => {
     // Both candidate labels appear once attach info resolves.
     expect(await screen.findByText('LAN')).toBeInTheDocument();
     expect(screen.getByText('VPN')).toBeInTheDocument();
-    // …and the dialog measured them itself; the probe is a bare upgrade now.
+    // …and the dialog measured them itself through the scheduler's legacy path.
     await waitFor(() =>
-      expect(testAddressesMock).toHaveBeenCalledWith(expect.anything()),
+      expect(probeControl.measureLatencyMock).toHaveBeenCalledWith('ws://lan/ws', expect.anything()),
     );
     // Pick the VPN path explicitly (server marked it unreachable — user override
     // still allowed).
@@ -233,7 +242,7 @@ describe('AttachDialog', () => {
     );
 
     await screen.findByText('30ms');
-    expect(testAddressesMock).toHaveBeenCalledTimes(1);
+    expect(probeControl.measureLatencyMock).toHaveBeenCalledTimes(1);
 
     // Re-test re-requests rather than re-probing the previous reply: the
     // measured addresses belong to the attach the user is about to start.

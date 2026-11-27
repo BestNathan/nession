@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { orderByLatency, testAddresses } from '@/shared/lib/addressSelection';
+import { orderByLatency } from '@/shared/lib/addressSelection';
 import { probeResultsAtom, type AgentProbe } from '@/product/agent/state/probe';
-import type { ProbedAddress } from '@/types';
+import { probeScheduler, useProbeTargetStates, type ProbeCandidate } from '@/platform/probe';
+import type { AddressLatency, ProbedAddress } from '@/types';
 
 export interface AgentProbeInput {
   /** Agent whose candidates are being tested. A null id probes nothing. */
@@ -10,11 +11,8 @@ export interface AgentProbeInput {
   /** Candidates to test. An empty list probes nothing (a relay attach has none). */
   addresses: ProbedAddress[];
   /**
-   * Bump to measure again with the same inputs.
-   *
-   * This exists because a caller that re-measured with the same addresses and
-   * the same bump would otherwise find its Re-test silently inert. The bump
-   * makes the re-measurement explicit.
+   * Bump to measure again with the same inputs. A manual Re-test must refresh
+   * unchanged addresses without requiring a remount (#4618).
    */
   reprobeKey?: number;
 }
@@ -22,94 +20,110 @@ export interface AgentProbeInput {
 export interface AgentProbeController {
   /** The latest measurement for this agent, or null before one lands. */
   probe: AgentProbe | null;
-  /** True while a measurement is in flight. */
+  /** True while any of this agent's addresses is in flight. */
   probing: boolean;
 }
 
+function sameLatencies(a: AddressLatency[], b: AddressLatency[]): boolean {
+  return a.length === b.length
+    && a.every((entry, i) => entry.url === b[i].url && entry.latencyMs === b[i].latencyMs);
+}
+
 /**
- * Measure an agent's candidate addresses from this browser, and cache where
- * `probeResultsAtom` says cached results live.
+ * Subscribe an Agent's candidate addresses to the shared probe scheduler
+ * (#4618) and project its per-address results into `probeResultsAtom`.
  *
- * ## Why this replaced a poll
+ * ## Why this is a bridge, not a measurement owner
  *
- * `useProbePolling` did this on a five-minute timer for every online agent,
- * which worked only while the probe was unauthenticated. A credential exists
- * only once an attach reply has arrived (#1013), and it is that reply's own
- * `addresses` the measurement is about — so the measurement belongs wherever
- * the reply is in hand, not on a timer that cannot hold one.
+ * The React-free `ProbeScheduler` owns scheduling, cancellation, single-flight
+ * and incremental publication. This hook only acquires/releases the target and
+ * mirrors the published facts into the Jotai read model existing consumers
+ * (Auto resolution, deep-link restore, the attach dialog) already read. There
+ * is no component-owned batch and no `Promise.all` barrier: each address
+ * settles on its own and the projection updates immediately.
  *
- * ## Why the trigger is a fingerprint and not the array
+ * ## Why a fingerprint and not the array
  *
- * `addresses` is a fresh array on every render of the caller, and the credential
- * is re-minted on every attach-info request. Keying the effect on either
- * identity re-probes on renders that changed nothing; keying it on a string of
- * what the probe actually reads probes exactly when the measurement would
- * differ. The inputs themselves are read through a ref at fire time, which is
- * also what keeps the dependency list honest without disabling the lint.
+ * `addresses` is a fresh array on every render of the caller. Keying membership
+ * on a string of what the probe actually reads (URL + probe endpoint) updates
+ * the inventory exactly when the measurement would differ, and a `reprobeKey`
+ * bump forces a fresh round even when nothing changed. The candidates are read
+ * through a ref at fire time so the dependency list stays honest.
  */
 export function useAgentProbe({ agentId, addresses, reprobeKey = 0 }: AgentProbeInput): AgentProbeController {
   const results = useAtomValue(probeResultsAtom);
   const setResults = useSetAtom(probeResultsAtom);
-  const [probing, setProbing] = useState(false);
+  const states = useProbeTargetStates(agentId);
 
-  // What the probe reads. Held in a ref so the effect below can depend on the
-  // fingerprint string alone.
-  const inputs = useRef({ agentId, addresses });
-  inputs.current = { agentId, addresses };
+  const fingerprint = addresses.map((a) => `${a.url}|${a.probe_url ?? ''}`).join(',');
+  const candidates: ProbeCandidate[] = addresses.map((a) => ({
+    addressId: a.url,
+    wsUrl: a.url,
+    probeUrl: a.probe_url ?? null,
+  }));
+  const candidatesRef = useRef(candidates);
+  candidatesRef.current = candidates;
 
-  /**
-   * Which measurement is the current one.
-   *
-   * A counter rather than a boolean because two probes can overlap — React's
-   * StrictMode double-mount, or a re-attach landing while the first is still in
-   * flight — and the answer must be "the newest wins", not "the first wins".
-   */
-  const generation = useRef(0);
-
-  const fingerprint = `${addresses.map((a) => a.url).join('|')}|${reprobeKey}`;
-
+  // Hold a ref-counted lease for the lifetime of this subscriber. Several
+  // subscribers (dialog preview + attached Session) share one logical target.
   useEffect(() => {
-    const { agentId: id, addresses: candidates } = inputs.current;
-    if (!id || candidates.length === 0) {
-      setProbing(false);
+    if (!agentId) {
       return;
     }
+    probeScheduler.acquireTarget({ targetId: agentId, kind: 'agent', addresses: [] });
+    return () => probeScheduler.releaseTarget(agentId);
+  }, [agentId]);
 
-    const mine = (generation.current += 1);
-    setProbing(true);
+  // Set membership; the scheduler fences obsolete results and refreshes only
+  // when the inventory actually changed.
+  useEffect(() => {
+    const current = candidatesRef.current;
+    if (!agentId || current.length === 0) {
+      return;
+    }
+    probeScheduler.registerTarget({ targetId: agentId, kind: 'agent', addresses: current });
+  }, [agentId, fingerprint]);
 
-    void testAddresses(candidates).then((latencies) => {
-      if (generation.current !== mine) {
-        return;
+  // A manual Re-test refreshes unchanged addresses too.
+  useEffect(() => {
+    if (!agentId || reprobeKey === 0) {
+      return;
+    }
+    probeScheduler.refresh(agentId, 'manual');
+  }, [agentId, reprobeKey]);
+
+  // Project settled per-address results into the compatibility read model.
+  // Pending/unknown addresses are omitted (not rendered as unreachable); the
+  // last settled result is retained while a new round is pending.
+  useEffect(() => {
+    if (!agentId) {
+      return;
+    }
+    const settled = states.filter((s) => s.reachability !== 'unknown');
+    if (settled.length === 0) {
+      // Absent means "nobody has looked"; do not write an empty projection that
+      // a reader would mistake for a measurement.
+      return;
+    }
+    const latencies = settled.map((s) => ({
+      url: s.wsUrl,
+      latencyMs: s.reachability === 'reachable' ? s.latencyMs : null,
+    }));
+    const orderedUrls = orderByLatency(latencies);
+    const probedAt = settled.reduce((max, s) => Math.max(max, s.measuredAt ?? 0), 0) || Date.now();
+    setResults((previous) => {
+      const existing = previous.get(agentId);
+      if (existing && existing.probedAt === probedAt && sameLatencies(existing.latencies, latencies)) {
+        return previous;
       }
-      setProbing(false);
-      // Written on total failure too, and that is deliberate: `orderByLatency`
-      // never drops a failed address, so "everything failed" is a measurement a
-      // reader has to be able to tell from "never measured". Refusing to cache
-      // it — which the old poll did — makes an absence do the work of a result,
-      // and every reader then renders an untested address as unreachable.
-      setResults((previous) => {
-        const next = new Map(previous);
-        next.set(id, {
-          latencies,
-          orderedUrls: orderByLatency(latencies),
-          probedAt: Date.now(),
-        });
-        return next;
-      });
+      const next = new Map(previous);
+      next.set(agentId, { latencies, orderedUrls, probedAt });
+      return next;
     });
-
-    // Invalidates this measurement when the fingerprint moves on or the
-    // component unmounts, so a late arrival cannot overwrite a newer result.
-    return () => {
-      generation.current += 1;
-    };
-    // `inputs` is a ref and the setters are stable; the fingerprint is what
-    // decides whether the measurement would differ.
-  }, [fingerprint, setResults]);
+  }, [agentId, states, setResults]);
 
   return {
     probe: agentId ? (results.get(agentId) ?? null) : null,
-    probing,
+    probing: states.some((s) => s.probing),
   };
 }
