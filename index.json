@@ -169,6 +169,20 @@
         "updated_at": "2026-11-16T16:56:10Z"
       },
       {
+        "title": "Nession site registry and split-DNS exposure contract",
+        "description": "Private-by-default reviewed site registry, exact LAN AdGuard split-horizon DNS and MCP-only Cloudflare public exposure, with receipt-bound reconciliation and gated Origin CA retirement",
+        "path": "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "security",
+          "delivery",
+          "registry",
+          "workflows"
+        ],
+        "updated_at": "2026-11-27T09:24:21Z"
+      },
+      {
         "title": "Nession WebSocket runtime architecture and message dispatch",
         "description": "One physical WebSocket carries three runtime dispatch domains — Control, Request and Stream — independent of the Protocol Kernel's Operation/Notification/Control wire categories, with one Reader, one Writer and one owner per resource",
         "path": "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
@@ -475,7 +489,7 @@
           "security",
           "workflows"
         ],
-        "updated_at": "2026-11-26T15:34:16Z"
+        "updated_at": "2026-11-27T09:24:21Z"
       },
       {
         "title": "Nession native Toolchain OCI release to GHCR",
@@ -547,6 +561,7 @@
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
       "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-activity-ownership.md",
@@ -577,6 +592,7 @@
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
     "delivery": [
+      "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "design": [
@@ -717,7 +733,8 @@
       "topics/terminal/terminal-parser-progress-and-exception-reconciliation.md"
     ],
     "registry": [
-      "topics/engineering/global-erofs-image-manager.md"
+      "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md"
     ],
     "release": [
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
@@ -758,6 +775,7 @@
       "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
+      "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md",
@@ -833,6 +851,7 @@
       "topics/engineering/websocket-stream-delivery-and-recovery.md"
     ],
     "workflows": [
+      "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
       "topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md",
       "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],

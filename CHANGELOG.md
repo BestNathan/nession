@@ -1017,3 +1017,17 @@
 - Categories: architecture, cli, observability, logging, lifecycle, security
 - Reason: Establish the current CLI log/discovery contract: read-only `agent|server logs`, source/filter/follow semantics, bounded sanitized startup diagnostics, managed-service captures and archive-safe dispatch
 - Source: https://github.com/BestNathan/nession/issues/4600
+
+## 2026-11-27T09:24:21Z | create | Nession site registry and split-DNS exposure contract
+- Path: topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md
+- Topic: engineering
+- Categories: architecture, security, delivery, registry, workflows
+- Reason: Record the owner-approved private-by-default site registry, exact LAN AdGuard split-horizon DNS, MCP-only Cloudflare public allowlist, receipt-bound reconciliation, edge-policy contract for nitops#2 and gated Origin CA retirement; PR green is not rollout
+- Source: https://github.com/BestNathan/nession/issues/4589
+
+## 2026-11-27T09:24:21Z | update | Nession GitHub Actions workflow domains and trust boundaries
+- Path: topics/workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md
+- Topic: workflows
+- Categories: architecture, agent, ci, security, workflows
+- Reason: Cross-link the Delivery-domain Deploy / Configure Site split-DNS reconciliation contract so the site registry article has a reciprocal incoming link
+- Source: https://github.com/BestNathan/nession/pull/4678
