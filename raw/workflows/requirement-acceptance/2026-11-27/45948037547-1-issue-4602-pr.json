@@ -1,0 +1,112 @@
+{
+  "schema_version": 1,
+  "kind": "agent_workflow_run",
+  "identity": {
+    "workflow_id": "requirement-acceptance",
+    "github_workflow": "Acceptance / Orchestrator",
+    "github_run_id": 45948037547,
+    "github_run_attempt": 1,
+    "job": "execute",
+    "repository": "BestNathan/nession",
+    "event": "pull_request_target",
+    "unique_run_name": "45948037547-1-issue-4602-pr"
+  },
+  "task": {
+    "id": "issue-4602-pr",
+    "type": "acceptance",
+    "issue": 4602,
+    "stage": "pr",
+    "target_ref": "fb904db10f1fad2162bb00f469324e88d82134c5",
+    "deployment": null
+  },
+  "agent": {
+    "provider": "claude-code",
+    "id": "legacy-acceptance-claude-code",
+    "role": "acceptor",
+    "harness_sha256": null,
+    "checkpoint_id": null,
+    "model": {
+      "id": "qwen3.7-plus",
+      "request_model": "qwen3.7-plus",
+      "backend_mapping": "qwen-configured-gateway"
+    },
+    "run_id": "b3f30b28-951f-40f9-aba3-e2864504b8bc",
+    "request_id": null,
+    "status": "finished",
+    "prompt": {
+      "id": "acceptance",
+      "version": "v5",
+      "sha256": "9da8575e30bf05998f02d18cc1461f6a00535da3ab1880a73fa32ca5411d9e4e"
+    }
+  },
+  "execution": {
+    "turns": 1,
+    "model_requests": null,
+    "tools": {
+      "observed": false,
+      "total": null,
+      "unique": null,
+      "by_name": null
+    }
+  },
+  "tokens": {
+    "input": 12,
+    "output": 951,
+    "cache_read": 132720,
+    "cache_write": 19278,
+    "reasoning": null,
+    "total": 152961
+  },
+  "cost": {
+    "raw_usd": null,
+    "charged_usd": null,
+    "estimated_usd": null
+  },
+  "timing": {
+    "started_at": "2026-11-27T05:55:22.418Z",
+    "finished_at": "2026-11-27T06:00:37.452Z",
+    "agent_duration_ms": 16928,
+    "workflow_duration_ms": null
+  },
+  "result": {
+    "status": "agent-error",
+    "pass": 0,
+    "pending": 0,
+    "fail": 0,
+    "na": 0
+  },
+  "attempts": [
+    {
+      "attempt": 1,
+      "status": "invalid-result",
+      "error": "acceptance result is missing criteria: SC-05, SC-06, SC-07, SC-08",
+      "started_at": "2026-11-27T05:49:54.763Z",
+      "finished_at": "2026-11-27T05:55:22.418Z",
+      "turns": 1,
+      "tokens": {
+        "input": 6,
+        "output": 580,
+        "cache_read": 51321,
+        "cache_write": 8434,
+        "reasoning": null,
+        "total": null
+      }
+    },
+    {
+      "attempt": 2,
+      "status": "invalid-result",
+      "error": "invalid criterion id: SC-ALL",
+      "started_at": "2026-11-27T05:55:22.418Z",
+      "finished_at": "2026-11-27T06:01:40.322Z",
+      "turns": 1,
+      "tokens": {
+        "input": 6,
+        "output": 371,
+        "cache_read": 81399,
+        "cache_write": 10844,
+        "reasoning": null,
+        "total": null
+      }
+    }
+  ]
+}
