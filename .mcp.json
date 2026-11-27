@@ -1,6 +1,7 @@
 {
   "mcpServers": {
-    "playwright": {
+    "playwright":
+    {
       "command": "npx",
       "args": ["@playwright/mcp@latest", "--output-dir", ".playwright-mcp"]
     }
