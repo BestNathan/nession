@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "708c6e2f4fbcedb0053741e3450c803cb7fd7375bd60ed1a4d6905703a8c87e4",
+  "run_id": 45915631857,
+  "run_attempt": 1,
+  "issue": 4620,
+  "criterion": "SC-01",
+  "criterion_text": "A `platform: macos` staging Acceptance Case at the exact staging SHA completes the macOS job's Web build within the hosted runner's memory and executes its verifier without an infrastructure OOM, evidenced by this Issue's own staging Case record and the run's successful `execute-macos` job.",
+  "stage": "staging",
+  "target_sha": "84561a8f2e18ee1d12727c66b91fd938a7697bab",
+  "contract_sha256": "bf601390dd961c070f4b1e08616856e165021c868e21633498b576cd5ee1ed77",
+  "case_revision": "84561a8f2e18ee1d12727c66b91fd938a7697bab",
+  "case_tree_sha": "d961d49a2fba98776be18ba094ac34dbf3b242be",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-27T00:23:53.328Z",
+  "finished_at": "2026-11-27T00:25:18.627Z",
+  "duration_ms": 85297,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The macOS Acceptance Case lane builds Web and executes a verifier without OOM",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "staging 84561a8f2e18ee1d12727c66b91fd938a7697bab: the hosted macos-15-intel Acceptance Case job completed the cold Web build and executed a real compiled nession-tmux verifier (parser::tests::test_parse_output) with real zsh and tmux present; this Case's passed run is the lane receipt"
+        }
+      ],
+      "duration_ms": 67362,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 45915631857,
+      "run_attempt": 1,
+      "event": "push",
+      "head_sha": "84561a8f2e18ee1d12727c66b91fd938a7697bab",
+      "head_branch": "staging",
+      "workflow_id": 378275235
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/45915631857",
+    "record_path": "runs/2026-11-27/45915631857-1/4620/SC-01.json",
+    "source_result_sha256": "d827334483deff3157d0eeea48870feb97b61d906b64c4a86eed7dc4ec7f75f2"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-45915631857-1",
+    "sha256": "d827334483deff3157d0eeea48870feb97b61d906b64c4a86eed7dc4ec7f75f2",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/45915631857",
+    "durability": "time-limited; object archival not configured"
+  }
+}
