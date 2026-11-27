@@ -42,8 +42,9 @@ export type TranscriptsResponseV1 = { state: TranscriptsStateV1,
  */
 cwd?: string | null, 
 /**
- * The transcripts visible at `cwd`, newest first — a listing order, not a
- * selection.
+ * The Session's transcripts, newest first — a listing order, not a
+ * selection. Includes the subagents of reported conversations whose cwd
+ * drifted, reached through their primary's report (#4664 D7).
  */
 items?: Array<TranscriptItemV1>, 
 /**
@@ -143,8 +144,9 @@ export type TranscriptsResponse = { state: TranscriptsStateV1,
  */
 cwd?: string | null, 
 /**
- * The transcripts visible at `cwd`, newest first — a listing order, not a
- * selection.
+ * The Session's transcripts, newest first — a listing order, not a
+ * selection. Includes the subagents of reported conversations whose cwd
+ * drifted, reached through their primary's report (#4664 D7).
  */
 items?: Array<TranscriptItemV1>, 
 /**

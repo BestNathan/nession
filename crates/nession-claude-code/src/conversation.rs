@@ -209,6 +209,105 @@ pub fn conversations_at(cwd: &str) -> Vec<Discovered> {
         .collect()
 }
 
+/// Resolve a **reported** conversation identity to its transcript (#4664 D3).
+///
+/// Discovery's strict cwd match answers "which transcripts belong to this
+/// directory"; it cannot answer "where is the transcript this session's Claude
+/// reported", because a resumed conversation keeps its historical file while
+/// its recorded cwd drifts, and the hook's claimed `transcript_path` may name
+/// a file that does not exist yet. The identity is the join key:
+///
+/// 1. the claimed path, when it is inside the projects tree and its head
+///    records exactly this `sessionId`;
+/// 2. otherwise `<id>.jsonl` in any project directory, verified the same way —
+///    the filename is the identity, the directory is not a usable index (the
+///    module doctrine above, measured).
+///
+/// `None` when neither resolves: a report that names no readable transcript is
+/// not a binding, and inventing a file for it would be the guess #1005 forbids.
+/// Reads stay inside the projects tree discovery already scans; `fallback_cwd`
+/// is display metadata for a head that recorded no cwd, never a match key.
+pub fn resolve_by_identity(
+    id: &str,
+    claimed: Option<&Path>,
+    fallback_cwd: &str,
+) -> Option<Discovered> {
+    // A primary identity is a Claude session UUID. Anything that could escape
+    // a filename (a path separator, a traversal) is not an identity this
+    // function will look up; sidechain ids (`parent/agent`) are resolved
+    // through their primary, never here.
+    if id.is_empty()
+        || !id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+        || id.chars().all(|c| c == '.')
+    {
+        return None;
+    }
+
+    let root = projects_dir()?;
+    if let Some(path) = claimed {
+        if path.starts_with(&root) {
+            if let Some(found) = inspect_identity(path, id, fallback_cwd) {
+                return Some(found);
+            }
+        }
+    }
+    for project in std::fs::read_dir(&root).ok()?.flatten() {
+        let candidate = project.path().join(format!("{id}.jsonl"));
+        if let Some(found) = inspect_identity(&candidate, id, fallback_cwd) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Like [`inspect`], but the gate is the transcript's own `sessionId` rather
+/// than its cwd: the caller already holds a reported identity and is asking
+/// whether *this file* is that conversation's transcript.
+fn inspect_identity(path: &Path, id: &str, fallback_cwd: &str) -> Option<Discovered> {
+    let head = head_facts(path);
+    if head.session_id.as_deref() != Some(id) {
+        return None;
+    }
+    let tail = tail_facts(path);
+    Some(Discovered {
+        claude_session_id: id.to_string(),
+        cwd: head.cwd.unwrap_or_else(|| fallback_cwd.to_string()),
+        created_at: head.created_at,
+        updated_at: tail.updated_at,
+        title: tail.title,
+        preview: tail.preview,
+        kind: TranscriptKind::Primary,
+        parent_id: None,
+        agent_id: None,
+        path: path.to_path_buf(),
+    })
+}
+
+/// The subagent transcripts of one resolved primary (#4664 D7).
+///
+/// [`transcripts_at`] reaches sidechains through the cwd-matched sessions; a
+/// reported primary whose cwd drifted is not among those, so its subagents
+/// need the same reach through *it*. The scope key stays the parent session,
+/// exactly as in [`sidechains_in`].
+pub fn sidechains_of(primary: &Discovered) -> Vec<Discovered> {
+    let Some(stem) = primary.path.file_stem().and_then(|s| s.to_str()) else {
+        return Vec::new();
+    };
+    let Some(project) = primary.path.parent() else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    sidechains_in(
+        &project.join(stem).join("subagents"),
+        stem,
+        &primary.cwd,
+        &mut out,
+    );
+    out
+}
+
 /// `~/.claude/projects`.
 fn projects_dir() -> Option<PathBuf> {
     #[cfg(test)]
@@ -910,6 +1009,136 @@ mod tests {
         let _root = ProjectsRootForTest::set(absent);
 
         assert!(conversations_at("/w").is_empty());
+    }
+
+    // ---- identity resolution (#4664 D3) ------------------------------------
+
+    /// A transcript whose head records `cwd` and `sessionId` independently of
+    /// its filename, the shape a resumed conversation leaves behind.
+    fn transcript_with_identity(dir: &Path, id: &str, cwd: &str) -> PathBuf {
+        std::fs::create_dir_all(dir).unwrap();
+        let path = dir.join(format!("{id}.jsonl"));
+        std::fs::write(
+            &path,
+            format!(
+                r#"{{"type":"user","uuid":"u","timestamp":"2026-11-17T02:35:28Z","cwd":"{cwd}","sessionId":"{id}","message":{{"role":"user","content":"hi"}}}}"#
+            ),
+        )
+        .unwrap();
+        path
+    }
+
+    #[test]
+    fn identity_resolves_a_transcript_in_a_directory_that_does_not_match_its_cwd() {
+        // The measured resume shape: the file sits where the conversation was
+        // created, its recorded cwd drifted elsewhere. The directory is not an
+        // index; the identity is.
+        let root = tempfile::tempdir().unwrap();
+        transcript_with_identity(&root.path().join("-created-here"), "conv-1", "/drifted");
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+
+        let found = resolve_by_identity("conv-1", None, "/fallback").expect("identity resolves");
+        assert_eq!(found.claude_session_id, "conv-1");
+        assert_eq!(found.cwd, "/drifted", "the transcript's own recorded cwd");
+        assert_eq!(found.kind, TranscriptKind::Primary);
+    }
+
+    #[test]
+    fn a_claimed_path_that_does_not_exist_falls_back_to_the_identity_scan() {
+        // The measured bbc-devparams binding: the hook reported a transcript
+        // path under the drifted cwd's project directory, but the live file
+        // stayed in the original one. The claim is reconciled, not trusted.
+        let root = tempfile::tempdir().unwrap();
+        let live = transcript_with_identity(&root.path().join("-original"), "conv-1", "/drifted");
+        let claimed = root.path().join("-drifted").join("conv-1.jsonl");
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+
+        let found = resolve_by_identity("conv-1", Some(&claimed), "/fallback")
+            .expect("the existing file resolves");
+        assert_eq!(found.path(), live);
+    }
+
+    #[test]
+    fn a_claimed_path_inside_the_tree_is_used_when_it_matches() {
+        let root = tempfile::tempdir().unwrap();
+        let path = transcript_with_identity(&root.path().join("-p"), "conv-1", "/w");
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = resolve_by_identity("conv-1", Some(&path), "/fallback").expect("resolves");
+        assert_eq!(found.path(), path);
+    }
+
+    #[test]
+    fn a_claimed_path_outside_the_projects_tree_is_not_read() {
+        // Reads stay inside the tree discovery already scans. A payload naming
+        // a file elsewhere is not an invitation to open it.
+        let root = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let foreign = transcript_with_identity(outside.path(), "conv-1", "/w");
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        assert!(
+            resolve_by_identity("conv-1", Some(&foreign), "/fallback").is_none(),
+            "a file outside the projects tree must not resolve"
+        );
+    }
+
+    #[test]
+    fn a_head_session_id_mismatch_is_not_the_reported_conversation() {
+        let root = tempfile::tempdir().unwrap();
+        let path = transcript_with_identity(&root.path().join("-p"), "other", "/w");
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        assert!(
+            resolve_by_identity("conv-1", Some(&path), "/fallback").is_none(),
+            "the file must record the identity it is resolved for"
+        );
+    }
+
+    #[test]
+    fn an_unresolvable_report_invents_nothing() {
+        let root = tempfile::tempdir().unwrap();
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        assert!(resolve_by_identity("conv-1", None, "/fallback").is_none());
+        assert!(resolve_by_identity("../escape", None, "/fallback").is_none());
+        assert!(resolve_by_identity("a/b", None, "/fallback").is_none());
+        assert!(resolve_by_identity("", None, "/fallback").is_none());
+    }
+
+    #[test]
+    fn a_head_with_no_cwd_reports_the_fallback_as_display_metadata() {
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-p");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(
+            project.join("conv-1.jsonl"),
+            r#"{"type":"user","uuid":"u","sessionId":"conv-1","message":{"role":"user","content":"hi"}}"#,
+        )
+        .unwrap();
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+        let found = resolve_by_identity("conv-1", None, "/reported").expect("resolves");
+        assert_eq!(found.cwd, "/reported");
+    }
+
+    #[test]
+    fn sidechains_of_a_drifted_primary_are_reachable_through_it() {
+        // A reported primary whose cwd drifted is not among the cwd-matched
+        // sessions, so its subagents need the same reach through it.
+        let root = tempfile::tempdir().unwrap();
+        let project = root.path().join("-original");
+        transcript_with_identity(&project, "conv-1", "/drifted");
+        let subagents = project.join("conv-1").join("subagents");
+        std::fs::create_dir_all(&subagents).unwrap();
+        std::fs::write(
+            subagents.join("agent-abc.jsonl"),
+            r#"{"type":"assistant","uuid":"a","isSidechain":true,"timestamp":"2026-11-17T02:36:00Z","cwd":"/drifted/sub","sessionId":"conv-1","message":{"role":"assistant","content":"work"}}"#,
+        )
+        .unwrap();
+        let _root = ProjectsRootForTest::set(root.path().to_path_buf());
+
+        let primary = resolve_by_identity("conv-1", None, "/fallback").expect("primary");
+        let sides = sidechains_of(&primary);
+        assert_eq!(sides.len(), 1);
+        assert_eq!(sides[0].claude_session_id, "conv-1/agent-abc");
+        assert_eq!(sides[0].parent_id.as_deref(), Some("conv-1"));
+        assert_eq!(sides[0].kind, TranscriptKind::Sidechain);
     }
 
     // ---- titles ---------------------------------------------------------

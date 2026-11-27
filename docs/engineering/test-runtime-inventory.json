@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1903,
-    "references": 1016,
+    "entries": 1904,
+    "references": 1018,
     "unresolved": 0
   },
   "crates": [
@@ -31,13 +31,13 @@
       "file": "crates/nession-agent/src/claude_binding.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 114
+      "line": 145
     },
     {
       "file": "crates/nession-agent/src/claude_session_context.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 285
+      "line": 369
     },
     {
       "file": "crates/nession-agent/src/claude_workspace_trust.rs",
@@ -169,7 +169,7 @@
       "file": "crates/nession-agent/src/runtime.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 941
+      "line": 959
     },
     {
       "file": "crates/nession-agent/src/sandbox_images.rs",
@@ -235,7 +235,7 @@
       "file": "crates/nession-agent/src/session/activity/claude.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 295
+      "line": 318
     },
     {
       "file": "crates/nession-agent/src/session/activity/coordinator.rs",
@@ -451,13 +451,13 @@
       "file": "crates/nession-claude-code/src/agent.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1281
+      "line": 1267
     },
     {
       "file": "crates/nession-claude-code/src/binding.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 198
+      "line": 249
     },
     {
       "file": "crates/nession-claude-code/src/canonical/adapter.rs",
@@ -481,7 +481,7 @@
       "file": "crates/nession-claude-code/src/conversation.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 658
+      "line": 757
     },
     {
       "file": "crates/nession-claude-code/src/mcp/cli.rs",
@@ -547,7 +547,7 @@
       "file": "crates/nession-claude-code/src/plugin.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 324
+      "line": 332
     },
     {
       "file": "crates/nession-claude-code/src/process.rs",
@@ -559,7 +559,7 @@
       "file": "crates/nession-claude-code/src/protocol/conversations/v1.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 223
+      "line": 231
     },
     {
       "file": "crates/nession-claude-code/src/protocol/list/v1.rs",
@@ -607,7 +607,7 @@
       "file": "crates/nession-claude-code/src/protocol/messages/v1.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 375
+      "line": 377
     },
     {
       "file": "crates/nession-claude-code/src/protocol/mod.rs",
@@ -643,13 +643,19 @@
       "file": "crates/nession-claude-code/src/protocol/transcripts/v1.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 237
+      "line": 239
     },
     {
       "file": "crates/nession-claude-code/src/records.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 483
+    },
+    {
+      "file": "crates/nession-claude-code/src/resolution.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 164
     },
     {
       "file": "crates/nession-claude-code/src/scanner.rs",
@@ -667,7 +673,7 @@
       "file": "crates/nession-claude-code/src/session_context.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 184
+      "line": 211
     },
     {
       "file": "crates/nession-claude-code/src/tools/nession_claude_enter.rs",
@@ -11154,7 +11160,7 @@
     },
     {
       "file": "crates/nession-agent/tests/integration/mcp.rs",
-      "line": 1150,
+      "line": 1161,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11352,7 +11358,7 @@
     },
     {
       "file": "crates/nession-claude-code/src/plugin.rs",
-      "line": 472,
+      "line": 481,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -11361,11 +11367,29 @@
     },
     {
       "file": "crates/nession-claude-code/src/plugin.rs",
-      "line": 480,
+      "line": 489,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
       "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-claude-code/src/plugin.rs",
+      "line": 512,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = Command::new(\"sh\");",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-claude-code/src/plugin.rs",
+      "line": 522,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut child = command.spawn().expect(\"run hook\");",
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {

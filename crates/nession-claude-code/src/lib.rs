@@ -14,6 +14,7 @@ pub mod plugin;
 pub mod process;
 pub mod protocol;
 pub mod records;
+pub mod resolution;
 pub mod scanner;
 pub mod security;
 pub mod server;

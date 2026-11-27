@@ -69,6 +69,7 @@ use crate::protocol::{
     transcript_record, transcript_records, transcripts,
 };
 use crate::records;
+use crate::resolution;
 use crate::scanner;
 use crate::security;
 use crate::session_context::SessionContext;
@@ -304,39 +305,15 @@ impl ClaudeCodeAgentExtension {
         Some(PathBuf::from(cwd).join(".claude"))
     }
 
-    /// The conversation `session_id` is bound to, among those `found`.
-    ///
-    /// Matching is on the **transcript path**, which is the binding's strongest
-    /// statement: it names the exact file Claude said this session's
-    /// conversation lives in. The Claude session id would match just as well
-    /// today — discovery derives it from that same file's name — but it is the
-    /// weaker claim of the two, and the binding carries the path precisely so
-    /// this does not have to reconstruct it.
-    ///
-    /// Restricting the search to `found` is what keeps a stale binding harmless.
-    /// `found` is the conversations at the session's **current** cwd, so a
-    /// binding written before the user changed directory simply is not in it,
-    /// and the caller gets the candidate list rather than a conversation from a
-    /// directory this session has left.
-    async fn bound_conversation<'a>(
-        &self,
-        session_id: &str,
-        found: &'a [conversation::Discovered],
-    ) -> Option<&'a conversation::Discovered> {
-        let binding = self.context.session_claude_binding(session_id).await?;
-        found
-            .iter()
-            .find(|candidate| candidate.path() == binding.transcript_path)
-    }
-
     /// Answer `claude-code.conversations` (#1222).
     ///
     /// **The list is the answer.** The retired unit resolved one conversation —
     /// the caller's pick, or the binding, or nothing with an `ambiguous` state —
     /// and that unit's whole failure mode was the resolving. This one reports:
-    /// the conversations at the Session's strict cwd, and the exact binding
-    /// when one is current. What gets opened, and whether, is the caller's
-    /// decision, made through `claude-code.messages`.
+    /// the Session's conversations — strict-cwd candidates plus the
+    /// conversations its own reports name (#4664 D4) — and the current binding
+    /// when reported evidence resolves to one. What gets opened, and whether,
+    /// is the caller's decision, made through `claude-code.messages`.
     async fn handle_conversations(&self, payload: Value) -> anyhow::Result<Value> {
         let request: ConversationsRequestV1 = match serde_json::from_value(payload) {
             Ok(request) => request,
@@ -352,20 +329,22 @@ impl ClaudeCodeAgentExtension {
         // No host answer means cannot-say, never a guess. `Unavailable` rather
         // than an empty list: nothing is wrong with the directory, the scope
         // itself is out of reach — and an empty list is a claim about the cwd.
-        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+        let Some(resolved) = resolution::resolve(self.context.as_ref(), &request.session_id).await
+        else {
             return Ok(serde_json::to_value(ConversationsResponseV1::bare(
                 ConversationsStateV1::Unavailable,
             ))?);
         };
+        let cwd = resolved.cwd.clone();
+        let found = resolved.conversations;
 
-        let found = conversation::conversations_at(&cwd);
-
-        // The binding is reported only while it is exact *and current*:
-        // `bound_conversation` matches it against this cwd's transcripts, so a
-        // binding made before the user changed directory is simply absent —
-        // reporting it anyway would point the caller at a conversation this
-        // list cannot show.
-        let binding = match self.bound_conversation(&request.session_id, &found).await {
+        // The binding is the current reported conversation (#4664 D2): the
+        // freshest evidence — the live verified observation, then the latest
+        // lifecycle report — resolved by identity rather than filtered against
+        // the cwd candidates. A report that resolves to no transcript is
+        // absent; one that resolves is always among `found`, because the union
+        // is structural in the resolution owner.
+        let binding = match resolved.current {
             Some(bound) => Some(ConversationBindingV1 {
                 conversation_id: bound.claude_session_id.clone(),
                 activity: activity_of(
@@ -451,19 +430,18 @@ impl ClaudeCodeAgentExtension {
 
         // No host answer means cannot-say, never a guess. `Unavailable` rather
         // than an empty list: an empty list is a claim about the cwd.
-        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+        let Some(resolved) = resolution::resolve(self.context.as_ref(), &request.session_id).await
+        else {
             return Ok(serde_json::to_value(TranscriptsResponseV1::bare(
                 TranscriptsStateV1::Unavailable,
             ))?);
         };
+        let cwd = resolved.cwd.clone();
+        let found = resolved.transcripts();
 
-        let found = conversation::transcripts_at(&cwd);
-
-        // Reported only while it is exact *and current*, exactly as the
-        // conversation unit reports it: `bound_conversation` matches against
-        // this cwd's transcripts, so a binding from before the user changed
-        // directory is simply absent.
-        let binding = match self.bound_conversation(&request.session_id, &found).await {
+        // The current reported transcript, exactly as the conversation unit
+        // reports it (#4664 D2): resolved by identity, a member of `found`.
+        let binding = match resolved.current {
             Some(bound) => Some(TranscriptBindingV1 {
                 transcript_id: bound.claude_session_id.clone(),
                 activity: activity_of(
@@ -528,21 +506,22 @@ impl ClaudeCodeAgentExtension {
             }
         };
 
-        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+        let Some(resolved) = resolution::resolve(self.context.as_ref(), &request.session_id).await
+        else {
             return Ok(serde_json::to_value(TranscriptItemsResponseV1::bare(
                 TranscriptItemsStateV1::Unavailable,
             ))?);
         };
 
-        let found = conversation::transcripts_at(&cwd);
+        let found = resolved.transcripts();
         let Some(chosen) = found
             .iter()
             .find(|t| t.claude_session_id == request.transcript_id)
             .cloned()
         else {
-            // Not an error: the transcript can have been deleted, or the
-            // Session's cwd can have changed between listing and selecting. It
-            // is simply not here, and nothing else stands in for it.
+            // Not an error: the transcript can have been deleted, or it can
+            // belong to a directory this session has no report for. It is
+            // simply not here, and nothing else stands in for it.
             return Ok(serde_json::to_value(TranscriptItemsResponseV1::bare(
                 TranscriptItemsStateV1::NotFound,
             ))?);
@@ -578,11 +557,11 @@ impl ClaudeCodeAgentExtension {
             }
         };
 
-        // Live only while the Session is bound to *this* transcript, exactly as
-        // the message unit reports it.
-        let is_bound = self
-            .bound_conversation(&request.session_id, &found)
-            .await
+        // Live only while the Session's current reported conversation is *this*
+        // transcript, exactly as the message unit reports it (#4664 D2).
+        let is_bound = resolved
+            .current
+            .as_ref()
             .is_some_and(|b| b.claude_session_id == chosen.claude_session_id);
         let activity = activity_of(
             self.context
@@ -632,13 +611,14 @@ impl ClaudeCodeAgentExtension {
             }
         };
 
-        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+        let Some(resolved) = resolution::resolve(self.context.as_ref(), &request.session_id).await
+        else {
             return Ok(serde_json::to_value(TranscriptRecordsResponseV1::bare(
                 TranscriptRecordsStateV1::Unavailable,
             ))?);
         };
 
-        let found = conversation::transcripts_at(&cwd);
+        let found = resolved.transcripts();
         let Some(chosen) = found
             .iter()
             .find(|t| t.claude_session_id == request.transcript_id)
@@ -695,9 +675,9 @@ impl ClaudeCodeAgentExtension {
             }
         };
 
-        let is_bound = self
-            .bound_conversation(&request.session_id, &found)
-            .await
+        let is_bound = resolved
+            .current
+            .as_ref()
             .is_some_and(|b| b.claude_session_id == chosen.claude_session_id);
         let activity = activity_of(
             self.context
@@ -757,13 +737,14 @@ impl ClaudeCodeAgentExtension {
             ))?);
         };
 
-        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+        let Some(resolved) = resolution::resolve(self.context.as_ref(), &request.session_id).await
+        else {
             return Ok(serde_json::to_value(TranscriptRecordResponseV1::bare(
                 TranscriptRecordStateV1::Unavailable,
             ))?);
         };
 
-        let found = conversation::transcripts_at(&cwd);
+        let found = resolved.transcripts();
         let Some(chosen) = found
             .iter()
             .find(|t| t.claude_session_id == decoded.transcript_id)
@@ -844,21 +825,26 @@ impl ClaudeCodeAgentExtension {
             }
         };
 
-        let Some(cwd) = self.context.session_cwd(&request.session_id).await else {
+        let Some(resolved) = resolution::resolve(self.context.as_ref(), &request.session_id).await
+        else {
             return Ok(serde_json::to_value(MessagesResponseV1::bare(
                 MessagesStateV1::Unavailable,
             ))?);
         };
 
-        let found = conversation::conversations_at(&cwd);
+        // The named id resolves among the Session's conversations — strict-cwd
+        // candidates plus its own reports (#4664 D7) — so a reported
+        // conversation whose cwd drifted stays readable. An id this session
+        // has no evidence for is still not here, and nothing stands in for it.
+        let found = resolved.conversations;
         let Some(chosen) = found
             .iter()
             .find(|c| c.claude_session_id == request.conversation_id)
             .cloned()
         else {
             // An unknown id is not an error: the conversation can have been
-            // deleted, or the Session's cwd can have changed between listing
-            // and selecting. It is simply not here, and nothing else stands
+            // deleted, or it can belong to a directory this session has no
+            // report for. It is simply not here, and nothing else stands
             // in for it.
             return Ok(serde_json::to_value(MessagesResponseV1::bare(
                 MessagesStateV1::NotFound,
@@ -901,9 +887,9 @@ impl ClaudeCodeAgentExtension {
         // it is live only while the Session is bound to *it* — reading the
         // conversation the binding does not name is reading a finished one,
         // whatever Claude is doing elsewhere.
-        let is_bound = self
-            .bound_conversation(&request.session_id, &found)
-            .await
+        let is_bound = resolved
+            .current
+            .as_ref()
             .is_some_and(|b| b.claude_session_id == chosen.claude_session_id);
         let activity = activity_of(
             self.context
@@ -1419,6 +1405,8 @@ mod tests {
         config: Option<SessionClaudeConfig>,
         active: Option<bool>,
         binding: Option<Binding>,
+        history: Option<Vec<Binding>>,
+        verified: Option<String>,
     }
 
     impl FixedContext {
@@ -1430,6 +1418,8 @@ mod tests {
                 config: None,
                 active: None,
                 binding: None,
+                history: None,
+                verified: None,
             }
         }
 
@@ -1444,10 +1434,18 @@ mod tests {
         /// The cwd comes from the context rather than a constant so the two
         /// cannot disagree: a fixture whose binding claimed a different
         /// directory than the host was asked about would make a later test that
-        /// checks the binding's cwd fail for the wrong reason.
+        /// checks the binding's cwd fail for the wrong reason. The session id
+        /// is the transcript's own identity (its filename stem), as Claude's
+        /// hook reports it — a report naming a different identity than the file
+        /// it points at is exactly the mismatch identity resolution rejects
+        /// (#4664 D1).
         fn bound(mut self, transcript: &str) -> Self {
+            let id = std::path::Path::new(transcript)
+                .file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("claude-abc");
             let payload = serde_json::json!({
-                "session_id": "claude-abc",
+                "session_id": id,
                 "transcript_path": transcript,
                 "cwd": self.cwd.clone().unwrap_or_default(),
                 "hook_event_name": "SessionStart",
@@ -1461,6 +1459,27 @@ mod tests {
         /// The same host, answering the activity question with `active`.
         fn with_active(mut self, active: Option<bool>) -> Self {
             self.active = active;
+            self
+        }
+
+        /// The same host, with an explicit lifecycle report — the drift
+        /// fixtures need a binding whose cwd and claimed path differ from the
+        /// pane's, which `bound` deliberately cannot express (#4664).
+        fn bound_report(mut self, report: Binding) -> Self {
+            self.binding = Some(report);
+            self
+        }
+
+        /// The same host, with an appended lifecycle history (#4664 D5).
+        fn with_history(mut self, history: Vec<Binding>) -> Self {
+            self.history = Some(history);
+            self
+        }
+
+        /// The same host, with a fresh verified observation naming `id`
+        /// (#4664 D6 / SC-10).
+        fn with_verified(mut self, id: &str) -> Self {
+            self.verified = Some(id.to_string());
             self
         }
     }
@@ -1478,6 +1497,12 @@ mod tests {
         }
         async fn session_claude_binding(&self, _session_id: &str) -> Option<Binding> {
             self.binding.clone()
+        }
+        async fn session_claude_history(&self, _session_id: &str) -> Option<Vec<Binding>> {
+            self.history.clone()
+        }
+        async fn session_claude_verified_conversation(&self, _session_id: &str) -> Option<String> {
+            self.verified.clone()
         }
     }
 
@@ -1521,6 +1546,8 @@ mod tests {
             config: None,
             active,
             binding: None,
+            history: None,
+            verified: None,
         }))
     }
 
@@ -1606,7 +1633,9 @@ mod tests {
                 "sessionId": id,
                 "message": {"role": "user", "content": "hello"},
             });
-            std::fs::write(project.join(format!("{id}.jsonl")), record.to_string())
+            // A real transcript terminates every record with a newline; the
+            // page reader treats a newline-less tail as still being written.
+            std::fs::write(project.join(format!("{id}.jsonl")), format!("{record}\n"))
                 .expect("write the transcript");
         }
         let guard = conversation::ProjectsRootForTest::set(root.path().to_path_buf());
@@ -1677,12 +1706,12 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_stale_binding_is_omitted_from_the_report() {
-        // A binding outlives the directory it was made in: the user starts
-        // Claude, then `cd`s. The recorded conversation is no longer among this
-        // cwd's transcripts, so it is not this Session's current binding —
-        // reporting it would point the caller at a conversation the list
-        // cannot show.
+    async fn an_unresolvable_binding_is_omitted_from_the_report() {
+        // A report that names no readable transcript is not a binding
+        // (#4664 D3): the claimed file is gone and no transcript records the
+        // reported identity. Reporting it would point the caller at a
+        // conversation the provider cannot open. Cwd drift alone no longer
+        // retires a binding — identity resolution does (the test below).
         let (root, _guard) = projects(&[("aaa", BOUND_CWD, "2026-09-25T00:00:01Z")]);
         let elsewhere = root.path().join("-gone").join("zzz.jsonl");
         let extension = ClaudeCodeAgentExtension::new(Arc::new(
@@ -1697,12 +1726,318 @@ mod tests {
         assert_eq!(value["state"], "ready", "{value}");
         assert!(
             value["binding"].is_null(),
-            "a stale binding is no binding: {value}"
+            "an unresolvable report is no binding: {value}"
         );
         assert!(
             value["items"].as_array().is_some_and(|c| c.len() == 1),
             "the current cwd's conversation is still listed: {value}"
         );
+    }
+
+    // ---- reported identity survives cwd drift (#4664) -----------------------
+
+    /// A lifecycle report in the measured resume shape: the transcript's
+    /// recorded cwd drifted from the pane's, and the claimed path names a file
+    /// that does not exist while the live file stays where it was created.
+    fn resume_report(root: &std::path::Path, id: &str, drifted_cwd: &str) -> Binding {
+        let claimed = root.join("-drifted").join(format!("{id}.jsonl"));
+        crate::binding::parse(
+            &serde_json::json!({
+                "session_id": id,
+                "transcript_path": claimed.to_string_lossy(),
+                "cwd": drifted_cwd,
+                "hook_event_name": "SessionStart",
+                "source": "resume",
+            })
+            .to_string(),
+        )
+        .expect("the resume-shaped report parses")
+    }
+
+    #[tokio::test]
+    async fn sc01_a_reported_drifted_conversation_is_listed_and_bound() {
+        // SC-01: pane cwd BOUND_CWD, transcript head cwd /elsewhere, a
+        // SessionStart resume report naming it. The list shows it with its own
+        // recorded cwd, and the binding names it — active while Claude is the
+        // foreground command.
+        let (root, _guard) = projects(&[("drifted", "/elsewhere", "2026-11-17T00:00:09Z")]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .bound_report(resume_report(root.path(), "drifted", "/elsewhere")),
+        ));
+
+        let value = extension
+            .handle_conversations(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        assert_eq!(value["state"], "ready", "{value}");
+        assert_eq!(value["binding"]["conversation_id"], "drifted", "{value}");
+        assert_eq!(value["binding"]["activity"], "active", "{value}");
+        let items = value["items"].as_array().expect("items");
+        assert_eq!(items.len(), 1, "{value}");
+        assert_eq!(items[0]["id"], "drifted");
+        assert_eq!(
+            items[0]["cwd"], "/elsewhere",
+            "the item carries the transcript's own recorded cwd: {value}"
+        );
+
+        // SC-01's negative half: the same transcript with no report is not
+        // listed — the strict cwd rule still governs unreported candidates.
+        let unreported = extension_with(Some(BOUND_CWD), Some(true));
+        let value = unreported
+            .handle_conversations(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert!(
+            value["items"].as_array().is_none_or(Vec::is_empty),
+            "an unreported drifted transcript must not leak into the list: {value}"
+        );
+        assert!(value["binding"].is_null(), "{value}");
+    }
+
+    #[tokio::test]
+    async fn sc02_a_reported_drifted_conversation_is_readable() {
+        // SC-02: messages and transcript-items resolve the reported id even
+        // though cwd discovery misses it; an unreported id stays not_found.
+        let (root, _guard) = projects(&[
+            ("drifted", "/elsewhere", "2026-11-17T00:00:09Z"),
+            ("stranger", "/elsewhere", "2026-11-17T00:00:01Z"),
+        ]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .bound_report(resume_report(root.path(), "drifted", "/elsewhere")),
+        ));
+
+        let messages = extension
+            .handle_messages(serde_json::json!({
+                "session_id": "agent:s", "conversation_id": "drifted"
+            }))
+            .await
+            .unwrap();
+        assert_eq!(messages["state"], "ready", "{messages}");
+        assert_eq!(messages["conversation"]["id"], "drifted");
+        assert_eq!(messages["activity"], "active");
+        assert!(
+            messages["items"].as_array().is_some_and(|i| !i.is_empty()),
+            "the real page is returned: {messages}"
+        );
+
+        let items = extension
+            .handle_transcript_items(serde_json::json!({
+                "session_id": "agent:s", "transcript_id": "drifted"
+            }))
+            .await
+            .unwrap();
+        assert_eq!(items["state"], "ready", "{items}");
+
+        let records = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s", "transcript_id": "drifted"
+            }))
+            .await
+            .unwrap();
+        assert_eq!(records["state"], "ready", "{records}");
+        let record_ref = records["records"][0]["record_ref"]
+            .as_str()
+            .expect("the page carries a record reference")
+            .to_string();
+        let record = extension
+            .handle_transcript_record(serde_json::json!({
+                "session_id": "agent:s", "record_ref": record_ref
+            }))
+            .await
+            .unwrap();
+        assert_eq!(record["state"], "ready", "{record}");
+
+        // The negative half: an id this session has no report for, recorded
+        // only at another cwd, is not readable through it.
+        let stranger = extension
+            .handle_messages(serde_json::json!({
+                "session_id": "agent:s", "conversation_id": "stranger"
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stranger["state"], "not_found", "{stranger}");
+        let stranger_records = extension
+            .handle_transcript_records(serde_json::json!({
+                "session_id": "agent:s", "transcript_id": "stranger"
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stranger_records["state"], "not_found", "{stranger_records}");
+    }
+
+    #[tokio::test]
+    async fn sc04_history_keeps_earlier_reported_conversations_listed() {
+        // SC-04: a prior SessionEnd conversation whose cwd drifted stays in
+        // the list beside the current one; the binding names only the latest.
+        let (root, _guard) = projects(&[
+            ("earlier", "/gone", "2026-11-17T00:00:01Z"),
+            ("latest", BOUND_CWD, "2026-11-17T00:00:09Z"),
+        ]);
+        let p = root.path().join("-work-bound");
+        let earlier_report = crate::binding::parse(
+            &serde_json::json!({
+                "session_id": "earlier",
+                "transcript_path": p.join("earlier.jsonl").to_string_lossy(),
+                "cwd": "/gone",
+                "hook_event_name": "SessionEnd",
+            })
+            .to_string(),
+        )
+        .expect("report");
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .bound_report(resume_report(root.path(), "latest", BOUND_CWD))
+                .with_history(vec![earlier_report]),
+        ));
+
+        let value = extension
+            .handle_conversations(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+
+        let ids: Vec<&str> = value["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .map(|i| i["id"].as_str().expect("id"))
+            .collect();
+        assert_eq!(ids, vec!["latest", "earlier"], "newest-first: {value}");
+        assert_eq!(value["binding"]["conversation_id"], "latest", "{value}");
+    }
+
+    #[tokio::test]
+    async fn sc08_two_sessions_in_one_directory_bind_only_their_own() {
+        // SC-08: each session's binding names its own reported conversation;
+        // the other's running conversation is at most a candidate row.
+        let (root, _guard) = projects(&[
+            ("aaa", BOUND_CWD, "2026-09-25T00:00:01Z"),
+            ("bbb", BOUND_CWD, "2026-09-25T00:00:09Z"),
+        ]);
+        let session_a = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .bound(&transcript_path(root.path(), "aaa")),
+        ));
+        let session_b = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .bound(&transcript_path(root.path(), "bbb")),
+        ));
+
+        let a = session_a
+            .handle_conversations(serde_json::json!({"session_id": "agent:a"}))
+            .await
+            .unwrap();
+        let b = session_b
+            .handle_conversations(serde_json::json!({"session_id": "agent:b"}))
+            .await
+            .unwrap();
+        assert_eq!(a["binding"]["conversation_id"], "aaa", "{a}");
+        assert_eq!(b["binding"]["conversation_id"], "bbb", "{b}");
+        assert_eq!(a["binding"]["activity"], "active");
+        assert_eq!(b["binding"]["activity"], "active");
+    }
+
+    #[tokio::test]
+    async fn sc09_pagination_walks_the_union_exactly_once() {
+        // SC-09: the cursor revision covers reported conversations too — a
+        // page walk yields each row once, and a changed report between pages
+        // is listing_changed, not a silent shift.
+        let (root, _guard) = projects(&[
+            ("aaa", BOUND_CWD, "2026-09-25T00:00:01Z"),
+            ("bbb", BOUND_CWD, "2026-09-25T00:00:05Z"),
+            ("drifted", "/elsewhere", "2026-09-25T00:00:09Z"),
+        ]);
+        let context = FixedContext::at(Some(BOUND_CWD)).bound_report(resume_report(
+            root.path(),
+            "drifted",
+            "/elsewhere",
+        ));
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(context));
+
+        let first = extension
+            .handle_conversations(serde_json::json!({"session_id": "agent:s", "limit": 2}))
+            .await
+            .unwrap();
+        assert_eq!(first["has_more"], true, "{first}");
+        let cursor = first["next_cursor"].as_str().expect("cursor").to_string();
+        let second = extension
+            .handle_conversations(serde_json::json!({
+                "session_id": "agent:s", "limit": 2, "cursor": cursor
+            }))
+            .await
+            .unwrap();
+        let mut ids: Vec<String> = first["items"]
+            .as_array()
+            .expect("items")
+            .iter()
+            .chain(second["items"].as_array().expect("items").iter())
+            .map(|i| i["id"].as_str().expect("id").to_string())
+            .collect();
+        ids.sort();
+        assert_eq!(ids, vec!["aaa", "bbb", "drifted"], "each row exactly once");
+
+        // A different reported current between pages invalidates the cursor.
+        let changed = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD)).bound(&transcript_path(root.path(), "aaa")),
+        ));
+        let stale = changed
+            .handle_conversations(serde_json::json!({
+                "session_id": "agent:s", "limit": 2, "cursor": cursor
+            }))
+            .await
+            .unwrap();
+        assert_eq!(stale["state"], "error", "{stale}");
+        assert_eq!(stale["error"], "listing_changed", "{stale}");
+    }
+
+    #[tokio::test]
+    async fn sc10_a_verified_observation_is_listed_and_bound_even_without_a_hook() {
+        // SC-10: the host's verified observation names a conversation the hook
+        // never reported — the list includes it and reports it as current, so
+        // status and conversations cannot diverge.
+        let (_root, _guard) = projects(&[("verified", "/elsewhere", "2026-11-17T00:00:09Z")]);
+        let extension = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .with_verified("verified"),
+        ));
+        let value = extension
+            .handle_conversations(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(value["binding"]["conversation_id"], "verified", "{value}");
+        assert!(
+            value["items"]
+                .as_array()
+                .is_some_and(|i| i.iter().any(|c| c["id"] == "verified")),
+            "{value}"
+        );
+
+        // And it outranks a lagging lifecycle report: the hook file still
+        // names the previous conversation, the live self-report names the
+        // current one.
+        let (root2, _guard2) = projects(&[
+            ("old", BOUND_CWD, "2026-11-17T00:00:01Z"),
+            ("new", "/elsewhere", "2026-11-17T00:00:09Z"),
+        ]);
+        let lagging = ClaudeCodeAgentExtension::new(Arc::new(
+            FixedContext::at(Some(BOUND_CWD))
+                .with_active(Some(true))
+                .bound(&transcript_path(root2.path(), "old"))
+                .with_verified("new"),
+        ));
+        let value = lagging
+            .handle_conversations(serde_json::json!({"session_id": "agent:s"}))
+            .await
+            .unwrap();
+        assert_eq!(value["binding"]["conversation_id"], "new", "{value}");
     }
 
     #[tokio::test]

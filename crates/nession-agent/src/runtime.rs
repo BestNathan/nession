@@ -345,7 +345,14 @@ pub async fn run(
         .mount_mcp(
             &config,
             agent_token.as_str(),
-            compose_mcp_tool_providers(&agent_id, Arc::clone(&tmux_for_client)),
+            compose_mcp_tool_providers(
+                &agent_id,
+                Arc::clone(&tmux_for_client),
+                Arc::new(ClaudeActivityProvider::new(
+                    &agent_id,
+                    Arc::clone(&tmux_for_client),
+                )),
+            ),
         )
         .context("failed to mount the MCP endpoint")?;
     // Mount the opt-in read-only OCI Registry on the P2P listener when
@@ -441,17 +448,25 @@ pub async fn run(
         ready.announce();
         (None, config.heartbeat_interval_secs, None)
     } else {
+        // One Claude Activity adapter instance (#4664 D6): the coordinator
+        // polls it, and the Claude session context reads its verified cache —
+        // one observation engine, not two.
+        let claude_activity = Arc::new(ClaudeActivityProvider::new(
+            &agent_id,
+            Arc::clone(&tmux_for_client),
+        ));
         let ext_registry = compose_providers(
             &agent_id,
             Arc::clone(&tmux_for_client),
             claude_mcp_host(&config, listen_addr),
+            Arc::clone(&claude_activity),
         )?;
         // Activity providers come from the same composition that serves
         // the protocol routes (#3800), so a capability cannot contribute
         // observations without being part of this Agent's provider set.
         let activity = SessionActivityCoordinator::new(
             agent_id.clone(),
-            compose_activity_providers(&agent_id, Arc::clone(&tmux_for_client), &ext_registry),
+            compose_activity_providers(&ext_registry, claude_activity),
         )
         .context("cannot compose this agent's Session Activity providers")?;
 
@@ -662,6 +677,7 @@ pub fn compose_providers(
     agent_id: &str,
     tmux: Arc<SessionManager>,
     claude_mcp_host: McpHostContext,
+    claude_activity: Arc<ClaudeActivityProvider>,
 ) -> Result<Arc<ExtensionRegistry>> {
     // #750/#1290. The resolver is what keeps Git and GitHub inside the
     // Session's own working directory: the client names a session, never a
@@ -679,7 +695,9 @@ pub fn compose_providers(
         // lifecycle, so it is the only thing that can answer, and the provider
         // must not depend back on it to ask.
         Box::new(ClaudeCodeAgentExtension::new(Arc::new(
-            TmuxSessionContext::new(Arc::clone(&tmux)).with_mcp_host(claude_mcp_host),
+            TmuxSessionContext::new(Arc::clone(&tmux))
+                .with_mcp_host(claude_mcp_host)
+                .with_claude_activity(claude_activity),
         ))),
         Box::new(GitAgentExtension::new(
             "git",
@@ -719,17 +737,15 @@ pub fn compose_providers(
 /// Extracted so the composition can be asserted without starting an Agent —
 /// a provider dropped here would disappear from every entrypoint at once.
 pub fn compose_activity_providers(
-    agent_id: &str,
-    tmux: Arc<SessionManager>,
     registry: &ExtensionRegistry,
+    claude_activity: Arc<ClaudeActivityProvider>,
 ) -> Vec<Arc<dyn SessionActivityProvider>> {
     let mut providers = registry.activity_providers();
     // The Claude adapter consumes #3779's source-owned status reader and owns
-    // a Pane only when it can bind a verified Claude process to it.
-    providers.push(Arc::new(ClaudeActivityProvider::new(
-        agent_id,
-        Arc::clone(&tmux),
-    )));
+    // a Pane only when it can bind a verified Claude process to it. The same
+    // instance is attached to the Claude session context (#4664 D6), so the
+    // read path and the Activity projection share one observation cache.
+    providers.push(claude_activity);
     providers.push(Arc::new(ShellActivityProvider::new()));
     providers
 }
@@ -745,12 +761,14 @@ pub fn compose_activity_providers(
 pub fn compose_mcp_tool_providers(
     agent_id: &str,
     tmux: Arc<SessionManager>,
+    claude_activity: Arc<ClaudeActivityProvider>,
 ) -> Vec<Arc<dyn McpToolProvider>> {
     // The read Tools execute this Agent's **existing** conversation/transcript
     // Protocol Units through the same stateless extension the protocol routes
     // use, over the same tmux Session truth (`#3779` P3). There is no second
     // discovery or transcript parser behind the MCP surface.
-    let context = Arc::new(TmuxSessionContext::new(Arc::clone(&tmux)));
+    let context =
+        Arc::new(TmuxSessionContext::new(Arc::clone(&tmux)).with_claude_activity(claude_activity));
     let reader = Arc::new(ClaudeCodeAgentExtension::new(context.clone()));
     // #4073: `claude.enter` prepares Claude's own Workspace Trust immediately
     // before launch, resolved from this same live Session view.
@@ -958,6 +976,10 @@ mod tests {
             "agent-test",
             Arc::new(SessionManager::new()),
             McpHostContext::default(),
+            Arc::new(ClaudeActivityProvider::new(
+                "agent-test",
+                Arc::new(SessionManager::new()),
+            )),
         )
         .expect("the runtime's own providers must compose");
         let manifest = registry.manifest();
@@ -982,10 +1004,19 @@ mod tests {
             "agent-test",
             Arc::new(SessionManager::new()),
             McpHostContext::default(),
+            Arc::new(ClaudeActivityProvider::new(
+                "agent-test",
+                Arc::new(SessionManager::new()),
+            )),
         )
         .expect("the runtime's own providers must compose");
-        let providers =
-            compose_activity_providers("agent-test", Arc::new(SessionManager::new()), &registry);
+        let providers = compose_activity_providers(
+            &registry,
+            Arc::new(ClaudeActivityProvider::new(
+                "agent-test",
+                Arc::new(SessionManager::new()),
+            )),
+        );
         let ids: Vec<&'static str> = providers.iter().map(|provider| provider.id()).collect();
 
         for expected in ["claude-code", "shell"] {
@@ -1009,7 +1040,14 @@ mod tests {
     /// explicit composition (`#3779`).
     #[test]
     fn the_runtime_composes_the_claude_control_tools() {
-        let providers = compose_mcp_tool_providers("agent-test", Arc::new(SessionManager::new()));
+        let providers = compose_mcp_tool_providers(
+            "agent-test",
+            Arc::new(SessionManager::new()),
+            Arc::new(ClaudeActivityProvider::new(
+                "agent-test",
+                Arc::new(SessionManager::new()),
+            )),
+        );
         let names: Vec<String> = providers
             .iter()
             .flat_map(|provider| provider.tools().expect("provider tools"))

@@ -36,7 +36,7 @@ use std::time::{Duration, Instant, SystemTime};
 
 use async_trait::async_trait;
 use nession_claude_code::control::{
-    ClaudeActivityState, ClaudeControl, ClaudeProcessState, ClaudeSessionTarget,
+    ClaudeActivityState, ClaudeControl, ClaudeObservation, ClaudeProcessState, ClaudeSessionTarget,
     ClaudeStatusObservation,
 };
 use nession_common::session_activity::{
@@ -124,6 +124,29 @@ impl ClaudeActivityProvider {
             observations.retain(|_, cached| cached.at.elapsed() < CACHE_TTL);
         }
         observations.insert(key, observation);
+    }
+
+    /// The conversation a fresh verified observation names for this Session
+    /// (#4664 D6 / SC-10).
+    ///
+    /// The read path's window onto the control path's live self-report: the
+    /// same cached observation the Activity projection uses, surfaced so the
+    /// conversation list cannot diverge from status on a verified
+    /// conversation. Read-only — it never spawns a CLI probe. Freshness is the
+    /// cache's own TTL bound; an observation older than that, or one that did
+    /// not verify a running Claude, names nothing, and the lifecycle binding
+    /// remains the reported evidence.
+    pub fn verified_conversation(&self, session_name: &str, instance_id: &str) -> Option<String> {
+        let key = format!("{session_name}\0{instance_id}");
+        let observations = self.lock();
+        let cached = observations.get(&key)?;
+        if cached.at.elapsed() >= CACHE_TTL
+            || cached.status.observation != ClaudeObservation::Verified
+            || cached.status.process != ClaudeProcessState::Running
+        {
+            return None;
+        }
+        cached.status.conversation_id.clone()
     }
 
     async fn observe(
@@ -510,6 +533,77 @@ mod tests {
         );
         assert_eq!(provider.id(), "claude-code");
         assert_eq!(provider.class(), WorkloadClass::Specialized);
+    }
+
+    // ---- the verified-identity window (#4664 D6 / SC-10) -------------------
+
+    struct FixedControl(ClaudeStatusObservation);
+
+    #[async_trait]
+    impl ClaudeControl for FixedControl {
+        async fn status(&self, _target: &ClaudeSessionTarget) -> ClaudeStatusObservation {
+            self.0.clone()
+        }
+        async fn enter(&self, _request: EnterRequest) -> EnterOutcome {
+            unimplemented!("the accessor never enters")
+        }
+        async fn submit(&self, _request: SubmitRequest) -> SubmitOutcome {
+            unimplemented!("the accessor never submits")
+        }
+    }
+
+    #[tokio::test]
+    async fn a_fresh_verified_observation_names_its_conversation() {
+        let provider = ClaudeActivityProvider::with_control(
+            "agent-a",
+            Arc::new(SessionManager::new()),
+            Arc::new(FixedControl(status(
+                ClaudeProcessState::Running,
+                ClaudeActivityState::Idle,
+                Some(42),
+            ))),
+        );
+        // Populate the cache the way the Activity projection does.
+        let _ = provider.probe(&context("p1", Some("claude.exe"))).await;
+        assert_eq!(
+            provider.verified_conversation("dev", "inc-1").as_deref(),
+            Some("conversation-1")
+        );
+        // Another instance of the same name reads nothing — the cache key is
+        // instance-fenced like the binding files.
+        assert_eq!(provider.verified_conversation("dev", "inc-2"), None);
+    }
+
+    #[tokio::test]
+    async fn an_unverified_or_absent_observation_names_nothing() {
+        // Unknown activity is not Verified; NotRunning is not a live Claude.
+        for fixture in [
+            status(
+                ClaudeProcessState::Running,
+                ClaudeActivityState::Unknown,
+                None,
+            ),
+            status(
+                ClaudeProcessState::NotRunning,
+                ClaudeActivityState::Unknown,
+                None,
+            ),
+        ] {
+            let provider = ClaudeActivityProvider::with_control(
+                "agent-a",
+                Arc::new(SessionManager::new()),
+                Arc::new(FixedControl(fixture)),
+            );
+            let _ = provider.probe(&context("p1", Some("claude.exe"))).await;
+            assert_eq!(provider.verified_conversation("dev", "inc-1"), None);
+        }
+        // And a provider that never observed answers None rather than guessing.
+        let fresh = ClaudeActivityProvider::with_control(
+            "agent-a",
+            Arc::new(SessionManager::new()),
+            Arc::new(NoControl),
+        );
+        assert_eq!(fresh.verified_conversation("dev", "inc-1"), None);
     }
 
     struct NoControl;
