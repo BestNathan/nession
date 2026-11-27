@@ -1,0 +1,13 @@
+schema_version: 1
+issue: 4665
+criterion: SC-01
+stage: staging
+runner: live-cli
+runtime: full-stack-local
+isolation: shared
+verifiers:
+  - type: runtime
+    entry: verify.cjs
+  - type: runtime
+    entry: verify-live.cjs
+result_policy: all-pass

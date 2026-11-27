@@ -63,6 +63,16 @@ use anyhow::{Context, Result};
 
 use crate::process::TmuxCommand;
 
+/// The settle delay between a literal text burst and its Enter in
+/// [`TmuxOps::send_literal_line`] (#4665).
+///
+/// Long enough for a full-screen TUI to consume the text burst as its own
+/// input event before the Enter arrives; short enough that typing a line stays
+/// interactive. The value is a heuristic separation, not a measured protocol
+/// constant — the proof that the line was actually submitted is the caller's
+/// read-back, never this delay.
+pub const PASTE_SETTLE_DELAY: Duration = Duration::from_millis(250);
+
 /// tmux's own words for "this session does not hold that variable".
 ///
 /// `show-environment <name>` exits 1 both when the variable is unset and when
@@ -1102,9 +1112,22 @@ impl TmuxOps {
     /// it must never be interpreted: `-l` makes tmux send the characters
     /// verbatim, and the separate `Enter` is the only key this operation
     /// presses.
+    ///
+    /// The two sends are separated by [`PASTE_SETTLE_DELAY`]. A full-screen
+    /// TUI reads its input in chunks, and an Enter that arrives in the same
+    /// chunk as a large literal burst can be coalesced into the application's
+    /// paste handling instead of submitting the line (#4665: the text landed
+    /// in the composer, the Enter was lost). The delay lets the application
+    /// consume the text before the Enter arrives as its own input event.
+    ///
+    /// **This is a delivery heuristic, not proof of submission.** A zero exit
+    /// status from both sends only proves tmux accepted the keys for the pane
+    /// PTY; whether the application consumed them as intended is the caller's
+    /// read-back to prove (#4665).
     pub async fn send_literal_line(&self, session: &str, text: &str) -> Result<()> {
         self.run_send_keys(&["send-keys", "-l", "-t", session, "--", text], session)
             .await?;
+        tokio::time::sleep(PASTE_SETTLE_DELAY).await;
         self.run_send_keys(&["send-keys", "-t", session, "Enter"], session)
             .await
     }

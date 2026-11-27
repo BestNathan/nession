@@ -1,10 +1,13 @@
 //! `nession_claude_submit` — send one prompt to the verified idle Claude
-//! conversation (`#3779` P2).
+//! conversation (`#3779` P2, delivery truthfulness `#4665`).
 //!
 //! The answer carries the verified actual conversation id and a truthful
-//! delivery phase (`input_sent`), never an invented execution result. A stale
-//! conversation id, a busy/waiting/unknown Claude, or a concurrent conflicting
-//! write is refused without sending.
+//! delivery phase, never an invented execution result. `input_sent` means the
+//! prompt's **submission was confirmed by read-back** (the exact user message
+//! in the addressed conversation), not merely that tmux accepted the keys.
+//! Unconfirmed delivery answers `unknown` with read-back guidance. A stale
+//! conversation id, a busy/waiting/unknown Claude, an unready or non-empty
+//! composer, or a concurrent conflicting write is refused without sending.
 
 use std::sync::Arc;
 
@@ -79,9 +82,12 @@ impl ToolHandler for NessionClaudeSubmit {
 
     fn description(&self) -> &str {
         "Send one prompt line to the verified idle Claude conversation in one named Nession \
-         Session. Returns the actual verified conversation id and a truthful delivery phase \
-         (`input_sent`), never a fabricated execution result. A stale conversation id, a \
-         busy/waiting/unknown Claude, or a concurrent writer is refused without sending."
+         Session. Returns the actual verified conversation id and a truthful delivery phase: \
+         `input_sent` only after the prompt's submission is confirmed by read-back (the exact \
+         user message in the addressed conversation); `unknown` with read-back guidance when \
+         delivery could not be confirmed; never a fabricated execution result. A stale \
+         conversation id, a busy/waiting/unknown Claude, an unready or non-empty composer, or \
+         a concurrent writer is refused without sending."
     }
 
     fn input_schema(&self) -> Map<String, Value> {
@@ -212,6 +218,65 @@ mod tests {
         assert_eq!(
             reply["conversation_id"],
             "550e8400-e29b-41d4-a716-446655440000"
+        );
+    }
+
+    struct UnconfirmedControl;
+
+    #[async_trait]
+    impl ClaudeControl for UnconfirmedControl {
+        async fn status(&self, _target: &ClaudeSessionTarget) -> ClaudeStatusObservation {
+            ClaudeStatusObservation::not_running("2026-11-18T00:00:00Z")
+        }
+
+        async fn enter(&self, _request: EnterRequest) -> EnterOutcome {
+            unreachable!("submit does not enter")
+        }
+
+        async fn submit(&self, request: SubmitRequest) -> SubmitOutcome {
+            SubmitOutcome {
+                conversation_id: Some(request.conversation_id),
+                status: SubmitStatus::Unknown,
+                observation: ClaudeObservation::Verified,
+                detail: Some(
+                    "the input was sent but its submission was not confirmed; read the \
+                     conversation back before retrying"
+                        .to_string(),
+                ),
+                observed_at: "2026-11-18T00:00:00Z".to_string(),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn an_unconfirmed_delivery_is_passed_through_as_unknown_with_guidance() {
+        // #4665: the Tool must not dress an unconfirmed delivery as
+        // `input_sent`. The backend's truthful `unknown` and its read-back
+        // guidance reach the caller unchanged.
+        let tool = NessionClaudeSubmit::new("agent-a", Arc::new(UnconfirmedControl));
+        let reply = tool
+            .call(
+                &context(),
+                args(serde_json::json!({
+                    "agent_id": "agent-a",
+                    "session_id": "agent-a:dev",
+                    "conversation_id": "550e8400-e29b-41d4-a716-446655440000",
+                    "prompt": "Review changes"
+                })),
+            )
+            .await
+            .expect("submit");
+        assert_eq!(reply["status"], "unknown");
+        assert_eq!(
+            reply["conversation_id"],
+            "550e8400-e29b-41d4-a716-446655440000"
+        );
+        assert!(
+            reply["detail"]
+                .as_str()
+                .expect("detail")
+                .contains("read the conversation back"),
+            "the read-back guidance must survive: {reply}"
         );
     }
 
