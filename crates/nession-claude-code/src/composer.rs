@@ -62,7 +62,7 @@ pub fn observe_composer(capture: &[u8]) -> ComposerObservation {
         .map(|line| annotate(line.trim_end_matches('\r')))
         .collect();
 
-    let Some(box_lines) = last_input_box(&lines) else {
+    let Some(box_lines) = last_composer_content(&lines) else {
         return ComposerObservation::NotRecognized;
     };
 
@@ -322,6 +322,65 @@ fn prompt_text_run(body: &[Cell]) -> Vec<Cell> {
         start += 1;
     }
     body.get(start..).map(<[Cell]>::to_vec).unwrap_or_default()
+}
+
+/// The composer's content lines, recognizing both rendered shapes:
+///
+/// - a rounded-border box (`╭─╮ │ ╰─╯`) with a `>` prompt line; and
+/// - the horizontal-rule frame the v2.1.312 TUI actually draws: a `❯ ` prompt
+///   line between two `────` rules, with a mode footer below.
+///
+/// The composer is at the bottom of the screen, below any transcript frame.
+/// `None` when neither shape is present (startup, a dialog, an unknown layout).
+fn last_composer_content(lines: &[Vec<Cell>]) -> Option<Vec<Vec<Cell>>> {
+    if let Some(boxed) = last_input_box(lines) {
+        return Some(boxed);
+    }
+    rule_composer(lines)
+}
+
+/// Whether a capture line is a horizontal rule (a run of box-drawing horizontals
+/// such as `────`), the frame the rule-shaped composer draws above and below its
+/// prompt line.
+fn is_horizontal_rule(line: &[Cell]) -> bool {
+    let plain = plain(line);
+    let mut count = 0;
+    for ch in plain.chars() {
+        if ch.is_whitespace() {
+            continue;
+        }
+        if !matches!(ch, '─' | '━' | '═' | '┄' | '┅' | '┈' | '┉') {
+            return false;
+        }
+        count += 1;
+    }
+    count >= 8
+}
+
+/// The rule-shaped composer: the last prompt-glyph line (`❯` or `>`) bounded by
+/// a horizontal rule above and below. The content between those rules is the
+/// composer (prompt line plus any wrapped/multi-line continuation).
+fn rule_composer(lines: &[Vec<Cell>]) -> Option<Vec<Vec<Cell>>> {
+    let prompt = lines.iter().rposition(|line| {
+        let plain = plain(line);
+        let trimmed = plain.trim_start();
+        trimmed.starts_with('❯') || trimmed.starts_with("> ") || trimmed.trim_end() == ">"
+    })?;
+    let top = lines
+        .get(..prompt)?
+        .iter()
+        .rposition(|line| is_horizontal_rule(line))?;
+    let bottom = prompt
+        + 1
+        + lines
+            .get(prompt + 1..)?
+            .iter()
+            .position(|line| is_horizontal_rule(line))?;
+    let content = lines.get(top + 1..bottom)?;
+    if content.is_empty() {
+        return None;
+    }
+    Some(content.to_vec())
 }
 
 /// The content lines of the last rounded-border box in the capture — the
@@ -629,6 +688,97 @@ mod tests {
         assert_eq!(
             observe_composer(&screen(&lines)),
             ComposerObservation::Dirty("unsubmitted text in the input box")
+        );
+    }
+
+    // The v2.1.312 TUI (qwen gateway) draws the composer as a `❯ ` prompt line
+    // between two horizontal rules, with a mode footer below — not a rounded
+    // box. These fixtures replicate the captured live screen (#4665 SC-01
+    // staging diagnosis).
+    const RULE: &str =
+        "────────────────────────────────────────────────────────────────────────────────";
+
+    fn rule_screen(prompt_line: &str) -> Vec<String> {
+        vec![
+            "▎ Auto mode is now Claude Code's default permission mode.".to_string(),
+            RULE.to_string(),
+            prompt_line.to_string(),
+            RULE.to_string(),
+            "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents".to_string(),
+        ]
+    }
+
+    #[test]
+    fn a_rule_shaped_empty_composer_is_ready() {
+        assert_eq!(
+            observe_composer(&screen(&rule_screen("❯ "))),
+            ComposerObservation::Ready
+        );
+    }
+
+    #[test]
+    fn a_rule_shaped_composer_with_typed_text_is_dirty() {
+        assert_eq!(
+            observe_composer(&screen(&rule_screen("❯ leftover unsubmitted prompt"))),
+            ComposerObservation::Dirty("unsubmitted text in the input box")
+        );
+    }
+
+    #[test]
+    fn a_rule_shaped_dim_hint_is_an_empty_composer() {
+        let lines = rule_screen(&format!("❯ {}", dim("Try \"fix lint errors\"")));
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::Ready
+        );
+    }
+
+    #[test]
+    fn a_rule_shaped_focused_hint_with_inverted_cursor_is_ready() {
+        let lines = rule_screen(&format!(
+            "❯ \u{1b}[7mT\u{1b}[0m{}",
+            dim("ry \"fix lint errors\"")
+        ));
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::Ready
+        );
+    }
+
+    #[test]
+    fn a_rule_shaped_paste_placeholder_is_dirty() {
+        let lines = rule_screen(&format!("❯ {}", dim("[Pasted text #1 +22 lines]")));
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::Dirty("an unsent paste placeholder")
+        );
+    }
+
+    #[test]
+    fn a_rule_shaped_multiline_composer_is_dirty() {
+        let lines = vec![
+            RULE.to_string(),
+            "❯ first part of the prompt".to_string(),
+            "second part of the prompt".to_string(),
+            RULE.to_string(),
+            "  ⏵⏵ auto mode on".to_string(),
+        ];
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::Dirty("unsubmitted text in the input box")
+        );
+    }
+
+    #[test]
+    fn a_startup_screen_without_a_prompt_line_is_not_recognized() {
+        let lines = vec![
+            "▐▛███▛█   Claude Code v2.1.312".to_string(),
+            "▝▜██████▀  qwen3.7-plus · API Usage Billing".to_string(),
+            "  Starting up…".to_string(),
+        ];
+        assert_eq!(
+            observe_composer(&screen(&lines)),
+            ComposerObservation::NotRecognized
         );
     }
 }
