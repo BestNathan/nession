@@ -1,13 +1,17 @@
 # Patch ingress hosts for staging environment.
 # nameSuffix handles the -staging rename; these patches change the host values.
 # The http/paths/backend are included because rules use "replace" merge strategy.
+# #4588: the canonical single-label hosts (staging-nession / staging-agent-nession
+# / staging-ui-nession .bestnathan.top) are added; the nested bestnathan.top names
+# are retained as LAN compatibility during migration and nhome.local is preserved
+# verbatim. TLS for bestnathan.top terminates at the nitops-owned SLB.
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nession-server
   annotations:
-    higress.io/domain: "staging.nession.nhome.local staging.nession.bestnathan.top"
+    higress.io/domain: "staging.nession.nhome.local staging.nession.bestnathan.top staging-nession.bestnathan.top"
 spec:
   rules:
     - host: staging.nession.nhome.local
@@ -30,13 +34,23 @@ spec:
                 name: nession-server
                 port:
                   number: 10080
+    - host: staging-nession.bestnathan.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-server
+                port:
+                  number: 10080
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nession-agent
   annotations:
-    higress.io/domain: "staging.agent.nession.nhome.local staging.agent.nession.bestnathan.top"
+    higress.io/domain: "staging.agent.nession.nhome.local staging.agent.nession.bestnathan.top staging-agent-nession.bestnathan.top"
 spec:
   rules:
     - host: staging.agent.nession.nhome.local
@@ -59,13 +73,23 @@ spec:
                 name: nession-agent
                 port:
                   number: 10080
+    - host: staging-agent-nession.bestnathan.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-agent
+                port:
+                  number: 10080
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nession-ui
   annotations:
-    higress.io/domain: "staging.ui.nession.nhome.local staging.ui.nession.bestnathan.top"
+    higress.io/domain: "staging.ui.nession.nhome.local staging.ui.nession.bestnathan.top staging-ui-nession.bestnathan.top"
 spec:
   rules:
     - host: staging.ui.nession.nhome.local
@@ -79,6 +103,16 @@ spec:
                 port:
                   number: 80
     - host: staging.ui.nession.bestnathan.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-ui
+                port:
+                  number: 80
+    - host: staging-ui-nession.bestnathan.top
       http:
         paths:
           - path: /

@@ -15,3 +15,7 @@ spec:
               value: "ws://nession-server-staging-01:18080"
             - name: AGENT_CONNECT_URL
               value: "ws://staging-01.agent.nession.nhome.local/ws"
+            # #4588: canonical single-label WSS endpoint advertised alongside the
+            # preserved nhome.local connect_url (overrides the base value).
+            - name: AGENT_ADVERTISE_URLS
+              value: "wss://staging-01-agent-nession.bestnathan.top/ws"

@@ -1,9 +1,14 @@
+# #4588: ui-nession.bestnathan.top is the canonical single-label host. The
+# nested ui.nession.bestnathan.top name is retained as LAN compatibility during
+# migration and retired only after cutover readback; nhome.local is preserved
+# verbatim. TLS for bestnathan.top terminates at the nitops-owned SLB
+# (cert-manager wildcard), not here.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: nession-ui
   annotations:
-    higress.io/domain: "ui.nession.nhome.local ui.nession.bestnathan.top"
+    higress.io/domain: "ui.nession.nhome.local ui.nession.bestnathan.top ui-nession.bestnathan.top"
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: higress
@@ -19,6 +24,16 @@ spec:
                 port:
                   number: 80
     - host: ui.nession.bestnathan.top
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: nession-ui
+                port:
+                  number: 80
+    - host: ui-nession.bestnathan.top
       http:
         paths:
           - path: /

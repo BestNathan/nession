@@ -13,4 +13,4 @@ spec:
         - name: nession-server
           env:
             - name: SERVER_ALLOWED_ORIGINS
-              value: "http://staging-01.nession.nhome.local,http://staging-01.ui.nession.nhome.local,http://staging-01.nession.bestnathan.top,https://staging-01.nession.bestnathan.top,http://staging-01.ui.nession.bestnathan.top,https://staging-01.ui.nession.bestnathan.top"
+              value: "http://staging-01.nession.nhome.local,http://staging-01.ui.nession.nhome.local,http://staging-01.nession.bestnathan.top,https://staging-01.nession.bestnathan.top,http://staging-01.ui.nession.bestnathan.top,https://staging-01.ui.nession.bestnathan.top,https://staging-01-nession.bestnathan.top,https://staging-01-ui-nession.bestnathan.top"

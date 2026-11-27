@@ -42,6 +42,11 @@ spec:
                   key: auth-token
             - name: AGENT_CONNECT_URL
               value: "ws://agent.nession.nhome.local/ws"
+            # #4588: canonical single-label WSS endpoint advertised alongside the
+            # preserved nhome.local connect_url. The entrypoint projects this to
+            # [[advertise_addresses]]; AgentConfig validates the ws/wss scheme.
+            - name: AGENT_ADVERTISE_URLS
+              value: "wss://agent-nession.bestnathan.top/ws"
             - name: SERVER_BACKEND
               value: "127.0.0.1:19090"
             - name: LANG

@@ -13,4 +13,4 @@ spec:
         - name: nession-server
           env:
             - name: SERVER_ALLOWED_ORIGINS
-              value: "http://preprod.nession.nhome.local,http://preprod.ui.nession.nhome.local,http://preprod.nession.bestnathan.top,https://preprod.nession.bestnathan.top,http://preprod.ui.nession.bestnathan.top,https://preprod.ui.nession.bestnathan.top"
+              value: "http://preprod.nession.nhome.local,http://preprod.ui.nession.nhome.local,http://preprod.nession.bestnathan.top,https://preprod.nession.bestnathan.top,http://preprod.ui.nession.bestnathan.top,https://preprod.ui.nession.bestnathan.top,https://preprod-nession.bestnathan.top,https://preprod-ui-nession.bestnathan.top"
