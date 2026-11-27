@@ -131,8 +131,17 @@ function isTooling(file) {
   // E2E suite: Claude worktree hooks and just recipes, plus the E2E tree's
   // ignore rules. Only these exact surfaces are trusted, not arbitrary
   // dotfiles.
+  //
+  // #4683: the root `.mcp.json` is the project-level MCP server configuration
+  // read by coding agents working in this repository (the same developer-agent
+  // surface family as `.claude/`). The product runtime, the Web build and the
+  // E2E Playwright suite (which uses `e2e/playwright.config.ts`) never consume
+  // it, so it cannot affect browser runtime. Leaving it `unknown` fail-closed
+  // the whole convergence batch and deadlocked the main->staging sync
+  // (UNCLASSIFIED_BATCH_SCOPE, the #4599/#4606 registration pattern). Exact
+  // root surface only — nested or suffixed dotfiles stay unrecognized.
   if (file === 'justfile' || file.startsWith('.claude/') ||
-      file === 'e2e/.gitignore') return true;
+      file === 'e2e/.gitignore' || file === '.mcp.json') return true;
   if (file.startsWith('gates/')) return true; // executor/suite paths handled first
   if (file.startsWith('.github/workflows/')) return true; // executor paths handled first
   if (file.startsWith('scripts/')) return true; // e2e/ci paths handled first
@@ -406,6 +415,26 @@ function selfTest() {
     '.github/actions/install-regctl/action.yml',
     'unknown/path/that/does/not/exist.ts',
   ]).category, 'unknown', 'an unknown path must still fail closed alongside a composite action');
+  // #4683: the exact #4663 main->staging sync shape — a single root `.mcp.json`
+  // (coding-agent MCP config). It is a registered developer-tooling surface, so
+  // the batch is tooling-only (Not Required) and the convergence approval is no
+  // longer denied UNCLASSIFIED_BATCH_SCOPE. This is the positive half.
+  assert.equal(categorizeChangedPath('.mcp.json'), 'tooling',
+    'root .mcp.json must be positively classified developer tooling');
+  const mcpConfigOnly = classifyChangedPaths(['.mcp.json']);
+  assert.equal(mcpConfigOnly.category, 'tooling-only');
+  assert.equal(mcpConfigOnly.applicable, false);
+  // Negative: only the exact root surface is trusted. Nested, suffixed and
+  // other dotfiles stay unrecognized, and an unknown path mixed into a
+  // .mcp.json batch still fails closed (no broad dotfile trust).
+  for (const dotfile of ['.mcp.json.bak', 'nested/.mcp.json', '.foorc', '.mcp.json/child']) {
+    assert.equal(categorizeChangedPath(dotfile), 'unknown',
+      dotfile + ' must not be trusted as the root .mcp.json surface');
+  }
+  assert.equal(classifyChangedPaths(['.mcp.json', 'unknown/path/that/does/not/exist.ts']).category,
+    'unknown', 'an unknown path must still fail closed alongside .mcp.json');
+  assert.equal(classifyChangedPaths(['.mcp.json', 'web/src/App.tsx']).category,
+    'mixed', '.mcp.json must not hide a runtime change in the same batch');
   // #4477: the Pages migration made pages/scripts/** the trusted build
   // pipeline for the shipped public artifact. They are risk-bearing runtime
   // build inputs (never tooling-only, never unknown) while the Pages test
