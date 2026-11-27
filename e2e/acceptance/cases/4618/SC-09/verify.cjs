@@ -87,6 +87,15 @@ run(({ evidence }) => {
   ], '4618 SC-05');
   evidence.push({ type: 'runtime', value: `WebSocketService dial deadline: ${dial} passing tests (CONNECTING settles once, waiters reject once, late callbacks fenced)` });
 
+  // Controlled cold/warm measurement (SC-08): real loopback HTTP vs WS with an
+  // identical fixed delay; records sample count, p50/p95 and zero WS slots.
+  const benchmarkOut = checked('node', [path.join(REPO_ROOT, 'web/scripts/probe-benchmark.mjs')], 120000);
+  const benchmarkLine = benchmarkOut.split('\n').find((l) => l.startsWith('PROBE_BENCHMARK '));
+  if (!benchmarkLine) {
+    throw new Error('the probe benchmark produced no PROBE_BENCHMARK evidence line');
+  }
+  evidence.push({ type: 'runtime', value: benchmarkLine.slice('PROBE_BENCHMARK '.length) });
+
   // Source invariants: one Session attach authority; probe is credential-free.
   requireSource([
     ['web/src/platform/session-runtime/SessionRuntimeRegistry.ts', 'resumeServerAuthenticated', 'single SessionRuntime registry wake authority'],

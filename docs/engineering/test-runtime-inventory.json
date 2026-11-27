@@ -4,7 +4,7 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1916,
+    "entries": 1915,
     "references": 1022,
     "unresolved": 0
   },
@@ -9115,11 +9115,6 @@
     },
     {
       "file": "web/src/platform/probe/__tests__/unit/httpProbe.test.ts",
-      "owner": "web vitest",
-      "disposition": "web-unit"
-    },
-    {
-      "file": "web/src/platform/probe/__tests__/unit/probeBenchmark.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
     },
