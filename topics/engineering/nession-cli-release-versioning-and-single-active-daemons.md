@@ -1,12 +1,12 @@
 ---
 title: "Nession CLI release versioning and single-active daemons"
-description: "Current/Selected/Running release semantics, the installation as the stable unit retained across upgrades, independent archive snapshots with coverage manifests, the bounded resumable upgrade transport, per-command version dispatch with a state-coverage gate, and idempotent start with restart-only replacement"
+description: "Current/Selected/Running release semantics, the installation as the stable unit retained across upgrades, independent archive snapshots with coverage manifests, the bounded resumable upgrade transport, per-command version dispatch with a state-coverage gate, read-only local log dispatch, and idempotent start with restart-only replacement"
 topic: engineering
 categories: ["architecture", "cli", "lifecycle", "process", "release", "storage"]
 status: verified
 created_at: 2026-11-10T15:06:36Z
-updated_at: 2026-11-26T10:40:40Z
-sources: ["https://github.com/BestNathan/nession/issues/3173", "https://github.com/BestNathan/nession/pull/3214", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/update/install.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/release_config.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/snapshot.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/policy.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/commands/version/recover.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/scripts/install.sh"]
+updated_at: 2026-11-27T07:10:08Z
+sources: ["https://github.com/BestNathan/nession/issues/3173", "https://github.com/BestNathan/nession/pull/3214", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/update/install.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/release_config.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/snapshot.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/policy.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/commands/version/recover.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4600", "https://github.com/BestNathan/nession/pull/4612", "https://github.com/BestNathan/nession/pull/4616", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/docs/architecture/cli-logs.md", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/local_logs/mod.rs", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/lifecycle/pid_file.rs"]
 ---
 
 # Nession CLI release versioning and single-active daemons
@@ -211,6 +211,19 @@ invocation of old binaries is not sandboxed. Existing archives remain
 untouched and inspectable; there is no automatic DB downgrade and no implicit
 promotion of a historical release.
 
+### Read-only logs dispatch
+
+`nession agent|server logs` is a read-only diagnostic surface (#4600). A
+selected archive release runs its own CLI with the archive home; a release that
+predates the logs command is read directly by the Current CLI after an explicit
+diagnostic, never by falling back to Current's history. Logs skip
+install-transaction recovery and the background update check, report a pending
+recovery journal without mutating it, and do not require a proven archive
+manifest. `server logs` is exempt from the data-touching classifier for the same
+reason `agent logs` is. The command contract, source semantics, filters/follow
+and bounded startup diagnostics are owned by
+[Nession CLI local logs and startup diagnostics](nession-cli-local-logs-and-startup-diagnostics.md).
+
 ### Shared lifecycle contract
 
 Before `agent|server start|restart|status|stop` is dispatched to an archived
@@ -289,4 +302,5 @@ Current and re-runs `install-service` from it.
 Related knowledge:
 
 - [Nession runtime directories and daemon process state ownership](nession-runtime-directories-and-daemon-process-state-ownership.md) — the shared runtime location and legacy PID migration this versioning relies on.
+- [Nession CLI local logs and startup diagnostics](nession-cli-local-logs-and-startup-diagnostics.md) — read-only local log discovery, filters/follow and bounded startup/service diagnostics.
 - [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md) — Sandbox confinement is a separate process boundary from daemon release lifecycle.

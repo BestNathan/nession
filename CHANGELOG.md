@@ -996,3 +996,24 @@
 - Categories: architecture, agent, ci, security, workflows
 - Reason: Record #4603 common production image version family, protected repair and Secret validation, GitOps 1.0.1 convergence evidence, and explicit separation of desired state from live ArgoCD/Pod proof
 - Source: https://github.com/BestNathan/nession/issues/4603
+
+## 2026-11-27T07:10:08Z | update | Nession CLI release versioning and single-active daemons
+- Path: topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, release, storage
+- Reason: Record the #4600 read-only local logs dispatch boundary — selected archives read their own home, releases without the command are read directly by Current, logs skip install recovery/update checks, and `server logs` is exempt from the data-touching archive gate
+- Source: https://github.com/BestNathan/nession/issues/4600
+
+## 2026-11-27T07:10:08Z | update | Nession runtime directories and daemon process state ownership
+- Path: topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, security, storage
+- Reason: Record the identity's optional absolute home/log_dir scope and its status/logs verification rules, while runtime log discovery remains read-only and never creates runtime state
+- Source: https://github.com/BestNathan/nession/issues/4600
+
+## 2026-11-27T07:10:08Z | create | Nession CLI local logs and startup diagnostics
+- Path: topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md
+- Topic: engineering
+- Categories: architecture, cli, observability, logging, lifecycle, security
+- Reason: Establish the current CLI log/discovery contract: read-only `agent|server logs`, source/filter/follow semantics, bounded sanitized startup diagnostics, managed-service captures and archive-safe dispatch
+- Source: https://github.com/BestNathan/nession/issues/4600

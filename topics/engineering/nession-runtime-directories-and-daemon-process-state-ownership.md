@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "cli", "lifecycle", "process", "security", "storage"]
 status: verified
 created_at: 2026-11-10T11:18:40Z
-updated_at: 2026-11-26T10:40:40Z
-sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md"]
+updated_at: 2026-11-27T07:10:08Z
+sources: ["https://github.com/BestNathan/nession/issues/3155", "https://github.com/BestNathan/nession/pull/3183", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-common/src/paths.rs", "https://github.com/BestNathan/nession/blob/f69b9a0f92ddc6cb28070ba4a3965b051e57a604/crates/nession-cli/src/lifecycle/pid_file.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/issues/4600", "https://github.com/BestNathan/nession/pull/4612", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/docs/architecture/runtime-directories.md", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/lifecycle/pid_file.rs"]
 ---
 
 # Nession runtime directories and daemon process state ownership
@@ -52,9 +52,10 @@ group/other-writable is rejected rather than trusted with lifecycle artifacts.
 Failure to resolve a default runtime location is an error: the CLI never falls
 back to `./agent.pid`, `./server.pid`, or a durable home path.
 
-An explicit `--pid-file` is the highest-priority override. It disables runtime
-resolution and migration, remains authoritative across the foreground/background
-child re-exec, and is written into `agent install-service` artifacts.
+An explicit `--pid-file` is the highest-priority override for lifecycle
+commands and `logs`. It disables runtime resolution and migration, remains
+authoritative across the foreground/background child re-exec, and is written
+into `agent install-service` artifacts.
 
 ## Migration and diagnostics
 
@@ -75,6 +76,18 @@ legacy location with the existing `pid + started_at + kind` ownership identity
   plist installed by a pre-runtime binary keeps passing the old path as an
   explicit `--pid-file`; re-run `nession agent install-service` to move the
   managed start onto the runtime state file.
+
+## Recorded log scope
+
+The identity the daemon writes also records the absolute `home` and runtime
+`log_dir` it resolved. Both fields are optional and backward compatible: an
+older record reads as unknown, and a reader must say the live process's log
+location is unverified rather than substitute a documented default. `status`
+shows a recorded directory only when it is the canonical one under the recorded
+home; `agent|server logs` refuses an explicitly selected home that conflicts
+with a live instance. Log discovery itself never creates the runtime directory
+or removes state records. Its reader, filters and bounded startup diagnostics
+are owned by [Nession CLI local logs and startup diagnostics](nession-cli-local-logs-and-startup-diagnostics.md).
 
 ## Autostart
 
@@ -120,4 +133,5 @@ the recorded instance. The grace and settle windows are unchanged.
 Related knowledge:
 
 - [Nession CLI release versioning and single-active daemons](nession-cli-release-versioning-and-single-active-daemons.md) — per-command release selection, the release archive and the cross-version lifecycle lock built on this runtime directory.
+- [Nession CLI local logs and startup diagnostics](nession-cli-local-logs-and-startup-diagnostics.md) — the read-only log reader and startup capture that consume the identity log scope recorded here.
 - [Nession Sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md) — Sandbox isolation controls what a Session process may access; this article owns only where daemon lifecycle state lives.

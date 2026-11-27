@@ -83,8 +83,23 @@
         "updated_at": "2026-10-24T12:24:00Z"
       },
       {
+        "title": "Nession CLI local logs and startup diagnostics",
+        "description": "Read-only `agent|server logs` discovery across rolling runtime files, bounded startup diagnostics and managed-service captures, with filter-before-tail, identity/offset follow, sanitized bounded startup records and archive-safe read-only dispatch",
+        "path": "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "cli",
+          "observability",
+          "logging",
+          "lifecycle",
+          "security"
+        ],
+        "updated_at": "2026-11-27T07:10:08Z"
+      },
+      {
         "title": "Nession CLI release versioning and single-active daemons",
-        "description": "Current/Selected/Running release semantics, the installation as the stable unit retained across upgrades, independent archive snapshots with coverage manifests, the bounded resumable upgrade transport, per-command version dispatch with a state-coverage gate, and idempotent start with restart-only replacement",
+        "description": "Current/Selected/Running release semantics, the installation as the stable unit retained across upgrades, independent archive snapshots with coverage manifests, the bounded resumable upgrade transport, per-command version dispatch with a state-coverage gate, read-only local log dispatch, and idempotent start with restart-only replacement",
         "path": "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
         "status": "verified",
         "categories": [
@@ -95,7 +110,7 @@
           "release",
           "storage"
         ],
-        "updated_at": "2026-11-26T10:40:40Z"
+        "updated_at": "2026-11-27T07:10:08Z"
       },
       {
         "title": "Nession instruction architecture and knowledge ownership",
@@ -138,7 +153,7 @@
           "security",
           "storage"
         ],
-        "updated_at": "2026-11-26T10:40:40Z"
+        "updated_at": "2026-11-27T07:10:08Z"
       },
       {
         "title": "Nession Sandbox policy and execution isolation architecture",
@@ -527,6 +542,7 @@
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
@@ -556,6 +572,7 @@
       "topics/workflows/nession-native-toolchain-oci-release-to-ghcr.md"
     ],
     "cli": [
+      "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
@@ -617,8 +634,12 @@
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
     "lifecycle": [
+      "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
+    ],
+    "logging": [
+      "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md"
     ],
     "media": [
       "topics/web/files-capability-identity-creation-context-and-safe-mutation-ownership.md",
@@ -632,6 +653,7 @@
       "topics/web/web-session-first-navigation-reserved-rail-and-explicit-experience-mode.md"
     ],
     "observability": [
+      "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/websocket-runtime-observability-and-reliability.md"
     ],
     "overlay": [
@@ -733,6 +755,7 @@
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md",
