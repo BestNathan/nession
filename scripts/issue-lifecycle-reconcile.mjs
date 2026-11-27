@@ -719,6 +719,7 @@ export async function verifyForcePushedPrSourceRebind(repository, sourceSha, pr,
       'beforeCommit{oid} afterCommit{oid}}}}}}}',
     variables:{owner,name,number:pr.number},
   }});
+  if (Array.isArray(timeline?.errors) && timeline.errors.length > 0) return false;
   const pull=timeline?.data?.repository?.pullRequest;
   const nodes=pull?.timelineItems?.nodes;
   if (!pull || pull.number !== pr.number || pull.merged !== true ||
@@ -1453,6 +1454,8 @@ async function selfTest() {
       timelineItems:{pageInfo:{hasNextPage:true},nodes:[{__typename:
         'HeadRefForcePushedEvent',beforeCommit:{oid:sha},
         afterCommit:{oid:successorSha}}]}}}}}}],
+    ['partial GraphQL timeline errors',{timeline:{...rebindTimeline,
+      errors:[{message:'timeline was only partially resolved'}]}}],
     ['different merged head',{timeline:{data:{repository:{pullRequest:{
       number:assocPr.number,merged:true,headRefOid:sha,
       timelineItems:{pageInfo:{hasNextPage:false},nodes:[{__typename:
