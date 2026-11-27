@@ -1,12 +1,30 @@
 import { useContext } from 'react';
+import { RefreshScheduler } from './RefreshScheduler';
+import { RefreshSignalBus } from './RefreshSignalBus';
 import { RefreshRuntimeContext, type RefreshRuntime } from './RefreshRuntimeContext';
+import { systemClock } from './types';
 
-/** The ambient refresh runtime. Throws rather than silently creating a private
- *  scheduler, which would defeat the shared in-flight budget. */
-export function useRefreshRuntime(): RefreshRuntime {
-  const runtime = useContext(RefreshRuntimeContext);
-  if (!runtime) {
-    throw new Error('usePullRefresh requires a <RefreshProvider> ancestor');
+/**
+ * The composition-wide default, used when no explicit provider is mounted.
+ *
+ * It is one shared singleton rather than a per-hook instance, so the in-flight
+ * budget stays global even on a mount that never declared a provider. A test
+ * that needs deterministic time mounts {@link RefreshProvider} with a fake
+ * clock instead of reaching for this.
+ */
+let defaultRuntime: RefreshRuntime | null = null;
+
+function sharedRuntime(): RefreshRuntime {
+  if (!defaultRuntime) {
+    defaultRuntime = {
+      scheduler: new RefreshScheduler({ clock: systemClock }),
+      signals: new RefreshSignalBus(),
+      clock: systemClock,
+    };
   }
-  return runtime;
+  return defaultRuntime;
+}
+
+export function useRefreshRuntime(): RefreshRuntime {
+  return useContext(RefreshRuntimeContext) ?? sharedRuntime();
 }

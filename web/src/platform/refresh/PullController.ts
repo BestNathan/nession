@@ -17,6 +17,9 @@ import {
 
 type Waiter = (outcome: PullOutcome) => void;
 
+/** Automatic reads that a minimum interval may dedupe. */
+const CADENCE_REASONS: readonly RefreshReason[] = ['interval', 'foreground', 'reconnect', 'activate'];
+
 interface Intent {
   reason: RefreshReason;
   force: boolean;
@@ -58,6 +61,12 @@ export interface PullControllerOptions<T> {
   clock?: RefreshClock;
   /** An authoritative but incomplete answer (partial Agent coverage). */
   isPartial?: (snapshot: T) => boolean;
+  /**
+   * A read was fenced out by a newer push. The answer is still information:
+   * an owner with a domain-specific version check may inspect it and call
+   * `invalidate()` to owe one trailing read. The controller never publishes it.
+   */
+  onSuperseded?: (snapshot: T) => void;
   onStatus?: (status: PullStatus) => void;
   onTelemetry?: (event: RefreshTelemetryEvent) => void;
   /** Stable surface name for telemetry aggregation. */
@@ -97,6 +106,7 @@ export class PullController<T> implements RefreshRegistration {
   private readonly pullFn: (ctx: PullContext) => Promise<T>;
   private readonly applyFn: (snapshot: T) => void;
   private readonly isPartialFn?: (snapshot: T) => boolean;
+  private readonly onSuperseded?: (snapshot: T) => void;
   private readonly onStatus?: (status: PullStatus) => void;
   private readonly onTelemetry?: (event: RefreshTelemetryEvent) => void;
   private readonly random: () => number;
@@ -132,6 +142,7 @@ export class PullController<T> implements RefreshRegistration {
     this.applyFn = options.apply;
     this.policy = options.policy;
     this.isPartialFn = options.isPartial;
+    this.onSuperseded = options.onSuperseded;
     this.onStatus = options.onStatus;
     this.onTelemetry = options.onTelemetry;
     this.random = options.random ?? Math.random;
@@ -225,7 +236,10 @@ export class PullController<T> implements RefreshRegistration {
       this.dirty = true;
       return Promise.resolve('cancelled');
     }
-    if (!strong && !this.respectsMinInterval()) {
+    // The floor dedupes *automatic* resume/cadence signals only. A mutation or
+    // invalidation carries new information the user is waiting on, and a
+    // manual ask explicitly skips it (#4602 §2).
+    if (CADENCE_REASONS.includes(reason) && !this.respectsMinInterval()) {
       this.record('coalesced', reason);
       return Promise.resolve('superseded');
     }
@@ -420,6 +434,7 @@ export class PullController<T> implements RefreshRegistration {
         }
         if (flight.supersededExternally
           || this.externalRevision !== flight.externalRevisionAtStart) {
+          this.onSuperseded?.(snapshot);
           this.finish(flight, 'superseded', startedAt);
           return;
         }
@@ -465,9 +480,12 @@ export class PullController<T> implements RefreshRegistration {
     this.record(outcome, flight.reason, this.clock.now() - startedAt);
 
     const waiters = flight.waiters;
-    // A trailing read is owed when newer information arrived during this one,
-    // or when a stronger intent was held behind it.
+    // A trailing read is owed when newer information arrived during this one.
+    // The obligation is consumed by queueing it, not by its success: otherwise
+    // a read that keeps failing would re-queue itself forever. A failure is
+    // recorded as stale and retried on backoff instead.
     if (!this.pending && this.dirty && this.active && this.enabled && !this.disposed) {
+      this.dirty = false;
       void this.enqueue({ reason: 'invalidate', force: false, strong: false });
     }
     if (!this.pending && !this.dirty) { this.armInterval(); }

@@ -17,7 +17,7 @@ import { imagesApi } from '@/capabilities/images';
 import { terminalServerApi } from '@/product/terminal';
 import { getToken, setToken, clearToken, getRememberPreference } from './auth';
 import { getOrCreateClientId } from '../platform/socket/clientId';
-import { useVisibilityReconnect } from './useVisibilityReconnect';
+import { useRefreshSignals } from './useRefreshSignals';
 import { useBootstrapTokenConsumption } from './useBootstrapToken';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 
@@ -255,7 +255,9 @@ export function useAppConnection() {
     });
   }, [autoConnect]);
 
-  useVisibilityReconnect(wasEverAuthed, wsService);
+  // Owns foreground recovery (useVisibilityReconnect) and publishes the
+  // reconnect/foreground facts business lists refresh on (#4602).
+  useRefreshSignals(wasEverAuthed, wsService);
 
   const handleRetry = useCallback(() => retryCurrentTransport(wsService), [wsService]);
 

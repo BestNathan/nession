@@ -130,8 +130,8 @@ describe('PullController — publication fence (SC-03)', () => {
     await flush();
 
     expect(manual.value).toBe('applied');
-    expect(h.controller.isDirty).toBe(true);
-    // The trailing read is owed because newer information arrived mid-flight.
+    // The newer invalidation was not swallowed by the settled read: it owes a
+    // trailing read, which is now running rather than silently dropped.
     expect(h.calls).toHaveLength(3);
     h.reads[2].resolve(['trailing']);
     await flush();
@@ -313,6 +313,37 @@ describe('PullController — failure, timeout and retry (SC-03)', () => {
 
     h.clock.advance(60_000);
     expect(h.calls).toHaveLength(1);
+  });
+
+  it('consumes the trailing-read obligation once instead of re-queuing a failure forever', async () => {
+    const clock = new FakeClock();
+    const scheduler = new RefreshScheduler({ clock });
+    let calls = 0;
+    const controller = new PullController<string[]>({
+      scheduler,
+      clock,
+      random: noJitter,
+      policy: { ...BASE_POLICY, autoRetry: false },
+      pull: () => { calls += 1; return Promise.reject(new Error('down')); },
+      apply: () => { throw new Error('a failed read must never publish'); },
+    });
+    controller.setContext(['target-a']);
+    controller.setEnabled(true);
+    controller.setActive(true);
+    await flush();
+    expect(calls).toBe(1);
+
+    controller.invalidate();
+    clock.advance(500);
+    await flush();
+    clock.advance(60_000);
+    await flush();
+
+    // One coalesced read plus the single trailing read it owed — not a chain.
+    expect(calls).toBe(3);
+    expect(controller.status.stale).toBe(false);
+    expect(controller.status.error).toBe('down');
+    controller.retire();
   });
 
   it('reports a partial authoritative answer as partial, not applied', async () => {

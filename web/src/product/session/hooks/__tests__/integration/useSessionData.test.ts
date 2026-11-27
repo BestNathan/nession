@@ -92,10 +92,15 @@ describe('useSessionData', () => {
   /** A refresh that recovers must clear the previous stale marks, otherwise
    *  the badges would stick around forever. */
   it('clears stale agents on a subsequent healthy refresh', async () => {
+    // The list reads on mount now (#4602), so let that projection land before
+    // sequencing the two explicit refreshes this assertion is about.
+    sessionsApiMock.fetchSessions.mockResolvedValue({ sessions: [makeSession()], stale_agents: [] });
+    const { result } = renderHook(() => useSessionData());
+    await waitFor(() => { expect(result.current.sessionsLoaded).toBe(true); });
+
     sessionsApiMock.fetchSessions
       .mockResolvedValueOnce({ sessions: [makeSession()], stale_agents: ['a1'] })
       .mockResolvedValueOnce({ sessions: [makeSession()], stale_agents: [] });
-    const { result } = renderHook(() => useSessionData());
 
     await act(async () => { await result.current.fetchSessions({ force: true }); });
     expect(result.current.staleAgents).toEqual(['a1']);
@@ -299,28 +304,36 @@ describe('useSessionData', () => {
     expect(result.current.sessions[0].foreground_command).toBeNull();
   });
 
-  it('ignores an older concurrent list even when it resolves after the later fetch', async () => {
+  it('holds a force refresh behind the normal read and settles it on the force answer', async () => {
     const resolves: Array<(value: { sessions: Session[]; stale_agents?: string[] }) => void> = [];
     sessionsApiMock.fetchSessions.mockImplementation(() => new Promise((resolve) => {
       resolves.push(resolve);
     }));
     const { result } = renderHook(() => useSessionData());
-    let first!: Promise<void>, second!: Promise<void>;
-    act(() => {
-      first = result.current.fetchSessions();
-      second = result.current.fetchSessions({ force: true });
-    });
+    // The mount read is the normal (non-force) read of this context.
+    expect(resolves).toHaveLength(1);
+
+    let forced!: Promise<void>;
+    act(() => { forced = result.current.fetchSessions({ force: true }); });
+    // One read per context (#4602 SC-03): the force ask is held behind the
+    // normal read instead of opening a second concurrent request whose reply
+    // could land out of order.
+    expect(resolves).toHaveLength(1);
+
     await act(async () => {
-      resolves[1]({ sessions: [makeSession({ foreground_command: 'bash' })] });
-      await second;
+      resolves[0]({ sessions: [makeSession({ foreground_command: null })] });
+      await Promise.resolve();
     });
-    expect(result.current.sessions[0].foreground_command).toBe('bash');
+    expect(resolves).toHaveLength(2);
+    expect(sessionsApiMock.fetchSessions).toHaveBeenLastCalledWith({ force: true });
+
     await act(async () => {
-      resolves[0]({ sessions: [makeSession({ foreground_command: null })], stale_agents: ['a1'] });
-      await first;
+      resolves[1]({ sessions: [makeSession({ foreground_command: 'bash' })], stale_agents: ['a1'] });
+      await forced;
     });
+    // The force answer is what lands, and its partial coverage is reported.
     expect(result.current.sessions[0].foreground_command).toBe('bash');
-    expect(result.current.staleAgents).toEqual([]);
+    expect(result.current.staleAgents).toEqual(['a1']);
     expect(result.current.loadingSessions).toBe(false);
   });
 

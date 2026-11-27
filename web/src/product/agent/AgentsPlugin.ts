@@ -25,6 +25,9 @@ export class AgentsPlugin implements TransportPlugin {
 
   private connection: PluginSurface | null = null;
   private generation = 0;
+  /** Monotonic count of agent-list snapshots published to the protocol
+   *  directory, used to order replies and pushes on one physical socket. */
+  private snapshotSeq = 0;
   private callbacks = new Set<GenerationEntry<AgentsCallback>>();
 
   /**
@@ -103,6 +106,14 @@ export class AgentsPlugin implements TransportPlugin {
    */
   async listAgents(): Promise<Agent[]> {
     const connection = this.requireConnection();
+    // Ordering *within* one physical socket (#4602 SC-04). The generation fence
+    // below only refuses a reply from a replaced socket; two list requests can
+    // still be outstanding on the same one, and the older reply resolving last
+    // would publish an older protocol manifest over a newer one. A push counts
+    // as a newer snapshot too. The directory is wholesale-replaced, so a stale
+    // publish is not a harmless no-op: it resolves calls against manifests
+    // nobody serves any more.
+    const snapshotSeqAtStart = this.snapshotSeq;
     // The answer describes the Agent registry on the physical socket the
     // request went out on. Capture that generation only when the request is
     // issued on a live socket: a request queued behind the readiness gate will
@@ -117,7 +128,8 @@ export class AgentsPlugin implements TransportPlugin {
       AGENT_LIST_WIRE,
       {},
     );
-    if (this.isCurrent(connection, physicalGeneration)) {
+    if (this.isCurrent(connection, physicalGeneration)
+      && this.snapshotSeq === snapshotSeqAtStart) {
       this.publishProtocols(connection, response.agents);
     }
     return response.agents;
@@ -205,6 +217,7 @@ export class AgentsPlugin implements TransportPlugin {
    * a manifest nobody serves any more.
    */
   private publishProtocols(connection: PluginSurface, agents: Agent[]): void {
+    this.snapshotSeq += 1;
     connection.protocols.publish(manifestsOf(agents));
   }
 

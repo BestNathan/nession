@@ -68,7 +68,12 @@ function useSessionSelectionCommands(commands: {
 }
 
 export function useShellState() {
-  const data = useDashboard();
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { isWide, showList, showDetail, openDetail, openList } =
+    useMobileNav(selectedId);
+  // The sidebar/global lists read periodically only while their surface is
+  // actually displayed (#4602 §2); a hidden list stays dirty until shown.
+  const data = useDashboard(undefined, showList);
   const {
     agents,
     sessions,
@@ -90,7 +95,6 @@ export function useShellState() {
   } = useAttachFlow();
   const attachDialogIntent = useAtomValue(attachDialogIntentAtom);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
   const {
     selectedProjectId,
     selectProject: handleSelectProject,
@@ -98,8 +102,6 @@ export function useShellState() {
   } = useProjectSelection();
   const [surface, setSurface] = useState<Surface>('terminal');
   const [tool, setTool] = useState<CapabilityId>('files');
-  const { isWide, showList, showDetail, openDetail, openList } =
-    useMobileNav(selectedId);
 
   const { selectedSession, selectedAgent, domain } = useSelectedSession({
     sessions,

@@ -23,6 +23,8 @@ export interface UsePullRefreshOptions<T> {
   apply: (snapshot: T) => void;
   policy: PullRefreshPolicy;
   isPartial?: (snapshot: T) => boolean;
+  /** Inspect an answer a newer push fenced out; may owe one trailing read. */
+  onSuperseded?: (snapshot: T) => void;
   /** Low-cardinality surface name for lifecycle telemetry. */
   label?: string;
   onTelemetry?: (event: RefreshTelemetryEvent) => void;
@@ -34,6 +36,10 @@ export interface UsePullRefreshResult<T> {
   invalidate: (reason?: RefreshReason) => void;
   /** Hand a complete push snapshot to the same fence the pulls use. */
   acceptExternal: (snapshot: T) => void;
+  /** Synchronous read of whether a read is in flight or queued. Unlike
+   *  `status.refreshing` this never waits for a render, so a push handler can
+   *  decide in the same tick whether it raced an outstanding read. */
+  isRefreshing: () => boolean;
   status: PullStatus;
 }
 
@@ -66,6 +72,8 @@ export function usePullRefresh<T>(options: UsePullRefreshOptions<T>): UsePullRef
   applyRef.current = options.apply;
   const isPartialRef = useRef(options.isPartial);
   isPartialRef.current = options.isPartial;
+  const onSupersededRef = useRef(options.onSuperseded);
+  onSupersededRef.current = options.onSuperseded;
   const policyRef = useRef(policy);
   policyRef.current = policy;
   const telemetryRef = useRef(onTelemetry);
@@ -85,6 +93,7 @@ export function usePullRefresh<T>(options: UsePullRefreshOptions<T>): UsePullRef
       pull: (ctx) => pullRef.current(ctx),
       apply: (snapshot) => applyRef.current(snapshot),
       isPartial: (snapshot) => isPartialRef.current?.(snapshot) ?? false,
+      onSuperseded: (snapshot) => onSupersededRef.current?.(snapshot),
       policy: policyRef.current,
       onStatus: setStatus,
       onTelemetry: (event) => telemetryRef.current?.(event),
@@ -142,5 +151,7 @@ export function usePullRefresh<T>(options: UsePullRefreshOptions<T>): UsePullRef
     controllerRef.current?.acceptExternal(snapshot);
   }, []);
 
-  return { refresh, invalidate, acceptExternal, status };
+  const isRefreshing = useCallback(() => controllerRef.current?.isRefreshing ?? false, []);
+
+  return { refresh, invalidate, acceptExternal, isRefreshing, status };
 }

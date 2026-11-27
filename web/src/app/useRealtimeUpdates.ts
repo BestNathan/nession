@@ -9,8 +9,7 @@ type AgentDataReturn = ReturnType<typeof useAgentData>;
 type SessionDataReturn = ReturnType<typeof useSessionData>;
 
 /**
- * Subscribes to live agent/session events and performs the initial data
- * fetch. Bridges the agent/session data hooks to the realtime push channel.
+ * Bridges the agent/session data hooks to the realtime push channel.
  *
  * Subscriptions go through the typed feature APIs (agentsApi/sessionsApi) so
  * they see the same event set the legacy facade exposed — server pushes plus
@@ -18,13 +17,19 @@ type SessionDataReturn = ReturnType<typeof useSessionData>;
  * wsService instance: a replaced transport re-installs the feature plugins
  * with a new generation, so consumers must re-register when it changes or
  * the plugin teardown drops their callbacks.
+ *
+ * This hook no longer performs the initial or post-reconnect fetch (#4602).
+ * Each list's pull controller owns mount, activate, foreground, reconnect and
+ * cadence reads, so a second fetch path here would double every resume and
+ * race the controller's own fence. A push is handed to the same fence as a
+ * pull, never applied around it.
  */
 export function useRealtimeUpdates(
   wsService: WebSocketService,
   agentData: AgentDataReturn,
   sessionData: SessionDataReturn,
 ) {
-  const { fetchAgents, applyAgentUpdate } = agentData;
+  const { applyAgentUpdate } = agentData;
   const { applyRealtimeSessions, fetchSessions } = sessionData;
 
   useEffect(() => {
@@ -32,25 +37,6 @@ export function useRealtimeUpdates(
     const u2 = sessionsApi.onSessionsChanged(applyRealtimeSessions);
     return () => { u1(); u2(); };
   }, [wsService, applyAgentUpdate, applyRealtimeSessions]);
-
-  useEffect(() => {
-    const fetchIfConnected = () => {
-      if (wsService.connectionState !== 'connected') {
-        return;
-      }
-      fetchAgents();
-      fetchSessions();
-    };
-
-    // 'connected' on the transport IS the post-handshake state (there is no
-    // separate 'authenticated' anymore).
-    fetchIfConnected();
-    return wsService.onConnectionStateChange((state) => {
-      if (state === 'connected') {
-        fetchIfConnected();
-      }
-    });
-  }, [wsService, fetchAgents, fetchSessions]);
 
   const clearError = useCallback(() => agentData.setError(null), [agentData]);
 
