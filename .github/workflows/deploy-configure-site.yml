@@ -1,32 +1,85 @@
 name: Deploy / Configure Site
-# Main-owned, human-approved Cloudflare DNS reconciliation for reviewed sites.
-# No arbitrary FQDN, Zone, IP or API endpoint is accepted as dispatch input.
+# Main-owned, human-approved split-DNS reconciliation for the reviewed site
+# registry (#4589, extends #3963/#3992). Canonical identity/visibility owner:
+# scripts/ci/site-registry. No arbitrary FQDN, Zone, IP, URL, shell command or
+# branch is accepted as dispatch input. Cloudflare credentials are scoped to
+# public-provider jobs; VPN/AdGuard credentials only to LAN jobs. Plan is
+# read-only for both providers; apply/reconcile/delete require a reviewed
+# plan receipt bound to the exact source SHA, GitOps revision and registry.
 on:
   workflow_dispatch:
     inputs:
-      site:
-        description: Reviewed site registry entry (staging environment)
+      environment:
+        description: Protected execution environment (credential authority)
         type: choice
         options:
+          - staging
+          - production
+        default: staging
+        required: true
+      site:
+        description: Reviewed registry site ID, or all sites in scope
+        type: choice
+        options:
+          - all
+          - staging-server
+          - staging-agent
+          - staging-ui
           - staging-mcp
+          - staging-01-server
+          - staging-01-agent
+          - staging-01-ui
+          - preprod-server
+          - preprod-agent
+          - preprod-ui
+          - production-server
+          - production-agent
+          - production-ui
+          - production-mcp
+        default: all
         required: true
       action:
-        description: DNS plan, DNS apply, or explicit Origin CA TLS issuance
+        description: plan/verify/plan-delete read-only; apply/reconcile/delete mutate; issue-tls legacy Origin CA
         type: choice
         options:
           - plan
+          - verify
+          - plan-delete
           - apply
+          - reconcile
+          - delete
           - issue-tls
         default: plan
         required: true
+      plan_run_id:
+        description: Numeric Run ID of the reviewed plan receipt (apply/reconcile/delete)
+        type: string
+        required: false
+        default: ''
+  # Trusted main site-contract change -> read-only plan. Ordinary source and
+  # release builds never touch these paths, so they cannot trigger DNS work.
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/ci/site-registry/**'
+      - 'scripts/ci/configure-cloudflare-site.mjs'
+      - 'scripts/ci/configure-adguard-dns.mjs'
+      - 'scripts/ci/site-dns-tunnel.sh'
+      - '.github/workflows/deploy-configure-site.yml'
+  # Hourly read-only inventory/drift plan. Environment Variable edits do not
+  # trigger workflows; this periodic plan and manual reconcile catch them.
+  schedule:
+    - cron: '17 * * * *'
 
+# Mutations serialize across ALL environments by the shared DNS authority;
+# read-only plans queue separately. In-flight runs are never cancelled.
 concurrency:
-  # Shared lock for all writers to the orphan gitops branch.
-  group: gitops-writer
+  group: site-dns-${{ (inputs.action == 'apply' || inputs.action == 'reconcile' || inputs.action == 'delete' || inputs.action == 'issue-tls') && 'writer' || 'plan' }}
   cancel-in-progress: false
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   verify:
@@ -41,18 +94,314 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Validate bounded Cloudflare site provider and tests
+      - name: Validate bounded site registry, providers, edge policy and tests
         run: |
           set -euo pipefail
-          node --test scripts/ci/configure-cloudflare-site.test.mjs scripts/ci/issue-cloudflare-origin-ca.test.mjs
-          node --input-type=module -e "import {getSite} from './scripts/ci/configure-cloudflare-site.mjs'; if(getSite('staging-mcp').environment !== 'staging') process.exit(1)"
+          node --test \
+            scripts/ci/site-registry/site-registry.test.mjs \
+            scripts/ci/configure-cloudflare-site.test.mjs \
+            scripts/ci/configure-adguard-dns.test.mjs \
+            scripts/ci/site-registry/edge-policy.test.mjs \
+            scripts/ci/site-registry/retire-origin-ca.test.mjs \
+            scripts/ci/issue-cloudflare-origin-ca.test.mjs \
+            scripts/ci/site-workflow-contract.test.mjs
+          node scripts/ci/site-registry/site-registry.mjs validate
+          node scripts/ci/site-registry/edge-policy.mjs check-fixture
+          node scripts/ci/site-registry/retire-origin-ca.mjs check-source
+          bash scripts/ci/site-dns-tunnel.sh self-test
 
-  configure:
-    if: inputs.action != 'issue-tls'
+  gitops-compare:
+    if: >-
+      github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' || inputs.action != 'issue-tls')
+    needs: verify
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: gitops
+          path: gitops
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Compare pinned GitOps desired hosts against the reviewed registry
+        env:
+          GITOPS_CHECKOUT: ${{ github.workspace }}/gitops
+        run: |
+          set -euo pipefail
+          git -C gitops rev-parse HEAD > "$RUNNER_TEMP/gitops-revision"
+          echo "GITOPS_REVISION=$(cat "$RUNNER_TEMP/gitops-revision")" >> "$GITHUB_ENV"
+          node scripts/ci/site-registry/site-registry.mjs compare | tee "$RUNNER_TEMP/site-comparison.txt"
+          grep '^SITE_GITOPS_COMPARISON_V1 ' "$RUNNER_TEMP/site-comparison.txt" \
+            | sed 's/^SITE_GITOPS_COMPARISON_V1 //' > "$RUNNER_TEMP/site-comparison.json"
+          echo "### GitOps render comparison (pinned $(cat "$RUNNER_TEMP/gitops-revision"))" >> "$GITHUB_STEP_SUMMARY"
+          echo '```json' >> "$GITHUB_STEP_SUMMARY"
+          cat "$RUNNER_TEMP/site-comparison.json" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-gitops-comparison
+          path: |
+            ${{ runner.temp }}/site-comparison.json
+            ${{ runner.temp }}/gitops-revision
+          retention-days: 90
+
+  lan-plan:
+    if: >-
+      github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' ||
+        inputs.action == 'plan' || inputs.action == 'verify' || inputs.action == 'plan-delete')
     needs: verify
     runs-on: ubuntu-24.04
     environment:
-      name: staging
+      name: ${{ inputs.environment || 'staging' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: gitops
+          path: gitops
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Validate LAN environment configuration (values never printed)
+        env:
+          LAN_GATEWAY_IP: ${{ vars.LAN_GATEWAY_IP }}
+          ADGUARD_API_URL: ${{ vars.ADGUARD_API_URL }}
+          ADGUARD_USERNAME: ${{ secrets.ADGUARD_USERNAME }}
+          ADGUARD_PASSWORD: ${{ secrets.ADGUARD_PASSWORD }}
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+        run: |
+          set -euo pipefail
+          for name in LAN_GATEWAY_IP ADGUARD_API_URL ADGUARD_USERNAME ADGUARD_PASSWORD GOST_RELAY_URL; do
+            [[ -n "${!name:-}" ]] || { echo "::error::$name unavailable for the protected LAN environment"; exit 1; }
+          done
+          echo "Required LAN variables/secrets are available. Their values are not logged."
+      - name: Install approved GOST client
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gost.tgz" \
+            https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/gost.tgz" -C "$RUNNER_TEMP" gost
+          chmod 755 "$RUNNER_TEMP/gost"
+      - name: Start job-owned AdGuard-only VPN
+        env:
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+          ADGUARD_API_URL: ${{ vars.ADGUARD_API_URL }}
+        run: bash scripts/ci/site-dns-tunnel.sh start
+      - name: Read-only LAN plan, verify probes or reviewed removal plan
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          TARGET_ACTION: ${{ inputs.action == 'verify' && 'verify' || inputs.action == 'plan-delete' && 'plan-delete' || 'plan' }}
+          SITE_SELECTION: ${{ inputs.site || 'all' }}
+          SOURCE_SHA: ${{ github.sha }}
+          LAN_GATEWAY_IP: ${{ vars.LAN_GATEWAY_IP }}
+          ADGUARD_API_URL: ${{ vars.ADGUARD_API_URL }}
+          ADGUARD_USERNAME: ${{ secrets.ADGUARD_USERNAME }}
+          ADGUARD_PASSWORD: ${{ secrets.ADGUARD_PASSWORD }}
+          DNS_RESOLVER: ${{ vars.DNS_RESOLVER }}
+          SITE_PLAN_OUT: ${{ runner.temp }}/site-plan-receipt.json
+        run: |
+          set -euo pipefail
+          GITOPS_REVISION="$(git -C gitops rev-parse HEAD)"
+          export GITOPS_REVISION
+          node scripts/ci/configure-adguard-dns.mjs "$TARGET_ACTION"
+          echo "### LAN plan ($TARGET_ACTION, environment $TARGET_ENVIRONMENT)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Sanitized receipt uploaded; gateway IP and credentials are never logged.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-plan-lan-${{ inputs.environment || 'staging' }}
+          path: ${{ runner.temp }}/site-plan-receipt.json
+          retention-days: 90
+      - name: Clean up only job-owned VPN and temporary files
+        if: always()
+        run: bash scripts/ci/site-dns-tunnel.sh cleanup
+
+  public-plan:
+    if: >-
+      github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' &&
+      (github.event_name != 'workflow_dispatch' ||
+        inputs.action == 'plan' || inputs.action == 'verify' || inputs.action == 'plan-delete')
+    needs: verify
+    runs-on: ubuntu-24.04
+    environment:
+      name: ${{ inputs.environment || 'staging' }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: gitops
+          path: gitops
+          fetch-depth: 1
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Read-only Cloudflare plan for approved public MCP sites only
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          TARGET_ACTION: ${{ inputs.action == 'plan-delete' && 'plan-delete' || 'plan' }}
+          SITE_SELECTION: ${{ inputs.site || 'all' }}
+          SOURCE_SHA: ${{ github.sha }}
+          CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_ORIGIN_IPV4: ${{ secrets.CLOUDFLARE_ORIGIN_IPV4 }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          SITE_PLAN_OUT: ${{ runner.temp }}/site-plan-receipt.json
+        run: |
+          set -euo pipefail
+          GITOPS_REVISION="$(git -C gitops rev-parse HEAD)"
+          export GITOPS_REVISION
+          # The CF provider accepts one reviewed public site per invocation.
+          # Private selections never reach Cloudflare; at most one enabled
+          # public MCP site exists per environment.
+          mapfile -t sites < <(node scripts/ci/site-registry/site-registry.mjs render-public \
+            | sed 's/^SITE_PUBLIC_PLAN_V1 //' \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{for(const s of JSON.parse(d)) if(s.environment===process.env.TARGET_ENVIRONMENT && (process.env.SITE_SELECTION==='all' || s.site===process.env.SITE_SELECTION)) console.log(s.site)})")
+          if [[ "${#sites[@]}" -eq 0 ]]; then
+            echo "No applicable enabled public site for $TARGET_ENVIRONMENT selection; Cloudflare not touched."
+            exit 0
+          fi
+          [[ "${#sites[@]}" -le 1 ]] || { echo "::error::more than one public site per environment"; exit 1; }
+          for site in "${sites[@]}"; do
+            node scripts/ci/configure-cloudflare-site.mjs "$TARGET_ACTION" "$site"
+          done
+          echo "### Public DNS plan ($TARGET_ACTION, environment $TARGET_ENVIRONMENT)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'Sanitized receipt uploaded; origin IP and token are never logged.' >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: site-plan-public-${{ inputs.environment || 'staging' }}
+          path: ${{ runner.temp }}/site-plan-receipt.json
+          retention-days: 90
+
+  lan-apply:
+    if: >-
+      github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.action == 'apply' || inputs.action == 'reconcile' || inputs.action == 'delete')
+    needs: [verify, gitops-compare]
+    runs-on: ubuntu-24.04
+    environment:
+      name: ${{ inputs.environment || 'staging' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: site-gitops-comparison
+          path: ${{ runner.temp }}/comparison
+      - name: Require canonical GitOps host readiness before LAN registration
+        env:
+          SITE_COMPARISON_REPORT: ${{ runner.temp }}/comparison/site-comparison.json
+          SITE_SELECTION: ${{ inputs.site || 'all' }}
+          TARGET_ACTION: ${{ inputs.action }}
+          SITE_READY_OUT: ${{ runner.temp }}/site-ready.json
+        run: node scripts/ci/site-registry/site-registry.mjs lan-readiness
+      - name: Authenticate and download the reviewed LAN plan receipt
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+        run: |
+          set -euo pipefail
+          [[ "$PLAN_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::plan_run_id must be a numeric Run ID"; exit 1; }
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLAN_RUN_ID")"
+          printf '%s' "$run_json" | node -e "
+            let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
+              const r=JSON.parse(d);
+              const ok=r.path==='.github/workflows/deploy-configure-site.yml'
+                && r.head_branch==='main' && r.head_sha===process.env.GITHUB_SHA
+                && ['workflow_dispatch','push','schedule'].includes(r.event)
+                && r.status==='completed' && r.conclusion==='success';
+              if(!ok){console.error('::error::plan receipt producer run identity rejected');process.exit(1)}
+            })"
+          gh run download "$PLAN_RUN_ID" -R "$GITHUB_REPOSITORY" \
+            -n "site-plan-lan-$TARGET_ENVIRONMENT" -D "$RUNNER_TEMP/plan"
+      - name: Validate LAN environment configuration (values never printed)
+        env:
+          LAN_GATEWAY_IP: ${{ vars.LAN_GATEWAY_IP }}
+          ADGUARD_API_URL: ${{ vars.ADGUARD_API_URL }}
+          ADGUARD_USERNAME: ${{ secrets.ADGUARD_USERNAME }}
+          ADGUARD_PASSWORD: ${{ secrets.ADGUARD_PASSWORD }}
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+        run: |
+          set -euo pipefail
+          for name in LAN_GATEWAY_IP ADGUARD_API_URL ADGUARD_USERNAME ADGUARD_PASSWORD GOST_RELAY_URL; do
+            [[ -n "${!name:-}" ]] || { echo "::error::$name unavailable for the protected LAN environment"; exit 1; }
+          done
+          echo "Required LAN variables/secrets are available. Their values are not logged."
+      - name: Install approved GOST client
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/gost.tgz" \
+            https://github.com/go-gost/gost/releases/download/v3.0.0/gost_3.0.0_linux_amd64.tar.gz
+          tar -xzf "$RUNNER_TEMP/gost.tgz" -C "$RUNNER_TEMP" gost
+          chmod 755 "$RUNNER_TEMP/gost"
+      - name: Start job-owned AdGuard-only VPN
+        env:
+          GOST_RELAY_URL: ${{ secrets.GOST_RELAY_URL }}
+          ADGUARD_API_URL: ${{ vars.ADGUARD_API_URL }}
+        run: bash scripts/ci/site-dns-tunnel.sh start
+      - name: Apply reviewed LAN desired state with fresh provider readback
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+          TARGET_ACTION: ${{ inputs.action }}
+          SITE_SELECTION: ${{ inputs.site || 'all' }}
+          SOURCE_SHA: ${{ github.sha }}
+          LAN_GATEWAY_IP: ${{ vars.LAN_GATEWAY_IP }}
+          ADGUARD_API_URL: ${{ vars.ADGUARD_API_URL }}
+          ADGUARD_USERNAME: ${{ secrets.ADGUARD_USERNAME }}
+          ADGUARD_PASSWORD: ${{ secrets.ADGUARD_PASSWORD }}
+          SITE_PLAN_RECEIPT: ${{ runner.temp }}/plan/site-plan-receipt.json
+          SITE_PLAN_OUT: ${{ runner.temp }}/site-result-receipt.json
+        run: |
+          set -euo pipefail
+          GITOPS_REVISION="$(cat "$RUNNER_TEMP/comparison/gitops-revision")"
+          export GITOPS_REVISION
+          SITE_READY_SITES="$(cat "$RUNNER_TEMP/site-ready.json")"
+          export SITE_READY_SITES
+          node scripts/ci/configure-adguard-dns.mjs "$TARGET_ACTION"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: site-result-lan-${{ inputs.environment || 'staging' }}
+          path: ${{ runner.temp }}/site-result-receipt.json
+          retention-days: 90
+      - name: Clean up only job-owned VPN and temporary files
+        if: always()
+        run: bash scripts/ci/site-dns-tunnel.sh cleanup
+
+  public-apply:
+    if: >-
+      github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' &&
+      (inputs.action == 'apply' || inputs.action == 'reconcile' || inputs.action == 'delete')
+    needs: [verify, gitops-compare]
+    runs-on: ubuntu-24.04
+    environment:
+      name: ${{ inputs.environment || 'staging' }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
@@ -62,27 +411,77 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - name: Plan or reconcile one registered Cloudflare DNS record
+      - uses: actions/download-artifact@v4
+        with:
+          name: site-gitops-comparison
+          path: ${{ runner.temp }}/comparison
+      - name: Authenticate and download the reviewed public plan receipt
         env:
-          TARGET_ENVIRONMENT: staging
-          TARGET_SITE: ${{ inputs.site }}
+          GH_TOKEN: ${{ github.token }}
+          PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+        run: |
+          set -euo pipefail
+          [[ "$PLAN_RUN_ID" =~ ^[1-9][0-9]*$ ]] || { echo "::error::plan_run_id must be a numeric Run ID"; exit 1; }
+          run_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$PLAN_RUN_ID")"
+          printf '%s' "$run_json" | node -e "
+            let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{
+              const r=JSON.parse(d);
+              const ok=r.path==='.github/workflows/deploy-configure-site.yml'
+                && r.head_branch==='main' && r.head_sha===process.env.GITHUB_SHA
+                && ['workflow_dispatch','push','schedule'].includes(r.event)
+                && r.status==='completed' && r.conclusion==='success';
+              if(!ok){console.error('::error::plan receipt producer run identity rejected');process.exit(1)}
+            })"
+          gh run download "$PLAN_RUN_ID" -R "$GITHUB_REPOSITORY" \
+            -n "site-plan-public-$TARGET_ENVIRONMENT" -D "$RUNNER_TEMP/plan"
+      - name: Apply reviewed public MCP DNS with fresh provider readback
+        env:
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'staging' }}
           TARGET_ACTION: ${{ inputs.action }}
-          # Bound to the protected GitHub Environment, not user inputs.
+          SITE_SELECTION: ${{ inputs.site || 'all' }}
+          SOURCE_SHA: ${{ github.sha }}
           CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
           CLOUDFLARE_ORIGIN_IPV4: ${{ secrets.CLOUDFLARE_ORIGIN_IPV4 }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-        shell: bash
+          SITE_PLAN_RECEIPT: ${{ runner.temp }}/plan/site-plan-receipt.json
+          SITE_PLAN_OUT: ${{ runner.temp }}/site-result-receipt.json
         run: |
           set -euo pipefail
-          node scripts/ci/configure-cloudflare-site.mjs "$TARGET_ACTION" "$TARGET_SITE"
+          GITOPS_REVISION="$(cat "$RUNNER_TEMP/comparison/gitops-revision")"
+          export GITOPS_REVISION
+          mapfile -t sites < <(node scripts/ci/site-registry/site-registry.mjs render-public \
+            | sed 's/^SITE_PUBLIC_PLAN_V1 //' \
+            | node -e "let d='';process.stdin.on('data',c=>d+=c).on('end',()=>{for(const s of JSON.parse(d)) if(s.environment===process.env.TARGET_ENVIRONMENT && (process.env.SITE_SELECTION==='all' || s.site===process.env.SITE_SELECTION)) console.log(s.site)})")
+          if [[ "${#sites[@]}" -eq 0 ]]; then
+            echo "No applicable enabled public site for $TARGET_ENVIRONMENT selection; Cloudflare not touched."
+            exit 0
+          fi
+          [[ "${#sites[@]}" -le 1 ]] || { echo "::error::more than one public site per environment"; exit 1; }
+          for site in "${sites[@]}"; do
+            node scripts/ci/configure-cloudflare-site.mjs "$TARGET_ACTION" "$site"
+          done
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: site-result-public-${{ inputs.environment || 'staging' }}
+          path: ${{ runner.temp }}/site-result-receipt.json
+          retention-days: 90
 
   issue_tls:
-    if: inputs.action == 'issue-tls'
+    if: >-
+      github.repository == 'BestNathan/nession' && github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch' && inputs.action == 'issue-tls'
     needs: verify
     runs-on: ubuntu-24.04
     environment:
       name: staging
     timeout-minutes: 20
+    # GitOps writers keep their shared lock; retirement of this legacy action
+    # is gated by scripts/ci/site-registry/retire-origin-ca.mjs (#4588 cutover).
+    concurrency:
+      group: gitops-writer
+      cancel-in-progress: false
     permissions:
       contents: write
     steps:
