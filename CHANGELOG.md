@@ -1052,3 +1052,10 @@
 - Categories: acceptance, ci, e2e, release
 - Reason: Record activated #4672 per-family positive applicability and independent fallback, superseding historical global unknown-path fanout while preserving unverifiable-diff and independent E2E/Case safety; live config-only receipt remains separate
 - Source: https://github.com/BestNathan/nession/issues/4672
+
+## 2026-11-27T12:25:04Z | update | Nession canonical hostname migration and cert-manager TLS consumption
+- Path: topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md
+- Topic: engineering
+- Categories: architecture, security, delivery, identity
+- Reason: Record the merged implementation (gitops c4e58e7de, main adbf6b662), PR-stage SC-01/02/03 Pass, the landed site registry (#4678) and the merged doc's cert-manager TLS consumption section; preparation only, cutover and legacy retirement still blocked on nitops#2 readiness
+- Source: https://github.com/BestNathan/nession/issues/4588

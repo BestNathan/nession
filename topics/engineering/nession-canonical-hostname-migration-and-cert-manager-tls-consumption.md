@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "security", "delivery", "identity"]
 status: verified
 created_at: 2026-11-27T09:36:15Z
-updated_at: 2026-11-27T09:36:15Z
-sources: ["https://github.com/BestNathan/nession/issues/4588", "https://github.com/BestNathan/nession/pull/4677", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/docs/engineering/cloudflare-site-provisioning.md", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-host-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-tls-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/deploy/entrypoint-agent.sh"]
+updated_at: 2026-11-27T12:25:04Z
+sources: ["https://github.com/BestNathan/nession/issues/4588", "https://github.com/BestNathan/nession/pull/4677", "https://github.com/BestNathan/nession/pull/4679", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-host-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-tls-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/adbf6b66260673bb4b80cd415039d651a2d08573/docs/engineering/cloudflare-site-provisioning.md"]
 ---
 
 # Nession canonical hostname migration and cert-manager TLS consumption
@@ -85,6 +85,15 @@ client TLS at the edge.
   workflow/script retirement (gated on the same cutover readiness). nitops owns
   issuer/SLB/router changes. The canonical names match the reviewed registry in
   #4678.
+- **Merged (2026-11-27).** GitOps desired state PR 4677 → gitops merge
+  `c4e58e7ded747f6b9d97e206b902a0fdb3a59708`; main application/config + Gates + docs
+  PR 4679 → main merge `adbf6b66260673bb4b80cd415039d651a2d08573`. SC-01/02/03
+  projected **Pass** at the PR stage (SCN-01). The reviewed site registry (#4678)
+  also landed on main; `scripts/ci/site-registry/registry.json` is now the
+  canonical site-identity owner. The merged `cloudflare-site-provisioning.md`
+  carries a focused "cert-manager TLS consumption (#4588)" section linking these
+  executable owners. This is preparation only — no DNS activation, TLS switch or
+  retirement was executed.
 
 ## Related knowledge
 
@@ -105,5 +114,7 @@ client TLS at the edge.
   retained during migration; prune them only in a reviewed change after the
   cutover receipt is recorded and no consumer remains.
 - The hostname checker encodes the canonical contract directly; the reviewed site
-  registry (#4678) was still open at implementation time. Revisit to consume the
-  registry once it lands on main, keeping one source of site identity.
+  registry (#4678) has since landed on main. A future refinement can consume
+  `scripts/ci/site-registry/registry.json` for site identity, keeping one source
+  of canonical names; the checker's nhome.local/dormancy/backend/config assertions
+  remain its distinct SC-01 responsibility.
