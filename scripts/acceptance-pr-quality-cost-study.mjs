@@ -195,7 +195,124 @@ export async function collectVerifiedPrQualityCost({repo,issueNumber,stage,targe
     preservation:'Canonical Quality checks must pass when applicable. Case Smoke selects before provisioning. Mixed E2E failed closed; it was NOT accepted as Pass.',
     limits:'Single non-identical-SHA category comparisons, cache/runner/content differ; measured observation, not statistically guaranteed SLA'};
 }
+// #4533: bounded proof of the original routing repair and the real combined
+ // deployment diff. Pins locate immutable evidence; they never confer a Pass.
+const secretRoutingPins=Object.freeze([
+  {pr:4534,issue:4533,id:45605842346,sha:'e395e7326021503780592e8812be8ab8e66be3f1',
+    paths:['scripts/ci/quality-scope.mjs','scripts/ci/quality-scope.test.mjs'],workflow:'skipped'},
+  {pr:4530,issue:4529,id:45664399850,sha:'d1e545ef69c2ba35724ac77637e07454aa8525',
+    paths:['.github/workflows/deploy-seal-gitops-secret.yml','scripts/ci/seal-gitops-secret.mjs','scripts/ci/seal-gitops-secret.test.mjs'],workflow:'success'},
+]);
+function verifySecretRoutingPr(pin,pr,files){
+  assert.equal(pr?.number,pin.pr);
+  assert.equal(pr?.merged,true);
+  assert.equal(pr?.head?.sha,pin.sha);
+  assert.equal(pr?.head?.repo?.full_name,REPO);
+  assert.equal(pr?.base?.repo?.full_name,REPO);
+  assert.equal(pr?.base?.ref,'main');
+  assert.ok(SHA.test(pr.merge_commit_sha));
+  assert.ok(String(pr.body??'').split(/\r?\n/).some(line=>
+    line==='Fixes #'+pin.issue||line==='Refs #'+pin.issue),'missing Issue binding');
+  assert.equal(pr.changed_files,pin.paths.length);
+  assert.ok(Array.isArray(files));
+  assert.deepEqual(files.map(f=>f.filename).sort(),[...pin.paths].sort());
+}
+function verifySecretRoutingQuality(pin,run,jobs){
+  assertRun(run,pin,'CI / Quality Gate',qualityPath);
+  const scope=uniqueJob(jobs,'scope',run,'success');
+  successfulStep(scope,'Classify the exact PR or main-push change');
+  const tooling=uniqueJob(jobs,'tooling-check',run,'success');
+  successfulStep(tooling,'Verify repository tooling Gates');
+  const aggregate=uniqueJob(jobs,'web-check',run,'success');
+  successfulStep(aggregate,'Enforce applicable Quality results at the stable check name');
+  for(const name of ['rust-check','web-tests','web-dist','instruction-check'])
+    uniqueJob(jobs,name,run,'skipped');
+  uniqueJob(jobs,'workflow-check',run,pin.workflow);
+  return {pr_number:pin.pr,sha:pin.sha,run_id:run.id,run_attempt:run.run_attempt,
+    scope_job_id:scope.id,tooling_job_id:tooling.id,
+    jobs:jobs.jobs.map(j=>({name:j.name,id:j.id,conclusion:j.conclusion})),
+    source_url:'https://github.com/'+REPO+'/actions/runs/'+run.id};
+}
+function verifySecretRoutingLogs(toolingLog,scopeLog){
+  assert.ok(/✓ ci-pr-routing-selftest(?:\r?\n|$)/.test(toolingLog),
+    'exact-head routing regression Gate did not report success');
+  const totals=[...toolingLog.matchAll(/(\d+) gates: (\d+) passed, 0 failed, 0 errors/g)];
+  assert.equal(totals.length,1,'missing or ambiguous tooling Gate summary');
+  assert.ok(Number(totals[0][1])>0&&totals[0][1]===totals[0][2],
+    'tooling Gate totals disagree');
+  const lines=[...scopeLog.matchAll(/Quality applicability: (\{[^\r\n]+\})/g)];
+  assert.equal(lines.length,1,'missing or ambiguous real deployment scope');
+  const scope=JSON.parse(lines[0][1]);
+  assert.deepEqual(scope,{paths:3,rust:false,web:false,tooling:true,
+    workflow:true,instruction:false,applicability:'scoped'});
+  return {routing_gate:'ci-pr-routing-selftest',tooling_gates_passed:Number(totals[0][1]),
+    deployment_scope:scope};
+}
+export async function collectSecretRoutingQuality({repo,issueNumber,stage,targetSha,get,getText}){
+  assert.equal(repo,REPO);
+  assert.equal(issueNumber,4533);
+  assert.equal(stage,'pr');
+  assert.equal(targetSha,secretRoutingPins[0].sha,'not the original implementation head');
+  const root='/repos/'+REPO;
+  const receipts=await Promise.all(secretRoutingPins.map(async pin=>{
+    const [pr,files,run,jobs]=await Promise.all([
+      get(root+'/pulls/'+pin.pr),get(root+'/pulls/'+pin.pr+'/files?per_page=100'),
+      get(root+'/actions/runs/'+pin.id),
+      get(root+'/actions/runs/'+pin.id+'/attempts/1/jobs?per_page=100'),
+    ]);
+    verifySecretRoutingPr(pin,pr,files);
+    return verifySecretRoutingQuality(pin,run,jobs);
+  }));
+  const [toolingLog,scopeLog]=await Promise.all([
+    getText(root+'/actions/jobs/'+receipts[0].tooling_job_id+'/logs',8388608),
+    getText(root+'/actions/jobs/'+receipts[1].scope_job_id+'/logs',1048576),
+  ]);
+  return {kind:'verified_secret_routing_quality_v1',target_sha:targetSha,
+    issue_number:4533,implementation:receipts[0],deployment:receipts[1],
+    ...verifySecretRoutingLogs(toolingLog,scopeLog)};
+}
+function selfTestSecretRoutingQuality(){
+  const pin=secretRoutingPins[0],pr={number:pin.pr,merged:true,
+    head:{sha:pin.sha,repo:{full_name:REPO}},base:{ref:'main',repo:{full_name:REPO}},
+    merge_commit_sha:'a'.repeat(40),body:'Fixes #4533',changed_files:2};
+  const files=pin.paths.map(filename=>({filename}));
+  verifySecretRoutingPr(pin,pr,files);
+  assert.throws(()=>verifySecretRoutingPr(pin,{...pr,merged:false},files));
+  assert.throws(()=>verifySecretRoutingPr(pin,{...pr,body:'Refs #999'},files));
+  assert.throws(()=>verifySecretRoutingPr(pin,pr,[...files,{filename:'web/x.ts'}]));
+  const run={id:pin.id,run_attempt:1,head_sha:pin.sha,name:'CI / Quality Gate',
+    path:qualityPath,event:'pull_request',repository:{full_name:REPO},
+    head_repository:{full_name:REPO},status:'completed',conclusion:'success',
+    created_at:'2026-11-25T11:35:00Z',updated_at:'2026-11-25T11:39:00Z'};
+  const specs=[['scope','success','Classify the exact PR or main-push change'],
+    ['tooling-check','success','Verify repository tooling Gates'],
+    ['web-check','success','Enforce applicable Quality results at the stable check name'],
+    ...['rust-check','web-tests','web-dist','instruction-check','workflow-check'].map(n=>[n,'skipped'])];
+  const jobs={total_count:specs.length,jobs:specs.map(([name,conclusion,step],i)=>({
+    id:i+1,name,conclusion,status:'completed',run_id:run.id,run_attempt:1,
+    head_sha:pin.sha,steps:step?[{name:step,conclusion:'success'}]:[]}))};
+  verifySecretRoutingQuality(pin,run,jobs);
+  assert.throws(()=>verifySecretRoutingQuality(pin,{...run,head_sha:'b'.repeat(40)},jobs));
+  assert.throws(()=>verifySecretRoutingQuality(pin,{...run,run_attempt:2},jobs));
+  for(const name of ['tooling-check','scope','rust-check']){
+    const invalid=structuredClone(jobs);
+    invalid.jobs.find(j=>j.name===name).conclusion='failure';
+    assert.throws(()=>verifySecretRoutingQuality(pin,run,invalid));
+  }
+  const stale=structuredClone(jobs);stale.jobs[1].head_sha='b'.repeat(40);
+  assert.throws(()=>verifySecretRoutingQuality(pin,run,stale));
+  const incomplete=structuredClone(jobs);incomplete.jobs[1].steps=[];
+  assert.throws(()=>verifySecretRoutingQuality(pin,run,incomplete));
+  const scope='Quality applicability: '+JSON.stringify({paths:3,rust:false,web:false,
+    tooling:true,workflow:true,instruction:false,applicability:'scoped'});
+  const log='✓ ci-pr-routing-selftest\n82 gates: 82 passed, 0 failed, 0 errors';
+  assert.equal(verifySecretRoutingLogs(log,scope).tooling_gates_passed,82);
+  assert.throws(()=>verifySecretRoutingLogs(log.replace('✓','✗'),scope));
+  assert.throws(()=>verifySecretRoutingLogs(log,scope.replace('"rust":false','"rust":true')));
+}
+
 export function selfTestPrQualityCost(){
+  selfTestSecretRoutingQuality();
   const sample=pinnedPrQualitySamples[1],run={
     id:sample.after.id,run_attempt:1,head_sha:sample.after.sha,
     name:'CI / Quality Gate',path:qualityPath,event:'pull_request',
@@ -271,8 +388,8 @@ export function selfTestPrQualityCost(){
     {...mixedJobs.jobs[0],steps:[{name:'Run E2E tests',conclusion:'success'}]}]}));
   const workflow=readFileSync(new URL('../.github/workflows/agent-sc-acceptance.yml',
     import.meta.url),'utf8');
-  assert.ok(workflow.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117' || inputs.issue_number == '4448'))"),
-    'only five explicitly allowlisted PR-stage CI collectors are permitted');
+  assert.ok(workflow.includes("if: inputs.stage != 'pr' || (inputs.stage == 'pr' && (inputs.issue_number == '2917' || inputs.issue_number == '3001' || inputs.issue_number == '3195' || inputs.issue_number == '4117' || inputs.issue_number == '4448' || inputs.issue_number == '4533'))"),
+    'only six explicitly allowlisted PR-stage CI collectors are permitted');
   assert.ok(workflow.includes('scripts/acceptance-ci-evidence.mjs collect-pr-quality'),
     'trusted pre-merge CI evidence command is not routed');
   assert.ok(workflow.includes('scripts/acceptance-4117-pr-evidence.mjs collect'),
@@ -283,8 +400,8 @@ export function selfTestPrQualityCost(){
     'trusted Pages migration evidence collector is not routed');
   assert.ok(workflow.includes('scripts/acceptance-ci-evidence.mjs collect-pr-fixture'),
     'trusted source-fixture CI evidence command is not routed');
-  assert.ok(workflow.includes('[[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 4117 || "${ISSUE_NUMBER}" == 4448 ]]'),
-    'prepare stage must only pass the five approved Issues scoped CI evidence');
+  assert.ok(workflow.includes('[[ "${ACCEPTANCE_STAGE}" != "pr" || "${ISSUE_NUMBER}" == 2917 || "${ISSUE_NUMBER}" == 3001 || "${ISSUE_NUMBER}" == 3195 || "${ISSUE_NUMBER}" == 4117 || "${ISSUE_NUMBER}" == 4448 || "${ISSUE_NUMBER}" == 4533 ]]'),
+    'prepare stage must only pass the six approved Issues scoped CI evidence');
 
   console.log('PR Quality timing: exact Run/Attempt/SHA, required job steps, skip, source change and negative fixture contracts passed');
 }

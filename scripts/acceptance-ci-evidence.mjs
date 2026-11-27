@@ -67,7 +67,7 @@ import {historicalCaseEvidence,selfTestHistoricalCase} from './acceptance-histor
 import { collectAuthenticatedCaseReadbacks, selfTestCaseReceipts } from './acceptance-case-readback-evidence.mjs';
 import {collectHistoricalBrowserDesignProof, selfTestHistoricalBrowserDesign} from './acceptance-browser-design-history.mjs';
 import {collectVerifiedCiCostStudy,selfTestCiCostStudy} from './acceptance-ci-cost-study.mjs';
-import {collectVerifiedPrQualityCost,selfTestPrQualityCost} from './acceptance-pr-quality-cost-study.mjs';
+import {collectVerifiedPrQualityCost,collectSecretRoutingQuality,selfTestPrQualityCost} from './acceptance-pr-quality-cost-study.mjs';
 import {collectOriginalQwenReview,selfTestOriginalQwenReview} from './acceptance-qwen-3001-pr-evidence.mjs';
 import {collectPublicPagesObservation,selfTestPublicPagesObservation} from './acceptance-pages-deployment-receipt.mjs';
 import {collectKnowledgePublication,shouldCollectKnowledgePublication,selfTestKnowledgePublication} from './acceptance-knowledge-publisher-evidence.mjs';
@@ -3683,6 +3683,18 @@ async function main() {
       verified_pr_quality_cost_study:measured,
     },null,2)+'\n');
     console.log('PR Quality CI cost source attested for issue #2917');
+    return;
+  }
+  if (command === 'collect-pr-secret-routing') {
+    const workspace=process.argv[3],outFile=process.argv[4];
+    if(!workspace||!outFile)throw Error('usage: collect-pr-secret-routing WORKSPACE OUT');
+    const targetSha=execFileSync('git',['-C',workspace,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
+    const receipt=await collectSecretRoutingQuality({
+      repo:process.env.GITHUB_REPOSITORY,issueNumber:Number(process.env.ISSUE_NUMBER),
+      stage:process.env.ACCEPTANCE_STAGE,targetSha,get:githubGet,getText:githubJobLog,
+    });
+    fs.writeFileSync(outFile,JSON.stringify({schema_version:1,kind:'acceptance_ci_evidence',
+      target_sha:targetSha,verified_secret_routing_quality:receipt},null,2)+'\n');
     return;
   }
   if (command === 'collect-pr-fixture') {
