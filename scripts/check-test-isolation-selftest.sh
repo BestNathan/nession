@@ -210,6 +210,15 @@ else
 fi
 rm -rf "$HARNESS_TMP"
 
+echo "→ the inventory merge-head contract must prove the owning parent, compose without unresolved references, and reject tampered heads"
+if node scripts/test-runtime-inventory.mjs --self-test; then
+    echo "  ✓ merge-head contract fixtures passed"
+    pass=$((pass + 1))
+else
+    echo "  ✗ merge-head contract fixtures failed"
+    fail=$((fail + 1))
+fi
+
 echo "→ the committed Test Runtime inventory must be current"
 if node scripts/test-runtime-inventory.mjs --check; then
     echo "  ✓ inventory current, no unresolved reference"
