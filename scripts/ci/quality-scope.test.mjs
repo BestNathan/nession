@@ -3,7 +3,7 @@ import test from 'node:test';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {selectQualityFamilies as choose} from './quality-scope.mjs';
+import {selectQualityFamilies as choose,explainQualityFamilies as explain} from './quality-scope.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
 const none={rust:false,web:false,tooling:false,workflow:false,instruction:false,native:false};
 const flags=xs=>{const {applicability,...result}=choose(xs);return result;};
@@ -11,7 +11,7 @@ test('fixture-only, web-only, rust-only and terminal protocol diffs',()=>{
   assert.deepEqual(flags(['e2e/fixtures/agent-development/qwen-repair-source.md']),none);
   assert.deepEqual(flags(['web/src/product/terminal/index.tsx']),{...none,web:true,tooling:true});
   assert.deepEqual(flags(['crates/nession-agent/src/session/runtime.rs']),{...none,rust:true,native:true});
-  assert.deepEqual(flags(['crates/nession-protocol/src/contracts/terminal/v1.rs','web/src/generated/protocol/a.ts']),{...none,rust:true,web:true,tooling:true});
+  assert.deepEqual(flags(['crates/nession-protocol/src/contracts/terminal/v1.rs','web/src/generated/protocol/a.ts']),{...none,rust:true,web:true,tooling:true,native:true});
 });
 test('native macOS runtime family selects native-binary crates and their CI owners (#4584)',()=>{
   // Positive: the native runtime crates and the two workflows that own the
@@ -24,13 +24,22 @@ test('native macOS runtime family selects native-binary crates and their CI owne
     'crates/nession-runtime/src/lib.rs',
     'crates/nession-tmux/src/process.rs',
     'crates/nession-sandbox/src/lib.rs',
+    'crates/nession-protocol/src/contracts/session/v1.rs',
+    'crates/nession-erofs/src/lib.rs',
+    'crates/nession-git/src/lib.rs',
+    'crates/nession-github/src/lib.rs',
+    'crates/nession-mcp/src/lib.rs',
+    'crates/nession-claude-code/src/lib.rs',
+    'crates/nession-client/src/lib.rs',
+    'Cargo.lock', '.cargo/config.toml',
+    'scripts/native-macos-runtime-check.sh', 'scripts/lib/native-macos-runtime-driver.mjs',
     '.github/workflows/ci-quality.yml',
     '.github/workflows/release-production.yml',
   ])assert.equal(flags([p]).native,true,'expected native for '+p);
-  // Negative: a non-native crate, web-only and docs diffs do not select it.
+  // Negative: codegen-only, Web and docs do not select native proof.
   for(const p of [
-    'crates/nession-protocol/src/contracts/session/v1.rs',
-    'crates/nession-erofs/src/lib.rs',
+    'crates/nession-protocol-codegen/src/main.rs',
+    'crates/nession-persistence-probes/src/lib.rs',
     'web/src/product/terminal/index.tsx',
     'docs/architecture/agent-process-discovery.md',
   ])assert.equal(flags([p]).native,false,'expected no native for '+p);
@@ -119,4 +128,55 @@ test('Secret sealing deployment changes are tooling-only, without weakening unkn
   assert.deepEqual(flags([...diff,'crates/nession-server/src/main.rs']),{...none,rust:true,tooling:true,workflow:true,native:true});
   assert.deepEqual(flags([...diff,'web/src/main.tsx']),{...none,web:true,tooling:true,workflow:true});
   assert.deepEqual(flags(['scripts/ci/seal-gitops-secret-unknown.mjs']),{...none,rust:true,web:true,tooling:true});
+});
+
+test('unclassified valid paths use Tooling fallback, not heavy-family fanout (#4672)',()=>{
+  for(const p of ['.mcp.json','.editorconfig','.new-dev-tool.json','new-area/settings.json','pages/src/app/App.tsx']){
+    assert.deepEqual(flags([p]),{...none,tooling:true},p);
+  }
+  const r=explain(['.mcp.json']);
+  assert.equal(r.result.applicability,'unknown');
+  assert.deepEqual(r.unknownPaths,['.mcp.json']);
+  assert.deepEqual(r.reasons.rust,[]);
+  assert.deepEqual(r.reasons.native,[]);
+  assert.deepEqual(r.reasons.web,[]);
+  assert.deepEqual(r.reasons.tooling,[{rule:'unclassified-repository-path',path:'.mcp.json'}]);
+  assert.deepEqual(flags(['.mcp.json','crates/nession-agent/src/lib.rs']),{...none,rust:true,tooling:true,native:true});
+  assert.deepEqual(flags(['new-area/settings.json','web/src/main.tsx']),{...none,web:true,tooling:true});
+  assert.deepEqual(flags(['.mcp.json','.github/workflows/release-production.yml']),{...none,tooling:true,workflow:true,native:true});
+});
+test('positive cross-boundary inputs and local fallback remain explicit',()=>{
+  assert.deepEqual(flags(['Cargo.toml']),{...none,rust:true,native:true});
+  assert.deepEqual(flags(['web/src/generated/protocol/example.ts']),{...none,rust:true,web:true,tooling:true});
+  assert.deepEqual(flags(['deploy/entrypoint-agent.sh']),{...none,rust:true,tooling:true});
+  assert.deepEqual(flags(['scripts/native-macos-runtime-check.sh']),{...none,native:true,tooling:true});
+  assert.deepEqual(flags(['scripts/new-checker.sh']),{...none,rust:true,web:true,tooling:true});
+  const unknown=explain(['scripts/new-checker.sh']);
+  assert.equal(unknown.reasons.rust[0].rule,'unresolved-rust-checker-dependency');
+  assert.equal(unknown.reasons.web[0].rule,'unresolved-web-checker-dependency');
+  assert.deepEqual(unknown.reasons.native,[]);
+  // --no-renames supplies both deleted and added paths; union is monotonic.
+  assert.deepEqual(flags(['crates/nession-agent/src/old.rs','new-area/settings.json']),
+    flags(['new-area/settings.json','crates/nession-agent/src/old.rs']));
+  assert.equal(explain([]).reasons.rust[0].rule,'empty-integration-diff');
+  assert.equal(explain(['../escape']).reasons.rust[0].rule,'unverifiable-path-list');
+});
+test('Cargo manifest path dependencies remain inside positive Rust input boundary',()=>{
+  const workspace=fs.readFileSync(path.join(root,'Cargo.toml'),'utf8');
+  const members=workspace.match(/\bmembers\s*=\s*\[([\s\S]*?)\]/);
+  assert.ok(members,'workspace member declaration');
+  for(const [,member] of members[1].matchAll(/"([^"]+)"/g)){
+    assert.ok(choose([member+'/Cargo.toml']).rust,'unregistered workspace member '+member);
+    const manifest=fs.readFileSync(path.join(root,member,'Cargo.toml'),'utf8');
+    for(const [,input] of manifest.matchAll(/\bpath\s*=\s*"([^"]+)"/g)){
+      const resolved=path.relative(root,path.resolve(root,member,input)).split(path.sep).join('/');
+      assert.ok(resolved && !resolved.startsWith('../'),'external manifest path '+input);
+      // A local dependency directory is represented by its manifest; an
+      // explicit source file is already a changed-path fact.
+      const actual=resolved.endsWith('.rs')?resolved:resolved+'/Cargo.toml';
+      assert.ok(choose([actual]).rust,'unregistered Cargo path dependency '+actual);
+      if(choose([member+'/Cargo.toml']).native)
+        assert.ok(choose([actual]).native,'unregistered native transitive input '+actual);
+    }
+  }
 });
