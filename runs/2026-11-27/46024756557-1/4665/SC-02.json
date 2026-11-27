@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "2d0266e5f5992d7d5053441199c930a90793385ca6c02255e45f115facea9719",
+  "run_id": 46024756557,
+  "run_attempt": 1,
+  "issue": 4665,
+  "criterion": "SC-02",
+  "criterion_text": "A submit targeting a Claude whose composer holds unsubmitted text never silently appends: it is refused or safely reconciled, and a replay after a lost-Enter event cannot produce an unchecked second submission (no concatenated or duplicated prompt reaches the transcript).",
+  "stage": "staging",
+  "target_sha": "22e82b494ff393ce60eb37352b6c4fcdd33f56b0",
+  "contract_sha256": "2e7054852dcac74977f653866898c7263702997492b07a844175a4216f071fae",
+  "case_revision": "22e82b494ff393ce60eb37352b6c4fcdd33f56b0",
+  "case_tree_sha": "cf5886b39a0be16afd6b8265e277204f90089c95",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-27T15:28:25.286Z",
+  "finished_at": "2026-11-27T15:30:11.280Z",
+  "duration_ms": 105994,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the no-unchecked-second-submission contract is pinned in source; the live verifier pre-fills a real Claude composer and proves refusal without append and safe reconcile",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "a dirty composer is refused before any key is sent, a replay whose Enter was lost stays unknown because the pre-existing transcript record cannot vouch for a new delivery, and a legitimate submit against the emptied composer confirms exactly once"
+        }
+      ],
+      "duration_ms": 69189,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-live.cjs",
+      "result": "Pass",
+      "summary": "a real Claude CLI 2.1.312 (Claude Code) refused every submit against a dirty composer without appending, delivered the queued text exactly once on the explicit reconcile, and confirmed the next submit exactly once — no concatenated or duplicated prompt reached the transcript",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 22e82b494ff393ce60eb37352b6c4fcdd33f56b0: CLI 2.1.312 (resolved 2.1.312 (Claude Code)); a composer pre-filled with unsubmitted text still observed verified idle (conversation fe81a7c4-f10d-43fb-be60-fdc9b1dd6800)"
+        },
+        {
+          "type": "runtime",
+          "value": "submit against the dirty composer was refused (the Claude composer holds unsubmitted input (unsubmitted text in the input box); refusing to append — inspect the Session and reconcile the composer before retrying); the transcript gained no prompt and the pane shows no appended text"
+        },
+        {
+          "type": "runtime",
+          "value": "the replayed submit was refused again with no delivery — no unchecked second submission"
+        },
+        {
+          "type": "runtime",
+          "value": "the explicit Enter reconciled the composer: the queued prompt was recorded exactly once, with no concatenated user message"
+        },
+        {
+          "type": "runtime",
+          "value": "the submit against the emptied composer answered input_sent+verified and the same conversation recorded the new prompt exactly once alongside the single reconciled prompt"
+        }
+      ],
+      "duration_ms": 30897,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 46024756557,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "61cd76d51d1bec7f147d1049515fbddf2ef1b471",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "22e82b494ff393ce60eb37352b6c4fcdd33f56b0",
+        "stage": "staging",
+        "issue": 4665,
+        "criterion": "SC-02",
+        "job_id": 140593156032,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/46024756557",
+    "record_path": "runs/2026-11-27/46024756557-1/4665/SC-02.json",
+    "source_result_sha256": "40fad6ef8068807c6966d051bc017cc2c49190718715d654d75ba271837a67f9"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-46024756557-1",
+    "sha256": "40fad6ef8068807c6966d051bc017cc2c49190718715d654d75ba271837a67f9",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/46024756557",
+    "durability": "time-limited; object archival not configured"
+  }
+}
