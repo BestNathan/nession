@@ -1,0 +1,55 @@
+{
+  "version": 1,
+  "issue": 4589,
+  "zone": "bestnathan.top",
+  "public": [
+    {
+      "host": "staging-mcp-nession.bestnathan.top",
+      "path": "/mcp",
+      "pathType": "Exact",
+      "backend": {
+        "service": "nession-mcp-staging",
+        "port": 9090
+      },
+      "originTls": "full-strict",
+      "authentication": "required"
+    }
+  ],
+  "privateHosts": [
+    "agent-nession.bestnathan.top",
+    "agent.nession.bestnathan.top",
+    "nession.bestnathan.top",
+    "preprod-agent-nession.bestnathan.top",
+    "preprod-nession.bestnathan.top",
+    "preprod-ui-nession.bestnathan.top",
+    "preprod.agent.nession.bestnathan.top",
+    "preprod.nession.bestnathan.top",
+    "preprod.ui.nession.bestnathan.top",
+    "staging-01-agent-nession.bestnathan.top",
+    "staging-01-nession.bestnathan.top",
+    "staging-01-ui-nession.bestnathan.top",
+    "staging-01.agent.nession.bestnathan.top",
+    "staging-01.nession.bestnathan.top",
+    "staging-01.ui.nession.bestnathan.top",
+    "staging-agent-nession.bestnathan.top",
+    "staging-nession.bestnathan.top",
+    "staging-ui-nession.bestnathan.top",
+    "staging.agent.nession.bestnathan.top",
+    "staging.nession.bestnathan.top",
+    "staging.ui.nession.bestnathan.top",
+    "ui-nession.bestnathan.top",
+    "ui.nession.bestnathan.top"
+  ],
+  "deny": {
+    "unknownHost": "reject",
+    "privateHost": "reject",
+    "sniMismatch": "reject",
+    "nonExactPath": "reject",
+    "spoofedForwarding": "reject",
+    "untrustedForwardingSource": "reject",
+    "nonCloudflareOriginSource": "reject",
+    "wildcardFallback": "reject"
+  },
+  "trustedForwardingSources": "cloudflare-ipv4-cidrs",
+  "lanRoute": "separate-private-authority"
+}

@@ -4095,6 +4095,113 @@ async fn an_origin_less_client_stays_compatible() {
     assert_eq!(reply["payload"]["status"], "success");
 }
 
+// ── Canonical hostname Origin policy (#4588 SC-02) ──────────────────────────
+//
+// The migrated allowance keeps the preserved nhome.local HTTP LAN origins and
+// the legacy nested bestnathan.top origins during migration, and names the new
+// canonical single-label hosts over HTTPS only (the actual TLS edge redirects
+// HTTP→HTTPS for the new names). These tests prove the upgrade boundary accepts
+// exactly the intended hosts and refuses unauthorized ones, without widening
+// trust or downgrading secure transport.
+
+/// The post-migration production allowance shape (#4588): nhome.local HTTP
+/// preserved, legacy nested HTTPS retained for compatibility, canonical
+/// single-label hosts HTTPS-only.
+const CANONICAL_PRODUCTION_ORIGINS: &[&str] = &[
+    "http://nession.nhome.local",
+    "http://ui.nession.nhome.local",
+    "http://nession.bestnathan.top",
+    "https://nession.bestnathan.top",
+    "http://ui.nession.bestnathan.top",
+    "https://ui.nession.bestnathan.top",
+    "https://ui-nession.bestnathan.top",
+];
+
+#[tokio::test]
+async fn canonical_https_browser_origins_connect_and_authenticate() {
+    let (_db_dir, db_path) = test_db("test_ws_canonical_https.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, CANONICAL_PRODUCTION_ORIGINS))
+            .await
+            .unwrap();
+
+    for origin in [
+        "https://nession.bestnathan.top",
+        "https://ui-nession.bestnathan.top",
+    ] {
+        let (mut ws_stream, _) = connect_async(upgrade_request(addr, "/ws", Some(origin)).unwrap())
+            .await
+            .unwrap_or_else(|error| panic!("canonical origin {origin} must connect: {error}"));
+        let reply = authenticate_with(&mut ws_stream, "test_token")
+            .await
+            .unwrap();
+        assert_eq!(reply["payload"]["status"], "success", "{origin}");
+    }
+}
+
+#[tokio::test]
+async fn preserved_nhome_local_http_origins_still_connect() {
+    let (_db_dir, db_path) = test_db("test_ws_nhome_preserved.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, CANONICAL_PRODUCTION_ORIGINS))
+            .await
+            .unwrap();
+
+    for origin in [
+        "http://nession.nhome.local",
+        "http://ui.nession.nhome.local",
+    ] {
+        let (mut ws_stream, _) = connect_async(upgrade_request(addr, "/ws", Some(origin)).unwrap())
+            .await
+            .unwrap_or_else(|error| panic!("nhome.local origin {origin} preserved: {error}"));
+        let reply = authenticate_with(&mut ws_stream, "test_token")
+            .await
+            .unwrap();
+        assert_eq!(reply["payload"]["status"], "success", "{origin}");
+    }
+}
+
+#[tokio::test]
+async fn a_canonical_host_cleartext_origin_is_not_a_secure_downgrade() {
+    let (_db_dir, db_path) = test_db("test_ws_canonical_http_refused.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, CANONICAL_PRODUCTION_ORIGINS))
+            .await
+            .unwrap();
+
+    // The new canonical UI host is HTTPS-only in the allowance: a cleartext
+    // browser origin for it is refused, so the migration cannot downgrade the
+    // secure transport a client derives from its HTTPS page.
+    let error = connect_async(
+        upgrade_request(addr, "/ws", Some("http://ui-nession.bestnathan.top")).unwrap(),
+    )
+    .await
+    .expect_err("cleartext canonical origin must be refused");
+    assert_eq!(handshake_status(error), Some(403));
+}
+
+#[tokio::test]
+async fn unauthorized_hosts_are_refused_even_under_the_canonical_suffix() {
+    let (_db_dir, db_path) = test_db("test_ws_canonical_unauthorized.db").unwrap();
+    let (addr, _handle) =
+        start_test_server(origin_server_config(db_path, CANONICAL_PRODUCTION_ORIGINS))
+            .await
+            .unwrap();
+
+    for origin in [
+        "https://evil.bestnathan.top",
+        "https://ui-nession.bestnathan.top.evil.example",
+        "https://nession.bestnathan.top:8443",
+        "https://attacker.example",
+        "null",
+    ] {
+        let error = connect_async(upgrade_request(addr, "/ws", Some(origin)).unwrap())
+            .await
+            .expect_err("unauthorized origin must be refused");
+        assert_eq!(handshake_status(error), Some(403), "{origin}");
+    }
+}
+
 #[tokio::test]
 async fn an_empty_presented_token_is_refused_when_one_is_configured() {
     let (_db_dir, db_path) = test_db("test_ws_empty_token.db").unwrap();

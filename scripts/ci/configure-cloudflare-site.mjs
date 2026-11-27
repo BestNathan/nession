@@ -1,28 +1,54 @@
 #!/usr/bin/env node
-// Review-owned DNS only. Cloudflare credentials and origin IP are protected
-// GitHub Environment inputs, never workflow_dispatch parameters (#3963).
+// Review-owned public DNS only (#3963, extended by #4589). Cloudflare
+// credentials and origin IP are protected GitHub Environment inputs, never
+// workflow_dispatch parameters. The canonical site registry owns identity
+// and the MCP-only public allowlist: private or unknown sites fail before
+// any Cloudflare request, and sensitive operations require a reviewed
+// explicit approval bound to the exact desired state.
+import fs from 'node:fs';
 import net from 'node:net';
 import { pathToFileURL } from 'node:url';
+import {
+  loadRegistry, findApproval, buildPlanReceipt, verifyPlanReceipt,
+  PUBLIC_ORIGIN_REF, ZONE
+} from './site-registry/site-registry.mjs';
 
 const API = 'https://api.cloudflare.com/client/v4';
-const MARKER = 'managed-by:nession:site=staging-mcp:issue=3963';
+const loaded = loadRegistry();
 
-export const SITES = Object.freeze({
-  'staging-mcp': Object.freeze({
-    environment: 'staging',
-    zone: 'bestnathan.top',
-    hostname: 'staging-mcp-nession.bestnathan.top',
+export const SITES = Object.freeze(Object.fromEntries(
+  loaded.registry.sites
+    .filter(site => site.visibility === 'public')
+    .map(site => [site.id, Object.freeze({
+      environment: site.environment,
+      zone: ZONE,
+      hostname: site.fqdn,
+      recordType: 'A',
+      proxied: true,
+      ttl: 1,
+      comment: site.ownershipMarker
+    })])
+));
+
+export function getSite(siteId) {
+  const site = typeof siteId === 'string'
+    ? loaded.registry.sites.find(entry => entry.id === siteId)
+    : null;
+  if (!site) throw new Error('Unregistered site; only reviewed site names are allowed');
+  if (site.visibility !== 'public') {
+    throw new Error('Private site; Cloudflare is not a DNS provider for private Nession sites');
+  }
+  return {
+    id: site.id,
+    environment: site.environment,
+    zone: ZONE,
+    hostname: site.fqdn,
     recordType: 'A',
     proxied: true,
     ttl: 1,
-    comment: MARKER
-  })
-});
-
-export function getSite(siteId) {
-  const site = Object.hasOwn(SITES, siteId) ? SITES[siteId] : null;
-  if (!site) throw new Error('Unregistered site; only reviewed site names are allowed');
-  return site;
+    comment: site.ownershipMarker,
+    enabled: site.enabled
+  };
 }
 
 export function validateOriginIpv4(ip) {
@@ -145,26 +171,12 @@ async function listExactRecords(call, site, zoneId) {
   return doc.result;
 }
 
-export async function configureSite({
-  mode, siteId, environment, apiToken, zoneId, originIpv4,
-  fetchImpl = globalThis.fetch, logger = () => {}
-}) {
-  if (mode !== 'plan' && mode !== 'apply') {
-    throw new Error('Unsupported site operation: expected plan or apply');
-  }
-  const site = getSite(siteId);
-  if (environment !== site.environment) {
-    throw new Error('Site and GitHub Environment identity mismatch');
-  }
-  const credentials = validateInputs({ apiToken, zoneId, originIpv4 });
-  const call = createClient(credentials, fetchImpl);
-
+async function readProviderState(call, site, credentials) {
   const zone = (await call('GET', '/zones/' + credentials.zoneId)).result;
   if (zone?.name !== site.zone || zone?.id !== credentials.zoneId ||
       zone?.status !== 'active') {
     throw new Error('Cloudflare Zone identity or active status mismatch');
   }
-
   const ips = (await call('GET', '/ips')).result?.ipv4_cidrs;
   if (!Array.isArray(ips) || ips.length === 0 ||
       ips.some(cidr => typeof cidr !== 'string')) {
@@ -173,15 +185,101 @@ export async function configureSite({
   if (ips.some(cidr => cidrContainsIpv4(cidr, credentials.originIpv4))) {
     throw new Error('CLOUDFLARE_ORIGIN_IPV4 points to Cloudflare edge, not Higress origin');
   }
+  return listExactRecords(call, site, credentials.zoneId);
+}
 
-  const existing = await listExactRecords(call, site, credentials.zoneId);
+// Sensitive operations need a reviewed explicit approval matching the exact
+// desired state; maintenance of an already-approved owned record does not.
+function sensitiveOperation(site, plan, records, origin) {
+  if (plan.kind === 'create') {
+    return {
+      operation: 'public-activate',
+      scope: { fqdn: site.hostname, visibility: 'public', originRef: PUBLIC_ORIGIN_REF }
+    };
+  }
+  if (plan.kind === 'update') {
+    const existing = records.find(record => record.id === plan.recordId);
+    if (existing && existing.content !== origin) {
+      return {
+        operation: 'origin-change',
+        scope: { fqdn: site.hostname, originRef: PUBLIC_ORIGIN_REF }
+      };
+    }
+  }
+  return null;
+}
+
+export async function configureSite({
+  mode, siteId, environment, apiToken, zoneId, originIpv4,
+  fetchImpl = globalThis.fetch, logger = () => {},
+  planReceipt = null, sourceSha = null, gitopsRevision = null,
+  approvals = loaded.approvals, registryHash = loaded.registryHash
+}) {
+  if (!['plan', 'plan-delete', 'apply', 'reconcile', 'delete'].includes(mode)) {
+    throw new Error('Unsupported site operation: expected plan, plan-delete, apply, reconcile or delete');
+  }
+  const site = getSite(siteId);
+  if (environment !== site.environment) {
+    throw new Error('Site and GitHub Environment identity mismatch');
+  }
+  if (!site.enabled && mode !== 'plan' && mode !== 'plan-delete') {
+    throw new Error('Site is not activated; public activation requires a reviewed registry change and explicit approval');
+  }
+  const credentials = validateInputs({ apiToken, zoneId, originIpv4 });
+  const call = createClient(credentials, fetchImpl);
+  const existing = await readProviderState(call, site, credentials);
+
+  if (mode === 'plan-delete' || mode === 'delete') {
+    return deleteFlow({
+      mode, site, credentials, call, existing, approvals, registryHash,
+      planReceipt, sourceSha, gitopsRevision, logger
+    });
+  }
+
   const plan = planRecord(site, existing, credentials.originIpv4);
+  const desiredState = recordBody(site, credentials.originIpv4);
   logger('site=' + siteId + ' mode=' + mode + ' dns=' + plan.kind +
     ' (origin IP hidden)');
   if (plan.kind === 'blocked') {
     throw new Error('Cloudflare DNS operation blocked: ' + plan.reason);
   }
-  if (mode === 'plan' || plan.kind === 'noop') return plan;
+  const sensitive = sensitiveOperation(site, plan, existing, credentials.originIpv4);
+  const approval = sensitive
+    ? findApproval(approvals, {
+      site: siteId, operation: sensitive.operation, registryHash, scope: sensitive.scope
+    })
+    : null;
+  if (mode === 'plan') {
+    const result = { ...plan, approvalRequired: sensitive ? sensitive.operation : null,
+      approved: Boolean(approval) };
+    if (sourceSha && gitopsRevision) {
+      result.receipt = buildPlanReceipt({
+        provider: 'cloudflare', mode: 'plan', environment, site: siteId,
+        sourceSha, gitopsRevision, registryHash,
+        operations: [{ site: siteId, kind: plan.kind,
+          approvalRequired: sensitive ? sensitive.operation : null }],
+        observedState: existing, desiredState,
+        runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT
+      });
+    }
+    return result;
+  }
+  if (plan.kind === 'noop') return plan;
+
+  // apply/reconcile must present the reviewed plan receipt and match fresh
+  // provider state; a stale plan fails closed before any mutation.
+  verifyPlanReceipt(planReceipt, {
+    provider: 'cloudflare', environment, site: siteId, sourceSha, gitopsRevision,
+    registryHash, observedState: existing, desiredState
+  });
+  if (sensitive && !approval) {
+    if (mode === 'reconcile') {
+      logger('site=' + siteId + ' reconcile skipped: ' + sensitive.operation + ' requires reviewed approval');
+      return { kind: 'skipped', reason: 'approval-required', operation: sensitive.operation };
+    }
+    throw new Error('Cloudflare DNS operation blocked: ' + sensitive.operation +
+      ' requires a reviewed explicit approval');
+  }
 
   const body = recordBody(site, credentials.originIpv4);
   const prefix = '/zones/' + credentials.zoneId + '/dns_records';
@@ -207,9 +305,120 @@ export async function configureSite({
   return { kind: plan.kind, verified: true };
 }
 
+// Exact owned-record removal only: reviewed approval bound to the record ID,
+// fresh state verification immediately before deletion, independent readback
+// afterwards. Wildcard, shared, unowned or colliding records are never deleted.
+async function deleteFlow({
+  mode, site, credentials, call, existing, approvals, registryHash,
+  planReceipt, sourceSha, gitopsRevision, logger
+}) {
+  if (site.hostname.startsWith('*.')) {
+    throw new Error('Cloudflare DNS operation blocked: wildcard records are never deleted');
+  }
+  const addressRecords = existing.filter(record => ['A', 'AAAA', 'CNAME'].includes(record.type));
+  const desiredState = { removal: { name: site.hostname, type: site.recordType } };
+  if (mode === 'plan-delete') {
+    const candidate = addressRecords.length === 1 ? addressRecords[0] : null;
+    const approval = candidate
+      ? findApproval(approvals, {
+        site: site.id, operation: 'delete', registryHash,
+        scope: { fqdn: site.hostname, recordId: candidate.id, recordType: candidate.type }
+      })
+      : null;
+    const kind = addressRecords.length !== 1 ? 'blocked'
+      : candidate.comment !== site.comment ? 'blocked'
+        : approval ? 'delete' : 'blocked';
+    const reason = addressRecords.length !== 1 ? 'DNS address record collision'
+      : candidate.comment !== site.comment ? 'Existing DNS record has another owner'
+        : approval ? null : 'deletion requires a reviewed explicit approval bound to the exact record';
+    logger('site=' + site.id + ' mode=plan-delete dns=' + kind + ' (origin IP hidden)');
+    const result = { kind, recordId: candidate?.id ?? null, reason, approved: Boolean(approval) };
+    if (sourceSha && gitopsRevision) {
+      result.receipt = buildPlanReceipt({
+        provider: 'cloudflare', mode: 'plan-delete', environment: site.environment, site: site.id,
+        sourceSha, gitopsRevision, registryHash,
+        operations: [{ site: site.id, kind, recordId: candidate?.id ?? null }],
+        observedState: existing, desiredState,
+        runId: process.env.GITHUB_RUN_ID, runAttempt: process.env.GITHUB_RUN_ATTEMPT
+      });
+    }
+    return result;
+  }
+  if (addressRecords.length !== 1) {
+    throw new Error('Cloudflare DNS operation blocked: DNS address record collision');
+  }
+  const record = addressRecords[0];
+  if (record.name !== site.hostname || record.type !== site.recordType) {
+    throw new Error('Cloudflare DNS operation blocked: record identity escaped the registered site');
+  }
+  if (record.comment !== site.comment) {
+    throw new Error('Cloudflare DNS operation blocked: Existing DNS record has another owner');
+  }
+  const approval = findApproval(approvals, {
+    site: site.id, operation: 'delete', registryHash,
+    scope: { fqdn: site.hostname, recordId: record.id, recordType: record.type }
+  });
+  if (!approval) {
+    throw new Error('Cloudflare DNS operation blocked: deletion requires a reviewed explicit approval bound to the exact record');
+  }
+  verifyPlanReceipt(planReceipt, {
+    provider: 'cloudflare', environment: site.environment, site: site.id,
+    sourceSha, gitopsRevision, registryHash, observedState: existing, desiredState
+  });
+  if (!/^[0-9a-f]{32}$/i.test(record.id ?? '')) {
+    throw new Error('Cloudflare DNS record ID is invalid');
+  }
+  await call('DELETE', '/zones/' + credentials.zoneId + '/dns_records/' + record.id);
+  const after = await listExactRecords(call, site, credentials.zoneId);
+  if (after.some(entry => entry.id === record.id)) {
+    throw new Error('Cloudflare DNS post-delete readback mismatch');
+  }
+  logger('site=' + site.id + ' owned record deletion verified by provider readback');
+  return { kind: 'delete', verified: true };
+}
+
+// Sanitized mutation result receipt: binds the reviewed plan identity and
+// the observed operation outcome without any provider secret values.
+export function buildResultReceipt({
+  mode, environment, site, sourceSha, gitopsRevision, registryHash,
+  planReceipt, result
+}) {
+  if (!planReceipt || planReceipt.receipt !== 'NESSION_SITE_PLAN_V1') {
+    throw new Error('Result receipt requires the reviewed plan receipt');
+  }
+  return {
+    receipt: 'NESSION_SITE_RESULT_V1',
+    provider: 'cloudflare', mode, environment, site,
+    sourceSha, gitopsRevision, registryHash,
+    planHash: planReceipt.planHash,
+    operation: result.kind,
+    verified: result.verified === true,
+    runId: String(process.env.GITHUB_RUN_ID ?? ''),
+    runAttempt: String(process.env.GITHUB_RUN_ATTEMPT ?? ''),
+    createdAt: new Date().toISOString()
+  };
+}
+
+function readReceiptFile() {
+  const file = process.env.SITE_PLAN_RECEIPT;
+  if (!file) throw new Error('SITE_PLAN_RECEIPT must reference the reviewed plan receipt artifact');
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+}
+
+function cliContext() {
+  const sourceSha = process.env.SOURCE_SHA;
+  const gitopsRevision = process.env.GITOPS_REVISION;
+  if (!/^[0-9a-f]{40}$/.test(sourceSha ?? '') || !/^[0-9a-f]{40}$/.test(gitopsRevision ?? '')) {
+    throw new Error('SOURCE_SHA and GITOPS_REVISION must be exact 40-hex revisions');
+  }
+  return { sourceSha, gitopsRevision };
+}
+
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   const [, , mode, siteId] = process.argv;
   const environment = process.env.TARGET_ENVIRONMENT;
+  const needsReceipt = mode === 'apply' || mode === 'reconcile' || mode === 'delete';
+  const context = mode === 'plan' || mode === 'plan-delete' || needsReceipt ? cliContext() : {};
   configureSite({
     mode,
     siteId,
@@ -217,7 +426,23 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
     apiToken: process.env.CLOUDFLARE_API_TOKEN,
     zoneId: process.env.CLOUDFLARE_ZONE_ID,
     originIpv4: process.env.CLOUDFLARE_ORIGIN_IPV4,
+    planReceipt: needsReceipt ? readReceiptFile() : null,
+    ...context,
     logger: line => console.log(line)
+  }).then(result => {
+    if (result?.receipt && process.env.SITE_PLAN_OUT) {
+      fs.writeFileSync(process.env.SITE_PLAN_OUT, JSON.stringify(result.receipt, null, 2) + '\n', { mode: 0o600 });
+      console.log('site=' + siteId + ' sanitized plan receipt written (no provider values)');
+    } else if (needsReceipt && process.env.SITE_PLAN_OUT) {
+      const receipt = buildResultReceipt({
+        mode, environment, site: siteId,
+        sourceSha: context.sourceSha, gitopsRevision: context.gitopsRevision,
+        registryHash: loaded.registryHash,
+        planReceipt: readReceiptFile(), result
+      });
+      fs.writeFileSync(process.env.SITE_PLAN_OUT, JSON.stringify(receipt, null, 2) + '\n', { mode: 0o600 });
+      console.log('site=' + siteId + ' sanitized result receipt written (no provider values)');
+    }
   }).catch(error => {
     console.error('Cloudflare site configuration failed: ' + error.message);
     process.exitCode = 1;

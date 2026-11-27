@@ -398,6 +398,7 @@ async fn start(recorder: Arc<Recorder>) -> Harness {
 struct Config {
     tool_timeout: Duration,
     allowed_origins: Vec<String>,
+    allowed_hosts: Vec<String>,
 }
 
 impl Default for Config {
@@ -405,6 +406,7 @@ impl Default for Config {
         Self {
             tool_timeout: Duration::from_secs(2),
             allowed_origins: Vec::new(),
+            allowed_hosts: Vec::new(),
         }
     }
 }
@@ -417,6 +419,7 @@ async fn start_with(recorder: Arc<Recorder>, config: Config) -> Harness {
             ServiceConfig {
                 tool_timeout: config.tool_timeout,
                 allowed_origins: config.allowed_origins,
+                allowed_hosts: config.allowed_hosts,
                 ..ServiceConfig::new(TOKEN)
             },
             cluster,
@@ -526,9 +529,22 @@ async fn request_to(
     headers: &[(&str, String)],
     body: &str,
 ) -> HttpResponse {
+    request_with_host(addr, "127.0.0.1", target, method, headers, body).await
+}
+
+/// One raw HTTP request carrying an explicit `Host` authority (#4588), so the
+/// transport's Host allowlist can be proven at the real HTTP boundary.
+async fn request_with_host(
+    addr: SocketAddr,
+    host: &str,
+    target: &str,
+    method: &str,
+    headers: &[(&str, String)],
+    body: &str,
+) -> HttpResponse {
     let mut stream = TcpStream::connect(addr).await.expect("connect");
     let mut head = format!(
-        "{method} {target} HTTP/1.1\r\nHost: 127.0.0.1\r\nAccept: application/json, \
+        "{method} {target} HTTP/1.1\r\nHost: {host}\r\nAccept: application/json, \
          text/event-stream\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
          Connection: close\r\n",
         body.len()
@@ -1248,6 +1264,122 @@ async fn a_present_origin_is_refused_by_default() {
     headers.push(("Origin", "https://evil.example".to_string()));
     let response = request(harness.addr, "POST", &with_auth(headers), &body.to_string()).await;
     assert_eq!(response.status, 403, "{}", response.body);
+}
+
+// ── Canonical MCP Host/Origin policy (#4588 SC-02) ──────────────────────────
+//
+// The standalone MCP Host allowlist already names the canonical single-label
+// hosts (staging-mcp-nession / mcp-nession). These tests prove the real HTTP
+// boundary accepts exactly those hosts, refuses unauthorized authorities even
+// under the canonical suffix, keeps the browser-Origin denial and the exact
+// /mcp path, and never widens trust.
+
+/// The staging MCP Host allowlist shape from GitOps mcp.toml (#4588).
+fn canonical_mcp_hosts() -> Vec<String> {
+    vec![
+        "staging-mcp-nession.bestnathan.top".to_string(),
+        "mcp-nession.bestnathan.top".to_string(),
+        "nession-mcp-staging".to_string(),
+        "localhost".to_string(),
+        "127.0.0.1".to_string(),
+    ]
+}
+
+async fn canonical_host_harness() -> Harness {
+    start_with(
+        Arc::default(),
+        Config {
+            allowed_hosts: canonical_mcp_hosts(),
+            ..Config::default()
+        },
+    )
+    .await
+}
+
+#[tokio::test]
+async fn canonical_mcp_hosts_are_accepted() {
+    let harness = canonical_host_harness().await;
+    // Modern stateless discovery needs no prior session, so a 200 here can only
+    // be attributed to the Host allowance admitting the canonical authority.
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "server/discover",
+        "params": { "_meta": modern_meta(MODERN) },
+    })
+    .to_string();
+    let headers = with_auth(vec![
+        ("MCP-Protocol-Version", MODERN.to_string()),
+        ("Mcp-Method", "server/discover".to_string()),
+    ]);
+    for host in [
+        "staging-mcp-nession.bestnathan.top",
+        "mcp-nession.bestnathan.top",
+    ] {
+        let response = request_with_host(harness.addr, host, PATH, "POST", &headers, &body).await;
+        assert_eq!(response.status, 200, "{host}: {}", response.body);
+    }
+}
+
+#[tokio::test]
+async fn unauthorized_mcp_hosts_are_refused() {
+    let harness = canonical_host_harness().await;
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+    for host in [
+        "evil.bestnathan.top",
+        "staging-mcp-nession.bestnathan.top.evil.example",
+        "staging.mcp.nession.bestnathan.top",
+        "attacker.example",
+    ] {
+        let response = request_with_host(
+            harness.addr,
+            host,
+            PATH,
+            "POST",
+            &with_auth(Vec::new()),
+            &body,
+        )
+        .await;
+        assert_eq!(response.status, 403, "{host}: {}", response.body);
+    }
+}
+
+#[tokio::test]
+async fn a_browser_origin_is_refused_even_on_a_canonical_mcp_host() {
+    let harness = canonical_host_harness().await;
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+    let headers = with_auth(vec![(
+        "Origin",
+        "https://staging-ui-nession.bestnathan.top".to_string(),
+    )]);
+    let response = request_with_host(
+        harness.addr,
+        "staging-mcp-nession.bestnathan.top",
+        PATH,
+        "POST",
+        &headers,
+        &body,
+    )
+    .await;
+    assert_eq!(response.status, 403, "{}", response.body);
+}
+
+#[tokio::test]
+async fn the_exact_mcp_path_is_preserved_on_a_canonical_host() {
+    let harness = canonical_host_harness().await;
+    let body = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" }).to_string();
+    for target in ["/", "/mcp/", "/ws"] {
+        let response = request_with_host(
+            harness.addr,
+            "staging-mcp-nession.bestnathan.top",
+            target,
+            "POST",
+            &with_auth(Vec::new()),
+            &body,
+        )
+        .await;
+        assert_eq!(response.status, 404, "{target}: {}", response.body);
+    }
 }
 
 #[tokio::test]
