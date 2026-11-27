@@ -459,7 +459,9 @@ test.describe('App 390×844', () => {
     const problem = page.getByTestId('app-sessions-problem');
     await expect(problem).toBeVisible();
     await expect(problem).toContainText('Reconnecting');
-    await expect(page.getByLabel('Refresh sessions')).toBeVisible();
+    // #4602 adds a resting header Refresh with the same accessible name; the
+    // degraded strip keeps its own contextual retry, so scope to the strip.
+    await expect(problem.getByLabel('Refresh sessions')).toBeVisible();
 
     await expect(page).toHaveScreenshot('app-sessions-degraded-link.png', {
       fullPage: true,

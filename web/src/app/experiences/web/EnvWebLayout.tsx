@@ -91,7 +91,7 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
     return (
       <div
         data-testid="env-detail-empty"
-        className={cn('flex h-full items-center justify-center px-6 text-center text-muted-foreground', chromeSansRole('secondary'))}
+        className={cn('flex h-full items-center justify-center px-[var(--nession-shell-space-5)] text-center text-muted-foreground', chromeSansRole('secondary'))}
       >
         Select an environment to inspect its variables.
       </div>
@@ -114,6 +114,8 @@ export function EnvWebLayout({ ctx }: { ctx: WorkspaceContext }) {
             onNew={screen.startNew}
             onImport={env.openImport}
             onRetry={() => void profiles.refresh()}
+            onRefresh={() => void profiles.refresh()}
+            refreshing={profiles.refreshing}
           />
         }
       >

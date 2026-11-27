@@ -4,6 +4,7 @@ import { cn } from '@/shared/lib/utils';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
   DropdownMenu,
@@ -28,6 +29,9 @@ export interface EnvironmentNavigatorProps {
   onNew: () => void;
   onImport: () => void;
   onRetry: () => void;
+  /** Manual refresh of the profile list (#4602), drawn in the toolbar. */
+  onRefresh?: () => void;
+  refreshing?: boolean;
   /**
    * App only (#1051): the pushed detail hides the list, so the list's scroll
    * position leaves with it — restore it when the detail pops. Same prop
@@ -57,13 +61,13 @@ function EnvironmentRow({
       data-included={included || undefined}
       onClick={onSelect}
       className={cn(
-        'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors hover:bg-accent/50',
+        'flex w-full items-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-3)] py-[var(--nession-shell-space-2)] text-left transition-colors hover:bg-accent/50',
         selected && 'bg-accent',
       )}
     >
       <span className="min-w-0 flex-1">
         <span className={cn('block truncate', chromeSansRole('primary'))}>{profile.name}</span>
-        <span className={cn('mt-0.5 block truncate text-muted-foreground', chromeSansRole('metadata'))}>
+        <span className={cn('mt-[var(--nession-rhythm-fact-stack)] block truncate text-muted-foreground', chromeSansRole('metadata'))}>
           {profileMetaLine(profile, agents)}
         </span>
       </span>
@@ -93,9 +97,9 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
 
   if (loading && profiles.length === 0) {
     return (
-      <div className="flex flex-col gap-1 p-2" data-testid="env-navigator-loading">
+      <div className="flex flex-col gap-[var(--nession-shell-space-1)] p-[var(--nession-shell-space-2)]" data-testid="env-navigator-loading">
         {[1, 2, 3, 4].map((i) => (
-          <Skeleton key={i} className="h-11 w-full" />
+          <Skeleton key={i} className="h-[length:var(--nession-navigator-skeleton-row-height)] w-full" />
         ))}
       </div>
     );
@@ -103,7 +107,7 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
 
   if (error && profiles.length === 0) {
     return (
-      <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
+      <div className="flex flex-col items-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] py-[var(--nession-navigator-error-inset-y)] text-center">
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>{error}</p>
         <Button size="sm" variant="outline" onClick={props.onRetry}>
           Retry
@@ -116,15 +120,15 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
     return (
       <div
         data-testid="env-navigator-empty"
-        className="flex flex-col items-center gap-3 px-4 py-10 text-center"
+        className="flex flex-col items-center gap-[var(--nession-shell-space-3)] px-[var(--nession-shell-space-4)] py-[var(--nession-navigator-empty-inset-y)] text-center"
       >
-        <div className="space-y-1">
+        <div className="space-y-[var(--nession-shell-space-1)]">
           <p className={chromeSansRole('primary')}>No environments yet</p>
           <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>
             Create or import an environment profile for this workspace.
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-[var(--nession-shell-space-2)]">
           <Button size="sm" onClick={props.onNew}>
             New environment
           </Button>
@@ -138,7 +142,7 @@ function NavigatorBody(props: EnvironmentNavigatorProps & { query: string }) {
 
   if (filtered.length === 0) {
     return (
-      <p className={cn('px-4 py-8 text-center text-muted-foreground', chromeSansRole('secondary'))}>
+      <p className={cn('px-[var(--nession-shell-space-4)] py-[var(--nession-navigator-error-inset-y)] text-center text-muted-foreground', chromeSansRole('secondary'))}>
         No environments match &ldquo;{query.trim()}&rdquo;
       </p>
     );
@@ -185,17 +189,25 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
 
   return (
     <div data-testid="env-navigator" className="flex h-full min-h-0 flex-col">
-      <div className="flex items-center gap-1.5 border-b p-2">
+      <div className="flex items-center gap-[var(--nession-rhythm-field-stack)] border-b p-[var(--nession-shell-space-2)]">
         <div className="relative min-w-0 flex-1">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-[var(--nession-rhythm-error-inset-x)] top-1/2 size-[length:var(--nession-icon-sm)] -translate-y-1/2 text-muted-foreground" />
           <Input
             data-testid="env-search"
             placeholder="Search profiles…"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            className="pl-8"
+            className="pl-[var(--nession-navigator-search-input-inset-x)]"
           />
         </div>
+        {props.onRefresh ? (
+          <RefreshButton
+            onClick={() => props.onRefresh?.()}
+            loading={props.refreshing ?? false}
+            variant="ghost"
+            ariaLabel="Refresh environment profiles"
+          />
+        ) : null}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -207,7 +219,7 @@ export function EnvironmentNavigator(props: EnvironmentNavigatorProps) {
               />
             }
           >
-            <Plus className="size-4" />
+            <Plus className="size-[length:var(--nession-icon-md)]" />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
             <DropdownMenuItem data-testid="env-new-profile" onClick={props.onNew}>

@@ -240,20 +240,26 @@ describe('Quick Commands view (#2710 SC-05)', () => {
 
   it('keeps a failed read distinct from empty across server.commands.changed refresh', async () => {
     // SC-03: a push-triggered refetch must re-read the owner and preserve the
-    // error/empty distinction rather than caching either answer.
-    const { request, plugin } = installSurface({ readErrors: 2 });
+    // error/empty distinction rather than caching either answer. Restated for
+    // the #4602 pull controller: the push routes through the controller's
+    // invalidate seam, which may owe a trailing read after a failure, so the
+    // invariant is "the push provokes a fresh read" rather than an exact count.
+    const { request, plugin } = installSurface();
+    request.mockResolvedValue({ commands: [], error: 'Saved commands could not be loaded' });
     renderView();
 
     await screen.findByTestId('quick-commands-error');
-    expect(request).toHaveBeenCalledTimes(1);
+    const readsAfterMount = request.mock.calls.length;
 
     plugin.pushChanged();
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(readsAfterMount));
+    // A failed server read stays an error, never a genuinely empty list.
     expect(await screen.findByTestId('quick-commands-error')).toBeInTheDocument();
     expect(screen.queryByTestId('quick-commands-empty')).toBeNull();
 
+    // A later successful read recovers into the correct ordered list.
+    request.mockResolvedValue({ commands: COMMANDS });
     plugin.pushChanged();
-    await waitFor(() => expect(request).toHaveBeenCalledTimes(3));
     expect(await screen.findByTestId('quick-commands-list')).toBeInTheDocument();
     expect(screen.queryByTestId('quick-commands-error')).toBeNull();
   });

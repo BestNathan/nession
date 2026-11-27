@@ -90,116 +90,147 @@ describe('useEnvironmentProfiles', () => {
     expect(result.current.profiles).toHaveLength(2);
   });
 
-  it('keeps the newest success when the superseded success settles later (SC-01)', async () => {
+  // #4602 SC-03: one read per context. The #2878 hazard — an older answer
+  // overwriting a newer one — is now structural: a second refresh is held
+  // behind the first instead of racing it. These prove the held refresh still
+  // lands its own answer, and that a late reply from a retired context cannot
+  // publish at all.
+
+  it('lands a queued refresh answer after the mount read, never before it', async () => {
     const requests = deferredLists();
     const { result } = renderHook(() => useEnvironmentProfiles());
     expect(requests).toHaveLength(1);
 
-    // B starts while A is still in flight, then B answers the new list.
     let b!: Promise<void>;
     act(() => { b = result.current.refresh(); });
-    expect(requests).toHaveLength(2);
-    await act(async () => {
-      requests[1].resolve({ files: [info('new.env')] });
-      await b;
-    });
-    expect(result.current.profiles.map((p) => p.name)).toEqual(['new.env']);
+    // Held, not concurrent.
+    expect(requests).toHaveLength(1);
 
-    // A answers last with the snapshot it took before B. It is superseded.
     await act(async () => {
       requests[0].resolve({ files: [info('old.env')] });
       await requests[0].promise;
+    });
+    expect(requests).toHaveLength(2);
+
+    await act(async () => {
+      requests[1].resolve({ files: [info('new.env')] });
+      await b;
     });
     expect(result.current.profiles.map((p) => p.name)).toEqual(['new.env']);
     expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
   });
 
-  it('keeps the newest success when the superseded request fails later (SC-01)', async () => {
+  it('keeps a newer success when the earlier read failed', async () => {
     const requests = deferredLists();
     const { result } = renderHook(() => useEnvironmentProfiles());
 
     let b!: Promise<void>;
     act(() => { b = result.current.refresh(); });
-    await act(async () => {
-      requests[1].resolve({ files: [info('new.env')] });
-      await b;
-    });
-
     await act(async () => {
       requests[0].reject(new Error('stale failure'));
       await requests[0].promise.catch(() => {});
     });
+    await act(async () => {
+      requests[1].resolve({ files: [info('new.env')] });
+      await b;
+    });
+
     expect(result.current.profiles.map((p) => p.name)).toEqual(['new.env']);
     expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
   });
 
-  it('loading belongs only to the newest list read (SC-01)', async () => {
+  it('reports a background refresh without raising the initial-load state', async () => {
     const requests = deferredLists();
     const { result } = renderHook(() => useEnvironmentProfiles());
-    expect(requests).toHaveLength(1);
+    expect(result.current.loading).toBe(true);
 
     let b!: Promise<void>;
     act(() => { b = result.current.refresh(); });
-    expect(requests).toHaveLength(2);
 
-    // A settles while B is still pending: A must not clear B's loading state
-    // or publish its older list.
     await act(async () => {
       requests[0].resolve({ files: [info('old.env')] });
       await requests[0].promise;
     });
-    expect(result.current.loading).toBe(true);
-    expect(result.current.profiles).toEqual([]);
+    // The first projection landed, so the page is no longer in initial load;
+    // the held refresh is reported as refreshing, not as a blank list.
+    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(true);
+    expect(result.current.profiles.map((p) => p.name)).toEqual(['old.env']);
 
     await act(async () => {
       requests[1].resolve({ files: [info('new.env')] });
       await b;
     });
-    expect(result.current.loading).toBe(false);
+    expect(result.current.refreshing).toBe(false);
     expect(result.current.profiles.map((p) => p.name)).toEqual(['new.env']);
   });
 
-  it('keeps a newest empty result against a superseded non-empty answer (SC-01)', async () => {
+  it('keeps a newest empty result against an earlier non-empty answer', async () => {
     const requests = deferredLists();
     const { result } = renderHook(() => useEnvironmentProfiles());
 
     let b!: Promise<void>;
     act(() => { b = result.current.refresh(); });
+    await act(async () => {
+      requests[0].resolve({ files: [info('old.env')] });
+      await requests[0].promise;
+    });
     await act(async () => {
       requests[1].resolve({ files: [] });
       await b;
     });
-    expect(result.current.profiles).toEqual([]);
-    expect(result.current.loading).toBe(false);
 
-    await act(async () => {
-      requests[0].resolve({ files: [info('old.env')] });
-      await requests[0].promise;
-    });
+    // An authoritative empty list is a result, not a failure.
     expect(result.current.profiles).toEqual([]);
     expect(result.current.error).toBeNull();
+    expect(result.current.loading).toBe(false);
   });
 
-  it('keeps the newest failure visible against a superseded success (SC-01)', async () => {
+  it('keeps the newest failure visible and retains the last known list', async () => {
     const requests = deferredLists();
     const { result } = renderHook(() => useEnvironmentProfiles());
 
     let b!: Promise<void>;
     act(() => { b = result.current.refresh(); });
     await act(async () => {
-      requests[1].reject(new Error('newest failed'));
-      await b;
-    });
-    expect(result.current.error).toBe('newest failed');
-
-    await act(async () => {
       requests[0].resolve({ files: [info('old.env')] });
       await requests[0].promise;
     });
+    await act(async () => {
+      requests[1].reject(new Error('newest failed'));
+      await b;
+    });
+
     expect(result.current.error).toBe('newest failed');
-    expect(result.current.profiles).toEqual([]);
+    // #4602 §3: a failure keeps the last successful data and marks it stale.
+    expect(result.current.profiles.map((p) => p.name)).toEqual(['old.env']);
+    expect(result.current.stale).toBe(true);
     expect(result.current.loading).toBe(false);
+  });
+
+  it('never publishes a reply from a retired transport context', async () => {
+    const requests = deferredLists();
+    const { result, rerender } = renderHook(
+      ({ revision }: { revision: number }) => useEnvironmentProfiles({ connectionRevision: revision }),
+      { initialProps: { revision: 1 } },
+    );
+    expect(requests).toHaveLength(1);
+
+    rerender({ revision: 2 });
+    expect(requests).toHaveLength(2);
+
+    // The replaced transport's answer arrives last and must not publish.
+    await act(async () => {
+      requests[1].resolve({ files: [info('current.env')] });
+      await requests[1].promise;
+    });
+    await act(async () => {
+      requests[0].resolve({ files: [info('retired.env')] });
+      await requests[0].promise;
+    });
+
+    expect(result.current.profiles.map((p) => p.name)).toEqual(['current.env']);
   });
 });

@@ -42,6 +42,14 @@ async function flush() {
   });
 }
 
+/**
+ * #3387 SC-01, restated for the #4602 pull controller. The hazard — an older
+ * answer overwriting a newer one — is now structural: the controller holds at
+ * most one read in flight per context, so a second refresh is queued behind the
+ * first instead of racing it, and a retired transport's reply cannot publish at
+ * all. These prove the held refresh still lands its own answer, that the newest
+ * empty/failure/retry sequence commits, and that a replaced transport is fenced.
+ */
 describe('useProjects response ordering (#3387 SC-01)', () => {
   let surface: MockPluginSurface;
   let release: () => void;
@@ -65,78 +73,75 @@ describe('useProjects response ordering (#3387 SC-01)', () => {
     return view;
   }
 
-  it('keeps the newer refresh when the older read succeeds late (#3387 SC-01)', async () => {
+  it('holds a manual refresh behind the mount read and lands its own answer (#3387 SC-01)', async () => {
     const { result } = renderProjects();
     // Mount read A.
     expect(surface.requests).toHaveLength(1);
     expect(result.current.loading).toBe(true);
 
-    // A caller refresh B starts before A answers.
+    // A caller refresh B is held behind A, not started concurrently.
     act(() => {
       void result.current.refresh();
     });
-    expect(surface.requests).toHaveLength(2);
+    expect(surface.requests).toHaveLength(1);
 
-    // B answers first with the current truth.
+    // A answers first; only then does the held B start.
     await act(async () => {
-      settle(surface, 1, [NEW]);
+      settle(surface, 0, [OLD]);
+      await Promise.resolve();
+    });
+    expect(result.current.projects).toEqual([OLD]);
+    expect(surface.requests).toHaveLength(1);
+
+    // B answers with the current truth and is the final word.
+    await act(async () => {
+      settle(surface, 0, [NEW]);
       await Promise.resolve();
     });
     expect(result.current.projects).toEqual([NEW]);
     expect(result.current.loading).toBe(false);
     expect(result.current.loaded).toBe(true);
-
-    // A answers late with the pre-mutation list. It must not commit.
-    await act(async () => {
-      settle(surface, 0, [OLD]);
-      await Promise.resolve();
-    });
-    expect(result.current.projects).toEqual([NEW]);
-    expect(result.current.loading).toBe(false);
     expect(result.current.error).toBeNull();
   });
 
-  it('keeps the newer refresh when the older read fails late (#3387 SC-01)', async () => {
+  it('keeps a newer success when the earlier read failed (#3387 SC-01)', async () => {
     const { result } = renderProjects();
     act(() => {
       void result.current.refresh();
     });
-
-    await act(async () => {
-      settle(surface, 1, [NEW]);
-      await Promise.resolve();
-    });
-    expect(result.current.projects).toEqual([NEW]);
+    // Held, not concurrent.
+    expect(surface.requests).toHaveLength(1);
 
     await act(async () => {
       settleError(surface, 0, 'the old read failed');
       await Promise.resolve();
     });
-    expect(result.current.error).toBeNull();
+    await act(async () => {
+      settle(surface, 0, [NEW]);
+      await Promise.resolve();
+    });
     expect(result.current.projects).toEqual([NEW]);
+    expect(result.current.error).toBeNull();
     expect(result.current.loading).toBe(false);
   });
 
   it('commits the newest empty list, the newest failure and a later retry (#3387 SC-01)', async () => {
     const { result } = renderProjects();
-    act(() => {
-      void result.current.refresh();
-    });
 
-    // The latest read answers with a legitimate empty collection.
+    // The mount read answers with a legitimate empty collection.
     await act(async () => {
-      settle(surface, surface.requests.length - 1, []);
+      settle(surface, 0, []);
       await Promise.resolve();
     });
     expect(result.current.projects).toEqual([]);
     expect(result.current.error).toBeNull();
 
-    // The latest read fails: the failure is the current truth.
+    // A later read fails: the failure is the current truth.
     act(() => {
       void result.current.refresh();
     });
     await act(async () => {
-      settleError(surface, surface.requests.length - 1, 'Projects could not be loaded');
+      settleError(surface, 0, 'Projects could not be loaded');
       await Promise.resolve();
     });
     expect(result.current.error).toBe('Projects could not be loaded');
@@ -147,7 +152,7 @@ describe('useProjects response ordering (#3387 SC-01)', () => {
       void result.current.refresh();
     });
     await act(async () => {
-      settle(surface, surface.requests.length - 1, [NEWEST]);
+      settle(surface, 0, [NEWEST]);
       await Promise.resolve();
     });
     expect(result.current.projects).toEqual([NEWEST]);
@@ -162,8 +167,9 @@ describe('useProjects response ordering (#3387 SC-01)', () => {
     const nextSurface = createMockPluginSurface();
     const releaseNext = projectsApi.install(nextSurface);
     try {
-      // Installing B notifies the hook, which starts the current-generation
-      // read on B.
+      // Installing B notifies the hook; the revision change retires A and starts
+      // the current-generation read on B (one render later).
+      await flush();
       expect(nextSurface.requests).toHaveLength(1);
 
       await act(async () => {
@@ -172,7 +178,8 @@ describe('useProjects response ordering (#3387 SC-01)', () => {
       });
       expect(result.current.projects).toEqual([NEW]);
 
-      // The old transport answers late with its own older list.
+      // The old transport answers late with its own older list. Its read was
+      // retired, so it cannot commit.
       await act(async () => {
         settle(surface, 0, [OLD]);
         await Promise.resolve();
@@ -189,8 +196,8 @@ describe('useProjects response ordering (#3387 SC-01)', () => {
     const { result } = renderProjects();
     expect(surface.requests).toHaveLength(1);
 
-    // Releasing the transport is a connection change: this read is newest, and
-    // a not-yet-installed transport is a loading state, not an error.
+    // Releasing the transport is a connection change: a not-yet-installed
+    // transport is a loading state, not an error.
     release();
     await flush();
     expect(result.current.loading).toBe(true);

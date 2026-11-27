@@ -3,6 +3,7 @@ import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { agentDisplayName } from '@/shared/lib/format';
 import { SidebarSectionHead } from '@/app/patterns/SidebarSectionHead';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import type { Agent } from '@/types';
 
 export interface SidebarAgentsProps {
@@ -25,6 +26,13 @@ export interface SidebarAgentsProps {
    * caller that has not supplied its own head.
    */
   showSectionHead?: boolean;
+  /**
+   * Optional manual refresh of the Agent registry (#4602), drawn in the section
+   * head when this component owns it. A caller that owns the head (the App
+   * disclosure) wires its own refresh control instead.
+   */
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }
 
 /**
@@ -69,14 +77,34 @@ export function SidebarAgents({
   activeAgentId,
   action,
   showSectionHead = true,
+  onRefresh,
+  refreshing,
 }: SidebarAgentsProps) {
   // With no head and no rows there is nothing to show; but when a head (or a
   // caller-supplied head action) is present it must not vanish with the Agent
   // count — a shell control that disappears based on data is exactly the
   // "jumping control" #1196 removes.
-  if (agents.length === 0 && (!showSectionHead || action === undefined)) {
+  if (
+    agents.length === 0 &&
+    (!showSectionHead || (action === undefined && onRefresh === undefined))
+  ) {
     return null;
   }
+
+  const headAction =
+    onRefresh !== undefined ? (
+      <span className="flex items-center gap-[var(--nession-shell-space-1)]">
+        {action}
+        <RefreshButton
+          onClick={() => onRefresh()}
+          loading={refreshing ?? false}
+          variant="ghost"
+          ariaLabel="Refresh agents"
+        />
+      </span>
+    ) : (
+      action
+    );
 
   return (
     <section
@@ -84,7 +112,7 @@ export function SidebarAgents({
       aria-label="Agents"
       className="flex shrink-0 flex-col px-[var(--nession-shell-space-2)]"
     >
-      {showSectionHead ? <SidebarSectionHead label="Agents" action={action} /> : null}
+      {showSectionHead ? <SidebarSectionHead label="Agents" action={headAction} /> : null}
       <ul className="flex flex-col">
         {agents.map((agent) => {
           const active = agent.agent_id === activeAgentId;
