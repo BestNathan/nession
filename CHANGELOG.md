@@ -1031,3 +1031,17 @@
 - Categories: architecture, agent, ci, security, workflows
 - Reason: Cross-link the Delivery-domain Deploy / Configure Site split-DNS reconciliation contract so the site registry article has a reciprocal incoming link
 - Source: https://github.com/BestNathan/nession/pull/4678
+
+## 2026-11-27T09:36:15Z | create | Nession canonical hostname migration and cert-manager TLS consumption
+- Path: topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md
+- Topic: engineering
+- Categories: architecture, security, delivery, identity
+- Reason: Record the owner-approved #4588 canonical single-label bestnathan.top hostname contract, single nitops-owned cert-manager wildcard TLS consumed at the SLB, fail-closed advertised-endpoint/origin config and receipt-gated legacy Origin CA retirement; replaces the Origin CA-only model; nitops#2 readiness unverified so activation/retirement stay blocked and live probes remain a separate SCN-07 gate
+- Source: https://github.com/BestNathan/nession/issues/4588
+
+## 2026-11-27T09:36:15Z | update | Nession site registry and split-DNS exposure contract
+- Path: topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md
+- Topic: engineering
+- Categories: architecture, security, delivery, registry, workflows
+- Reason: Add reciprocal cross-link to the delivered #4588 canonical hostname and cert-manager TLS consumption contract so the new article has a meaningful incoming link
+- Source: https://github.com/BestNathan/nession/issues/4588

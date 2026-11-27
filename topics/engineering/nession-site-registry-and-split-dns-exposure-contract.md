@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "security", "delivery", "registry", "workflows"]
 status: verified
 created_at: 2026-11-27T09:24:21Z
-updated_at: 2026-11-27T09:24:21Z
-sources: ["https://github.com/BestNathan/nession/blob/7f4d5fd5d55720627c98ff3b2934ea646b0280f5/docs/engineering/cloudflare-site-provisioning.md", "https://github.com/BestNathan/nession/blob/7f4d5fd5d55720627c98ff3b2934ea646b0280f5/scripts/ci/site-registry/registry.json", "https://github.com/BestNathan/nession/blob/7f4d5fd5d55720627c98ff3b2934ea646b0280f5/.github/workflows/deploy-configure-site.yml", "https://github.com/BestNathan/nession/issues/4589", "https://github.com/BestNathan/nession/pull/4678"]
+updated_at: 2026-11-27T09:36:15Z
+sources: ["https://github.com/BestNathan/nession/blob/7f4d5fd5d55720627c98ff3b2934ea646b0280f5/docs/engineering/cloudflare-site-provisioning.md", "https://github.com/BestNathan/nession/blob/7f4d5fd5d55720627c98ff3b2934ea646b0280f5/scripts/ci/site-registry/registry.json", "https://github.com/BestNathan/nession/blob/7f4d5fd5d55720627c98ff3b2934ea646b0280f5/.github/workflows/deploy-configure-site.yml", "https://github.com/BestNathan/nession/issues/4589", "https://github.com/BestNathan/nession/pull/4678", "https://github.com/BestNathan/nession/issues/4588"]
 ---
 
 # Nession site registry and split-DNS exposure contract
@@ -91,6 +91,7 @@ a second desired state.
 
 ## Related knowledge
 
+- [Nession canonical hostname migration and cert-manager TLS consumption](nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md) — #4588's delivered canonical hosts, single nitops cert-manager TLS consumption and receipt-gated legacy retirement this registry activates.
 - [Nession GitHub Actions workflow domains and trust boundaries](../workflows/nession-github-actions-workflow-domains-and-trust-boundaries.md) — the Delivery-domain trust model this workflow extends.
 - [Nession MCP access layer semantic tool ownership and protocol versions](nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md) — the standalone MCP endpoint whose public route this contract exposes.
 - [Endpoint-owned Server and Agent tokens](endpoint-owned-server-and-agent-tokens.md) — MCP inbound and backend credentials remain separate identities.

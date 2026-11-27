@@ -83,6 +83,19 @@
         "updated_at": "2026-10-24T12:24:00Z"
       },
       {
+        "title": "Nession canonical hostname migration and cert-manager TLS consumption",
+        "description": "Canonical single-label bestnathan.top hostnames, single nitops-owned cert-manager wildcard TLS consumed at the SLB, fail-closed advertised-endpoint and browser-origin config, and receipt-gated legacy Origin CA retirement",
+        "path": "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
+        "status": "verified",
+        "categories": [
+          "architecture",
+          "security",
+          "delivery",
+          "identity"
+        ],
+        "updated_at": "2026-11-27T09:36:15Z"
+      },
+      {
         "title": "Nession CLI local logs and startup diagnostics",
         "description": "Read-only `agent|server logs` discovery across rolling runtime files, bounded startup diagnostics and managed-service captures, with filter-before-tail, identity/offset follow, sanitized bounded startup records and archive-safe read-only dispatch",
         "path": "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
@@ -180,7 +193,7 @@
           "registry",
           "workflows"
         ],
-        "updated_at": "2026-11-27T09:24:21Z"
+        "updated_at": "2026-11-27T09:36:15Z"
       },
       {
         "title": "Nession WebSocket runtime architecture and message dispatch",
@@ -556,6 +569,7 @@
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
       "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
@@ -592,6 +606,7 @@
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md"
     ],
     "delivery": [
+      "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
       "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
       "topics/workflows/nession-public-pages-source-publication-and-orphan-branch-signals.md"
     ],
@@ -624,6 +639,7 @@
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md"
     ],
     "identity": [
+      "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
     ],
     "images": [
@@ -772,6 +788,7 @@
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
+      "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
       "topics/engineering/nession-cli-local-logs-and-startup-diagnostics.md",
       "topics/engineering/nession-runtime-directories-and-daemon-process-state-ownership.md",
       "topics/engineering/nession-sandbox-policy-and-execution-isolation-architecture.md",
