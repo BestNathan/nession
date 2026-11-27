@@ -84,4 +84,36 @@ and Rust/Web builds remain workflow-owned prerequisites.
 
 The `detector-selftest-coverage` Gate checks custom rule owners against the deterministic positive/negative fixtures selected by unconditional PR Quality. It mutates the actual Rust/Tooling suites and post-install Web Gate commands, ensuring that removing a self-test is detected. `dev-workspace-selftest` uses isolated real Git repositories and linked worktrees to prove root, linked-worktree, detached-head and strict-session behavior. The coverage map is not a second rules engine: original detector implementations remain authoritative. When adding a new custom detector, register its fixture and Quality routing in this check as well as the standard Gate catalog.
 
-PR CI routing: `scripts/ci/quality-scope.mjs` owns affected-file selection. The `ci-pr-routing-selftest` Gate verifies fixture-only, Rust-only, Web-only, mixed-protocol, unknown-path fail-closed and required `web-check` aggregation/Case Smoke ordering. This Gate is included in the full `quality-tooling` suite, which is conditionally applicable by source impact; the Web tests execute in a parallel job. Do not reintroduce unconditional expensive suites for fixture-only PRs or publish main Web dist before the `web-check` aggregate succeeds.
+PR CI routing: `scripts/ci/quality-scope.mjs` owns affected-file selection. The `ci-pr-routing-selftest` Gate verifies fixture-only, Rust-only, Web-only, mixed-protocol, family-local fallback, invalid/empty-diff fail-closed and required `web-check` aggregation/Case Smoke ordering. This Gate is included in the full `quality-tooling` suite, which is conditionally applicable by source impact; the Web tests execute in a parallel job. Do not reintroduce unconditional expensive suites for fixture-only PRs or publish main Web dist before the `web-check` aggregate succeeds.
+
+### Per-family Quality applicability (#4672)
+
+The trusted selector owns job applicability, not Gate contents. Its existing
+boolean outputs remain stable; `Quality decision reasons` logs matched paths
+and named rules separately. A valid unclassified path selects Tooling for
+inspection, not all heavy families. An unprovable or empty integration diff
+retains conservative verification. The known unresolved script and shared-Gate
+regions keep Rust/Web-local fallback until their transitive checker inputs can
+be narrowed.
+
+| Family | Positive inputs / unresolved boundary |
+|---|---|
+| Rust | Workspace crates, Cargo/toolchain/config, protocol generated output, root README (CLI parser/schema fixture), Rust checker owners (coverage, test route, codegen, worktree/cache, handler locality), deployment inputs used by runtime/tmux checks, shared recipes/Quality workflow; unresolved scripts/shared Gates |
+| Native | Agent/CLI/Server and their local Cargo dependencies, Cargo configuration/lock, the native fixture and its Node driver, owning Quality/release workflows |
+| Web | Web/design inputs, protocol crates, Web checker owners, shared recipes/Quality workflow; unresolved scripts/shared Gates |
+| Tooling | Repository scripts/Gates, Web/design, deployment, hooks, E2E/automation/Pages and unclassified paths |
+| Workflow | Workflow definitions and composite Actions |
+| Instruction | Repository instruction/Skill graph and hook inputs |
+
+The Cargo manifest regression verifies local workspace/path dependency coverage,
+including native transitive dependencies. The source-input guard also checks
+literal Rust includes and manifest-relative references; it runs in both Rust
+and Tooling Quality suites. Arbitrary dynamically constructed paths still
+require owner review. When introducing an out-of-tree build
+asset, embedded fixture, new check dependency or native fixture input, register
+its actual path family in the selector and extend its positive and negative
+fixtures in the same PR. Keep unknown diagnostics distinct from an inability to
+obtain the exact Git diff. Do not add per-config-file exclusions or duplicate
+the policy in workflow YAML. The canonical Tooling suite also runs the light
+protocol and tmux isolation invariants that inspect non-Rust paths, so their
+coverage does not depend on activating a Rust compilation lane.
