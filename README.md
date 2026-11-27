@@ -86,13 +86,55 @@ environments/<env>/nession one overlay per environment: namespace,
 in `argocd/apps/` + its DNS records. If more than one extra environment is
 foreseen, switch the static child apps to an ApplicationSet first.
 
+## Canonical hostnames and TLS ownership (#4588)
+
+Every Server/Agent/UI site has a **canonical single-label** `bestnathan.top`
+host (`env-service-nession`, production omits the env and server prefix):
+
+| env | server | agent | ui | mcp |
+|---|---|---|---|---|
+| production | `nession` | `agent-nession` | `ui-nession` | `mcp-nession` (dormant) |
+| staging | `staging-nession` | `staging-agent-nession` | `staging-ui-nession` | `staging-mcp-nession` (active) |
+| staging-01 | `staging-01-nession` | `staging-01-agent-nession` | `staging-01-ui-nession` | — |
+| preprod | `preprod-nession` | `preprod-agent-nession` | `preprod-ui-nession` | — |
+
+(suffix `.bestnathan.top`). The nested `<env>.nession.*` / `<env>.agent.nession.*`
+names are retained as LAN compatibility during migration and retired only after
+cutover readback; `nhome.local` hosts and their manual AdGuard records are
+preserved verbatim. Server/Agent/UI are private; only the existing MCP sites may
+be public (exact `/mcp`, authenticated). DNS activation and the public/private
+route policy are owned by the site-registry issue #4589, not by this branch.
+
+**TLS ownership.** cert-manager, the DNS-01 ClusterIssuer and the single wildcard
+Certificate `*.bestnathan.top` live in the **nitops** repo (BestNathan/nitops#2),
+in the serving `slb` namespace; the target Secret is owned exclusively by
+cert-manager and SLB nginx is the actual client-facing TLS terminator forwarding
+HTTP to Higress. Nession installs no cert-manager, issues no certificate, and
+writes no competing Certificate/Issuer/SealedSecret. The canonical hosts are
+covered by the nitops wildcard SAN; Nession ingress objects declare no
+bestnathan.top TLS block of their own once the legacy Higress Origin CA TLS
+(`environments/staging/mcp/sealed-tls.json` → `nession-mcp-staging-tls`) is
+retired. That retirement, and any consumption switch, is **blocked** until a
+sanitized cutover readback receipt is recorded; rollback restores route/config
+desired state only and never rolls back cert-manager or deletes shared Secrets.
+
+The executable contract owners are `scripts/gitops-host-contract.mjs` (SC-01:
+canonical hosts, backends, preserved nhome.local, dormant MCP) and
+`scripts/gitops-tls-contract.mjs` (SC-03: ownership, readiness-gated retirement)
+on `main`, run as the `gitops-host-contract` / `gitops-tls-contract` Gates against
+this branch. Live LAN/public probes and certificate readback are the separate
+operational gate (SCN-07); a green PR is not a rollout.
+
 ## Bootstrap checklist for a NEW environment
 
 1. NFS: create the directories on the NFS server
    (`/mnt/share/k8s/<env>` and `/mnt/share/k8s/<env>/claude-home`),
    correct ownership/perms (production's dirs already exist).
-2. DNS (manual): `<env>.nession.*`, `<env>.agent.nession.*`,
-   `<env>.ui.nession.*` on both `nhome.local` and `bestnathan.top`.
+2. DNS: the canonical single-label hosts `<env>-nession`, `<env>-agent-nession`,
+   `<env>-ui-nession` on `bestnathan.top` (production: `nession`, `agent-nession`,
+   `ui-nession`), plus the preserved `<env>.nession.*` / `<env>.agent.nession.*` /
+   `<env>.ui.nession.*` on `nhome.local`. LAN split-horizon DNS and any public MCP
+   record are reconciled by the protected site workflow (#4589), not by hand.
 3. Shared-namespace resources ArgoCD cannot create from manifests: the
    `ghcr-secret` docker-registry secret already exists in namespace `nession`
    and is used by every environment; only a different target namespace would

@@ -2,6 +2,9 @@
 # allowance exactly; CLI/Agent clients present no Origin and stay compatible.
 # These are this lane's own Web UI + server hosts (LAN over HTTP, public hosts
 # over HTTP/HTTPS). Keep this list in sync with patch-ingress.yaml.
+# #4588: the canonical single-label hosts are HTTPS-only (the actual TLS edge
+# redirects HTTP->HTTPS for the new names); nhome.local HTTP and the legacy
+# nested origins are preserved during migration.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -13,4 +16,4 @@ spec:
         - name: nession-server
           env:
             - name: SERVER_ALLOWED_ORIGINS
-              value: "http://staging.nession.nhome.local,http://staging.ui.nession.nhome.local,http://staging.nession.bestnathan.top,https://staging.nession.bestnathan.top,http://staging.ui.nession.bestnathan.top,https://staging.ui.nession.bestnathan.top"
+              value: "http://staging.nession.nhome.local,http://staging.ui.nession.nhome.local,http://staging.nession.bestnathan.top,https://staging.nession.bestnathan.top,http://staging.ui.nession.bestnathan.top,https://staging.ui.nession.bestnathan.top,https://staging-nession.bestnathan.top,https://staging-ui-nession.bestnathan.top"
