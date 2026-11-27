@@ -21,6 +21,8 @@ export function TranscriptsRoute({ data }: { data: ClaudeAppData }) {
       <TranscriptList
         list={data.state.transcripts.list}
         onSelect={data.actions.openTranscript}
+        onRefresh={data.state.transcripts.refresh}
+        refreshing={data.state.transcripts.refreshing}
         touch
       />
     </div>
@@ -79,9 +81,9 @@ export function RecordRoute({
         title={label}
         description={`${formatSize(record.size_bytes)} · every record is readable, recognised or not`}
       />
-      <ScrollBody className="px-4 py-3" testId="claude-app-record-scroll">
+      <ScrollBody className="px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-3)]" testId="claude-app-record-scroll">
         <TranscriptRecordDetail parsed={parsed} record={record} />
-        <div className="mt-4 border-t pt-3">
+        <div className="mt-[var(--nession-shell-space-4)] border-t pt-[var(--nession-shell-space-3)]">
           <Button
             type="button"
             size="sm"

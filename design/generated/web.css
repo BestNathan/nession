@@ -142,6 +142,11 @@
   --nession-rhythm-fact-stack: 2px;
   --nession-rhythm-error-inset-x: 10px;
   --nession-rhythm-error-inset-y: 6px;
+  --nession-navigator-empty-inset-y: 40px;
+  --nession-navigator-error-inset-y: 32px;
+  --nession-navigator-skeleton-row-height: 44px;
+  --nession-navigator-search-input-inset-x: 32px;
+  --nession-transcript-list-width: 288px;
   --nession-shell-space-1: 0.25rem;
   --nession-shell-space-2: 0.5rem;
   --nession-shell-space-3: 0.75rem;
@@ -162,6 +167,7 @@
   --nession-shell-foot-font-size: 11px;
   --nession-shell-section-head-font-size: 12.5px;
   --nession-shell-section-head-pad-bottom: 7px;
+  --nession-shell-agents-panel-max-height: min(40vh, 20rem);
   --nession-focus-ring-width: 2px;
   --nession-focus-ring-offset: 2px;
   --nession-terminal-font-size: 12.5px;

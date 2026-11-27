@@ -161,6 +161,8 @@ export function Sidebar({
   onCloseDrawer,
   onCreate,
   onRefresh,
+  onRefreshAgents,
+  refreshingAgents,
   onSelect,
   onConfigure,
   onKill,
@@ -218,10 +220,7 @@ export function Sidebar({
         <SidebarSectionHead
           label="Sessions"
           action={
-            <span
-              data-testid="sidebar-session-count"
-              className={cn('tabular-nums text-muted-foreground', chromeSansRole('caption'))}
-            >
+            <span data-testid="sidebar-session-count" className={cn('tabular-nums text-muted-foreground', chromeSansRole('caption'))}>
               {filteredSessions.length}
             </span>
           }
@@ -253,9 +252,8 @@ export function Sidebar({
       </div>
       <ProjectNavSection shell={projectShell} />
       <SidebarAgentsEntry
-        agents={agents}
-        activeAgentId={activeAgentId}
-        onlineCount={onlineCount}
+        agents={agents} activeAgentId={activeAgentId} onlineCount={onlineCount}
+        onRefresh={onRefreshAgents} refreshing={refreshingAgents}
       />
       <SidebarServerStatus connectionStatus={connectionStatus} />
     </aside>

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/shared/lib/utils';
 import { chromeSansRole } from '@/shared/typography/chromeRoles';
 import { WorkspaceBoundedScrollport } from '@/components/ui/workspace-scrollport';
+import { RefreshButton } from '@/components/ui/RefreshButton';
 import { canOpenWorktreeAsSession } from '../worktreeGate';
 import { useGitWorktrees } from '../hooks/useGitWorktrees';
 import { basename, describeUnavailable, formatBytes } from '../state';
@@ -32,56 +33,51 @@ import type { WorkspaceContext } from '@/app/workspace/workspaceContext';
 export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
   const agentId = ctx.agent?.agent_id;
   const sessionId = ctx.session?.session_id;
-  const { worktrees, loading, error } = useGitWorktrees({ agentId, sessionId });
+  const { worktrees, loading, error, refresh } = useGitWorktrees({ agentId, sessionId });
 
+  // #4455 demand-only: read on open and on an explicit refresh — the toolbar
+  // below is the manual entry, never an interval or watcher.
+  let body: ReactNode;
   if (loading) {
-    return <GitNotice testId="git-worktrees-loading">Reading worktrees…</GitNotice>;
-  }
-  if (error) {
-    return (
+    body = <GitNotice testId="git-worktrees-loading">Reading worktrees…</GitNotice>;
+  } else if (error) {
+    body = (
       <GitNotice testId="git-worktrees-error" destructive>
         {error}
       </GitNotice>
     );
-  }
-  if (!worktrees) {
-    return <GitNotice testId="git-worktrees-empty">No worktrees yet.</GitNotice>;
-  }
-  if (worktrees.state !== 'ok') {
-    return (
+  } else if (!worktrees) {
+    body = <GitNotice testId="git-worktrees-empty">No worktrees yet.</GitNotice>;
+  } else if (worktrees.state !== 'ok') {
+    body = (
       <div
         data-testid="git-worktrees-unavailable"
         data-state={worktrees.state}
-        className="flex h-full min-h-0 items-center justify-center px-6 text-center"
+        className="flex h-full min-h-0 items-center justify-center px-[var(--nession-shell-space-5)] text-center"
       >
         <p className={cn('max-w-sm text-muted-foreground', chromeSansRole('secondary'))}>
           {describeUnavailable(worktrees).title}
         </p>
       </div>
     );
-  }
-
-  const { worktrees: rows, truncated, truncated_bytes } = worktrees.worktrees;
-
-  if (rows.length === 0) {
+  } else if (worktrees.worktrees.worktrees.length === 0) {
     // `git worktree list` always reports at least the repository itself, so an
     // empty answer is not a state git produces — say so rather than render an
     // empty frame that reads as "still loading".
-    return (
+    body = (
       <GitNotice testId="git-worktrees-none">
         This repository did not report any worktrees.
       </GitNotice>
     );
-  }
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      {/* #4188: same declared-bounded contract as Branches — the listing is the
-          section's internal scroll owner and spends the host-measured inset. */}
+  } else {
+    const { worktrees: rows, truncated, truncated_bytes } = worktrees.worktrees;
+    body = (
+      /* #4188: same declared-bounded contract as Branches — the listing is the
+         section's internal scroll owner and spends the host-measured inset. */
       <WorkspaceBoundedScrollport
         data-testid="git-worktree-list"
         viewportClassName="flex flex-col"
-        className="p-1"
+        className="p-[var(--nession-shell-space-1)]"
       >
         {rows.map((worktree) => (
           <WorktreeRow key={worktree.path} worktree={worktree} ctx={ctx} />
@@ -89,12 +85,25 @@ export function GitWorktreesView({ ctx }: { ctx: WorkspaceContext }) {
         {truncated ? (
           <p
             data-testid="git-worktrees-truncated"
-            className={cn('px-2 py-2 text-muted-foreground', chromeSansRole('metadata'))}
+            className={cn('px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-2)] text-muted-foreground', chromeSansRole('metadata'))}
           >
             Worktree listing truncated — {formatBytes(truncated_bytes)} not read.
           </p>
         ) : null}
       </WorkspaceBoundedScrollport>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-center justify-end border-b px-[var(--nession-shell-space-2)] py-[var(--nession-shell-space-1)]">
+        <RefreshButton
+          onClick={() => refresh()}
+          variant="ghost"
+          ariaLabel="Refresh worktrees"
+        />
+      </div>
+      {body}
     </div>
   );
 }
@@ -111,11 +120,11 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
       data-current={worktree.current ? 'true' : undefined}
       title={worktree.path}
       className={cn(
-        'flex flex-col gap-0.5 rounded-[var(--nession-radius-surface)] px-2 py-1.5',
+        'flex flex-col gap-[var(--nession-rhythm-fact-stack)] rounded-[var(--nession-radius-surface)] px-[var(--nession-shell-space-2)] py-[var(--nession-rhythm-field-stack)]',
         worktree.current && 'bg-accent text-accent-foreground',
       )}
     >
-      <span className={cn('flex items-center gap-1.5', chromeSansRole('secondary'))}>
+      <span className={cn('flex items-center gap-[var(--nession-rhythm-field-stack)]', chromeSansRole('secondary'))}>
         {worktree.current ? (
           <span
             data-testid="git-worktree-current"
@@ -145,7 +154,7 @@ function WorktreeRow({ worktree, ctx }: { worktree: GitWorktree; ctx: WorkspaceC
           size="sm"
           data-testid="git-worktree-open-session"
           disabled={opening}
-          className={cn('mt-1 h-7 w-fit', chromeSansRole('metadata'))}
+          className={cn('mt-[var(--nession-shell-space-1)] h-[length:var(--nession-control-sm)] w-fit', chromeSansRole('metadata'))}
           onClick={() => {
             setOpening(true);
             void ctx.openWorktreeSession?.(worktree).finally(() => setOpening(false));

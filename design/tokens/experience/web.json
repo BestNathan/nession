@@ -196,6 +196,32 @@
       "value": "6px"
     }
   },
+  "navigator": {
+    "$description": "Environment navigator surface geometry (#1202). Established pixel baselines preserved through the #4602 token migration; these are the navigator's own insets, not the cross-Experience rhythm scale.",
+    "emptyInsetY": {
+      "$description": "Vertical inset of the centered empty state; preserves the established 40px py-10.",
+      "value": "40px"
+    },
+    "errorInsetY": {
+      "$description": "Vertical inset of the centered error state; preserves the established 32px py-8.",
+      "value": "32px"
+    },
+    "skeletonRowHeight": {
+      "$description": "Height of one loading skeleton row; preserves the established 44px h-11 placeholder.",
+      "value": "44px"
+    },
+    "searchInputInsetX": {
+      "$description": "Left padding of the search input, clearing the absolute search icon; preserves the established 32px pl-8.",
+      "value": "32px"
+    }
+  },
+  "transcript": {
+    "$description": "Transcript list surface geometry (#1234). Established pixel baselines preserved through the #4602 token migration.",
+    "listWidth": {
+      "$description": "Width of the Web master-detail transcript list pane; preserves the established 288px w-72 column.",
+      "value": "288px"
+    }
+  },
   "shell": {
     "space-1": {
       "value": "0.25rem"
@@ -273,6 +299,10 @@
     "sectionHeadPadBottom": {
       "$description": "Sidebar section label bottom padding. The mockup draws 7px, tighter than the sides so the label sits with the rows it names rather than floating between sections.",
       "value": "7px"
+    },
+    "agentsPanelMaxHeight": {
+      "$description": "Ceiling for the expanded Agents / locations disclosure panel (#4602). The roster scrolls inside this cap rather than pushing the Server footer off the column; a viewport share keeps it usable on a short window and the rem ceiling bounds it on a tall one.",
+      "value": "min(40vh, 20rem)"
     }
   },
   "focus": {

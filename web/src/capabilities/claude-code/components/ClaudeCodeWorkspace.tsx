@@ -45,13 +45,13 @@ export function FileList({
   touch?: boolean;
 }) {
   return (
-    <div className="space-y-4 p-3" data-testid={active ? 'claude-code-file-list' : undefined}>
+    <div className="space-y-[var(--nession-shell-space-4)] p-[var(--nession-shell-space-3)]" data-testid={active ? 'claude-code-file-list' : undefined}>
       {state.categories.map((category) => (
         <section key={category.name}>
-          <h2 className={cn('mb-1 px-2 text-muted-foreground', chromeLabelRole())}>
+          <h2 className={cn('mb-[var(--nession-shell-space-1)] px-[var(--nession-shell-space-2)] text-muted-foreground', chromeLabelRole())}>
             {category.name}
           </h2>
-          <div className="space-y-0.5">
+          <div className="space-y-[var(--nession-rhythm-fact-stack)]">
             {category.files.map((file) => (
               <button
                 key={file.path}
@@ -60,14 +60,14 @@ export function FileList({
                 aria-current={state.selectedFile?.path === file.path ? 'true' : undefined}
                 onClick={() => onFileClick(scope, file)}
                 className={cn(
-                  'flex w-full items-center gap-2 rounded-[var(--nession-radius-control)] px-2 py-1.5 text-left transition-colors',
-                  touch && 'min-h-11',
+                  'flex w-full items-center gap-[var(--nession-shell-space-2)] rounded-[var(--nession-radius-control)] px-[var(--nession-shell-space-2)] py-[var(--nession-rhythm-field-stack)] text-left transition-colors',
+                  touch && 'min-h-[length:var(--nession-control-md)]',
                   chromeSansRole('secondary'),
                   'hover:bg-accent hover:text-accent-foreground focus-visible:outline-solid focus-visible:outline-[length:var(--nession-focus-ring-width)] focus-visible:outline-ring focus-visible:outline-offset-[calc(-1*var(--nession-focus-ring-offset))]',
                   state.selectedFile?.path === file.path && 'bg-accent text-accent-foreground',
                 )}
               >
-                <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <FileText className="size-[length:var(--nession-icon-sm)] shrink-0 text-muted-foreground" />
                 <span className="truncate">{file.path}</span>
               </button>
             ))}
@@ -100,14 +100,14 @@ export function ScopePanel({
 }) {
   if (state.loading) {
     return (
-      <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
+      <div className="p-[var(--nession-shell-space-4)]" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Loading Claude Code files...</p>
       </div>
     );
   }
   if (state.error) {
     return (
-      <div className="space-y-3 p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
+      <div className="space-y-[var(--nession-shell-space-3)] p-[var(--nession-shell-space-4)]" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
         <p className={cn('text-destructive', chromeSansRole('body'))} role="alert">{state.error}</p>
         <Button
           data-testid={`claude-code-retry-${scope}`}
@@ -122,14 +122,14 @@ export function ScopePanel({
   }
   if (state.available === false) {
     return (
-      <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
+      <div className="p-[var(--nession-shell-space-4)]" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Claude Code not installed</p>
       </div>
     );
   }
   if (state.categories.length === 0) {
     return (
-      <div className="p-4" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
+      <div className="p-[var(--nession-shell-space-4)]" data-testid={`claude-code-scope-${scope}`} data-scope={scope}>
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>No Claude Code files found.</p>
       </div>
     );
@@ -158,11 +158,11 @@ export function ContentPanel({
   onLoadMore: (scope: ClaudeCodeConfigScope) => void;
 }) {
   if (!state.selectedFile) {
-    return <p className={cn('p-6 text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view its content.</p>;
+    return <p className={cn('p-[var(--nession-shell-space-5)] text-muted-foreground', chromeSansRole('secondary'))}>Select a file to view its content.</p>;
   }
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-4">
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+    <div className="flex min-h-0 flex-1 flex-col p-[var(--nession-shell-space-4)]">
+      <div className="flex flex-wrap items-center justify-between gap-[var(--nession-shell-space-3)] border-b pb-[var(--nession-shell-space-3)]">
         <div className="min-w-0">
           <p className={cn('truncate', chromeMonoRole('code'))} title={state.selectedFile.path}>{state.selectedFile.path}</p>
           <p className={cn('text-muted-foreground', chromeSansRole('metadata'))}>
@@ -181,10 +181,10 @@ export function ContentPanel({
           </Button>
         )}
       </div>
-      {state.readLoading && <p className={cn('py-3 text-muted-foreground', chromeSansRole('secondary'))}>Loading content...</p>}
-      {state.readError && <p className={cn('py-3 text-destructive', chromeSansRole('body'))} role="alert">{state.readError}</p>}
+      {state.readLoading && <p className={cn('py-[var(--nession-shell-space-3)] text-muted-foreground', chromeSansRole('secondary'))}>Loading content...</p>}
+      {state.readError && <p className={cn('py-[var(--nession-shell-space-3)] text-destructive', chromeSansRole('body'))} role="alert">{state.readError}</p>}
       <WorkspaceBoundedScrollport viewportClassName="overflow-auto" data-testid="claude-code-content">
-        <pre className={cn('whitespace-pre-wrap py-4', chromeMonoRole('code'))}>
+        <pre className={cn('whitespace-pre-wrap py-[var(--nession-shell-space-4)]', chromeMonoRole('code'))}>
           {state.content || (state.readLoading ? '' : '(empty)')}
         </pre>
       </WorkspaceBoundedScrollport>
@@ -224,7 +224,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
 
   if (!agentId || !sessionId) {
     return (
-      <div data-testid="claude-code-workspace" className="flex h-full min-h-0 items-center justify-center p-6">
+      <div data-testid="claude-code-workspace" className="flex h-full min-h-0 items-center justify-center p-[var(--nession-shell-space-5)]">
         <p className={cn('text-muted-foreground', chromeSansRole('secondary'))}>Select an agent and session to browse Claude Code files.</p>
       </div>
     );
@@ -234,10 +234,10 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
   const showHeading = ctx.experience !== 'app';
   return (
     <div data-testid="claude-code-workspace" className="flex h-full min-h-0 flex-col">
-      <header className="flex shrink-0 items-center justify-between gap-4 border-b px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-[var(--nession-shell-space-4)] border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-3)]">
         {showHeading ? (
-          <div className="flex items-center gap-2">
-            <FolderOpen className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-[var(--nession-shell-space-2)]">
+            <FolderOpen className="size-[length:var(--nession-icon-md)] text-muted-foreground" />
             <h1 className={chromeSansRole('title')}>Claude Code</h1>
           </div>
         ) : null}
@@ -298,6 +298,8 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           onLoadOlder={() => transcriptRecords.loadOlder()}
           onReload={() => transcriptRecords.reload()}
           onBack={() => setOpenTranscript(null)}
+          onRefresh={transcripts.refresh}
+          refreshing={transcripts.refreshing}
         />
       </main>
       <MemoryPane active={activeView === 'memory'} memory={memory} />
@@ -306,7 +308,7 @@ export function ClaudeCodeWorkspace({ ctx }: { ctx: WorkspaceContext }) {
           {/* Configuration's own sub-axis (#1120 item 7). It sits here, under
               the section that has scopes, rather than beside `Conversations` —
               which is the whole of the flattening this change undoes. */}
-          <div className="flex shrink-0 items-center border-b px-4 py-2">
+          <div className="flex shrink-0 items-center border-b px-[var(--nession-shell-space-4)] py-[var(--nession-shell-space-2)]">
             <Tabs value={activeScope} onValueChange={(value) => setActiveScope(value as ClaudeCodeConfigScope)}>
               <TabsList>
                 <TabsTrigger value="project">Project</TabsTrigger>
