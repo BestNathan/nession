@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import {
   AppSessionsSurface,
@@ -136,10 +136,10 @@ describe('App Sessions surface (#1050 stage 1)', () => {
 
     const problem = screen.getByTestId('app-sessions-problem');
     expect(problem).toHaveTextContent('Reconnecting');
-    // The healthy case renders nothing here at all — asserted above; this is
-    // the same region, so the two tests cannot both pass on a region that is
-    // always present.
-    await userEvent.click(screen.getByLabelText('Refresh sessions'));
+    // The healthy case renders nothing in this strip at all — asserted above.
+    // #4602 adds a header action in every state; the degraded strip keeps its
+    // own contextual retry, and both drive the same current-scope refresh.
+    await userEvent.click(within(problem).getByLabelText('Refresh sessions'));
     expect(onRefresh).toHaveBeenCalled();
   });
 
@@ -429,9 +429,14 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Activity' }));
     expect(toggleSort).toHaveBeenCalledWith('activity');
 
-    // Refresh is no longer reachable from here: it belongs to the degraded
-    // region, and its own test drives it there.
-    expect(screen.queryByLabelText('Refresh sessions')).not.toBeInTheDocument();
+    // #4602 supersedes #1083 §6 for this action: the manual refresh lives in
+    // the header in every state, including healthy. The filters panel adds no
+    // second refresh of its own.
+    expect(screen.getByLabelText('Refresh sessions')).toBeInTheDocument();
+    expect(
+      within(screen.getByTestId('session-list-filters-panel'))
+        .queryByLabelText('Refresh sessions'),
+    ).not.toBeInTheDocument();
 
     await userEvent.click(screen.getByTestId('create-session'));
     expect(onCreate).toHaveBeenCalledTimes(1);
@@ -596,5 +601,58 @@ describe('App Sessions surface (#1050 stage 1)', () => {
     expect(screen.getByRole('button', { name: 'Name' }).closest('div')?.className).toContain(
       AppBodyRoleClass,
     );
+  });
+});
+
+describe('App host pull-to-refresh (#4602 SC-05)', () => {
+  function drag(host: HTMLElement, dx: number, dy: number) {
+    fireEvent.pointerDown(host, { pointerId: 1, clientX: 100, clientY: 100 });
+    for (let i = 1; i <= 6; i += 1) {
+      fireEvent.pointerMove(host, {
+        pointerId: 1,
+        clientX: 100 + (dx * i) / 6,
+        clientY: 100 + (dy * i) / 6,
+      });
+    }
+    fireEvent.pointerUp(host, { pointerId: 1, clientX: 100 + dx, clientY: 100 + dy });
+  }
+
+  it('commits one refresh for a qualified pull and none for a short pull', () => {
+    const onRefresh = vi.fn();
+    render(<AppSessionsSurface {...props({ onRefresh })} />);
+    const host = screen.getByTestId('app-sessions-pull-host');
+
+    drag(host, 0, 30);
+    expect(onRefresh).not.toHaveBeenCalled();
+
+    drag(host, 0, 90);
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not arm while the link is down', () => {
+    const onRefresh = vi.fn();
+    render(<AppSessionsSurface {...props({ onRefresh, connectionStatus: 'reconnecting' })} />);
+    drag(screen.getByTestId('app-sessions-pull-host'), 0, 90);
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it('surrenders a horizontal contact to the pager', () => {
+    const onRefresh = vi.fn();
+    render(<AppSessionsSurface {...props({ onRefresh })} />);
+    drag(screen.getByTestId('app-sessions-pull-host'), 90, 10);
+    expect(onRefresh).not.toHaveBeenCalled();
+  });
+
+  it('exposes the header action in the healthy state and drives the same refresh', async () => {
+    const onRefresh = vi.fn();
+    render(<AppSessionsSurface {...props({ onRefresh })} />);
+    const header = screen.getByTestId('app-sessions-header');
+    await userEvent.click(within(header).getByLabelText('Refresh sessions'));
+    expect(onRefresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports the host indicator phase while a read is in flight', () => {
+    render(<AppSessionsSurface {...props({ refreshingSessions: true })} />);
+    expect(screen.getByTestId('app-pull-indicator')).toHaveAttribute('data-phase', 'busy');
   });
 });

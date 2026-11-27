@@ -54,6 +54,10 @@ export interface SidebarProps {
   onCloseDrawer?: () => void;
   onCreate: () => void;
   onRefresh: () => void;
+  /** #4602: live refresh state, and the Agent registry's own manual entry. */
+  refreshingSessions?: boolean;
+  refreshingAgents?: boolean;
+  onRefreshAgents?: () => void;
   onSelect: (session: Session) => void;
   onConfigure: (session: Session) => void;
   onKill: (session: Session) => void;
@@ -81,9 +85,9 @@ function WebSearchMiss({
   return (
     <div
       data-testid="session-search-miss"
-      className="flex flex-col items-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] py-8 text-center text-muted-foreground"
+      className="flex flex-col items-center gap-[var(--nession-shell-space-2)] px-[var(--nession-shell-space-4)] py-[calc(var(--nession-shell-space-4)*2)] text-center text-muted-foreground"
     >
-      <SearchX aria-hidden className="size-8" />
+      <SearchX aria-hidden className="size-[length:var(--nession-control-md)]" />
       <p className={chromeSansRole('secondary')}>
         {searching ? `No sessions match “${searchQuery}”` : 'No sessions match this filter.'}
       </p>
