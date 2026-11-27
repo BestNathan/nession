@@ -1580,6 +1580,116 @@ mod tests {
         assert!(!journal_path(&fixture.home).exists());
     }
 
+    /// #4682 SC-05: profile metadata, selection and credential bytes are
+    /// live installation-owned state. A completed upgrade, a failed upgrade
+    /// and a rolled-back swap all preserve them byte-for-byte; the archive
+    /// never receives a copy (no secret duplication, no selection reset).
+    #[test]
+    fn an_upgrade_preserves_the_installation_client_context() {
+        let fixture = fixture();
+        let client_store = fixture.home.join("client-config.toml");
+        let store_text = "schema_version = 1\ncurrent_profile = \"home\"\n\
+             [profiles.home]\nserver_url = \"wss://remote.example/ws\"\n\
+             credential_ref = \"home\"\ncredential_backend = \"file\"\n";
+        fs::write(&client_store, store_text).unwrap();
+        let credentials = fixture.home.join("client-credentials");
+        fs::create_dir_all(&credentials).unwrap();
+        let credential_file = credentials.join("home.toml");
+        let credential_text =
+            "endpoint = \"wss://remote.example/ws\"\ntoken = \"client-canary-4682\"\n";
+        fs::write(&credential_file, credential_text).unwrap();
+        fs::write(fixture.home.join("client-config.lock"), "").unwrap();
+
+        replace(&fixture).unwrap();
+
+        // Live selection, metadata and credential bytes survive the upgrade.
+        assert_eq!(fs::read_to_string(&client_store).unwrap(), store_text);
+        assert_eq!(
+            fs::read_to_string(&credential_file).unwrap(),
+            credential_text
+        );
+        // The archive holds no client context and no duplicated secret.
+        assert!(!fixture.archive.join("client-config.toml").exists());
+        assert!(!fixture.archive.join("client-credentials").exists());
+        assert!(!fixture.archive.join("client-config.lock").exists());
+        let manifest = snapshot::read_manifest(&fixture.archive).unwrap();
+        assert!(
+            manifest.state_complete,
+            "client context is recognized, not unknown"
+        );
+        assert!(manifest
+            .gaps
+            .iter()
+            .any(|gap| gap.contains("installation-owned client context")));
+        assert!(!manifest.state.keys().any(|key| key.contains("client-")));
+    }
+
+    #[test]
+    fn a_failed_upgrade_never_touches_the_client_context() {
+        for point in [FaultPoint::SnapshotConfig, FaultPoint::BinarySwap] {
+            let fixture = fixture();
+            let client_store = fixture.home.join("client-config.toml");
+            let store_text = "schema_version = 1\ncurrent_profile = \"home\"\n\
+                 [profiles.home]\nserver_url = \"ws://remote:9/ws\"\n";
+            fs::write(&client_store, store_text).unwrap();
+            let credentials = fixture.home.join("client-credentials");
+            fs::create_dir_all(&credentials).unwrap();
+            let credential_text = "endpoint = \"ws://remote:9/ws\"\ntoken = \"canary\"\n";
+            fs::write(credentials.join("home.toml"), credential_text).unwrap();
+
+            let result = replace_current_with_fault(
+                &fixture.home,
+                &fixture.install_dir,
+                &Version::new(0, 35, 0),
+                &Version::new(1, 2, 0),
+                &fixture.archive,
+                &fixture.staged,
+                FaultPlan {
+                    point: Some(point),
+                    abort: false,
+                },
+            );
+            assert!(result.is_err(), "{point:?} must fail");
+            assert_eq!(fs::read_to_string(&client_store).unwrap(), store_text);
+            assert_eq!(
+                fs::read_to_string(credentials.join("home.toml")).unwrap(),
+                credential_text
+            );
+            assert!(!fixture.archive.join("client-config.toml").exists());
+            assert!(!fixture.archive.join("client-credentials").exists());
+        }
+    }
+
+    /// #4682 SC-05: interrupt recovery (a crash mid binary-swap, recovered by
+    /// the next invocation) preserves the installation client context too.
+    #[test]
+    fn interrupt_recovery_preserves_the_installation_client_context() {
+        let fixture = fixture();
+        let client_store = fixture.home.join("client-config.toml");
+        let store_text = "schema_version = 1\ncurrent_profile = \"home\"\n\
+             [profiles.home]\nserver_url = \"ws://remote:9/ws\"\n\
+             credential_ref = \"home\"\ncredential_backend = \"file\"\n";
+        fs::write(&client_store, store_text).unwrap();
+        let credentials = fixture.home.join("client-credentials");
+        fs::create_dir_all(&credentials).unwrap();
+        let credential_text = "endpoint = \"ws://remote:9/ws\"\ntoken = \"recovery-canary\"\n";
+        fs::write(credentials.join("home.toml"), credential_text).unwrap();
+
+        let journal = binary_swap_crash(&fixture, 1, true);
+        write_journal(&journal_path(&fixture.home), &journal).unwrap();
+        let recovery = recover_journal_locked(&fixture.home).unwrap();
+        assert!(matches!(recovery, Recovery::RolledBack { .. }));
+
+        assert_eq!(fs::read_to_string(&client_store).unwrap(), store_text);
+        assert_eq!(
+            fs::read_to_string(credentials.join("home.toml")).unwrap(),
+            credential_text
+        );
+        assert!(!journal.archive_dir.join("client-config.toml").exists());
+        assert!(!journal.archive_dir.join("client-credentials").exists());
+        assert!(!journal_path(&fixture.home).exists());
+    }
+
     #[test]
     fn a_staging_failure_leaves_current_untouched() {
         let fixture = fixture();

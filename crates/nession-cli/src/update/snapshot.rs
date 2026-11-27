@@ -38,6 +38,15 @@ const EXCLUDED_ROOTS: [&str; 6] = [
     "erofs",
 ];
 
+/// Installation-owned client connection context (#4682): retained in place
+/// across upgrades, never copied into a release archive. Recognized so the
+/// coverage record names them deliberately instead of as unknown entries.
+const INSTALLATION_CLIENT_ENTRIES: [&str; 3] = [
+    nession_common::paths::CLIENT_CONFIG_FILE,
+    nession_common::paths::CLIENT_CONFIG_LOCK_FILE,
+    nession_common::paths::CLIENT_CREDENTIALS_DIR,
+];
+
 /// One independent copy in the snapshot plan, relative to the home.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CopyEntry {
@@ -135,6 +144,26 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
         }
     }
 
+    // The installation-owned client connection context (#4682): profile
+    // metadata, its mutation lock and the private credential fallback are
+    // live installation state, deliberately retained in place and NEVER
+    // copied into a release archive (no secret duplication, no reset of the
+    // current selection on upgrade). Recognized here so they are not recorded
+    // as "unknown durable entry" gaps, which would mark the snapshot
+    // state-incomplete.
+    let mut client_entries = Vec::new();
+    for name in INSTALLATION_CLIENT_ENTRIES {
+        if home.join(name).exists() {
+            client_entries.push(name);
+        }
+    }
+    if !client_entries.is_empty() {
+        plan.gaps.push(format!(
+            "{}: installation-owned client context retained in place, never archived (#4682)",
+            client_entries.join(", ")
+        ));
+    }
+
     // Agent identity + owned metadata subsets.
     let agent = home.join("agent");
     if agent.is_dir() {
@@ -219,6 +248,7 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
                 || name == "server-config.toml"
                 || name == "agent"
                 || name == "server"
+                || INSTALLATION_CLIENT_ENTRIES.contains(&name.as_str())
             {
                 continue;
             }
@@ -580,6 +610,62 @@ mod tests {
         assert_eq!(plan.references[0].entries, 1);
         assert!(plan.estimated_bytes > 0);
         assert!(plan.gaps.iter().any(|g| g.contains("blobs")));
+    }
+
+    /// #4682: the installation-owned client context is retained in place and
+    /// never copied into an archive — and recognizing it must not mark the
+    /// snapshot state-incomplete (it is not an "unknown durable entry").
+    #[test]
+    fn the_installation_client_context_is_retained_not_archived() {
+        let root = home_fixture();
+        let home = root.path();
+        fs::write(
+            home.join(nession_common::paths::CLIENT_CONFIG_FILE),
+            "schema_version = 1\ncurrent_profile = \"home\"\n",
+        )
+        .unwrap();
+        fs::write(
+            home.join(nession_common::paths::CLIENT_CONFIG_LOCK_FILE),
+            "",
+        )
+        .unwrap();
+        fs::create_dir_all(home.join(nession_common::paths::CLIENT_CREDENTIALS_DIR)).unwrap();
+        fs::write(
+            home.join(nession_common::paths::CLIENT_CREDENTIALS_DIR)
+                .join("home.toml"),
+            "endpoint = \"ws://host/ws\"\ntoken = \"canary\"\n",
+        )
+        .unwrap();
+
+        let plan = plan(home).unwrap();
+        let relatives: Vec<String> = plan
+            .copies
+            .iter()
+            .map(|c| c.relative.display().to_string())
+            .collect();
+        assert!(
+            !relatives.iter().any(|r| r.contains("client-")),
+            "client context must never be copied into an archive: {relatives:?}"
+        );
+        assert!(plan
+            .gaps
+            .iter()
+            .any(|g| g.contains("installation-owned client context")));
+        assert!(
+            !plan
+                .gaps
+                .iter()
+                .any(|g| g.contains("unknown durable entry")),
+            "recognized client entries are not unknown gaps: {:?}",
+            plan.gaps
+        );
+
+        // The transaction's state-complete computation stays true.
+        let state_complete = !plan
+            .gaps
+            .iter()
+            .any(|gap| gap.contains("unknown durable entry") || gap.contains("symlink"));
+        assert!(state_complete);
     }
 
     #[test]

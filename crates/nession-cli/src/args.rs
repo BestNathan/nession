@@ -87,28 +87,48 @@ pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,
 
-    /// Remote Server URL (ws:// or wss://) for `agents`/`sessions`, or the
-    /// Agent daemon's outbound Server URL override for `agent start`/
-    /// `agent restart`. Overrides NESSION_SERVER_URL, the legacy
-    /// NENSION_SERVER_URL alias, and the ws://127.0.0.1:8080 default.
+    /// Remote Server URL (ws:// or wss://) for `agents`/`sessions`, the
+    /// endpoint stored by `profile add`/`profile set`, or the Agent daemon's
+    /// outbound Server URL override for `agent start`/`agent restart`.
+    /// Overrides --profile, NESSION_PROFILE, NESSION_SERVER_URL, the legacy
+    /// NENSION_SERVER_URL alias, the persisted current profile and the
+    /// ws://127.0.0.1:8080 default. Combining it with --profile is rejected
+    /// as ambiguous.
     ///
     /// Commands that do not consume this flag reject it rather than ignoring
-    /// it: `server`, `config`, `update`, and agent stop/status/service leaves.
+    /// it: `server`, `config`, `update`, agent stop/status/service leaves, and
+    /// the profile leaves other than add/set.
     #[arg(long, global = true)]
     pub server_url: Option<String>,
 
     /// Remote credential for `agents`/`sessions`, or the Agent daemon's
     /// outbound credential override for `agent start`/`agent restart`.
     /// Overrides NESSION_AUTH_TOKEN, the legacy NENSION_AUTH_TOKEN alias, and
-    /// the empty default.
+    /// the empty default; an explicit value deliberately binds to this
+    /// invocation's resolved target (including a selected profile).
     ///
     /// A value passed here is visible in shell history and in process listings
-    /// while the command runs. For repeatable remote operation prefer
-    /// `NESSION_AUTH_TOKEN`. Remote commands never read a daemon config
-    /// (#2267); an Agent's configured outbound credential is a different
-    /// boundary. Commands that do not consume this flag reject it.
+    /// while the command runs. For repeatable remote operation prefer a
+    /// profile credential (`nession profile credential set <name>`) or
+    /// `NESSION_AUTH_TOKEN`. Remote commands never borrow a daemon credential
+    /// (#2267, evolved by #4682); an Agent's configured outbound credential is
+    /// a different boundary. Commands that do not consume this flag reject it
+    /// (no profile leaf accepts it: credentials are set via prompt/stdin).
     #[arg(long, global = true)]
     pub auth_token: Option<String>,
+
+    /// Select a named client connection profile for `agents`/`sessions`
+    /// (#4682). Overrides NESSION_SERVER_URL/NENSION_SERVER_URL and
+    /// NESSION_PROFILE; overridden by --server-url (combining the two is
+    /// rejected). The profile must exist in the installation's client store;
+    /// a missing or invalid one fails closed.
+    ///
+    /// Commands that do not consume this flag reject it: daemon lifecycle
+    /// (`agent start`/`restart` never run profile resolution), local-only
+    /// commands, and the profile management leaves (which name their profile
+    /// positionally).
+    #[arg(long, global = true, value_name = "NAME")]
+    pub profile: Option<String>,
 
     /// Internal: print the shared lifecycle contract and exit.
     ///
@@ -117,6 +137,15 @@ pub struct Cli {
     /// capability handshake, not an operator-facing flag.
     #[arg(long, hide = true, global = true)]
     pub lifecycle_contract: bool,
+
+    /// Internal: print the client-profile consumption contract and exit.
+    ///
+    /// The version dispatcher probes this before dispatching a remote command
+    /// to an archived release, to decide whether the archive may consume the
+    /// installation's client context read-only (#4682). Hidden: a capability
+    /// handshake, not an operator-facing flag.
+    #[arg(long, hide = true, global = true)]
+    pub client_profile_contract: bool,
 }
 
 /// The top-level command families.
@@ -141,6 +170,15 @@ pub enum Commands {
     Sessions {
         #[command(subcommand)]
         action: SessionsAction,
+    },
+    /// Manage client connection profiles (persistent remote targets, #4682)
+    ///
+    /// A profile is an installation-owned client connection context: a named
+    /// Server endpoint plus its credential policy. It is not an Agent,
+    /// Project, Session or release, and it never copies daemon credentials.
+    Profile {
+        #[command(subcommand)]
+        action: ProfileAction,
     },
     /// Manage agent or server configuration
     Config {
@@ -432,6 +470,108 @@ pub enum SessionsAction {
     },
 }
 
+/// `nession profile …`
+///
+/// The exact public grammar (#4682). `add`/`set` consume the global
+/// `--server-url` as the endpoint to store; no profile leaf accepts
+/// `--auth-token` — credentials are set through `profile credential set`
+/// (prompt or `--stdin`), never as argv.
+#[derive(Subcommand)]
+pub enum ProfileAction {
+    /// List stored profiles with masked credential state (offline)
+    List,
+    /// Show the selected profile and its source (offline)
+    Current,
+    /// Add a profile; requires --server-url <url>. The first profile added
+    /// becomes current; later adds never change the selection.
+    Add {
+        /// Profile name (letters/digits start, then letters/digits/_/-)
+        name: String,
+
+        /// Store this endpoint and send no credential (explicit no-auth)
+        #[arg(long)]
+        no_auth: bool,
+    },
+    /// Select a stored profile as current (client selection only)
+    Use {
+        /// Profile name to select
+        name: String,
+    },
+    /// Show one profile's endpoint and masked credential state (offline)
+    Show {
+        /// Profile name to inspect
+        name: String,
+    },
+    /// Replace a profile's endpoint and/or no-auth setting. Changing the
+    /// endpoint invalidates (deletes) its bound credential unless --no-auth
+    /// is given. This is the documented replacement operation; `add` never
+    /// overwrites.
+    Set {
+        /// Profile name to edit
+        name: String,
+
+        /// Mark this profile explicitly no-auth (deletes any bound credential)
+        #[arg(long)]
+        no_auth: bool,
+    },
+    /// Remove a profile and its owned unreferenced credential. Removing the
+    /// current profile requires --force and clears the selection; it never
+    /// silently selects another target.
+    Remove {
+        /// Profile name to remove
+        name: String,
+
+        /// Confirm removal of the current profile
+        #[arg(short, long)]
+        force: bool,
+    },
+    /// Import an Agent's configured endpoint into a client profile (endpoint
+    /// only; daemon credentials are never copied). Selects the profile only
+    /// if no current selection exists.
+    ImportAgent {
+        /// Profile name to create (default: agent)
+        #[arg(long)]
+        name: Option<String>,
+
+        /// Agent config to import from (default: ~/.nession/agent-config.toml)
+        #[arg(long)]
+        config: Option<String>,
+    },
+    /// Test a profile's real connection/authentication (bounded; does not
+    /// change the selection). Defaults to the current profile.
+    Test {
+        /// Profile name to test (default: the current profile)
+        name: Option<String>,
+    },
+    /// Manage the credential bound to a profile (prompt/stdin only)
+    Credential {
+        #[command(subcommand)]
+        action: CredentialAction,
+    },
+}
+
+/// `nession profile credential …`
+#[derive(Subcommand)]
+pub enum CredentialAction {
+    /// Store a credential read from a masked terminal prompt, or from stdin
+    /// with --stdin. The secret never travels as an argument. Re-running
+    /// rotates the stored credential.
+    Set {
+        /// Profile name whose credential to set
+        name: String,
+
+        /// Read the credential from one line of stdin instead of a prompt
+        #[arg(long)]
+        stdin: bool,
+    },
+    /// Delete the stored credential and return the profile to the unset
+    /// state (explicit no-auth is a separate `profile set --no-auth`).
+    Clear {
+        /// Profile name whose credential to delete
+        name: String,
+    },
+}
+
 /// `nession config …`
 #[derive(Subcommand)]
 pub enum ConfigAction {
@@ -587,6 +727,20 @@ mod tests {
                 ]),
             ),
             ("agents list".to_string(), strings(&[])),
+            ("profile list".to_string(), strings(&[])),
+            ("profile current".to_string(), strings(&[])),
+            ("profile add".to_string(), strings(&["--no-auth"])),
+            ("profile use".to_string(), strings(&[])),
+            ("profile show".to_string(), strings(&[])),
+            ("profile set".to_string(), strings(&["--no-auth"])),
+            ("profile remove".to_string(), strings(&["--force"])),
+            (
+                "profile import-agent".to_string(),
+                strings(&["--config", "--name"]),
+            ),
+            ("profile test".to_string(), strings(&[])),
+            ("profile credential set".to_string(), strings(&["--stdin"])),
+            ("profile credential clear".to_string(), strings(&[])),
             ("sessions list".to_string(), strings(&["--agent-id"])),
             (
                 "sessions attach".to_string(),
@@ -660,7 +814,7 @@ mod tests {
             .get_arguments()
             .filter_map(|arg| arg.get_long().map(|long| format!("--{long}")))
             .collect();
-        for expected in ["--server-url", "--auth-token"] {
+        for expected in ["--server-url", "--auth-token", "--profile"] {
             assert!(
                 flags.iter().any(|flag| flag == expected),
                 "missing global {expected}: {flags:?}"

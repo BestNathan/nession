@@ -1,14 +1,16 @@
 //! The command router and module inventory.
 //!
 //! Each leaf command has exactly one handler file. This module only maps the
-//! parsed [`crate::args`] tree onto those handlers and resolves the two shared
-//! inputs (remote target/credential, daemon overrides). Business logic does
-//! not live here.
+//! parsed [`crate::args`] tree onto those handlers and resolves the shared
+//! inputs: the one remote [`crate::connection::ConnectionContext`] for
+//! `agents`/`sessions`, and the daemon overrides for `agent start`/`restart`.
+//! Business logic does not live here.
 
 pub mod agent;
 pub mod agents;
 pub mod config;
 pub mod install;
+pub mod profile;
 pub mod server;
 pub mod sessions;
 pub mod update;
@@ -17,18 +19,17 @@ pub mod version;
 use anyhow::{Context, Result};
 
 use crate::args::{
-    AgentAction, AgentsAction, Cli, Commands, ConfigAction, ConfigSubAction, ServerAction,
-    SessionsAction, VersionAction,
+    AgentAction, AgentsAction, Cli, Commands, ConfigAction, ConfigSubAction, CredentialAction,
+    ProfileAction, ServerAction, SessionsAction, VersionAction,
 };
 use crate::connection;
 
-/// Whether a leaf's handler actually reads the two global target/credential
-/// flags.
+/// Whether a leaf reads `--server-url`.
 ///
-/// `--server-url`/`--auth-token` are the remote target for `agents`/`sessions`
-/// and the daemon outbound override for `agent start`/`restart`. Every other
-/// leaf has no use for them (#2869 SC-03).
-fn consumes_global_target_flags(command: &Commands) -> bool {
+/// The flag is the remote target for `agents`/`sessions`, the endpoint stored
+/// by `profile add`/`set`, and the daemon outbound override for `agent start`/
+/// `restart`. Every other leaf has no use for it (#2869 SC-03, #4682).
+fn consumes_server_url(command: &Commands) -> bool {
     match command {
         Commands::Agent { action } => {
             matches!(
@@ -37,12 +38,49 @@ fn consumes_global_target_flags(command: &Commands) -> bool {
             )
         }
         Commands::Agents { .. } | Commands::Sessions { .. } => true,
+        Commands::Profile { action } => {
+            matches!(
+                action,
+                ProfileAction::Add { .. } | ProfileAction::Set { .. }
+            )
+        }
         Commands::Server { .. }
         | Commands::Config { .. }
         | Commands::Install { .. }
         | Commands::Version { .. }
         | Commands::Update { .. } => false,
     }
+}
+
+/// Whether a leaf reads `--auth-token`.
+///
+/// No profile leaf accepts it: client credentials are set through
+/// `profile credential set` (prompt/stdin), never as argv (#4682).
+fn consumes_auth_token(command: &Commands) -> bool {
+    match command {
+        Commands::Agent { action } => {
+            matches!(
+                action,
+                AgentAction::Start { .. } | AgentAction::Restart { .. }
+            )
+        }
+        Commands::Agents { .. } | Commands::Sessions { .. } => true,
+        Commands::Profile { .. }
+        | Commands::Server { .. }
+        | Commands::Config { .. }
+        | Commands::Install { .. }
+        | Commands::Version { .. }
+        | Commands::Update { .. } => false,
+    }
+}
+
+/// Whether a leaf reads `--profile`.
+///
+/// Only the remote `agents`/`sessions` leaves select a connection profile.
+/// Daemon lifecycle never runs profile resolution; profile management leaves
+/// name their profile positionally; local-only commands have no remote target.
+fn consumes_profile(command: &Commands) -> bool {
+    matches!(command, Commands::Agents { .. } | Commands::Sessions { .. })
 }
 
 /// The user-facing path of a parsed command, for diagnostics.
@@ -71,6 +109,21 @@ fn command_path(command: &Commands) -> &'static str {
             SessionsAction::Create { .. } => "sessions create",
             SessionsAction::Kill { .. } => "sessions kill",
         },
+        Commands::Profile { action } => match action {
+            ProfileAction::List => "profile list",
+            ProfileAction::Current => "profile current",
+            ProfileAction::Add { .. } => "profile add",
+            ProfileAction::Use { .. } => "profile use",
+            ProfileAction::Show { .. } => "profile show",
+            ProfileAction::Set { .. } => "profile set",
+            ProfileAction::Remove { .. } => "profile remove",
+            ProfileAction::ImportAgent { .. } => "profile import-agent",
+            ProfileAction::Test { .. } => "profile test",
+            ProfileAction::Credential { action } => match action {
+                CredentialAction::Set { .. } => "profile credential set",
+                CredentialAction::Clear { .. } => "profile credential clear",
+            },
+        },
         Commands::Config { action } => match action {
             ConfigAction::Agent { action } => match action {
                 ConfigSubAction::Init { .. } => "config agent init",
@@ -98,30 +151,33 @@ fn command_path(command: &Commands) -> &'static str {
 /// The flags are declared globally so they work both before and after the
 /// subcommand (an existing spelling), but "parses" is not "has an effect":
 /// silently ignoring `--auth-token` on `server start` would look like a
-/// credential was applied when it was not (#2869 SC-03/SC-05).
+/// credential was applied when it was not (#2869 SC-03/SC-05). The same
+/// applies to `--profile` on daemon/local commands (#4682 SC-06).
 fn reject_unconsumed_global_flags(
     command: &Commands,
     server_url: &Option<String>,
     auth_token: &Option<String>,
+    profile: &Option<String>,
 ) -> Result<()> {
-    if consumes_global_target_flags(command) {
-        return Ok(());
-    }
     let mut rejected = Vec::new();
-    if server_url.is_some() {
+    if server_url.is_some() && !consumes_server_url(command) {
         rejected.push("--server-url");
     }
-    if auth_token.is_some() {
+    if auth_token.is_some() && !consumes_auth_token(command) {
         rejected.push("--auth-token");
+    }
+    if profile.is_some() && !consumes_profile(command) {
+        rejected.push("--profile");
     }
     if rejected.is_empty() {
         return Ok(());
     }
     anyhow::bail!(
         "`nession {}` does not consume {}.\n\
-         `--server-url`/`--auth-token` select the remote Server for `agents`/`sessions` \
-         and override an Agent daemon's outbound target for `agent start`/`agent restart`; \
-         remove the flag for this command.",
+         `--server-url`/`--auth-token` select the remote Server for `agents`/`sessions`, \
+         store the endpoint for `profile add`/`set` (`--server-url` only), and override an \
+         Agent daemon's outbound target for `agent start`/`agent restart`; `--profile` selects \
+         a stored client profile for `agents`/`sessions` only. Remove the flag for this command.",
         command_path(command),
         rejected.join(" and ")
     )
@@ -129,14 +185,16 @@ fn reject_unconsumed_global_flags(
 
 /// Route one parsed command to its single owner.
 pub async fn dispatch(cli: Cli) -> Result<()> {
-    reject_unconsumed_global_flags(&cli.command, &cli.server_url, &cli.auth_token)?;
+    reject_unconsumed_global_flags(&cli.command, &cli.server_url, &cli.auth_token, &cli.profile)?;
 
     let Cli {
         command,
         server_url,
         auth_token,
+        profile,
         // Intercepted before Clap in `main`; never reaches dispatch.
         lifecycle_contract: _,
+        client_profile_contract: _,
     } = cli;
 
     match command {
@@ -196,29 +254,56 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
         },
         Commands::Agents { action } => match action {
             AgentsAction::List => {
-                let url = connection::resolve_server_url(server_url);
-                let token = connection::resolve_auth_token(auth_token);
-                agents::list::run(&url, &token).await?
+                let ctx = connection::resolve_remote(connection::RemoteInputs {
+                    server_url,
+                    profile,
+                    auth_token,
+                })
+                .await?;
+                agents::list::run(&ctx.server_url, &ctx.auth_token)
+                    .await
+                    .with_context(|| connection::failure_context(&ctx))?
             }
         },
         Commands::Sessions { action } => match action {
             SessionsAction::List { agent_id } => {
-                let url = connection::resolve_server_url(server_url);
-                let token = connection::resolve_auth_token(auth_token);
-                sessions::list::run(&url, &token, agent_id.as_deref()).await?
+                let ctx = connection::resolve_remote(connection::RemoteInputs {
+                    server_url,
+                    profile,
+                    auth_token,
+                })
+                .await?;
+                sessions::list::run(&ctx.server_url, &ctx.auth_token, agent_id.as_deref())
+                    .await
+                    .with_context(|| connection::failure_context(&ctx))?
             }
             SessionsAction::Attach { session_id, mode } => {
-                let url = connection::resolve_server_url(server_url);
-                let token = connection::resolve_auth_token(auth_token);
-                sessions::attach::run(&url, &token, &session_id, mode.as_deref()).await?
+                let ctx = connection::resolve_remote(connection::RemoteInputs {
+                    server_url,
+                    profile,
+                    auth_token,
+                })
+                .await?;
+                sessions::attach::run(
+                    &ctx.server_url,
+                    &ctx.auth_token,
+                    &session_id,
+                    mode.as_deref(),
+                )
+                .await
+                .with_context(|| connection::failure_context(&ctx))?
             }
             SessionsAction::Create {
                 agent_id,
                 name,
                 sandbox_policy,
             } => {
-                let url = connection::resolve_server_url(server_url);
-                let token = connection::resolve_auth_token(auth_token);
+                let ctx = connection::resolve_remote(connection::RemoteInputs {
+                    server_url,
+                    profile,
+                    auth_token,
+                })
+                .await?;
                 let policy = sandbox_policy
                     .map(|path| {
                         let text = std::fs::read_to_string(&path)
@@ -229,13 +314,42 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
                         .with_context(|| format!("parse Sandbox policy {} as JSON", path.display()))
                     })
                     .transpose()?;
-                sessions::create::run(&url, &token, &agent_id, &name, policy).await?
+                sessions::create::run(&ctx.server_url, &ctx.auth_token, &agent_id, &name, policy)
+                    .await
+                    .with_context(|| connection::failure_context(&ctx))?
             }
             SessionsAction::Kill { session_id, force } => {
-                let url = connection::resolve_server_url(server_url);
-                let token = connection::resolve_auth_token(auth_token);
-                sessions::kill::run(&url, &token, &session_id, force).await?
+                let ctx = connection::resolve_remote(connection::RemoteInputs {
+                    server_url,
+                    profile,
+                    auth_token,
+                })
+                .await?;
+                sessions::kill::run(&ctx.server_url, &ctx.auth_token, &session_id, force)
+                    .await
+                    .with_context(|| connection::failure_context(&ctx))?
             }
+        },
+        Commands::Profile { action } => match action {
+            ProfileAction::List => profile::list::run()?,
+            ProfileAction::Current => profile::current::run()?,
+            ProfileAction::Add { name, no_auth } => profile::add::run(name, server_url, no_auth)?,
+            ProfileAction::Use { name } => profile::use_profile::run(&name)?,
+            ProfileAction::Show { name } => profile::show::run(&name)?,
+            ProfileAction::Set { name, no_auth } => {
+                profile::set::run(name, server_url, no_auth).await?
+            }
+            ProfileAction::Remove { name, force } => profile::remove::run(&name, force).await?,
+            ProfileAction::ImportAgent { name, config } => {
+                profile::import_agent::run(name, config)?
+            }
+            ProfileAction::Test { name } => profile::test::run(name).await?,
+            ProfileAction::Credential { action } => match action {
+                CredentialAction::Set { name, stdin } => {
+                    profile::credential::set::run(&name, stdin).await?
+                }
+                CredentialAction::Clear { name } => profile::credential::clear::run(&name).await?,
+            },
         },
         Commands::Config { action } => match action {
             ConfigAction::Agent { action } => match action {
@@ -315,6 +429,17 @@ mod tests {
         "config/server/set.rs",
         "config/server/show.rs",
         "install.rs",
+        "profile/add.rs",
+        "profile/credential/clear.rs",
+        "profile/credential/set.rs",
+        "profile/current.rs",
+        "profile/import_agent.rs",
+        "profile/list.rs",
+        "profile/remove.rs",
+        "profile/set.rs",
+        "profile/show.rs",
+        "profile/test.rs",
+        "profile/use_profile.rs",
         "server/logs.rs",
         "server/restart.rs",
         "server/start.rs",
@@ -388,8 +513,8 @@ mod tests {
         );
     }
 
-    /// Every leaf either consumes the global target flags or rejects them;
-    /// none may parse and silently ignore them (#2869 SC-03).
+    /// Every leaf either consumes each global flag or rejects it; none may
+    /// parse and silently ignore it (#2869 SC-03, #4682 SC-06).
     #[test]
     fn the_global_flag_applicability_matrix_is_pinned() {
         use crate::args::Cli;
@@ -403,68 +528,133 @@ mod tests {
                 .command
         }
 
-        let consumed: &[&[&str]] = &[
-            &["agent", "start"],
-            &["agent", "restart"],
-            &["agents", "list"],
-            &["sessions", "list"],
-            &["sessions", "create", "--agent-id", "a", "--name", "n"],
-            &["sessions", "attach", "--session-id", "a:b"],
-            &["sessions", "kill", "--session-id", "a:b"],
+        // (argv, consumes --server-url, consumes --auth-token, consumes --profile)
+        let matrix: &[(&[&str], bool, bool, bool)] = &[
+            (&["agent", "start"], true, true, false),
+            (&["agent", "restart"], true, true, false),
+            (&["agents", "list"], true, true, true),
+            (&["sessions", "list"], true, true, true),
+            (
+                &["sessions", "create", "--agent-id", "a", "--name", "n"],
+                true,
+                true,
+                true,
+            ),
+            (
+                &["sessions", "attach", "--session-id", "a:b"],
+                true,
+                true,
+                true,
+            ),
+            (
+                &["sessions", "kill", "--session-id", "a:b"],
+                true,
+                true,
+                true,
+            ),
+            (&["profile", "list"], false, false, false),
+            (&["profile", "current"], false, false, false),
+            (&["profile", "add", "home"], true, false, false),
+            (&["profile", "use", "home"], false, false, false),
+            (&["profile", "show", "home"], false, false, false),
+            (&["profile", "set", "home"], true, false, false),
+            (&["profile", "remove", "home"], false, false, false),
+            (&["profile", "import-agent"], false, false, false),
+            (&["profile", "test"], false, false, false),
+            (
+                &["profile", "credential", "set", "home"],
+                false,
+                false,
+                false,
+            ),
+            (
+                &["profile", "credential", "clear", "home"],
+                false,
+                false,
+                false,
+            ),
+            (&["agent", "stop"], false, false, false),
+            (&["agent", "status"], false, false, false),
+            (&["agent", "logs"], false, false, false),
+            (&["server", "logs"], false, false, false),
+            (&["agent", "install-service"], false, false, false),
+            (&["agent", "uninstall-service"], false, false, false),
+            (&["server", "start"], false, false, false),
+            (&["server", "stop"], false, false, false),
+            (&["server", "restart"], false, false, false),
+            (&["server", "status"], false, false, false),
+            (&["config", "agent", "init"], false, false, false),
+            (&["config", "agent", "show"], false, false, false),
+            (
+                &["config", "agent", "set", "terminal_cols", "96"],
+                false,
+                false,
+                false,
+            ),
+            (&["config", "server", "init"], false, false, false),
+            (&["config", "server", "show"], false, false, false),
+            (
+                &["config", "server", "set", "terminal_cols", "96"],
+                false,
+                false,
+                false,
+            ),
+            (&["install", "0.35.0"], false, false, false),
+            (&["version", "list"], false, false, false),
+            (&["update"], false, false, false),
         ];
-        for argv in consumed {
-            assert!(
-                consumes_global_target_flags(&parse(argv)),
-                "{argv:?} must consume the global flags"
-            );
-        }
 
-        let rejected: &[&[&str]] = &[
-            &["agent", "stop"],
-            &["agent", "status"],
-            &["agent", "logs"],
-            &["server", "logs"],
-            &["agent", "install-service"],
-            &["agent", "uninstall-service"],
-            &["server", "start"],
-            &["server", "stop"],
-            &["server", "restart"],
-            &["server", "status"],
-            &["config", "agent", "init"],
-            &["config", "agent", "show"],
-            &["config", "agent", "set", "terminal_cols", "96"],
-            &["config", "server", "init"],
-            &["config", "server", "show"],
-            &["config", "server", "set", "terminal_cols", "96"],
-            &["install", "0.35.0"],
-            &["version", "list"],
-            &["update"],
-        ];
-        for argv in rejected {
+        for (argv, url, token, profile) in matrix {
             let command = parse(argv);
-            assert!(
-                !consumes_global_target_flags(&command),
-                "{argv:?} must not claim to consume the global flags"
+            assert_eq!(
+                consumes_server_url(&command),
+                *url,
+                "{argv:?} --server-url applicability"
+            );
+            assert_eq!(
+                consumes_auth_token(&command),
+                *token,
+                "{argv:?} --auth-token applicability"
+            );
+            assert_eq!(
+                consumes_profile(&command),
+                *profile,
+                "{argv:?} --profile applicability"
             );
             assert!(
-                reject_unconsumed_global_flags(&command, &None, &None).is_ok(),
+                reject_unconsumed_global_flags(&command, &None, &None, &None).is_ok(),
                 "absent flags are always fine"
             );
             let error = reject_unconsumed_global_flags(
                 &command,
                 &Some("ws://example:1".to_string()),
                 &Some("do-not-echo-this".to_string()),
-            )
-            .expect_err("a flag with no effect must be rejected");
-            let message = format!("{error:#}");
-            assert!(
-                message.contains(command_path(&command)) && message.contains("does not consume"),
-                "{message}"
+                &Some("do-not-echo-profile".to_string()),
             );
-            assert!(
-                !message.contains("do-not-echo-this"),
-                "the rejection must not echo the credential: {message}"
-            );
+            if *url && *token && *profile {
+                assert!(error.is_ok(), "{argv:?} consumes all three flags");
+            } else {
+                let error = error.expect_err("a flag with no effect must be rejected");
+                let message = format!("{error:#}");
+                assert!(
+                    message.contains(command_path(&command))
+                        && message.contains("does not consume"),
+                    "{message}"
+                );
+                assert!(
+                    !message.contains("do-not-echo-this"),
+                    "the rejection must not echo the credential: {message}"
+                );
+                if !*url {
+                    assert!(message.contains("--server-url"), "{message}");
+                }
+                if !*token {
+                    assert!(message.contains("--auth-token"), "{message}");
+                }
+                if !*profile {
+                    assert!(message.contains("--profile"), "{message}");
+                }
+            }
         }
     }
 }
