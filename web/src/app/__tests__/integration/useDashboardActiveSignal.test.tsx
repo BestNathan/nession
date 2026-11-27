@@ -85,21 +85,30 @@ describe('shell list activity signal (#4602)', () => {
     await waitFor(() => expect(result.current.data.sessions).toHaveLength(1));
   });
 
-  it('does not poll while the narrow detail pane hides the list', async () => {
+  it('keeps reading while the narrow detail pane hides the list pane', async () => {
+    // The Terminal header / Project chip derive from these lists even when the
+    // list pane is hidden, so the shell keeps them active (#4602).
     stubMedia(false);
     const { result } = renderHook(() => {
       const nav = useMobileNav('a1:s1');
-      const data = useDashboard(service, nav.isWide || nav.showList);
+      const data = useDashboard(service, true);
       return { nav, data };
     });
     await act(async () => {
       result.current.nav.openDetail();
     });
     expect(result.current.nav.showList).toBe(false);
-    const calls = agentsApi.listAgents.mock.calls.length;
+    await waitFor(() => expect(result.current.data.sessions).toHaveLength(1));
+    expect(agentsApi.listAgents).toHaveBeenCalled();
+  });
+
+  it('pauses a hidden surface passed active=false', async () => {
+    stubMedia(false);
+    renderHook(() => useDashboard(service, false));
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
-    expect(agentsApi.listAgents.mock.calls.length).toBe(calls);
+    expect(agentsApi.listAgents).not.toHaveBeenCalled();
+    expect(sessionsApi.fetchSessions).not.toHaveBeenCalled();
   });
 });

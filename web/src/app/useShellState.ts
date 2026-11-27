@@ -73,11 +73,13 @@ export function useShellState() {
     useMobileNav(selectedId);
   // The sidebar/global lists read periodically only while their surface is
   // actually displayed (#4602 §2); a hidden list stays dirty until shown.
-  // The sidebar/global lists are displayed whenever the wide column exists or
-  // the narrow list pane is shown. `showList` alone is the *mobile pane* flag
-  // and is false on wide screens, where the sidebar is still visible — gating
-  // on it alone would leave the desktop lists unread (#4602).
-  const data = useDashboard(undefined, isWide || showList);
+  // The shell's global lists always have a visible consumer: the sidebar column
+  // on wide, the list pane on narrow, and — while a Session is open — the
+  // Terminal header and Project chip, which derive from the Session/Project
+  // lists even when the list pane itself is hidden. `showList` is only the
+  // mobile-pane flag, so gating on it (or on pane visibility) starves those
+  // consumers (#4602). Hidden *capability* views pause via their own `active`.
+  const data = useDashboard(undefined, true);
   const {
     agents,
     sessions,
