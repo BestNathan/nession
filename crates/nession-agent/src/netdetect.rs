@@ -319,24 +319,26 @@ mod tests {
     /// explicit config value when a reverse proxy needs a different route.
     #[test]
     fn advertised_addresses_carry_derived_probe_url() {
-        let mut config = AgentConfig::default();
-        config.disable_address_autodetect = true;
-        config.advertise_addresses = vec![
-            AdvertiseAddress {
-                url: "ws://192.168.1.5:8080/ws".to_string(),
-                label: Some("LAN".to_string()),
-                network_type: NetworkType::Lan,
-                priority: 10,
-                probe_url: None,
-            },
-            AdvertiseAddress {
-                url: "wss://agent.example.com/prefix/ws".to_string(),
-                label: Some("Tunnel".to_string()),
-                network_type: NetworkType::Tunnel,
-                priority: 30,
-                probe_url: Some("https://agent.example.com/custom/probe".to_string()),
-            },
-        ];
+        let config = AgentConfig {
+            disable_address_autodetect: true,
+            advertise_addresses: vec![
+                AdvertiseAddress {
+                    url: "ws://192.168.1.5:8080/ws".to_string(),
+                    label: Some("LAN".to_string()),
+                    network_type: NetworkType::Lan,
+                    priority: 10,
+                    probe_url: None,
+                },
+                AdvertiseAddress {
+                    url: "wss://agent.example.com/prefix/ws".to_string(),
+                    label: Some("Tunnel".to_string()),
+                    network_type: NetworkType::Tunnel,
+                    priority: 30,
+                    probe_url: Some("https://agent.example.com/custom/probe".to_string()),
+                },
+            ],
+            ..Default::default()
+        };
         let addresses = build_advertised_addresses(&config, 8080);
         let lan = addresses
             .iter()

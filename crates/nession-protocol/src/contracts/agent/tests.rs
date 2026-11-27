@@ -519,7 +519,7 @@ fn agent_address_probe_url_is_additive_and_optional() {
 
     let with_probe = AgentAddress {
         probe_url: Some("http://192.168.1.5:8080/probe".to_string()),
-        ..decoded.clone()
+        ..decoded
     };
     let encoded = serde_json::to_string(&with_probe).unwrap();
     assert!(encoded.contains("\"probe_url\":\"http://192.168.1.5:8080/probe\""));
