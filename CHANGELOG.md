@@ -1073,3 +1073,10 @@
 - Categories: agent, architecture, protocol, session, web
 - Reason: Cross-link the Claude conversation resolution owner that reads the same verified-observation cache (#4664 D6); one cache, not a second observation engine
 - Source: https://github.com/BestNathan/nession/issues/4664
+
+## 2026-11-28T01:40:00Z | update | Nession CLI release versioning and single-active daemons
+- Path: topics/engineering/nession-cli-release-versioning-and-single-active-daemons.md
+- Topic: engineering
+- Categories: architecture, cli, lifecycle, process, release, storage
+- Reason: Record the #4660 contract correction — one authoritative Rust transaction outcome consumed by a bootstrap-only shell (no directory-existence completeness rule, no false rollback), manifest schema-2 typed coverage with ownership-based classification and conservative schema-1 compatibility, per-component historical admission, read-only live-process preflight before transfer, and the first-hop verified local-artifact handoff; removes the directory-existence assumption that falsely failed a committed Agent-only upgrade
+- Source: https://github.com/BestNathan/nession/issues/4660

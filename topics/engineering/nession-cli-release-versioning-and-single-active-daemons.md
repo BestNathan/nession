@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "cli", "lifecycle", "process", "release", "storage"]
 status: verified
 created_at: 2026-11-10T15:06:36Z
-updated_at: 2026-11-27T07:10:08Z
-sources: ["https://github.com/BestNathan/nession/issues/3173", "https://github.com/BestNathan/nession/pull/3214", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/update/install.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/release_config.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/snapshot.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/policy.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/commands/version/recover.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4600", "https://github.com/BestNathan/nession/pull/4612", "https://github.com/BestNathan/nession/pull/4616", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/docs/architecture/cli-logs.md", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/local_logs/mod.rs", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/lifecycle/pid_file.rs"]
+updated_at: 2026-11-28T01:40:00Z
+sources: ["https://github.com/BestNathan/nession/issues/3173", "https://github.com/BestNathan/nession/pull/3214", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/3226bd58839daedfa9090eb44bad4cc5c76b56ab/crates/nession-cli/src/update/install.rs", "https://github.com/BestNathan/nession/issues/3232", "https://github.com/BestNathan/nession/pull/3261", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/update/release_config.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/lifecycle/terminate.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/crates/nession-cli/src/service/mod.rs", "https://github.com/BestNathan/nession/blob/335485885cc0457c4640b6271ae6eedd6f45adac/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4592", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/transaction.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/snapshot.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/update/policy.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/crates/nession-cli/src/commands/version/recover.rs", "https://github.com/BestNathan/nession/blob/d77c57ba32b987d22f674e21dc3353024fccf215/scripts/install.sh", "https://github.com/BestNathan/nession/issues/4600", "https://github.com/BestNathan/nession/pull/4612", "https://github.com/BestNathan/nession/pull/4616", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/docs/architecture/cli-logs.md", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/local_logs/mod.rs", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/972a5877f43be225a526e71711a3368576e89d2a/crates/nession-cli/src/lifecycle/pid_file.rs", "https://github.com/BestNathan/nession/issues/4660", "https://github.com/BestNathan/nession/blob/9dd5f38bcc224367e6af513d96ce8b042cf0652d/docs/architecture/cli-release-versioning.md", "https://github.com/BestNathan/nession/blob/9dd5f38bcc224367e6af513d96ce8b042cf0652d/crates/nession-cli/src/update/snapshot.rs", "https://github.com/BestNathan/nession/blob/9dd5f38bcc224367e6af513d96ce8b042cf0652d/crates/nession-cli/src/update/install.rs", "https://github.com/BestNathan/nession/blob/9dd5f38bcc224367e6af513d96ce8b042cf0652d/crates/nession-cli/src/versions/mod.rs", "https://github.com/BestNathan/nession/blob/9dd5f38bcc224367e6af513d96ce8b042cf0652d/scripts/install.sh"]
 ---
 
 # Nession CLI release versioning and single-active daemons
@@ -73,14 +73,33 @@ location, never config values).
 
 The snapshot is a bounded subset, never a rename of Current: both configs are
 byte-copied; the Agent identity, sessions, Claude/ENV bindings and Server ENV
-records are copied; the Server DB is captured through the SQLite backup API
-(WAL accounted for); content-addressed stores are **referenced, not copied**;
-caches, logs and runtime files are omitted; unknown top-level entries are
-preserved in place and recorded as coverage gaps. Every archive carries
-`manifest.json` recording binary digests, config coverage, per-entry state
-digests, references, gaps, external dependencies and whether the snapshot is
-state-complete. A failed DB backup is a recorded gap, never a fake complete
-snapshot.
+records are copied; the Agent's durable inbound credential (`agent-config.token`,
+owned by `nession-agent/src/token.rs`, #3440) is captured privately; the Server
+DB is captured through the SQLite backup API (WAL accounted for);
+content-addressed stores are **referenced, not copied**; caches, logs and
+runtime files are omitted; unknown top-level entries are preserved in place and
+recorded as unproven coverage. Every archive carries `manifest.json` recording
+binary digests, config coverage, per-entry state digests, references, typed
+coverage, external dependencies and whether the snapshot is state-complete. A
+failed DB backup is a recorded `missing` gap, never a fake complete snapshot.
+
+**Typed coverage (manifest schema 2, #4660).** Each coverage entry has a
+component (`agent`/`server`/`shared`) and a class: `captured` (independent
+verified copy), `not_applicable` (component/data absent by design, e.g. no
+Server DB on an Agent-only install), `excluded` (policy omission retained in
+place: logs/runtime, reproducible build workspace, regenerable zsh caches
+`.zcompdump*`/`*.zwc`, redundant config backups `<config>.bak*`), `referenced`
+(content-addressed store; an **empty** store is safe, a **nonempty** one needs
+pin/retention or verified independent ownership — never assumed safe),
+`missing` (a required capture failed) or `unknown` (unproven ownership, incl.
+user history/config). Ownership is classified by proven provenance, not
+directory existence: the Agent token is a known non-regenerable credential
+(captured privately, never exposed), a `<config>.bak*` sibling is a redundant
+backup of a captured config (excluded), and `.zcompdump*`/`*.zwc` are
+regenerable (excluded); user history (`.zsh_history`) and shell config are not
+regenerable and stay `unknown`. Schema-1 archives are classified conservatively
+from their `state_complete` flag and dependencies — never rewritten, never
+silently promoted to proven; ambiguous legacy state remains blocked.
 
 A durable journal (`<NESSION_HOME>/.install-transaction.json`, schema 2, mode
 0600) records `staging -> snapshot -> archive-committed -> binary-swap ->
@@ -137,6 +156,30 @@ never runs. A fresh machine still bootstraps the selected binaries from
 staging in one publication step. Neither path stops a running daemon, and the
 script defuses `NESION_VERSION` before probing or delegating. Bootstrap
 curl/wget calls are bounded (connect/total/idle budgets and bounded retries).
+
+**The shell is bootstrap only (#4660).** Before the large transfer it runs a
+read-only live-process preflight through the existing CLI's `agent|server
+status` (a proven live writer is refused with zero asset GETs; an inconclusive
+probe defers to the authoritative under-lock recheck). It downloads the archive
+**once** and hands the owner-private staged tarball plus its verified digest to
+the canonical target installer (`install <ver> --local-artifact <path>
+--artifact-sha256 <hex>`); the target never re-downloads the asset. The CLI
+independently re-hashes the local artifact, extracts safely (only the three
+named binaries, no path escape) and proves version/platform through the
+upgrade-contract handshake before any mutation; a tampered/wrong-version/
+wrong-platform artifact is refused with Current unchanged. After the
+transaction the CLI prints one authoritative versioned result line
+`nession-install-result-v1 outcome=<committed|unchanged|rolled-back|recovery-blocked> result=<ok|failed> [… coverage=<complete|gaps>]`.
+The shell consumes that line: `result=ok` reports success (a `committed`
+outcome with `coverage=gaps` is still committed and intact — only a warning);
+`result=failed` reports the proven Current state truthfully. The shell never
+infers archive completeness from directory existence and never asserts a
+rollback merely because the subprocess exited nonzero; an older upgrade-v1
+target without the result line is reported by exit status alone. Mandatory
+verification belongs before commit; after commit the outcome is reported
+truthfully without a destructive retry. The transaction owner preserves the
+three-binary digest checks, journal recovery, retention and no implicit
+stop/start.
 
 **Limitation:** an already-released old CLI's direct `nession update` cannot be
 retroactively changed by a new target artifact. Affected users must use the
@@ -203,7 +246,18 @@ are three different facts (#4592). Before `exec`, the Current dispatcher
 refuses **data-touching** commands (agent/server start/restart/stop and service
 registration, sessions create/attach/kill, config init/set) on an archive whose
 independent state ownership is unproven: a binary-only or legacy archive
-without `manifest.json`, or a manifest recording gaps/external dependencies.
+without `manifest.json`, or a manifest recording missing/unknown state, unsafe
+nonempty references or external dependencies.
+
+**Admission is per component (#4660).** Agent and Server assess their own
+required state plus shared dependencies independently: `agent`/`sessions`/
+`config agent` gate on Agent coverage, `server`/`config server` on Server
+coverage. A safe unrelated exclusion (Server logs/build, an empty CAS, an
+absent Server DB on an Agent-only install) never blocks an otherwise proven
+component; a nonempty referenced store, missing required capture, unknown root
+or external dependency blocks the affected component (unknown shared state
+blocks both). The historical runtime gate, peer-version check, single-active,
+tmux/workspace/external-path safety and identity/auth consistency are preserved.
 Read-only inspection (`status`, `logs`, `list`, `show`, `agents list`) stays
 available on every complete archive. The gate applies to legacy versions too;
 the supported entrypoint is the Current dispatcher — arbitrary direct
