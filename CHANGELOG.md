@@ -1059,3 +1059,17 @@
 - Categories: architecture, security, delivery, identity
 - Reason: Record the merged implementation (gitops c4e58e7de, main adbf6b662), PR-stage SC-01/02/03 Pass, the landed site registry (#4678) and the merged doc's cert-manager TLS consumption section; preparation only, cutover and legacy retirement still blocked on nitops#2 readiness
 - Source: https://github.com/BestNathan/nession/issues/4588
+
+## 2026-11-27T15:20:00Z | create | Claude conversation identity resolution
+- Path: topics/engineering/claude-conversation-identity-resolution.md
+- Topic: engineering
+- Categories: agent, architecture, protocol, session, identity, ownership
+- Reason: Record the #4664 doctrine: reported identity outranks inferred cwd for a Session's own conversations; one resolution owner, identity-based transcript resolution, instance-fenced lifecycle log, and the status/list agreement invariant
+- Source: https://github.com/BestNathan/nession/issues/4664
+
+## 2026-11-27T15:20:00Z | update | Session Activity ownership
+- Path: topics/engineering/session-activity-ownership.md
+- Topic: engineering
+- Categories: agent, architecture, protocol, session, web
+- Reason: Cross-link the Claude conversation resolution owner that reads the same verified-observation cache (#4664 D6); one cache, not a second observation engine
+- Source: https://github.com/BestNathan/nession/issues/4664

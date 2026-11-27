@@ -35,6 +35,21 @@
         "updated_at": "2026-11-15T16:51:08Z"
       },
       {
+        "title": "Claude conversation identity resolution",
+        "description": "Reported identity outranks inferred cwd: how a Nession Session discovers its Claude conversations and current binding across resume and cwd drift (#4664)",
+        "path": "topics/engineering/claude-conversation-identity-resolution.md",
+        "status": "verified",
+        "categories": [
+          "agent",
+          "architecture",
+          "protocol",
+          "session",
+          "identity",
+          "ownership"
+        ],
+        "updated_at": "2026-11-27T15:20:00Z"
+      },
+      {
         "title": "Endpoint-owned Server and Agent tokens",
         "description": "One durable Server Token for the control plane and one durable Agent Token per Agent for inbound P2P, Relay and MCP; registration-generation caching, handoff only to the resolved Agent, operator rotation, and the trusted-endpoint boundary that replaces per-attach grants",
         "path": "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
@@ -238,7 +253,7 @@
           "session",
           "web"
         ],
-        "updated_at": "2026-11-18T04:51:45Z"
+        "updated_at": "2026-11-27T15:20:00Z"
       },
       {
         "title": "Session metadata and display identity ownership",
@@ -544,6 +559,7 @@
     ],
     "agent": [
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
+      "topics/engineering/claude-conversation-identity-resolution.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
@@ -567,6 +583,7 @@
     ],
     "architecture": [
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
+      "topics/engineering/claude-conversation-identity-resolution.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/global-erofs-image-manager.md",
       "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
@@ -639,6 +656,7 @@
       "topics/web/git-capability-local-repository-and-read-only-github-hosting-context-ownership.md"
     ],
     "identity": [
+      "topics/engineering/claude-conversation-identity-resolution.md",
       "topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md"
     ],
@@ -693,6 +711,7 @@
     ],
     "ownership": [
       "topics/app/app-mobile-spatial-navigation-and-terminal-touch-ownership.md",
+      "topics/engineering/claude-conversation-identity-resolution.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",
@@ -727,6 +746,7 @@
     ],
     "protocol": [
       "topics/engineering/claude-code-mcp-configuration-and-nession-onboarding.md",
+      "topics/engineering/claude-conversation-identity-resolution.md",
       "topics/engineering/endpoint-owned-server-and-agent-tokens.md",
       "topics/engineering/nession-mcp-access-layer-semantic-tool-ownership-and-protocol-versions.md",
       "topics/engineering/nession-websocket-runtime-architecture-and-message-dispatch.md",
@@ -806,6 +826,7 @@
       "topics/engineering/websocket-execution-budgets-and-backpressure.md"
     ],
     "session": [
+      "topics/engineering/claude-conversation-identity-resolution.md",
       "topics/engineering/project-declaration-and-workspace-location-ownership.md",
       "topics/engineering/session-activity-ownership.md",
       "topics/engineering/session-metadata-and-display-identity-ownership.md",

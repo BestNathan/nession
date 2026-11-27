@@ -5,7 +5,7 @@ topic: engineering
 categories: ["agent","architecture","protocol","session","web"]
 status: verified
 created_at: 2026-11-18T04:51:45Z
-updated_at: 2026-11-18T04:51:45Z
+updated_at: 2026-11-27T15:20:00Z
 sources: ["https://github.com/BestNathan/nession/blob/7e82d7d21e0ab368e816d7633bd495a3cf78fa5b/docs/architecture/session-activity.md","https://github.com/BestNathan/nession/blob/7e82d7d21e0ab368e816d7633bd495a3cf78fa5b/docs/design/design-system/patterns/session-item.md","https://github.com/BestNathan/nession/blob/7e82d7d21e0ab368e816d7633bd495a3cf78fa5b/docs/architecture/agent-process-discovery.md","https://github.com/BestNathan/nession/issues/3800","https://github.com/BestNathan/nession/issues/3801","https://github.com/BestNathan/nession/issues/3802","https://github.com/BestNathan/nession/issues/3804"]
 ---
 
@@ -43,6 +43,9 @@ client attachment, and none of those may be inferred from or written by it.
   Pane's process tree; an unbound PID or unreadable status while Claude is in
   the tree is owned as `unknown`, so Shell cannot claim it. No Claude process
   releases the Pane. The command name `claude` alone never proves ownership.
+  The same verified-observation cache is the conversation read path's window
+  onto the live identity (#4664) — one cache, not a second observation engine:
+  [Claude conversation identity resolution](claude-conversation-identity-resolution.md).
 - **Transport.** The Agent publishes a dedicated, one-way
   `server.agent.session-activity` notification (incarnation, Agent epoch,
   monotonic generation, state, attention, capability, observed time). It is
@@ -74,6 +77,7 @@ the one-process group read is documented in
 
 ## Related knowledge
 
+- [Claude conversation identity resolution](claude-conversation-identity-resolution.md)
 - [Nession sandbox policy and execution isolation architecture](nession-sandbox-policy-and-execution-isolation-architecture.md)
 - [Session metadata and display identity ownership](session-metadata-and-display-identity-ownership.md)
 - [Terminal parser progress and exception reconciliation](../terminal/terminal-parser-progress-and-exception-reconciliation.md)
