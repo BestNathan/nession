@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "b165af09c4f9a49984769f0b563b0ed3de9997de962eee95710104cf3aaa0194",
+  "run_id": 46023764206,
+  "run_attempt": 1,
+  "issue": 4665,
+  "criterion": "SC-01",
+  "criterion_text": "`input_sent` with `observation: verified` is returned only after the prompt's submission is confirmed by read-back (exact user message in the addressed conversation, or equivalent authenticated TUI evidence). Against a real Claude CLI, the startup-race injection (submit immediately after enter) and the large single-line prompt injection produce no false verified delivery; unconfirmed delivery answers a truthful unknown/pending state with read-back guidance.",
+  "stage": "staging",
+  "target_sha": "22e82b494ff393ce60eb37352b6c4fcdd33f56b0",
+  "contract_sha256": "2e7054852dcac74977f653866898c7263702997492b07a844175a4216f071fae",
+  "case_revision": "22e82b494ff393ce60eb37352b6c4fcdd33f56b0",
+  "case_tree_sha": "c6cdbbd41952add9d5f10cd817281eaef5465972",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-27T15:22:01.237Z",
+  "finished_at": "2026-11-27T15:24:04.884Z",
+  "duration_ms": 123647,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "the verified-delivery read-back contract is pinned in source; the live verifier injects the startup race and the large single-line prompt against a real Claude CLI",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "the composer observation classifies empty/dirty/unready input boxes fail-closed, and the real submit path answers input_sent+verified only for a newly recorded exact user message, unknown with read-back guidance when the TUI never submitted, and refused before sending when the input box is not ready"
+        }
+      ],
+      "duration_ms": 83829,
+      "exit_code": 0
+    },
+    {
+      "type": "runtime",
+      "entry": "verify-live.cjs",
+      "result": "Pass",
+      "summary": "a real Claude CLI 2.1.312 (Claude Code) produced no false verified delivery under the startup-race and large single-line prompt injections: verified claims were backed by the exact transcript message, and unconfirmed delivery answered truthful unknown with read-back guidance",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "exact SHA 22e82b494ff393ce60eb37352b6c4fcdd33f56b0: CLI 2.1.312 (resolved 2.1.312 (Claude Code)); submit immediately after enter answered refused (Claude is not verifiably running in this Session; refusing to submit) — no unbacked verified claim"
+        },
+        {
+          "type": "runtime",
+          "value": "a settled idle submit answered input_sent+verified and the same conversation recorded exactly one OK prompt and the assistant reply"
+        },
+        {
+          "type": "runtime",
+          "value": "the ~500-character single-line CJK injection answered input_sent; the addressed conversation records it 1 time(s) — the claim and the transcript agree, with no duplicate delivery"
+        }
+      ],
+      "duration_ms": 33751,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 46023764206,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "61cd76d51d1bec7f147d1049515fbddf2ef1b471",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "22e82b494ff393ce60eb37352b6c4fcdd33f56b0",
+        "stage": "staging",
+        "issue": 4665,
+        "criterion": "SC-01",
+        "job_id": 140589767031,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/46023764206",
+    "record_path": "runs/2026-11-27/46023764206-1/4665/SC-01.json",
+    "source_result_sha256": "9b72088b95183707a07446ade22763ad33d26b34365aee783c72969afc0972d8"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-46023764206-1",
+    "sha256": "9b72088b95183707a07446ade22763ad33d26b34365aee783c72969afc0972d8",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/46023764206",
+    "durability": "time-limited; object archival not configured"
+  }
+}
