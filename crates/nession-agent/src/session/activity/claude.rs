@@ -84,7 +84,20 @@ impl ClaudeActivityProvider {
     /// The production provider: #3779's Agent-side Claude control.
     pub fn new(agent_id: impl Into<String>, tmux: Arc<SessionManager>) -> Self {
         let agent_id = agent_id.into();
-        let control = Arc::new(AgentClaudeControl::new(agent_id.clone(), Arc::clone(&tmux)));
+        // The control backend's submit read-back consumes the canonical
+        // conversation reader (#4665); this provider only queries status, but
+        // the backend is composed whole, over the same stateless extension the
+        // runtime composes for the read Tools.
+        let reader = Arc::new(nession_claude_code::agent::ClaudeCodeAgentExtension::new(
+            Arc::new(crate::claude_session_context::TmuxSessionContext::new(
+                Arc::clone(&tmux),
+            )),
+        ));
+        let control = Arc::new(AgentClaudeControl::new(
+            agent_id.clone(),
+            Arc::clone(&tmux),
+            reader,
+        ));
         Self::with_control(agent_id, tmux, control)
     }
 
@@ -706,7 +719,15 @@ esac
         let provider = ClaudeActivityProvider::with_control(
             "agent-a",
             Arc::clone(&manager),
-            Arc::new(AgentClaudeControl::new("agent-a", Arc::clone(&manager))),
+            Arc::new(AgentClaudeControl::new(
+                "agent-a",
+                Arc::clone(&manager),
+                Arc::new(nession_claude_code::agent::ClaudeCodeAgentExtension::new(
+                    Arc::new(crate::claude_session_context::TmuxSessionContext::new(
+                        Arc::clone(&manager),
+                    )),
+                )),
+            )),
         );
         let state = dir.path().join("state");
 

@@ -215,3 +215,60 @@ async fn env_flags_come_before_the_command() -> anyhow::Result<()> {
     ops.kill_session(&name).await?;
     Ok(())
 }
+
+/// `send_literal_line` delivers the text verbatim and submits it, with the
+/// Enter separated from the text burst by the paste settle delay (#4665).
+///
+/// The line deliberately contains tmux key names (`Enter`, `Up`, `Down`): the
+/// literal form must never interpret them. The round-trip proves both halves
+/// of the operation — the text arrived whole, and the Enter was pressed — and
+/// the elapsed lower bound proves the two sends are separated in time, so a
+/// full-screen TUI reads the text as its own input event before the Enter.
+#[tokio::test]
+async fn a_literal_line_is_delivered_verbatim_and_submitted_after_a_settle_delay(
+) -> anyhow::Result<()> {
+    use nession_tmux::ops::PASTE_SETTLE_DELAY;
+    use nession_tmux::{NewSession, TmuxOps};
+
+    let dir = tempfile::tempdir()?;
+    let command = TmuxCommand::new("tmux", dir.path().join("tmux.sock"));
+    command.validate()?;
+    let ops = TmuxOps::new(command);
+    let name = unique_name("literal-line");
+
+    ops.new_session(&NewSession {
+        name: name.clone(),
+        working_dir: "/tmp".to_string(),
+        width: 80,
+        height: 24,
+        env: Vec::new(),
+        command: Vec::new(),
+    })
+    .await?;
+
+    let started = Instant::now();
+    ops.send_literal_line(&name, "printf 'LITERAL_%s\\n' 'Enter Up Down'")
+        .await?;
+    let elapsed = started.elapsed();
+    anyhow::ensure!(
+        elapsed >= PASTE_SETTLE_DELAY,
+        "the text and the Enter must be separated by the settle delay; elapsed {elapsed:?}"
+    );
+
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        let captured = ops.capture_pane(&name, 100).await?.unwrap_or_default();
+        if String::from_utf8_lossy(&captured).contains("LITERAL_Enter Up Down") {
+            break;
+        }
+        anyhow::ensure!(
+            Instant::now() < deadline,
+            "the literal line was not delivered and submitted: {:?}",
+            String::from_utf8_lossy(&captured)
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    ops.kill_session(&name).await?;
+    Ok(())
+}
