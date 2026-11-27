@@ -19,7 +19,7 @@ resolve_endpoint() {
   [[ "$url" =~ ^https://([0-9]{1,3}(\.[0-9]{1,3}){3})(:([0-9]{1,5}))?/?$ ]] ||
     { fail 'ADGUARD_API_URL must be a bare https://<internal-IPv4>[:port] endpoint'; return 1; }
   host="${BASH_REMATCH[1]}"
-  port="${BASH_REMATCH[5]:-443}"
+  port="${BASH_REMATCH[4]:-443}"
   IFS=. read -r a b c d <<< "$host"
   for octet in "$a" "$b" "$c" "$d"; do
     [[ "$octet" =~ ^[0-9]{1,3}$ ]] && (( octet <= 255 )) ||
