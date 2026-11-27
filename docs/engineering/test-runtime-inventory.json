@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1903,
-    "references": 1016,
+    "entries": 1908,
+    "references": 1017,
     "unresolved": 0
   },
   "crates": [
@@ -169,7 +169,7 @@
       "file": "crates/nession-agent/src/runtime.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 941
+      "line": 945
     },
     {
       "file": "crates/nession-agent/src/sandbox_images.rs",
@@ -235,7 +235,7 @@
       "file": "crates/nession-agent/src/session/activity/claude.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 295
+      "line": 308
     },
     {
       "file": "crates/nession-agent/src/session/activity/coordinator.rs",
@@ -472,6 +472,12 @@
       "line": 362
     },
     {
+      "file": "crates/nession-claude-code/src/composer.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 329
+    },
+    {
       "file": "crates/nession-claude-code/src/conversation_reader.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
@@ -703,7 +709,7 @@
       "file": "crates/nession-claude-code/src/tools/nession_claude_submit.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 141
+      "line": 147
     },
     {
       "file": "crates/nession-claude-code/src/transcript.rs",
@@ -2629,7 +2635,7 @@
       "file": "crates/nession-tmux/src/ops.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1696
+      "line": 1719
     },
     {
       "file": "crates/nession-tmux/src/parser.rs",
@@ -6862,6 +6868,26 @@
     },
     {
       "file": "e2e/acceptance/cases/4620/SC-01/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-01/verify-live.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-01/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-02/verify-live.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-02/verify.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
     },
@@ -14385,7 +14411,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 1895,
+      "line": 1918,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14394,7 +14420,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 1914,
+      "line": 1937,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14403,7 +14429,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2288,
+      "line": 2311,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14412,7 +14438,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2472,
+      "line": 2495,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -14421,7 +14447,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2479,
+      "line": 2502,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -14430,7 +14456,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2488,
+      "line": 2511,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -14503,6 +14529,15 @@
     {
       "file": "crates/nession-tmux/tests/real_tmux.rs",
       "line": 191,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let command = TmuxCommand::new(\"tmux\", dir.path().join(\"tmux.sock\"));",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-tmux/tests/real_tmux.rs",
+      "line": 234,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",

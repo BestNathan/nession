@@ -205,9 +205,13 @@ pub struct SubmitRequest {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum SubmitStatus {
-    /// The input reached the interactive Claude process's PTY.
+    /// The prompt's **submission was confirmed by read-back**: the exact user
+    /// message is recorded in the addressed conversation (#4665). A tmux
+    /// send-keys exit code alone never produces this phase — keys accepted by
+    /// the pane PTY can still be lost to TUI startup or paste handling.
     InputSent,
-    /// Nothing was sent (wrong/stale conversation, busy/waiting/unknown).
+    /// Nothing was sent (wrong/stale conversation, busy/waiting/unknown, an
+    /// unready or non-empty composer).
     Refused,
     /// Delivery could not be confirmed; read the conversation back before retrying.
     Unknown,
