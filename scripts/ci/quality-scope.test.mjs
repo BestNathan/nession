@@ -200,8 +200,12 @@ function sourceInputReferences(file,text){
   };
   for(const m of text.matchAll(/\binclude(?:_str|_bytes)?!\s*\(\s*(?:r#*)?"([^"\n]+)"/g))
     append(m[1],path.posix.dirname(file),'include');
-  for(const m of text.matchAll(/\bconcat!\s*\(\s*env!\s*\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*"([^"\n]+)"/g))
-    append(m[1],crate,'manifest-relative');
+  for(const m of text.matchAll(/#\s*\[\s*path\s*=\s*"([^"\n]+)"/g))
+    append(m[1],path.posix.dirname(file),'include');
+  for(const m of text.matchAll(/\bconcat!\s*\(\s*env!\s*\(\s*"CARGO_MANIFEST_DIR"\s*\)\s*,\s*"([^"\n]+)"/g)){
+    const embedded=/\binclude(?:_str|_bytes)?!\s*\(\s*$/.test(text.slice(0,m.index));
+    append(m[1],crate,embedded?'include':'manifest-relative');
+  }
   return out;
 }
 function unregisteredSourceInputs(file,text){
@@ -227,6 +231,13 @@ test('external literal source input guard detects unregistered paths',()=>{
     {target:'new-area/payload.bin',kind:'include'}
   ]);
   assert.deepEqual(unregisteredSourceInputs('crates/nession-runtime/src/metrics.rs','include_str!("../assets/ws-runtime-dashboards.json")'),[]);
+  // A registered Rust-only path is still insufficient for a native build input.
+  assert.deepEqual(unregisteredSourceInputs('crates/nession-agent/src/lib.rs','include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../README.md"))'),[
+    {target:'README.md',kind:'include'}
+  ]);
+  assert.deepEqual(unregisteredSourceInputs('crates/nession-agent/src/lib.rs','#[path = "../../../new-area/module.rs"] mod external;'),[
+    {target:'new-area/module.rs',kind:'include'}
+  ]);
 });
 test('tracked Rust sources register statically discoverable build and test inputs',()=>{
   const failures=[];
