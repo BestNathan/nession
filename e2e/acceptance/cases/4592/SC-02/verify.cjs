@@ -13,7 +13,7 @@
 //     business state is still readable (no re-initialization).
 const {
   assert, fs, path, targetSha, nessionBin, makeRoot, mkdirPrivate,
-  cliOutput, runBinary, waitFor, waitForTcp, waitForGone,
+  runCliAsync, runBinary, waitFor, waitForTcp, waitForGone, tomlString, assertUnder,
   freePort, installEnv, readIdentity, sha256File, makeRealReleaseTarball,
   startInstallerFixture, downloadOfficialRelease, BINARIES, main,
 } = require('../../../shared/release-hardening-cases.cjs');
@@ -174,7 +174,17 @@ main(async () => {
     const release = makeRealReleaseTarball(base, targetVersion);
     fixture = await startInstallerFixture(release);
     const upgradeEnv = installEnv({ home, installDir, runtimeDir: runtime, apiBase: fixture.base });
-    const upgrade = cliOutput(['install', targetVersion, '--yes'], upgradeEnv, 180000);
+    // The release fixture is served from this process; a synchronous spawn
+    // would starve its HTTP server and the install would fail with a network
+    // error. Run the CLI asynchronously while the fixture is live.
+    const upgradeResult = await runCliAsync(
+      ['install', targetVersion, '--yes'], upgradeEnv, 180000,
+      'install ' + targetVersion,
+    );
+    const upgrade = {
+      status: upgradeResult.status,
+      output: String(upgradeResult.stdout) + String(upgradeResult.stderr),
+    };
     assert.equal(upgrade.status, 0, 'retention upgrade failed: ' + upgrade.output.slice(-3000));
     await fixture.close();
     fixture = null;
@@ -193,8 +203,11 @@ main(async () => {
       assert.ok(fs.existsSync(path.join(archive, 'bin', binary)), 'archive missing ' + binary);
     }
     assert.ok(fs.existsSync(path.join(archive, 'manifest.json')), 'archive has no coverage manifest');
-    assert.equal(sha256File(path.join(archive, 'agent-config.toml')), before.agentConfig, 'archive config copy differs');
-    assert.equal(sha256File(path.join(archive, 'server-config.toml')), before.serverConfig, 'archive config copy differs');
+    assert.equal(sha256File(path.join(archive, 'agent-config.toml')), before.agentConfig, 'archive agent-config copy differs');
+    // The archived server config is a coverage-honest copy: the captured
+    // generated-default db_path is rewritten into the archive, so it must
+    // differ from Current's file and point at the archived database.
+    assertUnder(tomlString(path.join(archive, 'server-config.toml'), 'db_path'), archive, 'archive server-config db_path');
     assert.equal(fs.readFileSync(path.join(archive, 'agent', 'identity'), 'utf8').trim(), identityBefore, 'archive identity copy differs');
     assert.ok(fs.existsSync(path.join(archive, 'server', 'server.db')), 'archive has no independent DB snapshot');
     evidence.push({

@@ -7,7 +7,76 @@
 //! then consumed by exactly one leaf handler, whose file lives under
 //! `commands/`.
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
+
+/// Where `agent|server logs` reads from.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum LogSourceArg {
+    /// The component's rolling runtime log files (default).
+    Runtime,
+    /// Bounded startup diagnostics captured before/around runtime logging.
+    Startup,
+    /// The managed OS service capture (Agent only; the Server has none).
+    Service,
+}
+
+/// The minimum persisted severity a runtime line must have to be shown.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, ValueEnum)]
+pub enum LogLevelArg {
+    Trace,
+    Debug,
+    Info,
+    Warn,
+    Error,
+}
+
+/// Options shared by `nession agent logs` and `nession server logs`.
+///
+/// Both leaves expose exactly this set; the leaf handler only chooses the
+/// component. Validation (invalid combinations, source-specific filters) is
+/// owned by `crate::local_logs::query`, not Clap.
+#[derive(clap::Args, Clone, Debug)]
+pub struct LogsArgs {
+    /// Number of matching lines to show (default: 100; 0 is allowed;
+    /// filtering happens before the tail)
+    #[arg(short = 'n', long = "tail", value_name = "N")]
+    pub tail: Option<usize>,
+
+    /// Print the tail, then keep printing appended lines (Ctrl-C stops only
+    /// the reader)
+    #[arg(short = 'f', long)]
+    pub follow: bool,
+
+    /// Lower bound: a duration such as 30m/1h30m or an RFC3339 timestamp with
+    /// a UTC offset
+    #[arg(long, value_name = "WHEN")]
+    pub since: Option<String>,
+
+    /// Upper bound as an RFC3339 timestamp with a UTC offset; with --follow
+    /// the reader stops at this cutoff
+    #[arg(long, value_name = "WHEN")]
+    pub until: Option<String>,
+
+    /// Minimum persisted severity (runtime source only)
+    #[arg(long, value_name = "LEVEL")]
+    pub level: Option<LogLevelArg>,
+
+    /// Exact target or module-prefix boundary (runtime source only)
+    #[arg(long, value_name = "TARGET")]
+    pub target: Option<String>,
+
+    /// Print the resolved source location(s) without reading content
+    #[arg(long)]
+    pub path: bool,
+
+    /// Which log source to read
+    #[arg(long, value_enum, default_value_t = LogSourceArg::Runtime)]
+    pub source: LogSourceArg,
+
+    /// Path to the Agent/Server PID file used for instance discovery
+    #[arg(long)]
+    pub pid_file: Option<String>,
+}
 
 /// The complete `nession` command tree.
 #[derive(Parser)]
@@ -221,6 +290,8 @@ pub enum AgentAction {
         #[arg(long)]
         pid_file: Option<String>,
     },
+    /// Read the Agent's local logs (no Server connection required)
+    Logs(LogsArgs),
     /// Install a user-level OS service to start the agent at boot
     InstallService {
         /// Path to configuration file (default: ~/.nession/agent-config.toml)
@@ -278,6 +349,8 @@ pub enum ServerAction {
         #[arg(long)]
         pid_file: Option<String>,
     },
+    /// Read the Server's local logs (no Server connection required)
+    Logs(LogsArgs),
 }
 
 /// `nession version …`
@@ -471,6 +544,20 @@ mod tests {
             ),
             ("agent status".to_string(), strings(&["--pid-file"])),
             (
+                "agent logs".to_string(),
+                strings(&[
+                    "--follow",
+                    "--level",
+                    "--path",
+                    "--pid-file",
+                    "--since",
+                    "--source",
+                    "--tail",
+                    "--target",
+                    "--until",
+                ]),
+            ),
+            (
                 "agent install-service".to_string(),
                 strings(&["--config", "--pid-file"]),
             ),
@@ -485,6 +572,20 @@ mod tests {
                 strings(&["--config", "--foreground", "--pid-file"]),
             ),
             ("server status".to_string(), strings(&["--pid-file"])),
+            (
+                "server logs".to_string(),
+                strings(&[
+                    "--follow",
+                    "--level",
+                    "--path",
+                    "--pid-file",
+                    "--since",
+                    "--source",
+                    "--tail",
+                    "--target",
+                    "--until",
+                ]),
+            ),
             ("agents list".to_string(), strings(&[])),
             ("sessions list".to_string(), strings(&["--agent-id"])),
             (

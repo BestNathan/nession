@@ -625,7 +625,10 @@ async fn p2p_and_server_create_materialize_the_same_binding() {
             auth: Arc::clone(&auth),
             mutations: nession_agent::execution::mutation_scheduler(),
             tmux: Arc::new(SessionManager::new()),
-            session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
+            session_metadata: Arc::new(SessionMetadataStore::with_root(
+                Arc::new(SessionManager::new()),
+                tmp.path().join("sessions"),
+            )),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             handshake_policy: Default::default(),
         },

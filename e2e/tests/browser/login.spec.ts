@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { waitForShell } from '../../helpers/shell';
 import { resetAuth } from '../../helpers/reset';
+import { E2E_SERVER_URL } from '../../runtime';
 
 /**
  * Direct WebSocket URL — bypasses vite preview's WS proxy, which has been
  * flaky in CI. The app accepts this via the `server_url` query parameter.
  */
-const DIRECT_WS = 'ws://localhost:19090/ws';
+const DIRECT_WS = E2E_SERVER_URL;
 
 // The form-login scenario is not yet implemented as an E2E test: the
 // "Connecting..." state races with startup. Restore it only once there is a

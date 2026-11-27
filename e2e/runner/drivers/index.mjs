@@ -88,7 +88,7 @@ async function executeNodeVerifier(verifier, context) {
     cwd: context.repoRoot,
     timeoutMs: context.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     env: {
-      ...process.env,
+      ...(context.env ?? process.env),
       NESSION_ACCEPTANCE_RUNTIME_FILE: context.runtimeFile,
       NESSION_ACCEPTANCE_CASE_DIR: context.caseDir,
       NESSION_ACCEPTANCE_TARGET_SHA: context.targetSha,
@@ -166,7 +166,7 @@ async function executeBrowserVerifier(verifier, context) {
     cwd: path.join(context.repoRoot, 'e2e'),
     timeoutMs: context.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     env: {
-      ...process.env,
+      ...(context.env ?? process.env),
       NODE_PATH: path.join(context.repoRoot, 'e2e', 'node_modules'),
       PLAYWRIGHT_JSON_OUTPUT_FILE: reportFile,
       NESSION_PLAYWRIGHT_PROOF_FILE: proofFile,

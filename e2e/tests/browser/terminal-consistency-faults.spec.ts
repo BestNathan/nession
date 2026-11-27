@@ -15,6 +15,7 @@ import {
   submitTerminalCommand,
   expectPtySize,
 } from '../../helpers/terminalRegression';
+import { E2E_AGENT_PORT, E2E_SERVER_PORT, E2E_SERVER_URL } from '../../runtime';
 
 // #1645 SC-10 / #1926 SC-05: a high-rate numbered burst must reach the xterm
 // parser exactly once per line — no hole a replay was supposed to fill and no
@@ -132,7 +133,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     const sessionName = `e2e-consistency-hv-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
-      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
     );
     await waitForShell(page);
     await createSession(page, sessionName);
@@ -209,7 +210,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     const sessionName = `e2e-consistency-tui-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
-      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
     );
     await waitForShell(page);
     await createSession(page, sessionName);
@@ -274,7 +275,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
         });
       });
       await other.goto(
-        '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+        '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
       );
       await waitForShell(other);
       await attachToSession(other, sessionName, mode);
@@ -408,7 +409,7 @@ test('a Relay reconnect keeps the xterm and loses no session output', async ({ p
 
   const sessionName = `e2e-consistency-reconnect-${testInfo.retry}-${Date.now()}`;
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -505,7 +506,7 @@ test('a reconnect returns a retained renderer to the pane\'s normal screen and c
 
   const sessionName = `e2e-2464-retained-${testInfo.retry}-${Date.now()}`;
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -596,7 +597,7 @@ test('two clients: a stalled observer never blocks the controller (#2144)', asyn
   test.setTimeout(420_000);
 
   const sessionName = `e2e-consistency-multi-${testInfo.retry}-${Date.now()}`;
-  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
+  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL);
   const controllerContext = await browser.newContext();
   const observerContext = await browser.newContext();
   const controller = await controllerContext.newPage();
@@ -785,7 +786,7 @@ test('an under-burst reconnect never replays already-parsed output (#2160)', asy
   });
 
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -878,7 +879,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   // route switch, not the separate half-open ping mechanism (#2160). A real
   // browser WebSocket close supplies a deterministic loss witness instead of
   // relying on a particular input/probe timer interleaving (#3516).
-  await page.addInitScript(() => {
+  await page.addInitScript((serverPort: string) => {
     const state = window as unknown as {
       __e2eRouteAgentSockets?: WebSocket[];
       __e2eBlockRouteAgentReconnect?: boolean;
@@ -892,7 +893,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
     const Original = window.WebSocket;
     const isServerSocket = (raw: string | URL): boolean => {
       try {
-        return new URL(String(raw)).port === '19090';
+        return new URL(String(raw)).port === String(serverPort);
       } catch {
         return false;
       }
@@ -912,7 +913,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
     Guarded.prototype = Original.prototype;
     Object.setPrototypeOf(Guarded, Original);
     window.WebSocket = Guarded;
-  });
+  }, String(E2E_SERVER_PORT));
   page.on('websocket', (socket) => {
     socket.on('framesent', (frame) => {
       if (typeof frame.payload !== 'string') { return; }
@@ -925,7 +926,7 @@ test('an Auto P2P loss falls back to Relay without remounting the xterm (#2156)'
   });
 
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -1161,7 +1162,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     const sessionName = `e2e-consistency-restart-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
-      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
     );
     await waitForShell(page);
     await createSession(page, sessionName);
@@ -1301,7 +1302,7 @@ test('a 100k-line burst survives parser starvation and a retention-lost reconnec
 
   const sessionName = `e2e-consistency-big-${testInfo.retry}-${Date.now()}`;
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -1464,7 +1465,7 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
 
   const sessionName = `e2e-consistency-overflow-${testInfo.retry}-${Date.now()}`;
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -1482,9 +1483,9 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
   // Only sockets that are open are used: an address-plan rebuild can leave a
   // disposed socket in the captured list, and dispatching into it is a no-op.
   const deliver = async (frames: number, text: string) => page.evaluate(
-    ({ name, count, body }: { name: string; count: number; body: string }) => {
+    ({ name, count, body, agentPort }: { name: string; count: number; body: string; agentPort: string }) => {
       const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
-        .__overflowSockets ?? []).filter((s) => s.url.includes(':19091/') && s.readyState === 1);
+        .__overflowSockets ?? []).filter((s) => s.url.includes(`:${agentPort}/`) && s.readyState === 1);
       if (sockets.length === 0) {
         return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
           .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
@@ -1506,7 +1507,7 @@ test('a writer overflow replaces the renderer and resumes output (#2196)', async
       }
       return { ok: true, count, sockets: sockets.length };
     },
-    { name: sessionName, count: frames, body: text },
+    { name: sessionName, count: frames, body: text, agentPort: String(E2E_AGENT_PORT) },
   );
 
   // Prove the boundary routes before relying on it: three tiny frames with a
@@ -1656,7 +1657,7 @@ test('a below-bound writer burst keeps the original renderer (#4303)', async ({ 
 
   const sessionName = `e2e-consistency-belowbound-${testInfo.retry}-${Date.now()}`;
   await page.goto(
-    '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+    '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
   );
   await waitForShell(page);
   await createSession(page, sessionName);
@@ -1669,9 +1670,9 @@ test('a below-bound writer burst keeps the original renderer (#4303)', async ({ 
   });
 
   const injected = await page.evaluate(
-    ({ name, count, body }: { name: string; count: number; body: string }) => {
+    ({ name, count, body, agentPort }: { name: string; count: number; body: string; agentPort: string }) => {
       const sockets = ((window as unknown as { __overflowSockets?: WebSocket[] })
-        .__overflowSockets ?? []).filter((s) => s.url.includes(':19091/') && s.readyState === 1);
+        .__overflowSockets ?? []).filter((s) => s.url.includes(`:${agentPort}/`) && s.readyState === 1);
       if (sockets.length === 0) {
         return { ok: false, urls: ((window as unknown as { __overflowSockets?: WebSocket[] })
           .__overflowSockets ?? []).map((s) => `${s.url} (${s.readyState})`) };
@@ -1691,7 +1692,7 @@ test('a below-bound writer burst keeps the original renderer (#4303)', async ({ 
       }
       return { ok: true, count, sockets: sockets.length };
     },
-    { name: sessionName, count: 200, body: 'B' },
+    { name: sessionName, count: 200, body: 'B', agentPort: String(E2E_AGENT_PORT) },
   );
   expect(injected.ok, `below-bound dispatch (${JSON.stringify(injected)})`).toBe(true);
 
@@ -1717,7 +1718,7 @@ for (const mode of ['Relay', 'P2P'] as const) {
 
     const sessionName = `e2e-consistency-ansi-${mode.toLowerCase()}-${testInfo.retry}-${Date.now()}`;
     await page.goto(
-      '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'),
+      '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL),
     );
     await waitForShell(page);
     await createSession(page, sessionName);
@@ -1762,7 +1763,7 @@ test('an observer\'s Peek sends no resize and cannot move the session (#3492 SC-
   test.setTimeout(240_000);
 
   const sessionName = `e2e-clearance-observer-${testInfo.retry}-${Date.now()}`;
-  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws');
+  const url = '/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL);
   const controllerContext = await browser.newContext();
   const observerContext = await browser.newContext();
   const controller = await controllerContext.newPage();

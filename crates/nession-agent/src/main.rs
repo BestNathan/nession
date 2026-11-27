@@ -24,8 +24,16 @@ fn main() -> Result<()> {
 async fn async_main() -> Result<()> {
     // Loaded before the runtime initializes logging, so a config that cannot be
     // read fails without a log destination to report to — the error goes to the
-    // shell, which is where the operator is.
-    let (config, config_path) = load_config()?;
+    // shell, which is where the operator is — and to the bounded startup capture
+    // so `nession agent logs --source startup` can retrieve it (#4600).
+    let (config, config_path) = load_config().map_err(|error| {
+        let note = nession_common::startup_log::record_or_note(
+            nession_common::logging::LogComponent::Agent,
+            "config",
+            &format!("{error:#}"),
+        );
+        error.context(note)
+    })?;
     // This binary is always started directly — a daemon parent re-execs the CLI,
     // not this — so there is nobody to announce readiness to.
     nession_agent::runtime::run(

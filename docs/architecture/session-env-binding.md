@@ -275,8 +275,8 @@ Only `bash` and `zsh` have adapters in this phase. Both are Session-local:
   (and, matching a login shell, is not sourced unless the profile sources it).
 - **zsh** selects the adapter through `ZDOTDIR`. Wrapper `.zshenv`, `.zprofile`,
   `.zshrc`, `.zlogin` and `.zlogout` source the user's own files (using
-  `$HOME`, or an explicitly configured `ZDOTDIR` preserved as
-  `NESSON_USER_ZDOTDIR`) and install a `precmd` hook in `.zshrc`.
+  `$HOME`, or a validated custom `ZDOTDIR` preserved as
+  `NESSION_RUNTIME_USER_ZDOTDIR`) and install a `precmd` hook in `.zshrc`.
 
 The hook compares the revision file with the shell's last applied revision,
 sources `env-runtime.sh` only when they differ, and writes `shell-revision`.
@@ -286,6 +286,78 @@ no synchronization.
 Any other shell degrades explicitly: Layers A and B still materialize, and the
 observed status is `unsupported_shell` rather than a claim that the current
 shell converged.
+
+### Original zsh configuration provenance (#4605)
+
+The Agent that composes a Session may itself have been launched from a Nession
+Session's shell, so its inherited `ZDOTDIR` can name a *generated adapter*
+rather than user configuration. `EnvManager::resolve_zsh_user_configuration`
+is the one owner that interprets it, once at the canonical producer
+(create and repair):
+
+- An unset or empty `ZDOTDIR` uses the generated wrapper's runtime `$HOME`
+  fallback — the target shell's home, not the Agent service's.
+- A nonempty value is canonicalized (symlinks resolved) and checked against the
+  Agent's configured state root (`<agent>/env-bindings`) and the generated
+  adapter shape (`<root>/<session>/shell/zsh`, identified by the
+  `.nession-adapter` marker or the generated `.zshenv` header that legacy
+  adapters also carry). A path that names a managed adapter is never a user
+  baseline, whether it was inherited directly or through a symlink alias.
+- For managed provenance the producer recovers a validated original directory
+  from the owning Session's durable `binding.json` (`zdotdir_origin`), then
+  from an inherited `NESSION_RUNTIME_USER_ZDOTDIR` / legacy
+  `NESSON_USER_ZDOTDIR` marker. A recovered directory must be absolute and
+  non-managed. When neither source validates, the Session falls back to its
+  own `$HOME` and reports the degradation; it never guesses a custom directory
+  or follows a managed path.
+- A legitimate absolute custom `ZDOTDIR` is preserved. A relative one is
+  refused (it cannot name a stable directory) and degrades to `$HOME`.
+
+The validated directory is delivered as `NESSION_RUNTIME_USER_ZDOTDIR` and
+recorded in the Session's `binding.json`, so a later repair and a Session
+launched from this one recover the same origin instead of the adapter path.
+
+At create time the inherited Agent environment is sanitized at the same
+boundary: a `ZDOTDIR` that names a managed adapter, and both user-marker names,
+are stripped before the Session baseline is composed. Legitimate custom
+`ZDOTDIR`, ordinary user variables, `NESSION_MCP_TOKEN` and other Agent-scoped
+settings are preserved; the existing `NESSION_RUNTIME_*` / `NESSON_*` prefix
+policy still owns the rest. The generated wrapper template never interpolates
+environment values into diagnostics.
+
+Generated zsh wrappers add two defenses in the shell itself:
+
+- a **non-exported per-phase reentrancy guard**, so one process cannot source a
+  phase twice, while a legitimate nested zsh process (a fresh process) still
+  initializes once per applicable phase;
+- **managed-target rejection**: a target directory carrying the adapter marker
+  or the generated `.zshenv` header is refused, and the Session `$HOME` is used
+  instead. One bounded, value-free line identifies the refusal in an
+  interactive process; non-interactive shells stay silent.
+
+### Repair and operator recovery
+
+`apply_binding` repairs a recorded Session's generated zsh adapter and owned
+tmux shell controls (`ZDOTDIR`, the user marker and the adapter's runtime /
+revision paths) before materializing a revision.
+`EnvManager::repair_recorded_zsh_adapters` performs the same repair once at
+Agent startup for recorded Sessions that still exist; a tmux that cannot
+answer skips that pass rather than guessing. Repairs are atomic and idempotent,
+rewrite only recognized generated artifacts, and leave profiles, revisions,
+baselines, instance identities, the tmux global environment and other Sessions
+untouched. A converged adapter writes nothing and reports nothing.
+
+An already-running shell keeps the wrapper functions it loaded at startup; a
+new shell or pane is what picks up a repaired adapter. The binding apply reply
+says this explicitly when a repair changed something. A `binding.json` that
+cannot be read or parsed remains fail-closed as described above; repair never
+treats it as a new Session.
+
+Operator recovery: open a new shell or pane in the affected Session, or restart
+the Agent so the startup repair runs — do not edit generated adapter files. A
+temporary child shell may set an absolute, validated
+`NESSION_RUNTIME_USER_ZDOTDIR` to the user's real configuration directory
+without changing the durable binding.
 
 ## Observed status
 
@@ -317,8 +389,17 @@ convergence status is synthesized from the desired revision alone.
 ## Verification
 
 - `crates/nession-agent/src/tmux/env.rs` unit tests: ordered last-wins merge,
-  reserved-key refusal, baseline restore/unset through a fake tmux, and real
-  bash/zsh prompt convergence with user configuration preserved.
+  reserved-key refusal, baseline restore/unset through a fake tmux, real
+  bash/zsh prompt convergence with user configuration preserved, and the
+  original-zsh provenance rules (custom directory preserved, managed adapter,
+  symlink alias and injected marker refused, durable/inherited origin recovery,
+  inherited-environment sanitization) (#4605).
+- The same module exercises real zsh processes (`zsh_contamination_*`) and real
+  tmux Sessions A/B (`zsh_session_isolation_*`) for cross-Session
+  contamination, wrapper reentrancy, nested shells, repair, restart repair and
+  idempotence. The merged staging Cases for #4605 run those tests on the
+  approved macOS runner with private sockets, disposable homes and bounded
+  waits.
 - `crates/nession-agent/src/tmux/manager.rs` `binding_create_tests`: the
   initial shell sees the binding.
 - `crates/nession-agent/src/tmux/manager.rs` `create_recovery_tests`: a
@@ -351,3 +432,9 @@ Session does not inherit either the old or the new internal environment
 namespace from the Agent daemon; MCP credentials require explicit Session
 binding. Neither running shells nor already-running Claude subprocesses
 receive a retroactive OS environment change.
+
+`ZDOTDIR` and both user-marker names (`NESSION_RUNTIME_USER_ZDOTDIR`, legacy
+`NESSON_USER_ZDOTDIR`) are per-Session shell controls (see *Original zsh
+configuration provenance*): they are reserved against Profiles, stripped from
+an inherited baseline when they name a managed adapter, and repaired only
+within their owning Session.

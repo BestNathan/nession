@@ -23,6 +23,7 @@ import { runCase, selectedCase } from '../acceptance/evaluator/run-case.mjs';
 
 const require = createRequire(import.meta.url);
 const { allocateLoopbackPort, startFullStackRuntime } = require('./runtime/full-stack.js');
+const { createRunRoot } = require('./runtime/test-runtime.js');
 
 export const CASE_ISOLATIONS = Object.freeze(['isolated', 'shared']);
 
@@ -102,20 +103,33 @@ export async function executeAcceptanceBatches({
     let runtime = null;
     try {
       if (batch.shared) {
-        const home = path.join(
-          os.tmpdir(), 'nession-acceptance-batch-' + runId + '-' + runAttempt + '-' + index,
-        );
-        const tmuxSocket = path.join(os.tmpdir(),
-          'nession-acceptance-batch-tmux-' + runId + '-' + runAttempt + '-' + index, 'tmux.sock');
+        // One verified run root per batch, not a fixed name under the shared
+        // temp dir; the real harness fails closed without it (#4597).
+        let runRoot = null;
+        let home;
+        let tmuxSocket;
+        if (runtimeFactory) {
+          home = path.join(
+            os.tmpdir(), 'nession-acceptance-batch-' + runId + '-' + runAttempt + '-' + index,
+          );
+          tmuxSocket = path.join(os.tmpdir(),
+            'nession-acceptance-batch-tmux-' + runId + '-' + runAttempt + '-' + index, 'tmux.sock');
+        } else {
+          const run = createRunRoot('nession-acceptance-batch');
+          runRoot = run.root;
+          home = path.join(run.root, 'home');
+          tmuxSocket = path.join(run.root, 'sockets', 'tmux.sock');
+        }
         const [serverPort, agentPort, stalledProbePort, webPort] = await Promise.all([
           allocateLoopbackPort(), allocateLoopbackPort(),
           allocateLoopbackPort(), allocateLoopbackPort(),
         ]);
         runtime = runtimeFactory
-          ? await runtimeFactory({ profile: batch.profile, home, tmuxSocket })
+          ? await runtimeFactory({ profile: batch.profile, home, tmuxSocket, runRoot })
           : await startFullStackRuntime({
-            repoRoot, targetSha, profile: batch.profile, home, tmuxSocket,
-            serverPort, agentPort, stalledProbePort, webPort, cleanupHome: true,
+            repoRoot, targetSha, profile: batch.profile, runRoot, home, tmuxSocket,
+            serverPort, agentPort, stalledProbePort, webPort,
+            cleanupHome: true, cleanupRoot: true,
           });
         sharedRuntimeCount += 1;
         log('batch ' + index + ': one runtime for ' + batch.cases.length +

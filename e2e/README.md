@@ -99,13 +99,24 @@ target SHA to the Runtime Harness.
 
 `e2e/globalSetup.ts` delegates to
 `e2e/runner/runtime/full-stack.js` and returns its cleanup callback.
-The regression profile in `e2e/runtime.ts` uses loopback ports
-19090 (Server), 19091 (Agent), 19092 (stalled-probe fixture), 4173
-(Web preview), and `NESSION_HOME=/tmp/nession-e2e`.
-Other Case profiles can allocate their own home, ports and socket;
-fixtures are rendered as runtime-specific config.
+Every run owns a short, manifest-backed Test Runtime root
+(`/tmp/nession-e2e.<random>`) created by
+`e2e/runner/runtime/test-runtime.js` (#4597). The regression profile leases a
+free port block (`E2E_SERVER_PORT`, `E2E_AGENT_PORT`,
+`E2E_STALLED_PROBE_PORT`, `E2E_WEB_PORT`) and exports the run-scoped
+`E2E_*_URL`/`E2E_RUN_DIR` constants from `e2e/runtime.ts`; tests must import
+those constants instead of writing fixed ports or `/tmp/nession-e2e`.
+Two independent runs can coexist because neither the root nor the ports are
+fixed. The harness refuses a caller-supplied home/socket outside its verified
+root and removes only verified owned paths during teardown.
+
+The run root also owns `HOME`, `NESION_HOME`, `NESION_RUNTIME_DIR`, `TMPDIR`,
+XDG/tool config roots and git configs. Child processes are built with
+`sanitizedEnv(...)`, not `...process.env`. The full contract is in
+[docs/engineering/test-runtime-isolation.md](../docs/engineering/test-runtime-isolation.md).
 
 ### Agent CLI version under test
+
 
 The full-stack harness is product-neutral: it does not assume a host `claude`
 installation. A caller may pass `agentCliVersions` to
@@ -127,11 +138,10 @@ The interactive CLI launched in a Session still resolves through that shell's
 own startup files; the version selection governs the Agent's probe/plugin
 operations.
 
-Each run carries its own `NESSION_TMUX_SOCKET` and executes tmux with
-`-S <socket>`, never the user's default server. The regression socket is
-`/tmp/nession-e2e-tmux-<hex>/tmux.sock`. **Do not use `TMUX_TMPDIR` as a
-substitute**: tmux can ignore it inside an existing tmux session (#574).
-`scripts/check-tmux-socket.sh` guards the invariant.
+Each run carries its own `NESSION_TMUX_SOCKET` under the run root and executes
+tmux with `-S <socket>`, never the user's default server. **Do not use
+`TMUX_TMPDIR` as a substitute**: tmux can ignore it inside an existing tmux
+session (#574). `scripts/check-tmux-socket.sh` guards the invariant.
 
 Hard-killed runs can leave isolated sockets or tmux servers. Inspect and
 reclaim only verified, owned test directories:
@@ -148,7 +158,7 @@ terminal I/O/attach/replay and UI/capability contracts. The current
 shell-ready helper is **`e2e/helpers/shell.ts` → `waitForShell`**;
 the old `sessionFirst.ts` / `waitForSessionFirst` helper was removed.
 Some browser regression flows use a direct `server_url` query parameter
-(`ws://localhost:19090/ws`) rather than Vite's preview proxy.
+(`E2E_SERVER_URL` from `e2e/runtime.ts`) rather than Vite's preview proxy.
 Terminal output assertions inspect the xterm buffer through the mounted
 `xtermInstance`, since Canvas/WebGL glyphs are not DOM text.
 

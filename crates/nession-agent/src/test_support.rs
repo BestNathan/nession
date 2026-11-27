@@ -379,7 +379,8 @@ pub(crate) const FAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_s
 /// a full-suite run while passing every isolated run).
 #[cfg(unix)]
 pub(crate) fn manager_with_fake(fake: &FakeTmux) -> crate::tmux::manager::SessionManager {
-    let mut mgr = crate::tmux::manager::SessionManager::new();
+    let mut mgr = crate::tmux::manager::SessionManager::new()
+        .with_inherited_shell_environment(Default::default());
     mgr.with_tmux_cmd(fake.dep().cmd());
     mgr.with_timeouts(FAKE_TIMEOUT, FAKE_TIMEOUT, FAKE_TIMEOUT);
     mgr

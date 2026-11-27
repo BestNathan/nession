@@ -15,6 +15,7 @@ import {
   runLine as runFileLinkCommand,
   seedTerminalFiles,
 } from '../../../e2e/acceptance/shared/terminal-file-links.cjs';
+import { E2E_RUN_DIR, E2E_SERVER_PORT } from '../../runtime';
 
 declare global {
   interface Window {
@@ -449,7 +450,7 @@ test('Web: selected row surface, disclosure caret and collapse after opening a f
 test('App: a Terminal file reference opens the pushed Files viewer at its line', async ({ page }) => {
   test.skip(!process.env.CI, 'real stack available in CI only');
   await page.setViewportSize({ width: 390, height: 844 });
-  const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+  const runtime = { server_port: E2E_SERVER_PORT, home: E2E_RUN_DIR };
   seedTerminalFiles(runtime.home);
   await openFileLinkApp(page, expect, runtime, 'e2e-3187-app');
   await runFileLinkCommand(page, expect, 'cd src/deep');
@@ -469,7 +470,7 @@ test('App: a Terminal file reference opens the pushed Files viewer at its line',
 test('App: a relative reference from the filesystem root never falls back into the source root', async ({ page }) => {
   test.skip(!process.env.CI, 'real stack available in CI only');
   await page.setViewportSize({ width: 390, height: 844 });
-  const runtime = { server_port: 19090, home: '/tmp/nession-e2e' };
+  const runtime = { server_port: E2E_SERVER_PORT, home: E2E_RUN_DIR };
   seedTerminalFiles(runtime.home);
   await openFileLinkApp(page, expect, runtime, 'e2e-3414-app');
   await runFileLinkCommand(page, expect, 'cd /');

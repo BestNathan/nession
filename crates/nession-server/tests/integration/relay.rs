@@ -140,7 +140,10 @@ async fn start_agent(
             auth: Arc::new(P2pAuth::new(&agent_token)),
             mutations: Arc::clone(&mutations),
             tmux: Arc::new(SessionManager::new()),
-            session_metadata: Arc::new(SessionMetadataStore::new(Arc::new(SessionManager::new()))),
+            session_metadata: Arc::new(SessionMetadataStore::with_root(
+                Arc::new(SessionManager::new()),
+                tmp.path().join("sessions"),
+            )),
             terminal_cols: nession_common::config::DEFAULT_TERMINAL_COLS,
             handshake_policy: Default::default(),
         },

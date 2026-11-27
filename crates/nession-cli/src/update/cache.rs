@@ -6,7 +6,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Cache TTL: 30 minutes.
 const CACHE_TTL_MINUTES: i64 = 30;
@@ -21,27 +21,39 @@ pub struct UpdateCache {
 }
 
 /// Returns the path to the update-check cache file.
-fn cache_path() -> io::Result<PathBuf> {
+pub(crate) fn cache_path() -> io::Result<PathBuf> {
     nession_common::paths::nession_home().map(|h| h.join("update-check.json"))
 }
 
 /// Read the cached update check result, if it exists and can be parsed.
 pub fn read_cache() -> Option<UpdateCache> {
-    let path = cache_path().ok()?;
-    let data = std::fs::read_to_string(&path).ok()?;
+    read_cache_at(&cache_path().ok()?)
+}
+
+/// [`read_cache`] at an explicit path.
+///
+/// The explicit seam exists so a caller with an owned root (a test, an
+/// isolated install) never has to mutate the process-global `NESSON_HOME` to
+/// keep this cache away from the developer's live file (#4597 F10).
+pub fn read_cache_at(path: &Path) -> Option<UpdateCache> {
+    let data = std::fs::read_to_string(path).ok()?;
     serde_json::from_str::<UpdateCache>(&data).ok()
 }
 
 /// Write the update check result to the cache file.
 /// Creates the ~/.nession directory if it doesn't exist.
 pub fn write_cache(cache: &UpdateCache) -> io::Result<()> {
-    let path = cache_path()?;
+    write_cache_at(&cache_path()?, cache)
+}
+
+/// [`write_cache`] at an explicit path.
+pub fn write_cache_at(path: &Path, cache: &UpdateCache) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
     let data = serde_json::to_string_pretty(cache)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    std::fs::write(&path, data)
+    std::fs::write(path, data)
 }
 
 /// Return true if the cached result is still fresh (within TTL).
@@ -55,21 +67,6 @@ pub fn is_cache_fresh(checked_at: &DateTime<Utc>) -> bool {
 mod tests {
     use super::*;
     use chrono::Duration;
-    use std::sync::Mutex;
-
-    /// Serialize cache-file tests and isolate them behind a temp `NESSIONS_HOME`.
-    /// `cache_path()` resolves to `~/.nession/update-check.json` (a fixed global
-    /// path), so `roundtrip_write_read` and `read_cache_file_not_exists` race and
-    /// pollute the real cache file when run in parallel. `set_var`/`remove_var`
-    /// are process-global, hence the mutex.
-    static ENV_MUTEX: Mutex<()> = Mutex::new(());
-
-    fn isolated_home() -> std::path::PathBuf {
-        let tmp = std::env::temp_dir().join(format!("nession-cache-test-{}", std::process::id()));
-        std::env::set_var("NESSION_HOME", tmp.to_string_lossy().as_ref());
-        std::fs::create_dir_all(&tmp).ok();
-        tmp
-    }
 
     #[test]
     fn fresh_within_ttl() {
@@ -97,31 +94,27 @@ mod tests {
 
     #[test]
     fn roundtrip_write_read() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let tmp = isolated_home();
+        // Explicit path: no process-global NESSION_HOME mutation, so this test
+        // can run in parallel with every other test in the binary (#4597 F10).
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update-check.json");
         let cache = UpdateCache {
             checked_at: Utc::now(),
             latest_version: "0.5.0".into(),
             current_version: "0.4.2".into(),
             update_available: true,
         };
-        write_cache(&cache).unwrap();
-        let read = read_cache().unwrap();
+        write_cache_at(&path, &cache).unwrap();
+        let read = read_cache_at(&path).unwrap();
         assert_eq!(read.latest_version, "0.5.0");
         assert_eq!(read.current_version, "0.4.2");
         assert!(read.update_available);
-        std::env::remove_var("NESSION_HOME");
-        let _ = std::fs::remove_dir_all(&tmp);
     }
 
     #[test]
     fn read_cache_file_not_exists() {
-        let _guard = ENV_MUTEX.lock().unwrap();
-        let tmp = isolated_home();
-        let path = cache_path().unwrap();
-        let _ = std::fs::remove_file(&path);
-        assert!(read_cache().is_none());
-        std::env::remove_var("NESSION_HOME");
-        let _ = std::fs::remove_dir_all(&tmp);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("update-check.json");
+        assert!(read_cache_at(&path).is_none());
     }
 }

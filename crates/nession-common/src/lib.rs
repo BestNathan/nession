@@ -9,7 +9,9 @@ pub mod paths;
 pub mod readiness;
 pub mod session_activity;
 pub mod session_env;
+pub mod startup_log;
 pub mod system;
+pub mod test_runtime;
 pub mod tmux_socket;
 
 pub use error::{NessionError, Result};

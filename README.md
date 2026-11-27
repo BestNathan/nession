@@ -174,6 +174,36 @@ config file uses `127.0.0.1:8080`; the standalone `nession-server` binary has
 the same no-file fallback. The two daemons' defaults are separate from the
 remote CLI target below.
 
+### Logs and diagnostics
+
+Both daemons write rolling local logs; no Server connection, credential or
+running daemon is needed to read them:
+
+```bash
+nession agent logs                 # last 100 runtime records
+nession server logs -n 500         # last 500 after filtering
+nession agent logs -f              # tail, then follow appends (Ctrl-C stops only the reader)
+nession server logs --since 1h --level warn
+nession agent logs --target nession_agent::ws -n 50
+nession agent logs --path          # resolved file locations, no content
+nession agent logs --source startup   # bounded startup diagnostics
+nession agent logs --source service   # systemd user journal / launchd capture (Agent)
+```
+
+The root is `$NESSION_HOME` (default `~/.nession`):
+`agent/logs/nession-agent[.YYYY-MM-DD[.HH]]`, `server/logs/nession-server…`,
+plus `agent|server/logs/startup/` for startup diagnostics. `--source service`
+is Agent-only; the Server has no managed service in this CLI. Filters are
+applied before `--tail`, and `--level`/`--target` apply only to runtime
+records (raw startup/service text is never assigned a severity or target).
+`-n 0` prints nothing. `--since` accepts a duration (`30m`, `1h30m`, `2d`) or
+an RFC3339 timestamp with an offset; `--until` is RFC3339 and ends a
+follow at the cutoff. A selected archive release (`nession +<version> …`)
+reads its own home; a release that predates these commands is read directly by
+the Current CLI. See
+[docs/architecture/cli-logs.md](docs/architecture/cli-logs.md) for selection,
+retention and platform details.
+
 ### Configuration files
 
 The same selection is available to the config commands, so `config set` edits

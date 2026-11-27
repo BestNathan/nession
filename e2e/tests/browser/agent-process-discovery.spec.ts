@@ -7,6 +7,7 @@ import {
   submitTerminalCommand,
   waitForInteractiveShell,
 } from '../../helpers/terminalRegression';
+import { E2E_SERVER_URL } from '../../runtime';
 
 /**
  * Agent Workspace process discovery (#2514).
@@ -24,7 +25,7 @@ test.describe('Agent process discovery', () => {
   test.use({ permissions: ['clipboard-read', 'clipboard-write'] });
 
   test.beforeEach(async ({ page }) => {
-    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent('ws://localhost:19090/ws'));
+    await page.goto('/?token=e2e-test-token&server_url=' + encodeURIComponent(E2E_SERVER_URL));
     await waitForShell(page);
   });
 

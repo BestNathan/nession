@@ -2324,7 +2324,8 @@ mod tests {
     #[tokio::test]
     async fn restart_survival() {
         // Use a temp file so we can "restart" by opening a new Database.
-        let path = format!("/tmp/nession_test_restart_{}.db", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("restart.db").to_string_lossy().into_owned();
         let env_created_at;
 
         // ── First session ────────────────────────────────────────
@@ -2404,7 +2405,8 @@ mod tests {
         // Craft a DB file with the old ad-hoc schema (agents table missing
         // display_name, connect_url, addresses) and verify the SeaORM
         // migration upgrades it.
-        let path = format!("/tmp/nession_test_migrate_{}.db", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("migrate.db").to_string_lossy().into_owned();
 
         // Create a DB with the minimal old schema using a bare connection
         // (no migrations run).
@@ -2599,7 +2601,12 @@ mod tests {
     /// legacy Session (which has no project association) remains valid.
     #[tokio::test]
     async fn project_state_survives_restart_without_reassigning_identity() {
-        let path = format!("/tmp/nession_test_projects_{}.db", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("projects.db")
+            .to_string_lossy()
+            .into_owned();
         let project_id = "project-123e4567-e89b-42d3-a456-426614174000".to_owned();
         let image_digest = format!("sha256:{}", "b".repeat(64));
 
@@ -2654,7 +2661,8 @@ mod tests {
 
     #[tokio::test]
     async fn session_project_binding_round_trips_across_restart() {
-        let path = format!("/tmp/nession_test_binding_{}.db", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("binding.db").to_string_lossy().into_owned();
         let project_id = "project-123e4567-e89b-42d3-a456-426614174000";
         let binding = binding_row("a1:sess1", project_id, 1_700_000_000);
 
@@ -2926,7 +2934,12 @@ mod tests {
     /// A file-backed database pair: SQLite's writer lock is then real between
     /// them, unlike two handles onto one `:memory:` database.
     async fn file_db_pair() -> (Database, Database, String) {
-        let path = format!("/tmp/nession_test_binding_cas_{}.db", uuid::Uuid::new_v4());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir
+            .path()
+            .join("binding_cas.db")
+            .to_string_lossy()
+            .into_owned();
         let first = Database::new(&path).await.unwrap();
         let second = Database::new(&path).await.unwrap();
         (first, second, path)

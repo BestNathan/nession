@@ -257,52 +257,53 @@ async fn download_to_file_with_mock_server() {
 async fn background_check_all_scenarios() {
     use chrono::{Duration, Utc};
     use nession_cli::update::cache::{self, UpdateCache};
+    use nession_cli::update::check::background_check_at;
+    use nession_cli::update::github::GitHubReleaseClient;
 
-    // Point NESSION_HOME at a temp dir before touching the cache. Without it
-    // `nession_home()` resolves to $HOME/.nession, so this test deleted and
-    // overwrote the developer's real update-check.json — and two concurrent
-    // runs overwrote each other's, which is how the concurrency check caught it.
-    let home = tempfile::tempdir().unwrap();
-    std::env::set_var(nession_common::paths::NESSION_HOME_ENV, home.path());
-
-    let cache_path = nession_common::paths::nession_home()
-        .unwrap()
-        .join("update-check.json");
+    // Explicit cache path and clients: no process-global NESION_HOME or
+    // NESION_UPDATE_API_URL mutation, so this test cannot touch the
+    // developer's live cache or race another test in this binary (#4597 F10).
+    let dir = tempfile::tempdir().unwrap();
+    let cache_path = dir.path().join("update-check.json");
     let _ = std::fs::remove_file(&cache_path);
 
     // Scenario 1: Fresh cache with update available
-    cache::write_cache(&UpdateCache {
-        checked_at: Utc::now(),
-        latest_version: "0.5.0".into(),
-        current_version: env!("CARGO_PKG_VERSION").into(),
-        update_available: true,
-    })
+    cache::write_cache_at(
+        &cache_path,
+        &UpdateCache {
+            checked_at: Utc::now(),
+            latest_version: "0.5.0".into(),
+            current_version: env!("CARGO_PKG_VERSION").into(),
+            update_available: true,
+        },
+    )
     .unwrap();
-    let msg = nession_cli::update::check::background_check()
+    let msg = background_check_at(Some(&cache_path), None)
         .await
         .expect("fresh cache should return update message");
     assert!(msg.contains("Update available"));
     assert!(msg.contains("0.5.0"));
 
-    // Scenario 2: Stale cache, network failure → returns None
-    // Use an invalid URL to simulate network failure (connection refused)
-    std::env::set_var("NESSION_UPDATE_API_URL", "http://127.0.0.1:1");
-    cache::write_cache(&UpdateCache {
-        checked_at: Utc::now() - Duration::minutes(60),
-        latest_version: "0.6.0".into(),
-        current_version: env!("CARGO_PKG_VERSION").into(),
-        update_available: true,
-    })
+    // Scenario 2: Stale cache, network failure -> returns None
+    cache::write_cache_at(
+        &cache_path,
+        &UpdateCache {
+            checked_at: Utc::now() - Duration::minutes(60),
+            latest_version: "0.6.0".into(),
+            current_version: env!("CARGO_PKG_VERSION").into(),
+            update_available: true,
+        },
+    )
     .unwrap();
+    let refused = GitHubReleaseClient::with_base_url("http://127.0.0.1:1".to_string()).unwrap();
     assert!(
-        nession_cli::update::check::background_check()
+        background_check_at(Some(&cache_path), Some(refused))
             .await
             .is_none(),
         "stale cache + network failure should return None"
     );
-    std::env::remove_var("NESSION_UPDATE_API_URL");
 
-    // Scenario 3: Mock API, stale cache → fetches latest
+    // Scenario 3: Mock API, stale cache -> fetches latest
     let server = Server::run();
     server.expect(
         Expectation::matching(request::method("GET")).respond_with(
@@ -310,40 +311,46 @@ async fn background_check_all_scenarios() {
                 .body(json!({"tag_name":"v99.99.99","prerelease":false,"assets":[]}).to_string()),
         ),
     );
-    cache::write_cache(&UpdateCache {
-        checked_at: Utc::now() - Duration::minutes(60),
-        latest_version: "0.1.0".into(),
-        current_version: env!("CARGO_PKG_VERSION").into(),
-        update_available: false,
-    })
+    cache::write_cache_at(
+        &cache_path,
+        &UpdateCache {
+            checked_at: Utc::now() - Duration::minutes(60),
+            latest_version: "0.1.0".into(),
+            current_version: env!("CARGO_PKG_VERSION").into(),
+            update_available: false,
+        },
+    )
     .unwrap();
     // Trim trailing slash so releases_url() appends cleanly.
     let api_url = server.url("/").to_string();
-    let api_url = api_url.strip_suffix('/').unwrap_or(&api_url);
-    std::env::set_var("NESSION_UPDATE_API_URL", api_url);
-    let msg = nession_cli::update::check::background_check()
+    let api_url = api_url.strip_suffix('/').unwrap_or(&api_url).to_string();
+    let client = GitHubReleaseClient::with_base_url(api_url).unwrap();
+    let msg = background_check_at(Some(&cache_path), Some(client))
         .await
         .expect("mock API should return update available");
-    std::env::remove_var("NESSION_UPDATE_API_URL");
     assert!(msg.contains("Update available"));
     assert!(msg.contains("99.99.99"));
-
-    // Scenario 4: Fresh cache with no update → returns None
-    cache::write_cache(&UpdateCache {
-        checked_at: Utc::now(),
-        latest_version: "0.4.2".into(),
-        current_version: env!("CARGO_PKG_VERSION").into(),
-        update_available: false,
-    })
-    .unwrap();
-    assert!(
-        nession_cli::update::check::background_check()
-            .await
-            .is_none(),
-        "fresh cache with no update should return None"
+    assert_eq!(
+        cache::read_cache_at(&cache_path).unwrap().latest_version,
+        "99.99.99",
+        "the explicit cache path must receive the fetched result"
     );
 
-    let _ = std::fs::remove_file(&cache_path);
+    // Scenario 4: Fresh cache with no update -> returns None
+    cache::write_cache_at(
+        &cache_path,
+        &UpdateCache {
+            checked_at: Utc::now(),
+            latest_version: "0.4.2".into(),
+            current_version: env!("CARGO_PKG_VERSION").into(),
+            update_available: false,
+        },
+    )
+    .unwrap();
+    assert!(
+        background_check_at(Some(&cache_path), None).await.is_none(),
+        "fresh cache with no update should return None"
+    );
 }
 
 #[tokio::test]
