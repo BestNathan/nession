@@ -267,6 +267,22 @@ info "Version  : ${TAG}"
 info "Binaries : $(echo "$SELECTED" | tr ' ' ',')"
 info "Install  : ${INSTALL_DIR}"
 
+# ── Read-only live-process preflight (before the large transfer) ────────────
+# A first safe upgrade refuses a live Agent/Server. Probe through the existing
+# CLI's read-only status — never its mutating install/update — so a proven live
+# writer is refused before spending the asset download (#4660 Fix Direction 5).
+# An inconclusive probe (an older CLI without a recognizable status) defers to
+# the target transaction's authoritative recheck under the lifecycle lock; this
+# preflight never stops or restarts a service.
+if [ "$MIGRATE" = 1 ]; then
+  for component in agent server; do
+    probe="$("$EXISTING_CLI" "$component" status 2>/dev/null || true)"
+    if printf '%s\n' "$probe" | grep -Eq 'Status:[[:space:]]*running|is running \(PID'; then
+      die "a live ${component} was detected before download; stop it first (nession ${component} stop), then re-run. Nession never stops a service implicitly."
+    fi
+  done
+fi
+
 # ── Download, verify and extract ────────────────────────────────────────────
 TMP=$(mktemp -d 2>/dev/null || mktemp -d -t nession)
 STAGE=""
@@ -317,57 +333,48 @@ if [ "$MIGRATE" = 1 ]; then
   # The transaction names the archive with the normalized SemVer; tolerate an
   # older CLI that prints a `v` prefix.
   OLD_VERSION="${OLD_VERSION#v}"
-  OLD_HOME="${NESSION_HOME:-$HOME/.nession}"
-  HAD_AGENT_CONFIG=0; [ -f "$OLD_HOME/agent-config.toml" ] && HAD_AGENT_CONFIG=1
-  HAD_SERVER_CONFIG=0; [ -f "$OLD_HOME/server-config.toml" ] && HAD_SERVER_CONFIG=1
-  HAD_AGENT_DIR=0;    [ -d "$OLD_HOME/agent" ] && HAD_AGENT_DIR=1
-  HAD_SERVER_DIR=0;   [ -d "$OLD_HOME/server" ] && HAD_SERVER_DIR=1
 
   info "Upgrading the installation at ${INSTALL_DIR} (release ${OLD_VERSION:-unknown}) through the verified target transaction…"
-  # The target CLI refuses while an Agent/Server is live and restores the old
-  # installation if any step fails. It never stops a daemon implicitly.
-  NESSION_INSTALL_DIR="$INSTALL_DIR" "$TMP/nession" install "$VER" --yes \
-    || die "first safe upgrade failed; the retention transaction restored the previous installation"
+  # The shell is bootstrap only (#4660 Fix Direction 1). It hands the verified
+  # staged artifact to the canonical target installer — downloaded once, never
+  # re-downloaded — and consumes the target's authoritative versioned result.
+  # It never infers completeness from directory existence and never asserts a
+  # rollback merely because the subprocess exited nonzero. The target CLI owns
+  # the transaction outcome (committed/unchanged/rolled-back/recovery-blocked),
+  # refuses a live writer under the lifecycle lock, and never stops a daemon.
+  INSTALL_OUTPUT="$(NESSION_INSTALL_DIR="$INSTALL_DIR" "$TMP/nession" install "$VER" --yes \
+    --local-artifact "$TMP/$ASSET" --artifact-sha256 "$EXPECTED" 2>&1)" \
+    && INSTALL_STATUS=0 || INSTALL_STATUS=$?
+  printf '%s\n' "$INSTALL_OUTPUT"
 
-  for b in $ALL_BINS; do
-    [ -f "$INSTALL_DIR/$b" ] || die "the upgrade did not install '$b'"
-    cmp -s "$TMP/$b" "$INSTALL_DIR/$b" \
-      || die "installed '$b' does not match the verified downloaded release"
-  done
-
-  # Retention (#4592 SC-01): Current keeps its configuration and durable state
-  # at the same paths; the archive holds independent copies, never a rename.
-  [ "$HAD_AGENT_CONFIG" = 0 ]  || [ -f "$OLD_HOME/agent-config.toml" ] \
-    || die "the upgrade removed Current's agent config; retention was violated"
-  [ "$HAD_SERVER_CONFIG" = 0 ] || [ -f "$OLD_HOME/server-config.toml" ] \
-    || die "the upgrade removed Current's server config; retention was violated"
-  [ "$HAD_AGENT_DIR" = 0 ]     || [ -d "$OLD_HOME/agent" ] \
-    || die "the upgrade removed Current's agent state; retention was violated"
-  [ "$HAD_SERVER_DIR" = 0 ]    || [ -d "$OLD_HOME/server" ] \
-    || die "the upgrade removed Current's server state; retention was violated"
-
-  if [ -n "$OLD_VERSION" ] && [ "$OLD_VERSION" != "$VER" ]; then
-    ARCHIVED="$OLD_HOME/versions/$OLD_VERSION"
-    [ -x "$ARCHIVED/bin/nession" ] \
-      || die "the previous release was not archived at ${ARCHIVED}; refusing to report success"
-    for b in $ALL_BINS; do
-      [ -f "$ARCHIVED/bin/$b" ] || die "the archived release is missing '$b'"
-    done
-    [ -f "$ARCHIVED/manifest.json" ] \
-      || die "the archive has no coverage manifest; refusing to report an unproven snapshot"
-    [ "$HAD_AGENT_CONFIG" = 0 ]  || [ -f "$ARCHIVED/agent-config.toml" ] \
-      || die "the previous agent config was not copied into the archive"
-    [ "$HAD_SERVER_CONFIG" = 0 ] || [ -f "$ARCHIVED/server-config.toml" ] \
-      || die "the previous server config was not copied into the archive"
-    [ "$HAD_AGENT_DIR" = 0 ]     || [ -d "$ARCHIVED/agent" ] \
-      || die "the previous agent state was not snapshotted into the archive"
-    [ "$HAD_SERVER_DIR" = 0 ]    || [ -d "$ARCHIVED/server" ] \
-      || die "the previous server state was not snapshotted into the archive"
-    info "Previous release archived at ${C_DIM}${ARCHIVED}${C_RST}"
+  RESULT_LINE="$(printf '%s\n' "$INSTALL_OUTPUT" | grep '^nession-install-result-v1 ' | tail -1 || true)"
+  if [ -n "$RESULT_LINE" ]; then
+    OUTCOME="$(printf '%s\n' "$RESULT_LINE" | sed -n 's/.* outcome=\([a-z-]*\).*/\1/p')"
+    RESULT="$(printf '%s\n' "$RESULT_LINE" | sed -n 's/.* result=\([a-z]*\).*/\1/p')"
+    COVERAGE="$(printf '%s\n' "$RESULT_LINE" | sed -n 's/.* coverage=\([a-z]*\).*/\1/p')"
+    if [ "$RESULT" = ok ]; then
+      info "Upgrade ${OUTCOME}: Current is release ${VER}."
+      if [ "$COVERAGE" = gaps ] && [ -n "$OLD_VERSION" ]; then
+        warn "the archive has non-fatal coverage gaps; inspect with \`nession version inspect ${OLD_VERSION}\`. Current is committed and intact."
+      fi
+      info "Done. Run ${C_DIM}nession --help${C_RST} to get started."
+      exit 0
+    fi
+    # A failed result reports the proven Current state truthfully; the shell
+    # does not retry destructively or claim a rollback the target did not prove.
+    die "the upgrade did not commit (Current: ${OUTCOME:-unknown}); see the transaction output above. Inspect with \`nession version list\` before retrying."
   fi
 
-  info "Done. Run ${C_DIM}nession --help${C_RST} to get started."
-  exit 0
+  # An older upgrade-v1 target predates the result line. Report its exit status
+  # truthfully without inferring archive completeness from directories or
+  # asserting a rollback from a nonzero exit (#4660). The target's own output
+  # above is authoritative; the manifest owns coverage.
+  if [ "$INSTALL_STATUS" = 0 ]; then
+    info "The verified target release ${VER} reported success."
+    info "Done. Run ${C_DIM}nession --help${C_RST} to get started."
+    exit 0
+  fi
+  die "the target install exited ${INSTALL_STATUS}; its output above is authoritative. Current's state was not inferred — inspect with \`nession version list\` before retrying."
 fi
 
 # ── Fresh bootstrap ─────────────────────────────────────────────────────────

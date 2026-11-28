@@ -21,7 +21,13 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 /// Manifest schema written into every new archive.
-pub const MANIFEST_SCHEMA: u32 = 1;
+///
+/// Schema 2 (#4660) replaces the flat `gaps` list with typed `coverage` entries
+/// so policy exclusions, provably-empty references and absent components are
+/// distinguished from genuine missing state. Schema-1 archives are still read
+/// conservatively by [`crate::versions::archive_state_coverage`]; they are never
+/// rewritten or silently promoted to proven.
+pub const MANIFEST_SCHEMA: u32 = 2;
 pub const MANIFEST_FILE: &str = "manifest.json";
 
 /// Agent-owned durable subdirectories snapshotted beside the identity file.
@@ -37,6 +43,95 @@ const EXCLUDED_ROOTS: [&str; 6] = [
     ".install-transaction.json.tmp",
     "erofs",
 ];
+
+/// The Agent's durable inbound credential file beside `agent-config.toml`
+/// (owned by `nession-agent/src/token.rs`, #3440). It is a non-regenerable
+/// secret bound to the Agent identity, so it is captured privately — never
+/// treated as an unknown root and never exposed in diagnostics.
+const AGENT_TOKEN_FILE: &str = "agent-config.token";
+
+/// How one inventory entry is covered by the archive (#4660 Fix Direction 2).
+///
+/// The classes separate *intentional* omission from *unproven* state so a
+/// policy exclusion or a provably-empty store can never masquerade as a missing
+/// required snapshot, while a failed required capture or an unknown durable root
+/// still fails closed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageClass {
+    /// An independent copy was captured and digest-verified.
+    Captured,
+    /// The component/data is absent by design (e.g. no Server DB on an
+    /// Agent-only installation); there is nothing to snapshot.
+    NotApplicable,
+    /// Intentional policy exclusion: logs, runtime files, reproducible build
+    /// workspace, regenerable shell caches, redundant config backups. Retained
+    /// in place; never required runtime state.
+    Excluded,
+    /// A content-addressed store referenced in place, not copied. An empty
+    /// store is safe (nothing to lose); a nonempty store needs verified
+    /// independent ownership or pin/retention before historical execution.
+    Referenced,
+    /// A required capture failed (e.g. the SQLite backup). A genuine gap.
+    Missing,
+    /// An unknown durable root or unproven ownership. Preserved in place;
+    /// historical execution that could touch it fails closed.
+    Unknown,
+}
+
+/// Which component's required state an entry belongs to (#4660 Fix Direction 3).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CoverageComponent {
+    Agent,
+    Server,
+    /// A shared resource (content-addressed store) both components may touch.
+    Shared,
+}
+
+/// One typed coverage record in the manifest.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct CoverageEntry {
+    /// Relative entry path, or a named category for a whole omitted class.
+    pub path: String,
+    pub class: CoverageClass,
+    pub component: CoverageComponent,
+    /// Non-secret explanation (never config/credential text).
+    pub detail: String,
+}
+
+impl CoverageEntry {
+    pub fn new(
+        path: impl Into<String>,
+        class: CoverageClass,
+        component: CoverageComponent,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            class,
+            component,
+            detail: detail.into(),
+        }
+    }
+
+    /// Whether this entry blocks historical execution of `component`.
+    ///
+    /// Exclusions and provably-empty references never block. A nonempty
+    /// referenced store is unsafe until pinned/owned (never assumed safe).
+    /// Missing/unknown state blocks its owner; unknown shared state blocks both.
+    pub fn blocks(&self, component: CoverageComponent, referenced_nonempty: bool) -> bool {
+        match self.class {
+            CoverageClass::Captured | CoverageClass::NotApplicable | CoverageClass::Excluded => {
+                false
+            }
+            CoverageClass::Referenced => referenced_nonempty,
+            CoverageClass::Missing | CoverageClass::Unknown => {
+                self.component == component || self.component == CoverageComponent::Shared
+            }
+        }
+    }
+}
 
 /// One independent copy in the snapshot plan, relative to the home.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -75,7 +170,13 @@ pub struct Manifest {
     pub state: BTreeMap<String, String>,
     /// Content-addressed stores referenced but not copied.
     pub references: Vec<CasReference>,
-    /// Honest coverage gaps (omitted caches, unknown roots, failed snapshots).
+    /// Typed coverage records (schema 2). Empty on legacy schema-1 archives,
+    /// which are classified conservatively from `state_complete`/`gaps`.
+    #[serde(default)]
+    pub coverage: Vec<CoverageEntry>,
+    /// Honest coverage gaps. Schema 2 keeps only genuine missing/unknown state
+    /// here for display compatibility; schema 1 mixed exclusions into this list.
+    #[serde(default)]
     pub gaps: Vec<String>,
     /// External mutable paths the archived config still declares.
     pub external_dependencies: Vec<String>,
@@ -95,8 +196,19 @@ pub struct ConfigCoverage {
 pub struct SnapshotPlan {
     pub copies: Vec<CopyEntry>,
     pub references: Vec<CasReference>,
-    pub gaps: Vec<String>,
+    /// Typed coverage for every inventory entry (schema 2).
+    pub coverage: Vec<CoverageEntry>,
     pub estimated_bytes: u64,
+}
+
+impl SnapshotPlan {
+    /// Whether a referenced store path holds any entries (nonempty CAS needs
+    /// pin/retention before it is safe for historical execution).
+    pub fn reference_nonempty(&self, relative: &str) -> bool {
+        self.references
+            .iter()
+            .any(|r| r.relative == relative && r.entries > 0)
+    }
 }
 
 /// Inventory the home and build the snapshot plan.
@@ -123,8 +235,13 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
     let mut plan = SnapshotPlan::default();
     let mut estimated = 0u64;
 
-    // Configs: independent byte copies.
-    for name in ["agent-config.toml", "server-config.toml"] {
+    // Configs: independent byte copies. An absent config is not-applicable for
+    // its component (e.g. an Agent-only installation has no server config),
+    // never a missing snapshot.
+    for (name, component) in [
+        ("agent-config.toml", CoverageComponent::Agent),
+        ("server-config.toml", CoverageComponent::Server),
+    ] {
         let path = home.join(name);
         if path.is_file() {
             estimated += file_len(&path);
@@ -132,7 +249,39 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
                 relative: PathBuf::from(name),
                 kind: CopyKind::File,
             });
+            plan.coverage.push(CoverageEntry::new(
+                name,
+                CoverageClass::Captured,
+                component,
+                "independent byte copy of the retained config",
+            ));
+        } else {
+            plan.coverage.push(CoverageEntry::new(
+                name,
+                CoverageClass::NotApplicable,
+                component,
+                "no such config at Current; the component is not configured",
+            ));
         }
+    }
+
+    // The Agent's durable inbound credential (#3440, nession-agent/token.rs).
+    // Provenance is known: a non-regenerable secret bound to the Agent identity.
+    // Capture it privately so the archive preserves the credential pairing; it
+    // is never an unknown root and its value never enters diagnostics.
+    let token = home.join(AGENT_TOKEN_FILE);
+    if token.is_file() {
+        estimated += file_len(&token);
+        plan.copies.push(CopyEntry {
+            relative: PathBuf::from(AGENT_TOKEN_FILE),
+            kind: CopyKind::File,
+        });
+        plan.coverage.push(CoverageEntry::new(
+            AGENT_TOKEN_FILE,
+            CoverageClass::Captured,
+            CoverageComponent::Agent,
+            "Agent inbound credential captured privately (owner: nession-agent token.rs)",
+        ));
     }
 
     // Agent identity + owned metadata subsets.
@@ -145,6 +294,12 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
                 relative: PathBuf::from("agent/identity"),
                 kind: CopyKind::File,
             });
+            plan.coverage.push(CoverageEntry::new(
+                "agent/identity",
+                CoverageClass::Captured,
+                CoverageComponent::Agent,
+                "independent copy of the Agent identity",
+            ));
         }
         for dir in AGENT_SNAPSHOT_DIRS {
             let root = agent.join(dir);
@@ -153,11 +308,20 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
             }
         }
         // Everything else under agent/ (logs, pid files, sockets, unknown
-        // records) is preserved in place; name the omitted categories once.
-        plan.gaps.push(
-            "agent/logs and runtime files: retained in place, not snapshotted (retention policy)"
-                .to_string(),
-        );
+        // records) is preserved in place; an intentional policy exclusion.
+        plan.coverage.push(CoverageEntry::new(
+            "agent/logs+runtime",
+            CoverageClass::Excluded,
+            CoverageComponent::Agent,
+            "logs and runtime files retained in place, not required runtime state",
+        ));
+    } else {
+        plan.coverage.push(CoverageEntry::new(
+            "agent",
+            CoverageClass::NotApplicable,
+            CoverageComponent::Agent,
+            "no Agent state directory at Current",
+        ));
     }
 
     // Server database (consistent backup) + owned env records.
@@ -170,6 +334,20 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
                 relative: PathBuf::from("server/server.db"),
                 kind: CopyKind::SqliteBackup,
             });
+            // The capture reports Captured/Missing once the backup runs.
+            plan.coverage.push(CoverageEntry::new(
+                "server/server.db",
+                CoverageClass::Captured,
+                CoverageComponent::Server,
+                "consistent SQLite backup (WAL accounted for)",
+            ));
+        } else {
+            plan.coverage.push(CoverageEntry::new(
+                "server/server.db",
+                CoverageClass::NotApplicable,
+                CoverageComponent::Server,
+                "no Server database at Current; nothing to snapshot",
+            ));
         }
         for dir in SERVER_SNAPSHOT_DIRS {
             let root = server.join(dir);
@@ -177,59 +355,132 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
                 collect_tree(home, &root, &mut plan, &mut estimated)?;
             }
         }
-        // Image blob store: content-addressed, referenced not copied.
+        // Image blob store: content-addressed, referenced not copied. An empty
+        // store is safe; a nonempty one needs pin/retention (never assumed safe).
         let blobs = server.join("images").join("blobs");
         if blobs.is_dir() {
-            plan.references.push(cas_reference(home, &blobs));
-            plan.gaps.push(
-                "server/images/blobs: content-addressed store referenced in place, not copied; \
-                 archive history is incomplete after a Current GC sweep unless pinned"
-                    .to_string(),
-            );
+            let reference = cas_reference(home, &blobs);
+            let detail = if reference.entries == 0 {
+                "empty content-addressed store referenced in place; nothing to lose"
+            } else {
+                "nonempty content-addressed store referenced in place; requires pin/retention \
+                 or verified independent ownership before historical execution"
+            };
+            plan.coverage.push(CoverageEntry::new(
+                "server/images/blobs",
+                CoverageClass::Referenced,
+                CoverageComponent::Server,
+                detail,
+            ));
+            plan.references.push(reference);
         }
         let build = server.join("images").join("build");
         if build.is_dir() {
-            plan.gaps.push(
-                "server/images/build: reproducible build workspace, not snapshotted".to_string(),
-            );
+            plan.coverage.push(CoverageEntry::new(
+                "server/images/build",
+                CoverageClass::Excluded,
+                CoverageComponent::Server,
+                "reproducible build workspace retained in place, not required runtime state",
+            ));
         }
-        plan.gaps.push(
-            "server/logs and runtime files: retained in place, not snapshotted (retention policy)"
-                .to_string(),
-        );
+        plan.coverage.push(CoverageEntry::new(
+            "server/logs+runtime",
+            CoverageClass::Excluded,
+            CoverageComponent::Server,
+            "logs and runtime files retained in place, not required runtime state",
+        ));
+    } else {
+        plan.coverage.push(CoverageEntry::new(
+            "server",
+            CoverageClass::NotApplicable,
+            CoverageComponent::Server,
+            "no Server state directory at Current",
+        ));
     }
 
     // Agent EROFS CAS (default root): referenced, never duplicated.
     let erofs = home.join("erofs");
     if erofs.is_dir() {
-        plan.references.push(cas_reference(home, &erofs));
-        plan.gaps.push(
-            "erofs: content-addressed store referenced in place, not copied; archive history is \
-             incomplete after a Current GC sweep unless pinned"
-                .to_string(),
-        );
+        let reference = cas_reference(home, &erofs);
+        let detail = if reference.entries == 0 {
+            "empty content-addressed store referenced in place; nothing to lose"
+        } else {
+            "nonempty content-addressed store referenced in place; requires pin/retention \
+             or verified independent ownership before historical execution"
+        };
+        plan.coverage.push(CoverageEntry::new(
+            "erofs",
+            CoverageClass::Referenced,
+            CoverageComponent::Shared,
+            detail,
+        ));
+        plan.references.push(reference);
     }
 
-    // Unknown top-level durable entries: preserve in place, surface the gap.
+    // Remaining top-level entries: classify by proven ownership/shape. Known
+    // reproducible caches and redundant config backups are intentional
+    // exclusions (retained in place); genuinely unknown durable roots are
+    // preserved and surfaced as unproven, never blanket-copied or deleted.
     if let Ok(entries) = fs::read_dir(home) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
             if EXCLUDED_ROOTS.contains(&name.as_str())
                 || name == "agent-config.toml"
                 || name == "server-config.toml"
+                || name == AGENT_TOKEN_FILE
                 || name == "agent"
                 || name == "server"
             {
                 continue;
             }
-            plan.gaps.push(format!(
-                "{name}: unknown durable entry preserved in place, not snapshotted"
-            ));
+            if is_config_backup(&name) {
+                plan.coverage.push(CoverageEntry::new(
+                    name,
+                    CoverageClass::Excluded,
+                    CoverageComponent::Agent,
+                    "redundant config backup retained in place; the live config is captured",
+                ));
+            } else if is_regenerable_shell_cache(&name) {
+                plan.coverage.push(CoverageEntry::new(
+                    name,
+                    CoverageClass::Excluded,
+                    CoverageComponent::Shared,
+                    "regenerable zsh completion/word-code cache retained in place",
+                ));
+            } else {
+                plan.coverage.push(CoverageEntry::new(
+                    name,
+                    CoverageClass::Unknown,
+                    CoverageComponent::Shared,
+                    "unknown durable entry preserved in place; ownership unproven",
+                ));
+            }
         }
     }
 
     plan.estimated_bytes = estimated;
     Ok(plan)
+}
+
+/// Whether a top-level entry is a redundant backup of a known config file
+/// (`<config>.bak` or `<config>.bak-<suffix>`). The live config is captured
+/// independently, so the backup is not required runtime state. This recognizes
+/// the backup *shape* only; it never excludes the live config or user history.
+fn is_config_backup(name: &str) -> bool {
+    for config in ["agent-config.toml", "server-config.toml"] {
+        if name == format!("{config}.bak") || name.starts_with(&format!("{config}.bak-")) {
+            return true;
+        }
+    }
+    false
+}
+
+/// Whether a top-level entry is a regenerable zsh cache. `.zcompdump*` is
+/// rebuilt by `compinit`; `*.zwc` is compiled word code rebuilt by `zcompile`.
+/// User history (`.zsh_history`) and config (`.zshrc`, `.zprofile`, …) are NOT
+/// regenerable and are never matched here.
+fn is_regenerable_shell_cache(name: &str) -> bool {
+    name.starts_with(".zcompdump") || name.ends_with(".zwc")
 }
 
 /// Recursively collect regular files under `root`, refusing escape symlinks
@@ -242,6 +493,17 @@ fn collect_tree(
 ) -> Result<()> {
     let entries =
         fs::read_dir(root).with_context(|| format!("failed to inventory {}", root.display()))?;
+    let component = if relative(home, root).starts_with("server") {
+        CoverageComponent::Server
+    } else {
+        CoverageComponent::Agent
+    };
+    plan.coverage.push(CoverageEntry::new(
+        relative(home, root).display().to_string(),
+        CoverageClass::Captured,
+        component,
+        "owned durable subtree snapshotted as independent copies",
+    ));
     for entry in entries {
         let entry = entry?;
         let path = entry.path();
@@ -262,9 +524,11 @@ fn collect_tree(
                     resolved.display()
                 );
             }
-            plan.gaps.push(format!(
-                "{}: symlink preserved in place, not snapshotted",
-                relative(home, &path).display()
+            plan.coverage.push(CoverageEntry::new(
+                relative(home, &path).display().to_string(),
+                CoverageClass::Unknown,
+                component,
+                "symlink preserved in place, not snapshotted; ownership unproven",
             ));
             continue;
         }
@@ -347,14 +611,15 @@ pub fn capture(home: &Path, staging: &Path, plan: &SnapshotPlan) -> Result<Captu
                     report.db_captured = true;
                 }
                 Err(error) => {
-                    // A failed snapshot is a coverage gap, never a fake
-                    // complete archive; Current's live DB is untouched. The
-                    // backup API may have created a partial destination before
-                    // failing — remove it so nothing masquerades as a snapshot.
+                    // A failed required snapshot is a genuine `missing` gap,
+                    // never a fake complete archive; Current's live DB is
+                    // untouched. The backup API may have created a partial
+                    // destination before failing — remove it so nothing
+                    // masquerades as a snapshot.
                     let _ = fs::remove_file(&destination);
                     let _ = fs::remove_file(destination.with_extension("db-wal"));
                     let _ = fs::remove_file(destination.with_extension("db-shm"));
-                    report.gaps.push(format!(
+                    report.missing.push(format!(
                         "server/server.db: consistent backup failed ({error:#}); the archive \
                          has no independent database snapshot"
                     ));
@@ -376,9 +641,66 @@ pub fn capture(home: &Path, staging: &Path, plan: &SnapshotPlan) -> Result<Captu
 #[derive(Debug, Clone, Default)]
 pub struct CaptureReport {
     pub digests: BTreeMap<String, String>,
-    pub gaps: Vec<String>,
+    /// Required captures that failed (genuine `missing` gaps).
+    pub missing: Vec<String>,
     /// Whether the planned SQLite backup succeeded.
     pub db_captured: bool,
+}
+
+/// Finalize the plan's typed coverage with the capture result: a planned
+/// `server/server.db` copy becomes `captured` only when the backup succeeded,
+/// otherwise `missing`. Returns the coverage records and the genuine gaps
+/// (missing/unknown only) for display compatibility.
+pub fn finalize_coverage(
+    plan: &SnapshotPlan,
+    capture: &CaptureReport,
+) -> (Vec<CoverageEntry>, Vec<String>) {
+    let mut coverage = plan.coverage.clone();
+    for entry in &mut coverage {
+        if entry.path == "server/server.db" && entry.class == CoverageClass::Captured {
+            if capture.db_captured {
+                entry.detail = "consistent SQLite backup captured (WAL accounted for)".into();
+            } else {
+                entry.class = CoverageClass::Missing;
+                entry.detail =
+                    "required SQLite backup failed; no independent database snapshot".into();
+            }
+        }
+    }
+    let gaps = coverage
+        .iter()
+        .filter(|e| matches!(e.class, CoverageClass::Missing | CoverageClass::Unknown))
+        .map(|e| format!("{}: {}", e.path, e.detail))
+        .collect();
+    (coverage, gaps)
+}
+
+/// Whether the typed coverage proves complete independent state for the whole
+/// archive: no missing/unknown entries and no nonempty referenced store left
+/// unpinned. External dependencies are checked separately by the caller.
+pub fn coverage_state_complete(coverage: &[CoverageEntry], plan: &SnapshotPlan) -> bool {
+    coverage.iter().all(|entry| match entry.class {
+        CoverageClass::Missing | CoverageClass::Unknown => false,
+        CoverageClass::Referenced => !plan.reference_nonempty(&entry.path),
+        _ => true,
+    })
+}
+
+/// Whether the typed coverage proves the required state of one component is
+/// independently owned and safe for historical execution (#4660 Fix Direction
+/// 3). The component's own entries must not be missing/unknown, and every
+/// shared entry must be safe (a nonempty referenced store blocks until pinned).
+/// Exclusions and provably-empty references never block.
+pub fn coverage_component_proven(
+    coverage: &[CoverageEntry],
+    plan: &SnapshotPlan,
+    component: CoverageComponent,
+) -> bool {
+    coverage.iter().all(|entry| {
+        let nonempty =
+            entry.class == CoverageClass::Referenced && plan.reference_nonempty(&entry.path);
+        !entry.blocks(component, nonempty)
+    })
 }
 
 /// Consistent SQLite snapshot via the backup API (WAL accounted for).
@@ -579,7 +901,20 @@ mod tests {
         assert_eq!(plan.references[0].relative, "server/images/blobs");
         assert_eq!(plan.references[0].entries, 1);
         assert!(plan.estimated_bytes > 0);
-        assert!(plan.gaps.iter().any(|g| g.contains("blobs")));
+        // The nonempty blob store is a referenced dependency, not a copy.
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == "server/images/blobs" && e.class == CoverageClass::Referenced));
+        // Logs/build are intentional exclusions, never missing state.
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == "server/images/build" && e.class == CoverageClass::Excluded));
+        assert!(!plan
+            .coverage
+            .iter()
+            .any(|e| matches!(e.class, CoverageClass::Missing | CoverageClass::Unknown)));
     }
 
     #[test]
@@ -588,14 +923,123 @@ mod tests {
         fs::create_dir_all(root.path().join("mystery-state")).unwrap();
         fs::write(root.path().join("mystery-state/record"), "x").unwrap();
         let plan = plan(root.path()).unwrap();
-        assert!(plan
-            .gaps
-            .iter()
-            .any(|g| g.contains("mystery-state") && g.contains("preserved in place")));
+        assert!(plan.coverage.iter().any(|e| e.path == "mystery-state"
+            && e.class == CoverageClass::Unknown
+            && e.detail.contains("preserved in place")));
         assert!(!plan
             .copies
             .iter()
             .any(|c| c.relative.starts_with("mystery-state")));
+    }
+
+    #[test]
+    fn agent_only_empty_stores_and_known_caches_are_not_missing() {
+        let root = TempDir::new().unwrap();
+        let home = root.path();
+        // Agent-only installation: agent config/identity, a durable token,
+        // a redundant config backup, regenerable zsh caches, empty CAS stores
+        // and a server/ tree holding only images/{blobs,build} and logs.
+        fs::write(home.join("agent-config.toml"), "agent-config").unwrap();
+        fs::write(home.join("agent-config.token"), "secret-token-value").unwrap();
+        fs::write(home.join("agent-config.toml.bak-20261127"), "old").unwrap();
+        fs::write(home.join(".zcompdump-host-5.9"), "cache").unwrap();
+        fs::write(home.join(".zshrc.zwc"), "compiled").unwrap();
+        fs::create_dir_all(home.join("agent")).unwrap();
+        fs::write(home.join("agent/identity"), "agent-id").unwrap();
+        fs::create_dir_all(home.join("server/images/blobs")).unwrap();
+        fs::create_dir_all(home.join("server/images/build")).unwrap();
+        fs::create_dir_all(home.join("server/logs")).unwrap();
+        fs::create_dir_all(home.join("erofs")).unwrap();
+
+        let plan = plan(home).unwrap();
+        // The token is a captured Agent credential, never an unknown root.
+        assert!(plan
+            .copies
+            .iter()
+            .any(|c| c.relative == Path::new("agent-config.token")));
+        assert!(plan.coverage.iter().any(|e| e.path == "agent-config.token"
+            && e.class == CoverageClass::Captured
+            && e.component == CoverageComponent::Agent));
+        // Config backup and zsh caches are exclusions; user history is unknown.
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == "agent-config.toml.bak-20261127"
+                && e.class == CoverageClass::Excluded));
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == ".zcompdump-host-5.9" && e.class == CoverageClass::Excluded));
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == ".zshrc.zwc" && e.class == CoverageClass::Excluded));
+        // Empty CAS stores are referenced-safe; the absent Server DB is N/A.
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == "erofs" && e.class == CoverageClass::Referenced));
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == "server/server.db" && e.class == CoverageClass::NotApplicable));
+        assert!(!plan.reference_nonempty("erofs"));
+        assert!(!plan.reference_nonempty("server/images/blobs"));
+        // Agent required state is proven despite the empty server tree.
+        assert!(coverage_component_proven(
+            &plan.coverage,
+            &plan,
+            CoverageComponent::Agent
+        ));
+    }
+
+    #[test]
+    fn a_nonempty_referenced_store_blocks_until_pinned() {
+        let root = TempDir::new().unwrap();
+        let home = root.path();
+        fs::write(home.join("agent-config.toml"), "agent-config").unwrap();
+        fs::create_dir_all(home.join("agent")).unwrap();
+        fs::write(home.join("agent/identity"), "id").unwrap();
+        fs::create_dir_all(home.join("erofs")).unwrap();
+        fs::write(home.join("erofs/sha256-blob"), "data").unwrap();
+        let plan = plan(home).unwrap();
+        assert!(plan.reference_nonempty("erofs"));
+        // A nonempty shared CAS is never assumed safe.
+        assert!(!coverage_component_proven(
+            &plan.coverage,
+            &plan,
+            CoverageComponent::Agent
+        ));
+        assert!(!coverage_state_complete(&plan.coverage, &plan));
+    }
+
+    #[test]
+    fn user_history_and_config_are_not_regenerable_caches() {
+        let root = TempDir::new().unwrap();
+        let home = root.path();
+        fs::write(home.join(".zsh_history"), "user history").unwrap();
+        fs::write(home.join(".zshrc"), "user config").unwrap();
+        fs::write(home.join(".zcompdump"), "cache").unwrap();
+        let plan = plan(home).unwrap();
+        // User history/config are unknown durable state, never blanket-excluded.
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == ".zsh_history" && e.class == CoverageClass::Unknown));
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == ".zshrc" && e.class == CoverageClass::Unknown));
+        // Only the regenerable completion cache is excluded.
+        assert!(plan
+            .coverage
+            .iter()
+            .any(|e| e.path == ".zcompdump" && e.class == CoverageClass::Excluded));
+        assert!(!coverage_component_proven(
+            &plan.coverage,
+            &plan,
+            CoverageComponent::Agent
+        ));
     }
 
     #[test]
@@ -674,8 +1118,19 @@ mod tests {
         fs::create_dir_all(&staging).unwrap();
         let report = capture(home, &staging, &plan).unwrap();
         assert!(!report.db_captured);
-        assert!(report.gaps.iter().any(|g| g.contains("backup failed")));
+        assert!(report.missing.iter().any(|g| g.contains("backup failed")));
         assert!(!staging.join("server/server.db").exists());
+        // Finalized coverage classifies the failed required backup as missing.
+        let (coverage, gaps) = finalize_coverage(&plan, &report);
+        assert!(coverage
+            .iter()
+            .any(|e| e.path == "server/server.db" && e.class == CoverageClass::Missing));
+        assert!(gaps.iter().any(|g| g.contains("server/server.db")));
+        assert!(!coverage_component_proven(
+            &coverage,
+            &plan,
+            CoverageComponent::Server
+        ));
     }
 
     #[test]
@@ -715,6 +1170,12 @@ mod tests {
                 entries: 2,
                 bytes: 10,
             }],
+            coverage: vec![CoverageEntry::new(
+                "erofs",
+                CoverageClass::Referenced,
+                CoverageComponent::Shared,
+                "nonempty store",
+            )],
             gaps: vec!["erofs: referenced".into()],
             external_dependencies: vec!["/srv/db".into()],
             state_complete: false,
@@ -724,6 +1185,30 @@ mod tests {
         assert_eq!(read.release, "0.35.0");
         assert!(!read.state_complete);
         assert_eq!(read.references[0].entries, 2);
+        assert_eq!(read.coverage[0].class, CoverageClass::Referenced);
         assert!(read_manifest(&root.path().join("missing")).is_none());
+    }
+
+    #[test]
+    fn a_legacy_schema1_manifest_reads_without_coverage() {
+        let root = TempDir::new().unwrap();
+        // A schema-1 archive predates typed coverage: no `coverage` key.
+        let legacy = serde_json::json!({
+            "schema": 1,
+            "release": "0.35.0",
+            "created_by": "nession-upgrade-v1",
+            "binaries": {},
+            "configs": {},
+            "state": {},
+            "references": [],
+            "gaps": ["server/logs: retained"],
+            "external_dependencies": [],
+            "state_complete": false
+        });
+        fs::write(root.path().join(MANIFEST_FILE), legacy.to_string()).unwrap();
+        let read = read_manifest(root.path()).unwrap();
+        assert_eq!(read.schema, 1);
+        assert!(read.coverage.is_empty());
+        assert!(!read.state_complete);
     }
 }

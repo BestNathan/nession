@@ -903,18 +903,16 @@ fn apply(
         rewrite_report = report;
     }
 
-    // The coverage manifest: binary-complete vs state-complete is explicit.
-    let mut gaps = plan.gaps.clone();
-    gaps.extend(capture.gaps.clone());
+    // The coverage manifest: typed coverage distinguishes intentional
+    // exclusions and provably-empty references from genuine missing state
+    // (#4660). Binary-complete vs state-complete remains explicit.
+    let (coverage, gaps) = snapshot::finalize_coverage(plan, &capture);
     let external_dependencies: Vec<String> = rewrite_report
         .external_dependencies()
         .map(std::string::ToString::to_string)
         .collect();
-    let state_complete = capture.gaps.is_empty()
-        && !plan
-            .gaps
-            .iter()
-            .any(|gap| gap.contains("unknown durable entry") || gap.contains("symlink"));
+    let state_complete =
+        snapshot::coverage_state_complete(&coverage, plan) && external_dependencies.is_empty();
     let mut configs = BTreeMap::new();
     for name in CONFIG_FILES {
         let archived = journal.staging_dir.join(name);
@@ -945,6 +943,7 @@ fn apply(
         configs,
         state: capture.digests,
         references: plan.references.clone(),
+        coverage,
         gaps,
         external_dependencies,
         state_complete,
@@ -1766,6 +1765,7 @@ mod tests {
                     configs: BTreeMap::new(),
                     state: BTreeMap::new(),
                     references: Vec::new(),
+                    coverage: Vec::new(),
                     gaps: Vec::new(),
                     external_dependencies: Vec::new(),
                     state_complete: true,
