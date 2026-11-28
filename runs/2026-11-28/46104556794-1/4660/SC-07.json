@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "kind": "acceptance_case_result",
+  "execution_id": "bad1729945a99f65a3f5fb20d7ffbf74852a4dc023fab056d5b692bbb2671d75",
+  "run_id": 46104556794,
+  "run_attempt": 1,
+  "issue": 4660,
+  "criterion": "SC-07",
+  "criterion_text": "Existing trusted isolated staging runtime Case executes actual published v1.0.1 binary and candidate target bridge using exact staging SHA with Agent-only empty Server dirs and Server-only valid DB variants; verifies exit/result, three binary hashes, config/identity and owned business state continuity, archive coverage, no repeat asset transfer and no production writes. Include a negative corrupted artifact/live writer test; platform-specific macOS readback if approved native runtime lane available, otherwise explicitly report native validation Pending rather than claim native proof.",
+  "stage": "staging",
+  "target_sha": "98416f3b4584b499e2a0509bd391fd77244f6595",
+  "contract_sha256": "c2dcc3717a5d32b0470cf0ea4d426c282fe73b79f4a9bcbb3ef5a0b9d5bbd07c",
+  "case_revision": "98416f3b4584b499e2a0509bd391fd77244f6595",
+  "case_tree_sha": "d97123d0ef5e63fa9e5d013fc50784c756873b65",
+  "runtime_profile": "full-stack-local",
+  "result_policy": "all-pass",
+  "result": "Pass",
+  "infrastructure_status": "ready",
+  "infrastructure_error": null,
+  "started_at": "2026-11-28T03:52:58.577Z",
+  "finished_at": "2026-11-28T03:54:13.420Z",
+  "duration_ms": 74843,
+  "verifiers": [
+    {
+      "type": "runtime",
+      "entry": "verify.cjs",
+      "result": "Pass",
+      "summary": "The real published v1.0.1 CLI was crossed over by the candidate install.sh on Agent-only (empty Server) and Server-only (valid DB) fixtures: committed outcome reported truthfully, honest schema-2 coverage, one asset transfer, retention proven; corrupted-artifact and live-writer negatives fail closed (exact SHA 98416f3b4584b499e2a0509bd391fd77244f6595). Native macOS readback: Pending (no approved native lane).",
+      "evidence": [
+        {
+          "type": "runtime",
+          "value": "Agent-only empty-Server bridge committed (exit 0), one asset GET, schema-2 coverage state-complete with no false missing; config/identity/token retained (SHA 98416f3b4584b499e2a0509bd391fd77244f6595)"
+        },
+        {
+          "type": "runtime",
+          "value": "Server-only valid-DB bridge committed; DB retained at Current and independently snapshotted into the archive; one asset GET (SHA 98416f3b4584b499e2a0509bd391fd77244f6595)"
+        },
+        {
+          "type": "runtime",
+          "value": "Corrupted checksum refused; nothing published"
+        },
+        {
+          "type": "runtime",
+          "value": "Live Agent refused before download with zero asset GETs; Current unchanged; no implicit stop/start by the bridge"
+        }
+      ],
+      "duration_ms": 68785,
+      "exit_code": 0
+    }
+  ],
+  "deployment": null,
+  "provenance": {
+    "verified_source": {
+      "repository": "BestNathan/nession",
+      "run_id": 46104556794,
+      "run_attempt": 1,
+      "event": "workflow_dispatch",
+      "head_sha": "c9570b0fbce4a5e80f98a9e28867c2c494f21db6",
+      "head_branch": "main",
+      "workflow_id": 378275235,
+      "dispatch_binding": {
+        "target_sha": "98416f3b4584b499e2a0509bd391fd77244f6595",
+        "stage": "staging",
+        "issue": 4660,
+        "criterion": "SC-07",
+        "job_id": 140854285429,
+        "step_number": 4
+      }
+    },
+    "workflow_url": "https://github.com/BestNathan/nession/actions/runs/46104556794",
+    "record_path": "runs/2026-11-28/46104556794-1/4660/SC-07.json",
+    "source_result_sha256": "b60dc6775eb66c91d3f993f17c95acca2b2d3e47bf44481e5411b4a202e6e18c"
+  },
+  "evidence": {
+    "schema_version": 1,
+    "mode": "acceptance",
+    "provider": "github-actions-artifact",
+    "artifact_name": "acceptance-case-results-46104556794-1",
+    "sha256": "b60dc6775eb66c91d3f993f17c95acca2b2d3e47bf44481e5411b4a202e6e18c",
+    "digest_scope": "validated-source-record-json",
+    "retention_days": 90,
+    "retrieval_url": "https://github.com/BestNathan/nession/actions/runs/46104556794",
+    "durability": "time-limited; object archival not configured"
+  }
+}
