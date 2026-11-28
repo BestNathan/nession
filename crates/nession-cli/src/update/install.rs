@@ -32,10 +32,24 @@ use crate::update::policy::{self, PolicyOverrides, TransferPolicy};
 use crate::update::progress::{CancelToken, Event, FailureReport, Phase, Reporter};
 use crate::update::{download, transaction};
 use crate::versions;
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use semver::Version;
 use std::fs;
 use std::path::{Path, PathBuf};
+
+/// A verified local release artifact handed off by the installer bootstrap
+/// (#4660 Fix Direction 6). The shell downloads and checksum-verifies the
+/// archive once, then passes its owner-private staged path and expected digest
+/// here so the canonical installer never re-downloads the same asset. The CLI
+/// independently re-hashes the file and proves version/platform/identity before
+/// any mutation; an unchecked local file is never installed.
+#[derive(Debug, Clone)]
+pub struct LocalArtifact {
+    /// Owner-private staged tarball path.
+    pub path: PathBuf,
+    /// Expected SHA256 (hex) the bootstrap verified against checksums.txt.
+    pub sha256: String,
+}
 
 /// One install/update request.
 #[derive(Debug, Clone)]
@@ -51,6 +65,8 @@ pub struct InstallRequest {
     pub include_installer: bool,
     /// Explicit CLI timeout/retry overrides (#4592 §8.1).
     pub policy_overrides: PolicyOverrides,
+    /// A bootstrap-verified local artifact to install without re-downloading.
+    pub local_artifact: Option<LocalArtifact>,
 }
 
 /// What the plan will do.
@@ -121,6 +137,13 @@ pub fn plan(layout: &versions::Layout, target: &Version) -> Result<InstallPlan> 
 }
 
 /// Run a full install/update, including the download and checksum.
+///
+/// Emits one authoritative versioned result line (`nession-install-result-v1`)
+/// on both success and failure (#4660 Fix Direction 1). The shell bootstrap
+/// consumes that line instead of inferring completeness from directories or
+/// asserting rollback from a nonzero exit. The transaction owner — not the
+/// caller — decides whether Current is committed/unchanged/rolled-back/
+/// recovery-blocked.
 pub async fn run(request: InstallRequest) -> Result<()> {
     let resolved =
         policy::resolve(&request.policy_overrides).map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -128,16 +151,120 @@ pub async fn run(request: InstallRequest) -> Result<()> {
     install_signal_handlers(cancel.clone());
     let reporter = Reporter::new();
     let result = run_inner(request, &resolved, &cancel, &reporter).await;
-    if let Err(error) = &result {
-        // The failure contract: phase, category, retryability, Current state
-        // and the safe next action. The transaction owner reports its proven
-        // Current state inside the error chain; pre-lock failures never
-        // mutated Current.
-        let phase = phase_from_error_chain(error);
-        let report = classify_failure(phase, error);
-        eprintln!("{}", report.render());
+    match result {
+        Ok(outcome) => {
+            report(&outcome);
+            emit_success_result(&outcome);
+            Ok(())
+        }
+        Err(error) => {
+            // The failure contract: phase, category, retryability, Current
+            // state and the safe next action. The transaction owner reports its
+            // proven Current state inside the error chain; pre-lock failures
+            // never mutated Current.
+            let phase = phase_from_error_chain(&error);
+            let report = classify_failure(phase, &error);
+            eprintln!("{}", report.render());
+            emit_failure_result(&report);
+            // A transaction that committed forward during recovery is a
+            // committed outcome, not a failure: report it truthfully and do
+            // not invite a destructive retry.
+            if report.current_state == crate::update::progress::CurrentState::Committed {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
     }
-    result
+}
+
+/// The canonical versioned result line consumed by `scripts/install.sh`.
+///
+/// `outcome` is the transaction's proven effect on Current; `result` is whether
+/// the requested operation succeeded. Coverage is reported separately so a
+/// committed upgrade with non-fatal archive gaps is never mistaken for a
+/// rollback. No credential/config text appears here.
+fn emit_result_line(
+    outcome: crate::update::progress::CurrentState,
+    ok: bool,
+    from: Option<&Version>,
+    to: Option<&Version>,
+    archive: Option<&Path>,
+    coverage_complete: Option<bool>,
+) {
+    println!(
+        "{}",
+        result_line(outcome, ok, from, to, archive, coverage_complete)
+    );
+}
+
+/// The canonical versioned result line as a string (testable contract).
+pub fn result_line(
+    outcome: crate::update::progress::CurrentState,
+    ok: bool,
+    from: Option<&Version>,
+    to: Option<&Version>,
+    archive: Option<&Path>,
+    coverage_complete: Option<bool>,
+) -> String {
+    let mut line = format!(
+        "nession-install-result-v1 outcome={} result={}",
+        outcome.label(),
+        if ok { "ok" } else { "failed" }
+    );
+    if let Some(from) = from {
+        line.push_str(&format!(" from={from}"));
+    }
+    if let Some(to) = to {
+        line.push_str(&format!(" to={to}"));
+    }
+    if let Some(archive) = archive {
+        line.push_str(&format!(" archive={}", archive.display()));
+    }
+    if let Some(complete) = coverage_complete {
+        line.push_str(&format!(
+            " coverage={}",
+            if complete { "complete" } else { "gaps" }
+        ));
+    }
+    line
+}
+
+fn emit_success_result(outcome: &InstallOutcome) {
+    match outcome {
+        InstallOutcome::NoOp { version } => emit_result_line(
+            crate::update::progress::CurrentState::Unchanged,
+            true,
+            None,
+            Some(version),
+            None,
+            None,
+        ),
+        InstallOutcome::ArchivedOnly { version, path } => emit_result_line(
+            crate::update::progress::CurrentState::Unchanged,
+            true,
+            None,
+            Some(version),
+            Some(path),
+            None,
+        ),
+        InstallOutcome::Replaced { from, to, archive } => {
+            let coverage_complete = crate::update::snapshot::read_manifest(archive)
+                .map(|manifest| manifest.state_complete);
+            emit_result_line(
+                crate::update::progress::CurrentState::Committed,
+                true,
+                Some(from),
+                Some(to),
+                Some(archive),
+                coverage_complete,
+            );
+        }
+    }
+}
+
+fn emit_failure_result(report: &FailureReport) {
+    emit_result_line(report.current_state, false, None, None, None, None);
 }
 
 /// Register SIGINT/SIGTERM on the one cooperative cancellation path.
@@ -220,7 +347,7 @@ async fn run_inner(
     resolved: &TransferPolicy,
     cancel: &CancelToken,
     reporter: &Reporter,
-) -> Result<()> {
+) -> Result<InstallOutcome> {
     // A previous process may have been killed mid-transaction. Resolve that
     // before reading Current: a mixed binary set is not a release, and the
     // journal is the only safe source of what to restore (#3232 F4).
@@ -234,7 +361,7 @@ async fn run_inner(
         match plan(&layout, &hinted)? {
             InstallPlan::NoOp if hinted == layout.current => {
                 println!("Already at release {hinted}; nothing to do.");
-                return Ok(());
+                return Ok(InstallOutcome::NoOp { version: hinted });
             }
             InstallPlan::NoOp => {
                 println!(
@@ -245,10 +372,46 @@ async fn run_inner(
                         .join(hinted.to_string())
                         .display()
                 );
-                return Ok(());
+                return Ok(InstallOutcome::NoOp { version: hinted });
             }
             _ => {}
         }
+    }
+
+    // A bootstrap-verified local artifact (#4660 Fix Direction 6): the shell
+    // already downloaded and checksum-verified the archive once. Install it
+    // without a second asset transfer; the CLI independently re-verifies the
+    // digest and proves version/platform/identity before any mutation.
+    if let Some(local) = request.local_artifact.as_ref() {
+        let raw = request.version.as_deref().ok_or_else(|| {
+            anyhow::anyhow!("a local artifact requires an explicit target version")
+        })?;
+        let target = versions::normalize_version(raw)?;
+        let plan = plan(&layout, &target)?;
+        println!("Current release: {}", layout.current);
+        println!("Target release:  {target}");
+        if request.dry_run {
+            println!("[dry-run] Would verify and install the local artifact.");
+            return Ok(InstallOutcome::NoOp { version: target });
+        }
+        // Read-only live-process preflight before any mutation (#4660 Fix
+        // Direction 5). The authoritative recheck still runs under the lock.
+        if matches!(plan, InstallPlan::ReplaceCurrent { .. }) {
+            refuse_while_running().context("live-process preflight")?;
+        }
+        let tmp_dir = download::temp_extract_dir()?;
+        let result = local_artifact_and_apply(
+            local,
+            &tmp_dir,
+            &layout,
+            &target,
+            &plan,
+            resolved.lock_wait,
+            reporter,
+        )
+        .await;
+        let _ = fs::remove_dir_all(&tmp_dir);
+        return result;
     }
 
     let client = GitHubReleaseClient::from_env_with_policy(resolved)?;
@@ -273,7 +436,7 @@ async fn run_inner(
     match &plan {
         InstallPlan::NoOp => {
             println!("Already at release {target}; nothing to do.");
-            return Ok(());
+            return Ok(InstallOutcome::NoOp { version: target });
         }
         InstallPlan::ArchiveOnly { target_dir } => {
             println!("Plan: install {target} into {}", target_dir.display());
@@ -295,15 +458,25 @@ async fn run_inner(
         std::io::stdin().read_line(&mut input)?;
         if !matches!(input.trim().to_lowercase().as_str(), "y" | "yes") {
             println!("Aborted.");
-            return Ok(());
+            return Ok(InstallOutcome::NoOp {
+                version: layout.current.clone(),
+            });
         }
+    }
+
+    // Read-only live-process preflight BEFORE the large asset transfer (#4660
+    // Fix Direction 5): a live Agent/Server is refused without spending the
+    // download. The authoritative recheck still runs under the lifecycle lock
+    // before snapshot/publish; no lock is held across the network transfer.
+    if matches!(plan, InstallPlan::ReplaceCurrent { .. }) {
+        refuse_while_running().context("live-process preflight")?;
     }
 
     let asset = client.find_platform_asset(&release)?;
     if request.dry_run {
         println!("[dry-run] Would download: {}", asset.browser_download_url);
         println!("[dry-run] Would verify SHA256 and apply the plan above.");
-        return Ok(());
+        return Ok(InstallOutcome::NoOp { version: target });
     }
 
     let tmp_dir = download::temp_extract_dir()?;
@@ -322,7 +495,6 @@ async fn run_inner(
     .await;
     let _ = fs::remove_dir_all(&tmp_dir);
     let outcome = result?;
-    report(&outcome);
 
     if request.include_installer {
         println!("Downloading install.sh...");
@@ -334,7 +506,7 @@ async fn run_inner(
         }
     }
 
-    Ok(())
+    Ok(outcome)
 }
 
 fn report_recovery(recovery: transaction::Recovery) {
@@ -418,7 +590,83 @@ async fn download_and_apply(
         }
     }
     cancel.check(Phase::WaitLock)?;
+    apply_under_lock(tmp_dir, layout, target, plan, policy.lock_wait, reporter)
+}
 
+/// Verify a bootstrap-handed local artifact and apply it without any asset
+/// transfer (#4660 Fix Direction 6). The CLI independently re-hashes the file
+/// against the expected digest, extracts safely (only the three named binaries,
+/// no path escape), and proves the target version/platform through the same
+/// contract handshake the transaction uses. A tampered, wrong-version or
+/// wrong-platform artifact is refused with Current unchanged.
+async fn local_artifact_and_apply(
+    local: &LocalArtifact,
+    tmp_dir: &Path,
+    layout: &versions::Layout,
+    target: &Version,
+    plan: &InstallPlan,
+    lock_wait: std::time::Duration,
+    reporter: &Reporter,
+) -> Result<InstallOutcome> {
+    verify_and_extract_local_artifact(local, tmp_dir, reporter)?;
+    // The transaction's target handshake proves the staged CLI advertises the
+    // upgrade contract for exactly `target` (version identity) and executes on
+    // this host (platform identity) before any mutation.
+    apply_under_lock(tmp_dir, layout, target, plan, lock_wait, reporter)
+}
+
+/// Independently verify and safely extract a bootstrap-handed local artifact
+/// (#4660 Fix Direction 6). Re-hashes the file against the expected digest,
+/// extracts only the three named binaries (no path escape) and refuses a
+/// partial release. Pure filesystem verification — no network, no Current
+/// mutation — so the tamper/partial negatives are deterministically testable.
+pub fn verify_and_extract_local_artifact(
+    local: &LocalArtifact,
+    tmp_dir: &Path,
+    reporter: &Reporter,
+) -> Result<()> {
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::Verify,
+    });
+    if !local.path.is_file() {
+        bail!(
+            "the staged local artifact {} does not exist; refusing an unchecked install",
+            local.path.display()
+        );
+    }
+    let actual = download::sha256_file(&local.path).map_err(|error| anyhow::anyhow!("{error}"))?;
+    if !actual.eq_ignore_ascii_case(local.sha256.trim()) {
+        bail!(
+            "checksum mismatch for the staged local artifact: expected {}, got {actual}; \
+             refusing to install a tampered or corrupt artifact",
+            local.sha256.trim()
+        );
+    }
+    reporter.emit(Event::Note("Local artifact checksum verified.".to_string()));
+    reporter.emit(Event::PhaseStarted {
+        phase: Phase::Extract,
+    });
+    download::extract_binaries(&local.path, tmp_dir).map_err(|error| anyhow::anyhow!("{error}"))?;
+    for name in versions::RELEASE_BINARIES {
+        if !tmp_dir.join(name).is_file() {
+            bail!("release archive is missing the {name} binary; refusing a partial release");
+        }
+    }
+    Ok(())
+}
+
+/// Acquire the lifecycle lock and run the archive/replace transaction. Shared
+/// by the network download path and the local-artifact handoff so there is one
+/// authoritative transaction owner. The live-process recheck here is the
+/// authoritative one (under the lock); the pre-transfer preflight is advisory.
+fn apply_under_lock(
+    tmp_dir: &Path,
+    layout: &versions::Layout,
+    target: &Version,
+    plan: &InstallPlan,
+    lock_wait: std::time::Duration,
+    reporter: &Reporter,
+) -> Result<InstallOutcome> {
     // One lifecycle command at a time across every installed release. The
     // bounded wait covers the live-process re-check and the whole archive
     // transaction; any journal left by an earlier crash is recovered before
@@ -427,7 +675,7 @@ async fn download_and_apply(
         phase: Phase::WaitLock,
     });
     let lock_started = std::time::Instant::now();
-    let _lock = LifecycleLock::acquire_bounded(policy.lock_wait, |elapsed| {
+    let _lock = LifecycleLock::acquire_bounded(lock_wait, |elapsed| {
         reporter.emit(Event::LockWait { elapsed });
     })
     .map_err(|error| anyhow::anyhow!("{error}"))?;
@@ -775,5 +1023,121 @@ mod tests {
             !archive.exists(),
             "a refused archive must not appear as an installed release"
         );
+    }
+
+    #[test]
+    fn the_result_line_reports_the_proven_outcome() {
+        use crate::update::progress::CurrentState;
+        let from = Version::new(1, 0, 1);
+        let to = Version::new(1, 1, 0);
+        let archive = Path::new("/home/.nession/versions/1.0.1");
+        let committed = result_line(
+            CurrentState::Committed,
+            true,
+            Some(&from),
+            Some(&to),
+            Some(archive),
+            Some(true),
+        );
+        assert!(committed.starts_with("nession-install-result-v1 "));
+        assert!(committed.contains("outcome=committed"));
+        assert!(committed.contains("result=ok"));
+        assert!(committed.contains("from=1.0.1"));
+        assert!(committed.contains("to=1.1.0"));
+        assert!(committed.contains("coverage=complete"));
+        // A committed upgrade with non-fatal gaps is still committed/ok.
+        let gaps = result_line(
+            CurrentState::Committed,
+            true,
+            Some(&from),
+            Some(&to),
+            Some(archive),
+            Some(false),
+        );
+        assert!(gaps.contains("outcome=committed"));
+        assert!(gaps.contains("result=ok"));
+        assert!(gaps.contains("coverage=gaps"));
+        // Failure outcomes are reported truthfully, never as a false rollback.
+        for (state, label) in [
+            (CurrentState::Unchanged, "unchanged"),
+            (CurrentState::RolledBack, "rolled-back"),
+            (CurrentState::RecoveryBlocked, "recovery-blocked"),
+        ] {
+            let line = result_line(state, false, None, None, None, None);
+            assert!(line.contains(&format!("outcome={label}")));
+            assert!(line.contains("result=failed"));
+        }
+    }
+
+    /// A real three-binary tarball for the local-artifact handoff tests.
+    fn local_tarball(dir: &Path) -> (PathBuf, String) {
+        use flate2::write::GzEncoder;
+        use sha2::{Digest, Sha256};
+        let path = dir.join("nession-1.2.0-test.tar.gz");
+        let file = fs::File::create(&path).unwrap();
+        let encoder = GzEncoder::new(file, flate2::Compression::default());
+        let mut archive = tar::Builder::new(encoder);
+        for name in versions::RELEASE_BINARIES {
+            let content = format!("binary-{name}");
+            let mut header = tar::Header::new_gnu();
+            header.set_size(content.len() as u64);
+            header.set_mode(0o755);
+            header.set_cksum();
+            archive
+                .append_data(&mut header, name, content.as_bytes())
+                .unwrap();
+        }
+        let encoder = archive.into_inner().unwrap();
+        encoder.finish().unwrap();
+        let digest = format!("{:x}", Sha256::digest(fs::read(&path).unwrap()));
+        (path, digest)
+    }
+
+    #[test]
+    fn a_verified_local_artifact_extracts_without_network() {
+        let root = TempDir::new().unwrap();
+        let (path, digest) = local_tarball(root.path());
+        let extract = root.path().join("extract");
+        fs::create_dir_all(&extract).unwrap();
+        let local = LocalArtifact {
+            path: path.clone(),
+            sha256: digest,
+        };
+        verify_and_extract_local_artifact(&local, &extract, &Reporter::silent()).unwrap();
+        for name in versions::RELEASE_BINARIES {
+            assert!(extract.join(name).is_file());
+        }
+        // The staged artifact is untouched (independent verification).
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn a_tampered_local_artifact_is_refused() {
+        let root = TempDir::new().unwrap();
+        let (path, _digest) = local_tarball(root.path());
+        let extract = root.path().join("extract");
+        fs::create_dir_all(&extract).unwrap();
+        let local = LocalArtifact {
+            path,
+            sha256: "0".repeat(64),
+        };
+        let error =
+            verify_and_extract_local_artifact(&local, &extract, &Reporter::silent()).unwrap_err();
+        assert!(format!("{error:#}").contains("checksum mismatch"));
+        assert!(!extract.join("nession").exists());
+    }
+
+    #[test]
+    fn a_missing_local_artifact_is_refused() {
+        let root = TempDir::new().unwrap();
+        let extract = root.path().join("extract");
+        fs::create_dir_all(&extract).unwrap();
+        let local = LocalArtifact {
+            path: root.path().join("absent.tar.gz"),
+            sha256: "0".repeat(64),
+        };
+        let error =
+            verify_and_extract_local_artifact(&local, &extract, &Reporter::silent()).unwrap_err();
+        assert!(format!("{error:#}").contains("does not exist"));
     }
 }

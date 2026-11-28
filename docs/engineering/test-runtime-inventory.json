@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1910,
-    "references": 1020,
+    "entries": 1912,
+    "references": 1026,
     "unresolved": 0
   },
   "crates": [
@@ -733,7 +733,7 @@
       "file": "crates/nession-cli/src/args.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 489
+      "line": 499
     },
     {
       "file": "crates/nession-cli/src/commands/agent/start.rs",
@@ -745,7 +745,7 @@
       "file": "crates/nession-cli/src/commands/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 292
+      "line": 304
     },
     {
       "file": "crates/nession-cli/src/commands/server/start.rs",
@@ -895,7 +895,7 @@
       "file": "crates/nession-cli/src/update/install.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 535
+      "line": 783
     },
     {
       "file": "crates/nession-cli/src/update/mod.rs",
@@ -931,13 +931,13 @@
       "file": "crates/nession-cli/src/update/snapshot.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 532
+      "line": 854
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1377
+      "line": 1376
     },
     {
       "file": "crates/nession-cli/src/update/version.rs",
@@ -949,7 +949,7 @@
       "file": "crates/nession-cli/src/versions/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 648
+      "line": 757
     },
     {
       "file": "crates/nession-cli/tests/integration/attach_route.rs",
@@ -971,6 +971,12 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/client_commands.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 1
@@ -6878,6 +6884,11 @@
       "disposition": "e2e-runtime"
     },
     {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
       "file": "e2e/acceptance/cases/4665/SC-01/verify-live.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
@@ -11875,7 +11886,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/install.rs",
-      "line": 627,
+      "line": 875,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11884,7 +11895,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/install.rs",
-      "line": 670,
+      "line": 918,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11893,7 +11904,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/install.rs",
-      "line": 722,
+      "line": 970,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11974,7 +11985,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/snapshot.rs",
-      "line": 658,
+      "line": 1102,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11983,7 +11994,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 1454,
+      "line": 1453,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12019,7 +12030,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 717,
+      "line": 826,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12028,7 +12039,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 727,
+      "line": 836,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -12222,6 +12233,33 @@
       "effect": "execute",
       "disposition": "test-runtime-root",
       "reference": "let mut command = Command::new(BIN);",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 103,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let status = Command::new(\"tar\")",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 121,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"server_url = \\\"ws://127.0.0.1:19099/ws\\\"\\nauth_token = \\\"\\\"\\n\",",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 169,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = Command::new(\"sh\");",
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
@@ -16057,6 +16095,33 @@
       "disposition": "read-only-tooling",
       "reference": "const child = spawn(process.execPath, ['-e', [",
       "replacement": "read-only repository/tooling command"
+    },
+    {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "line": 25,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "case-owned-root",
+      "reference": "const child = spawn('sh', [script, ...args], {",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
+    },
+    {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "line": 93,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "case-owned-root",
+      "reference": "'server_url = \"ws://127.0.0.1:19098/ws\"\\nauth_token = \"\"\\n');",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
+    },
+    {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "line": 186,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "case-owned-root",
+      "reference": "fs.writeFileSync(path.join(homeL, 'agent-config.toml'), 'server_url = \"ws://127.0.0.1:19097/ws\"\\nauth_token = \"\"\\n');",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
     },
     {
       "file": "e2e/acceptance/cases/565/SC-12/verify.cjs",

@@ -117,19 +117,15 @@ pub enum StateCoverage {
     NoManifest,
 }
 
-/// Classify an archive's state coverage from its manifest (read-only).
+/// Classify an archive's whole-state coverage from its manifest (read-only).
+///
+/// Schema-2 archives are classified from typed coverage; schema-1 archives are
+/// classified conservatively from their recorded `state_complete` flag and
+/// dependencies — never promoted to proven and never rewritten (#4660).
 pub fn archive_state_coverage(home: &Path) -> StateCoverage {
     let Some(manifest) = crate::update::snapshot::read_manifest(home) else {
         return StateCoverage::NoManifest;
     };
-    if !manifest.state_complete {
-        return StateCoverage::Unproven {
-            reason: format!(
-                "the snapshot is not state-complete ({})",
-                manifest.gaps.join("; ")
-            ),
-        };
-    }
     if !manifest.external_dependencies.is_empty() {
         return StateCoverage::Unproven {
             reason: format!(
@@ -138,14 +134,116 @@ pub fn archive_state_coverage(home: &Path) -> StateCoverage {
             ),
         };
     }
-    StateCoverage::Proven
+    if manifest.schema >= 2 && !manifest.coverage.is_empty() {
+        let plan = crate::update::snapshot::SnapshotPlan {
+            references: manifest.references.clone(),
+            ..Default::default()
+        };
+        if crate::update::snapshot::coverage_state_complete(&manifest.coverage, &plan) {
+            return StateCoverage::Proven;
+        }
+        return StateCoverage::Unproven {
+            reason: format!(
+                "the snapshot is not state-complete ({})",
+                manifest.gaps.join("; ")
+            ),
+        };
+    }
+    // Legacy schema 1: trust only an explicit complete flag with no gaps that
+    // indicate missing state. Ambiguous legacy state remains blocked.
+    if manifest.state_complete {
+        StateCoverage::Proven
+    } else {
+        StateCoverage::Unproven {
+            reason: format!(
+                "the snapshot is not state-complete ({})",
+                manifest.gaps.join("; ")
+            ),
+        }
+    }
+}
+
+/// Classify one component's required-state coverage (#4660 Fix Direction 3).
+///
+/// Agent and Server assess their own required state plus shared dependencies
+/// independently: a safe unrelated exclusion (e.g. Server logs on an Agent-only
+/// installation) never blocks an otherwise proven component. Read-only
+/// inspection is unaffected; this only gates data-touching commands.
+pub fn archive_component_coverage(
+    home: &Path,
+    component: crate::update::snapshot::CoverageComponent,
+) -> StateCoverage {
+    use crate::update::snapshot::{self, CoverageComponent};
+    let Some(manifest) = snapshot::read_manifest(home) else {
+        return StateCoverage::NoManifest;
+    };
+    if !manifest.external_dependencies.is_empty() {
+        return StateCoverage::Unproven {
+            reason: format!(
+                "the archived config still depends on paths the archive does not own: {}",
+                manifest.external_dependencies.join(", ")
+            ),
+        };
+    }
+    if manifest.schema >= 2 && !manifest.coverage.is_empty() {
+        let plan = snapshot::SnapshotPlan {
+            references: manifest.references.clone(),
+            ..Default::default()
+        };
+        if snapshot::coverage_component_proven(&manifest.coverage, &plan, component) {
+            return StateCoverage::Proven;
+        }
+        let blockers: Vec<String> = manifest
+            .coverage
+            .iter()
+            .filter(|e| {
+                let nonempty = e.class == snapshot::CoverageClass::Referenced
+                    && plan.reference_nonempty(&e.path);
+                e.blocks(component, nonempty)
+            })
+            .map(|e| format!("{} ({})", e.path, e.detail))
+            .collect();
+        let _ = CoverageComponent::Shared;
+        return StateCoverage::Unproven {
+            reason: format!(
+                "required state is not independently proven: {}",
+                blockers.join("; ")
+            ),
+        };
+    }
+    // Legacy schema 1 cannot be attributed per component; fall back to the
+    // conservative whole-archive classification (no promotion).
+    archive_state_coverage(home)
+}
+
+/// The component whose required state a data-touching command exercises.
+fn command_component(args: &[OsString]) -> Option<crate::update::snapshot::CoverageComponent> {
+    use crate::update::snapshot::CoverageComponent;
+    let tokens = command_tokens(args);
+    let family = tokens.first()?.as_str();
+    match family {
+        "agent" => Some(CoverageComponent::Agent),
+        "server" => Some(CoverageComponent::Server),
+        // Session metadata is Agent-owned durable state.
+        "sessions" => Some(CoverageComponent::Agent),
+        "config" => match tokens.get(1).map(String::as_str) {
+            Some("server") => Some(CoverageComponent::Server),
+            _ => Some(CoverageComponent::Agent),
+        },
+        _ => None,
+    }
 }
 
 /// Refuse a data-touching command on an archive whose independent state
-/// ownership cannot be proven (#4592 §5). Runs at the Current dispatcher
-/// before `exec`, for legacy versions included.
-fn verify_archive_state_coverage(home: &Path, version: &Version, command: &str) -> Result<()> {
-    match archive_state_coverage(home) {
+/// ownership cannot be proven for the affected component (#4592 §5, #4660).
+/// Runs at the Current dispatcher before `exec`, for legacy versions included.
+fn verify_archive_state_coverage(
+    home: &Path,
+    version: &Version,
+    command: &str,
+    component: crate::update::snapshot::CoverageComponent,
+) -> Result<()> {
+    match archive_component_coverage(home, component) {
         StateCoverage::Proven => Ok(()),
         StateCoverage::NoManifest => bail!(
             "release {version} is a binary-complete archive without a proven state snapshot \
@@ -166,16 +264,15 @@ fn verify_archive_state_coverage(home: &Path, version: &Version, command: &str) 
     }
 }
 
-/// The data-touching command named by the args, if any (#4592 §5).
-///
-/// Read-only inspection (`status`, `logs`, `list`, `show`, `agents list`)
-/// stays available on every complete archive; everything that writes config,
-/// identity, sessions or host service state is gated on proven coverage.
-fn mutating_command(args: &[OsString]) -> Option<String> {
+/// The first three non-flag command tokens, skipping global flags that take a
+/// value so a value named like a command cannot masquerade as one.
+fn command_tokens(args: &[OsString]) -> Vec<String> {
     let mut tokens = Vec::new();
     let mut index = 1;
     while let Some(value) = args.get(index) {
-        let token = value.to_str()?;
+        let Some(token) = value.to_str() else {
+            return tokens;
+        };
         if matches!(token, "--server-url" | "--auth-token") {
             index += 2;
             continue;
@@ -190,6 +287,16 @@ fn mutating_command(args: &[OsString]) -> Option<String> {
         }
         index += 1;
     }
+    tokens
+}
+
+/// The data-touching command named by the args, if any (#4592 §5).
+///
+/// Read-only inspection (`status`, `logs`, `list`, `show`, `agents list`)
+/// stays available on every complete archive; everything that writes config,
+/// identity, sessions or host service state is gated on proven coverage.
+fn mutating_command(args: &[OsString]) -> Option<String> {
+    let tokens = command_tokens(args);
     let family = tokens.first()?.as_str();
     let action = tokens.get(1).map(String::as_str).unwrap_or("");
     let mutating = match family {
@@ -367,7 +474,9 @@ pub fn prepare<I: IntoIterator<Item = OsString>>(raw_args: I) -> Result<Prepared
     // independent state ownership is unproven (#4592 §5): a binary-only or
     // legacy archive could touch Current's live state or mint a new identity.
     if let Some(command) = mutating_command(&args) {
-        verify_archive_state_coverage(&home, &version, &command)?;
+        let component =
+            command_component(&args).unwrap_or(crate::update::snapshot::CoverageComponent::Shared);
+        verify_archive_state_coverage(&home, &version, &command, component)?;
     }
     let cli = archived_cli(&version)?;
     // Read-only logs: the selected release reads its own home. A release that
@@ -884,6 +993,22 @@ mod tests {
         state_complete: bool,
         deps: Vec<String>,
     ) -> crate::update::snapshot::Manifest {
+        use crate::update::snapshot::{CoverageClass, CoverageComponent, CoverageEntry};
+        let coverage = if state_complete {
+            vec![CoverageEntry::new(
+                "agent/identity",
+                CoverageClass::Captured,
+                CoverageComponent::Agent,
+                "captured",
+            )]
+        } else {
+            vec![CoverageEntry::new(
+                "server/server.db",
+                CoverageClass::Missing,
+                CoverageComponent::Server,
+                "consistent backup failed",
+            )]
+        };
         crate::update::snapshot::Manifest {
             schema: crate::update::snapshot::MANIFEST_SCHEMA,
             release: "0.35.0".into(),
@@ -892,6 +1017,7 @@ mod tests {
             configs: BTreeMap::new(),
             state: BTreeMap::new(),
             references: Vec::new(),
+            coverage,
             gaps: if state_complete {
                 Vec::new()
             } else {
@@ -914,9 +1040,13 @@ mod tests {
             archive_state_coverage(dir.path()),
             StateCoverage::NoManifest
         );
-        let error =
-            verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "agent start")
-                .unwrap_err();
+        let error = verify_archive_state_coverage(
+            dir.path(),
+            &Version::new(0, 35, 0),
+            "agent start",
+            crate::update::snapshot::CoverageComponent::Agent,
+        )
+        .unwrap_err();
         let message = format!("{error:#}");
         assert!(
             message.contains("without a proven state snapshot"),
@@ -932,30 +1062,123 @@ mod tests {
         crate::update::snapshot::write_manifest(dir.path(), &manifest_fixture(true, Vec::new()))
             .unwrap();
         assert_eq!(archive_state_coverage(dir.path()), StateCoverage::Proven);
-        verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "sessions create")
-            .unwrap();
+        verify_archive_state_coverage(
+            dir.path(),
+            &Version::new(0, 35, 0),
+            "sessions create",
+            crate::update::snapshot::CoverageComponent::Agent,
+        )
+        .unwrap();
     }
 
     #[test]
     fn an_incomplete_or_dependent_manifest_is_refused() {
+        use crate::update::snapshot::CoverageComponent;
         let dir = tempfile::tempdir().unwrap();
+        // A failed Server DB backup refuses Server commands...
         crate::update::snapshot::write_manifest(dir.path(), &manifest_fixture(false, Vec::new()))
             .unwrap();
-        let error =
-            verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "agent start")
-                .unwrap_err();
+        let error = verify_archive_state_coverage(
+            dir.path(),
+            &Version::new(0, 35, 0),
+            "server start",
+            CoverageComponent::Server,
+        )
+        .unwrap_err();
         assert!(format!("{error:#}").contains("unproven state coverage"));
 
+        // ...but an external dependency refuses the affected component too.
         crate::update::snapshot::write_manifest(
             dir.path(),
             &manifest_fixture(true, vec!["db_path".into()]),
         )
         .unwrap();
-        let error =
-            verify_archive_state_coverage(dir.path(), &Version::new(0, 35, 0), "server start")
-                .unwrap_err();
+        let error = verify_archive_state_coverage(
+            dir.path(),
+            &Version::new(0, 35, 0),
+            "server start",
+            CoverageComponent::Server,
+        )
+        .unwrap_err();
         let message = format!("{error:#}");
         assert!(message.contains("does not own"), "{message}");
         assert!(message.contains("db_path"), "{message}");
+    }
+
+    #[test]
+    fn a_server_only_gap_does_not_block_a_proven_agent() {
+        use crate::update::snapshot::{
+            write_manifest, CoverageClass, CoverageComponent, CoverageEntry, Manifest,
+            MANIFEST_SCHEMA,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        // Agent identity captured; Server DB missing. Agent commands must run.
+        let manifest = Manifest {
+            schema: MANIFEST_SCHEMA,
+            release: "0.35.0".into(),
+            created_by: crate::update::UPGRADE_CONTRACT_TOKEN.into(),
+            binaries: BTreeMap::new(),
+            configs: BTreeMap::new(),
+            state: BTreeMap::new(),
+            references: Vec::new(),
+            coverage: vec![
+                CoverageEntry::new(
+                    "agent/identity",
+                    CoverageClass::Captured,
+                    CoverageComponent::Agent,
+                    "captured",
+                ),
+                CoverageEntry::new(
+                    "server/server.db",
+                    CoverageClass::Missing,
+                    CoverageComponent::Server,
+                    "backup failed",
+                ),
+            ],
+            gaps: vec!["server/server.db: backup failed".into()],
+            external_dependencies: Vec::new(),
+            state_complete: false,
+        };
+        write_manifest(dir.path(), &manifest).unwrap();
+        assert_eq!(
+            archive_component_coverage(dir.path(), CoverageComponent::Agent),
+            StateCoverage::Proven
+        );
+        assert!(matches!(
+            archive_component_coverage(dir.path(), CoverageComponent::Server),
+            StateCoverage::Unproven { .. }
+        ));
+        verify_archive_state_coverage(
+            dir.path(),
+            &Version::new(0, 35, 0),
+            "agent start",
+            CoverageComponent::Agent,
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn command_component_maps_families() {
+        use crate::update::snapshot::CoverageComponent;
+        assert_eq!(
+            command_component(&argv(&["agent", "start"])),
+            Some(CoverageComponent::Agent)
+        );
+        assert_eq!(
+            command_component(&argv(&["server", "start"])),
+            Some(CoverageComponent::Server)
+        );
+        assert_eq!(
+            command_component(&argv(&["sessions", "create"])),
+            Some(CoverageComponent::Agent)
+        );
+        assert_eq!(
+            command_component(&argv(&["config", "server", "set"])),
+            Some(CoverageComponent::Server)
+        );
+        assert_eq!(
+            command_component(&argv(&["config", "agent", "init"])),
+            Some(CoverageComponent::Agent)
+        );
     }
 }
