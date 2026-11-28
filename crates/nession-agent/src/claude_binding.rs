@@ -33,7 +33,8 @@
 use std::path::{Path, PathBuf};
 
 use nession_claude_code::binding::{
-    binding_filename, binding_filename_for_instance, BINDING_FILE_ENV, SESSION_ID_ENV,
+    binding_filename, binding_filename_for_instance, history_filename_for_instance,
+    BINDING_FILE_ENV, HISTORY_FILE_ENV, SESSION_ID_ENV,
 };
 use nession_common::paths::agent_claude_bindings_dir;
 
@@ -62,6 +63,25 @@ pub(crate) fn file_for(session_name: &str, instance_id: &str) -> Option<PathBuf>
 /// root so they exercise the real derivation without touching it.
 pub(crate) fn file_for_in(root: &Path, session_name: &str, instance_id: &str) -> PathBuf {
     root.join(binding_filename_for_instance(session_name, instance_id))
+}
+
+/// The file `session_name`'s lifecycle history is appended to and read from,
+/// fenced by the same tmux Session instance as its current binding (#4664 D5).
+///
+/// `None` under the same condition as [`file_for`]: an agent that cannot name
+/// its own state directory hands the hook nothing, and the session runs with
+/// the truncate-only behavior.
+pub(crate) fn history_file_for(session_name: &str, instance_id: &str) -> Option<PathBuf> {
+    Some(
+        agent_claude_bindings_dir()
+            .ok()?
+            .join(history_filename_for_instance(session_name, instance_id)),
+    )
+}
+
+/// [`history_file_for`] under an explicit root, for tests.
+pub(crate) fn history_file_for_in(root: &Path, session_name: &str, instance_id: &str) -> PathBuf {
+    root.join(history_filename_for_instance(session_name, instance_id))
 }
 
 /// The name-derived file a Session created before the instance fence (`#2974`)
@@ -102,13 +122,24 @@ pub(crate) fn env_for(session_name: &str, instance_id: &str) -> Vec<(String, Str
     let Some(file) = file_for(session_name, instance_id) else {
         return Vec::new();
     };
-    vec![
+    let mut env = vec![
         (SESSION_ID_ENV.to_string(), session_name.to_string()),
         (
             BINDING_FILE_ENV.to_string(),
             file.to_string_lossy().into_owned(),
         ),
-    ]
+    ];
+    // The lifecycle log (#4664 D5). Derived beside the current file so the
+    // hook is told about exactly the file the reader will open; a session
+    // created before this variable existed was never handed it, and its hook
+    // keeps the truncate-only path.
+    if let Some(history) = history_file_for(session_name, instance_id) {
+        env.push((
+            HISTORY_FILE_ENV.to_string(),
+            history.to_string_lossy().into_owned(),
+        ));
+    }
+    env
 }
 
 #[cfg(test)]
@@ -149,7 +180,41 @@ mod tests {
             .into_iter()
             .map(|(name, _)| name)
             .collect();
-        assert_eq!(names, vec![SESSION_ID_ENV, BINDING_FILE_ENV]);
+        assert_eq!(
+            names,
+            vec![SESSION_ID_ENV, BINDING_FILE_ENV, HISTORY_FILE_ENV]
+        );
+    }
+
+    #[test]
+    fn the_hook_is_told_about_the_history_file_the_reader_will_open() {
+        // The same identity claim as the current binding's: the injected path
+        // and the reader's path are one derivation, not two similar strings.
+        let instance = "2f0a6c1e-0d43-4a6e-9f7c-3c1d2e4b5a60";
+        let env = env_for("nession-test-sess", instance);
+        let reported = env
+            .iter()
+            .find(|(name, _)| name == HISTORY_FILE_ENV)
+            .map(|(_, value)| value.clone())
+            .expect("the hook is told where to append");
+        assert_eq!(
+            PathBuf::from(&reported),
+            history_file_for("nession-test-sess", instance)
+                .expect("the agent can name its own state directory"),
+        );
+        assert!(reported.ends_with(&format!(".{instance}.history.jsonl")));
+
+        let root = Path::new("/state");
+        assert_ne!(
+            history_file_for_in(root, "s", "instance-a"),
+            history_file_for_in(root, "s", "instance-b"),
+            "two instances of one name must not share a history"
+        );
+        assert_ne!(
+            history_file_for_in(root, "s", "instance-a"),
+            file_for_in(root, "s", "instance-a"),
+            "the log is a distinct file from the current binding"
+        );
     }
 
     #[test]

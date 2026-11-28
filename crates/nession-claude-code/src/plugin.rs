@@ -62,7 +62,15 @@ const HOOK_SCRIPT: &str = r#"#!/bin/sh
 # New Sessions carry NESSION_RUNTIME_* variables. Surviving Sessions created
 # before the rename retain their original NESSON_* names until they end.
 if [ -n "$NESSION_RUNTIME_SESSION_ID" ] && [ -n "$NESSION_RUNTIME_BINDING_FILE" ]; then
-  cat > "$NESSION_RUNTIME_BINDING_FILE"
+  if [ -n "$NESSION_RUNTIME_BINDING_HISTORY" ]; then
+    # Current binding: the latest report, truncated exactly as before.
+    # History: every report appended, one JSON line each — the added newline
+    # keeps records separate even when a payload arrives without one. Still
+    # no parsing: tee copies bytes, the agent reads them (#4664 D5).
+    { tee "$NESSION_RUNTIME_BINDING_FILE"; printf '\n'; } >> "$NESSION_RUNTIME_BINDING_HISTORY"
+  else
+    cat > "$NESSION_RUNTIME_BINDING_FILE"
+  fi
   exit 0
 fi
 [ -n "$NESSON_SESSION_ID" ] || exit 0
@@ -438,6 +446,7 @@ mod tests {
         for name in [
             crate::binding::SESSION_ID_ENV,
             crate::binding::BINDING_FILE_ENV,
+            crate::binding::HISTORY_FILE_ENV,
             crate::binding::LEGACY_SESSION_ID_ENV,
             crate::binding::LEGACY_BINDING_FILE_ENV,
         ] {
@@ -491,6 +500,153 @@ mod tests {
                 r#"{"hook_event_name":"SessionStart"}"#
             );
         }
+    }
+
+    /// Run the rendered hook once with `payload` on stdin and the given
+    /// variables, the way Claude Code runs it.
+    #[cfg(unix)]
+    fn run_hook(script: &str, payload: &[u8], vars: &[(&str, &str)]) -> bool {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut command = Command::new("sh");
+        command
+            .arg("-c")
+            .arg(script)
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::piped());
+        for (name, value) in vars {
+            command.env(name, value);
+        }
+        let mut child = command.spawn().expect("run hook");
+        child
+            .stdin
+            .take()
+            .expect("hook stdin")
+            .write_all(payload)
+            .expect("write input");
+        child.wait().expect("hook exit").success()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_hook_appends_a_history_record_per_event_and_keeps_the_latest_binding() {
+        // SC-07: the current-binding file keeps the truncate semantics it
+        // always had; the log gains one parseable record per event, in order.
+        let files = render("1.0.0");
+        let script = file(&files, "hooks/record-binding.sh");
+        let dir = tempfile::tempdir().expect("hook fixture");
+        let binding = dir.path().join("binding.json");
+        let history = dir.path().join("history.jsonl");
+        let vars = [
+            (crate::binding::SESSION_ID_ENV, "session"),
+            (
+                crate::binding::BINDING_FILE_ENV,
+                binding.to_str().expect("path"),
+            ),
+            (
+                crate::binding::HISTORY_FILE_ENV,
+                history.to_str().expect("path"),
+            ),
+        ];
+        let start = br#"{"session_id":"conv-1","transcript_path":"/t/conv-1.jsonl","cwd":"/w","hook_event_name":"SessionStart","source":"resume"}"#;
+        let end = br#"{"session_id":"conv-1","transcript_path":"/t/conv-1.jsonl","cwd":"/w","hook_event_name":"SessionEnd"}"#;
+
+        assert!(run_hook(script, start, &vars));
+        assert!(run_hook(script, end, &vars));
+
+        assert_eq!(
+            std::fs::read(&binding).expect("current binding"),
+            end,
+            "the current file is still the latest report, byte for byte"
+        );
+        let log = std::fs::read_to_string(&history).expect("history");
+        let records = crate::binding::parse_history(&log);
+        assert_eq!(records.len(), 2, "one record per event: {log:?}");
+        assert_eq!(records[0].event, crate::binding::HookEvent::SessionStart);
+        assert_eq!(records[1].event, crate::binding::HookEvent::SessionEnd);
+        assert_eq!(records[0].claude_session_id, "conv-1");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_payload_without_a_trailing_newline_still_appends_separate_records() {
+        // Claude's stdin payload may arrive without a final newline; the
+        // hook's separator keeps the log parseable regardless.
+        let files = render("1.0.0");
+        let script = file(&files, "hooks/record-binding.sh");
+        let dir = tempfile::tempdir().expect("hook fixture");
+        let binding = dir.path().join("binding.json");
+        let history = dir.path().join("history.jsonl");
+        let vars = [
+            (crate::binding::SESSION_ID_ENV, "session"),
+            (
+                crate::binding::BINDING_FILE_ENV,
+                binding.to_str().expect("path"),
+            ),
+            (
+                crate::binding::HISTORY_FILE_ENV,
+                history.to_str().expect("path"),
+            ),
+        ];
+        let payload = br#"{"session_id":"conv-1","transcript_path":"/t.jsonl","cwd":"/w","hook_event_name":"SessionStart"}"#;
+        assert!(run_hook(script, payload, &vars));
+        assert!(run_hook(script, payload, &vars));
+        let log = std::fs::read_to_string(&history).expect("history");
+        assert_eq!(crate::binding::parse_history(&log).len(), 2, "{log:?}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_session_without_the_history_variable_keeps_the_truncate_only_behavior() {
+        // SC-06: sessions created before the log existed were never handed the
+        // variable; their hook path must not create or touch a log.
+        let files = render("1.0.0");
+        let script = file(&files, "hooks/record-binding.sh");
+        let dir = tempfile::tempdir().expect("hook fixture");
+        let binding = dir.path().join("binding.json");
+        let history = dir.path().join("history.jsonl");
+        let vars = [
+            (crate::binding::SESSION_ID_ENV, "session"),
+            (
+                crate::binding::BINDING_FILE_ENV,
+                binding.to_str().expect("path"),
+            ),
+        ];
+        let payload = br#"{"session_id":"conv-1","transcript_path":"/t.jsonl","cwd":"/w","hook_event_name":"SessionStart"}"#;
+        assert!(run_hook(script, payload, &vars));
+        assert!(binding.is_file());
+        assert!(
+            !history.exists(),
+            "a session without the variable must not gain a log"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_hook_writes_nothing_without_a_session_identity() {
+        // SC-07's negative half: the file variables alone are not permission
+        // to write — the session identity guard comes first.
+        let files = render("1.0.0");
+        let script = file(&files, "hooks/record-binding.sh");
+        let dir = tempfile::tempdir().expect("hook fixture");
+        let binding = dir.path().join("binding.json");
+        let history = dir.path().join("history.jsonl");
+        let vars = [
+            (
+                crate::binding::BINDING_FILE_ENV,
+                binding.to_str().expect("path"),
+            ),
+            (
+                crate::binding::HISTORY_FILE_ENV,
+                history.to_str().expect("path"),
+            ),
+        ];
+        let payload = br#"{"session_id":"conv-1","transcript_path":"/t.jsonl","cwd":"/w","hook_event_name":"SessionStart"}"#;
+        assert!(run_hook(script, payload, &vars));
+        assert!(!binding.exists());
+        assert!(!history.exists());
     }
 
     #[test]

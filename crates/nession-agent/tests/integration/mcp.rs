@@ -676,7 +676,18 @@ async fn agent_mcp_exposes_the_claude_conversation_and_transcript_readers() {
     let (addr, handle) = start_agent_with_provider_factory(
         nession_agent::execution::mutation_scheduler(),
         60,
-        |tmux| nession_agent::runtime::compose_mcp_tool_providers(TEST_AGENT_ID, tmux),
+        |tmux| {
+            nession_agent::runtime::compose_mcp_tool_providers(
+                TEST_AGENT_ID,
+                Arc::clone(&tmux),
+                Arc::new(
+                    nession_agent::session::activity::ClaudeActivityProvider::new(
+                        TEST_AGENT_ID,
+                        tmux,
+                    ),
+                ),
+            )
+        },
         None,
     )
     .await;
