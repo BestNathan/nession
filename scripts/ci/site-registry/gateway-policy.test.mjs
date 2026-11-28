@@ -28,7 +28,7 @@ function route(overrides = {}) {
     host: 'staging-mcp-nession.bestnathan.top',
     path: '/mcp',
     pathType: 'Exact',
-    hops: ['cloudflare', 'hk', 'higress', 'service'],
+    hops: ['cloudflare', 'hk', 'wireguard-gost', 'higress', 'service'],
     upstream: { protocol: 'http', tls: false, exposure: 'private-upstream' },
     ingressTls: false,
     publicNodePort: false,

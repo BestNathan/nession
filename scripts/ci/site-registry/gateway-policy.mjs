@@ -411,7 +411,7 @@ export function evaluateRouteFixture(fixture, { registry, policy = null } = {}) 
   };
   if (fixture.entrypoint === 'public') {
     if (hops.includes('slb') || fixture.hkToSlb === true) fail('hk-slb-chaining', site.id);
-    exactHops(['cloudflare', 'hk', 'higress', 'service'], 'public-route-chain');
+    exactHops(['cloudflare', 'hk', 'wireguard-gost', 'higress', 'service'], 'public-route-chain');
   }
   if (fixture.entrypoint === 'private') {
     if (hops.includes('cloudflare') || hops.includes('hk')) {

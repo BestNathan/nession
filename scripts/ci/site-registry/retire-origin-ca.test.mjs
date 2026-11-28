@@ -38,7 +38,7 @@ function validReceipt() {
     },
     path: {
       public: {
-        verified: true, hops: ['cloudflare', 'hk', 'higress', 'service'],
+        verified: true, hops: ['cloudflare', 'hk', 'wireguard-gost', 'higress', 'service'],
         higressProtocol: 'http', higressTls: false, hkToSlb: false,
         sourceEnforced: 'cloudflare-ipv4-cidrs'
       },

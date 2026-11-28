@@ -27,7 +27,9 @@ export const RECEIPT_VERSION = 1;
 export const RECEIPT_ISSUE = 4719;
 export const RECEIPT_RELATIVE_PATH = 'docs/engineering/receipts/4719-parallel-cutover-readback.json';
 export const REQUIRED_REVISIONS = Object.freeze(['nession', 'nsible', 'nitops', 'gitops']);
-export const REQUIRED_PUBLIC_HOPS = Object.freeze(['cloudflare', 'hk', 'higress', 'service']);
+export const REQUIRED_PUBLIC_HOPS = Object.freeze([
+  'cloudflare', 'hk', 'wireguard-gost', 'higress', 'service'
+]);
 export const REQUIRED_PRIVATE_HOPS = Object.freeze(['adguard', 'slb', 'higress', 'service']);
 export const PROTOCOL_POSITIVE = Object.freeze([
   'mcp-initialize', 'mcp-tools-list', 'wss-101-frames', 'sse-beyond-60s'

@@ -132,6 +132,9 @@ test('receipt validation rejects HK->SLB chaining, Higress TLS and public bypass
     ['path.public.hops', receipt => {
       receipt.path.public.hops = ['cloudflare', 'hk', 'slb', 'higress', 'service'];
     }],
+    ['path.public.hops', receipt => {
+      receipt.path.public.hops = ['cloudflare', 'hk', 'higress', 'service'];
+    }],
     ['path.public.higressProtocol', receipt => {
       receipt.path.public.higressProtocol = 'https';
     }],

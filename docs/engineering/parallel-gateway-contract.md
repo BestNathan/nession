@@ -75,9 +75,9 @@ authorized operator (or a separately authenticated Acceptance lane) records
 `validateCrossRepoReceipt()` requires:
 
 - exact 40-hex `nession`, `nsible`, `nitops` and `gitops` revisions;
-- the actual public path (Cloudflare -> HK -> Higress HTTP -> Service, with
-  source enforcement and no HK->SLB chain) and private path (AdGuard -> SLB ->
-  Higress HTTP -> Service, SLB TLS);
+- the actual public path (Cloudflare -> HK -> WireGuard/gost -> Higress HTTP ->
+  Service, with source enforcement and no HK->SLB chain) and private path
+  (AdGuard -> SLB -> Higress HTTP -> Service, SLB TLS);
 - both TLS lifecycles (nitops-owned HK public SAN with a key distinct from the
   SLB wildcard, nitops wildcard at the SLB) with serial/expiry/chain readback
   and authenticated Run identity;
@@ -133,9 +133,10 @@ authenticated receipts; a green PR or merge is not a rollout.
 
 - [ ] Sanitized inventory of HK listeners/`nginx -T`/firewall/NAT and LAN
       gateway state, plus the actual Cloudflare origin.
-- [ ] Off-path public/private probes: scheme, no 308 loop, MCP authenticated
-      initialize/tools/list, WSS frames, SSE > 60s, and all negative source /
-      header / host / path cases.
+- [ ] Off-path public/private probes through the declared hops (Cloudflare ->
+      HK -> WireGuard/gost -> Higress; AdGuard -> SLB -> Higress): scheme, no
+      308 loop, MCP authenticated initialize/tools/list, WSS frames, SSE > 60s,
+      and all negative source / header / host / path cases.
 - [ ] HK public SAN certificate and SLB wildcard certificate readback (serial,
       expiry, chain, distinct keys) on every serving node.
 - [ ] Activated HK route and DNS/NAT cutover with correlated request IDs and no
