@@ -21,6 +21,7 @@ use nession_claude_code::binding::Binding;
 use nession_claude_code::session_context::{McpHostContext, SessionClaudeConfig, SessionContext};
 
 use crate::server::websocket::extract_session_name;
+use crate::session::activity::ClaudeActivityProvider;
 use crate::tmux::manager::{SessionManager, INSTANCE_ID_ENV, LEGACY_INSTANCE_ID_ENV};
 
 /// Answers from the agent's own tmux addressing.
@@ -34,6 +35,11 @@ pub struct TmuxSessionContext {
     /// The host's MCP hosting facts (#3600). `None` when the Agent host did not
     /// provide them, which the Claude view reports as "cannot answer".
     mcp_host: Option<McpHostContext>,
+    /// The Activity adapter whose verified-observation cache names the live
+    /// conversation (#4664 D6). `None` when the host did not provide it; the
+    /// verified-identity answer is then "cannot say", and the lifecycle
+    /// binding remains the reported evidence.
+    claude_activity: Option<Arc<ClaudeActivityProvider>>,
 }
 
 impl TmuxSessionContext {
@@ -42,12 +48,22 @@ impl TmuxSessionContext {
             tmux,
             binding_root: None,
             mcp_host: None,
+            claude_activity: None,
         }
     }
 
     /// Attach the host facts the Claude MCP view needs.
     pub fn with_mcp_host(mut self, host: McpHostContext) -> Self {
         self.mcp_host = Some(host);
+        self
+    }
+
+    /// Attach the Activity adapter the verified-identity answer reads (#4664).
+    ///
+    /// The same provider instance the Activity coordinator polls — one cache,
+    /// not a second observation engine beside it.
+    pub fn with_claude_activity(mut self, provider: Arc<ClaudeActivityProvider>) -> Self {
+        self.claude_activity = Some(provider);
         self
     }
 
@@ -58,6 +74,7 @@ impl TmuxSessionContext {
             tmux,
             binding_root: Some(root),
             mcp_host: None,
+            claude_activity: None,
         }
     }
 
@@ -73,6 +90,26 @@ impl TmuxSessionContext {
     /// fenced Session treat "no binding" as an answer instead of falling back to
     /// a file a deleted Session may have left behind.
     async fn binding_file(&self, name: &str) -> Option<PathBuf> {
+        match self.instance_fence(name).await? {
+            Some(instance) => match &self.binding_root {
+                Some(root) => Some(crate::claude_binding::file_for_in(root, name, &instance)),
+                None => crate::claude_binding::file_for(name, &instance),
+            },
+            None => match &self.binding_root {
+                Some(root) => Some(crate::claude_binding::legacy_file_for_in(root, name)),
+                None => crate::claude_binding::legacy_file_for(name),
+            },
+        }
+    }
+
+    /// The instance fence state of `name`: outer `None` when the environment
+    /// cannot be read at all, `Some(None)` for a pre-fence Session, and
+    /// `Some(Some(instance))` for a fenced one.
+    ///
+    /// One derivation for every file the fence addresses — the current binding
+    /// and the lifecycle history (#4664 D5) — so the two cannot disagree about
+    /// which instance a Session is.
+    async fn instance_fence(&self, name: &str) -> Option<Option<String>> {
         // A surviving pre-upgrade Session may still carry only the old marker.
         let fenced = match self.tmux.get_session_env(name, INSTANCE_ID_ENV).await {
             Ok(Some(_)) => true,
@@ -103,27 +140,36 @@ impl TmuxSessionContext {
                 return None;
             }
         };
-        if fenced {
-            let instance = match self.tmux.session_instance_id(name).await {
-                Ok(instance) => instance,
-                Err(err) => {
-                    tracing::debug!(
-                        session = %name,
-                        error = %err,
-                        "claude-code: session instance unavailable"
-                    );
-                    return None;
-                }
-            };
-            match &self.binding_root {
-                Some(root) => Some(crate::claude_binding::file_for_in(root, name, &instance)),
-                None => crate::claude_binding::file_for(name, &instance),
+        if !fenced {
+            return Some(None);
+        }
+        match self.tmux.session_instance_id(name).await {
+            Ok(instance) => Some(Some(instance)),
+            Err(err) => {
+                tracing::debug!(
+                    session = %name,
+                    error = %err,
+                    "claude-code: session instance unavailable"
+                );
+                None
             }
-        } else {
-            match &self.binding_root {
-                Some(root) => Some(crate::claude_binding::legacy_file_for_in(root, name)),
-                None => crate::claude_binding::legacy_file_for(name),
-            }
+        }
+    }
+
+    /// The lifecycle history file this Session's hook was told to append to
+    /// (#4664 D5).
+    ///
+    /// Fenced Sessions only: a Session created before the log existed was never
+    /// handed the variable, so there is no file to read for it — `None`, the
+    /// same "no history" answer as a fenced Session whose Claude has not
+    /// started.
+    async fn history_file(&self, name: &str) -> Option<PathBuf> {
+        let instance = self.instance_fence(name).await??;
+        match &self.binding_root {
+            Some(root) => Some(crate::claude_binding::history_file_for_in(
+                root, name, &instance,
+            )),
+            None => crate::claude_binding::history_file_for(name, &instance),
         }
     }
 
@@ -261,6 +307,44 @@ impl SessionContext for TmuxSessionContext {
                 None
             }
         }
+    }
+
+    /// Every lifecycle report this Session instance's hook appended (#4664 D5).
+    ///
+    /// The same fence and the same read discipline as the current binding; an
+    /// absent file is an empty history, and a pre-log Session answers `None`
+    /// because it was never handed a log path.
+    async fn session_claude_history(&self, session_id: &str) -> Option<Vec<Binding>> {
+        let name = extract_session_name(session_id);
+        if name.is_empty() {
+            return None;
+        }
+        let path = self.history_file(&name).await?;
+        match tokio::task::spawn_blocking(move || nession_claude_code::binding::read_history(&path))
+            .await
+        {
+            Ok(history) => Some(history),
+            Err(err) => {
+                tracing::debug!(session = %name, error = %err, "claude-code: history read task failed");
+                None
+            }
+        }
+    }
+
+    /// The conversation the host's fresh verified observation names (#4664 D6).
+    ///
+    /// Read from the Activity adapter's existing cache — the same observation
+    /// the Activity projection publishes — never a new CLI probe. `None` when
+    /// the host did not attach the adapter, the instance cannot be named, or
+    /// no fresh verified observation exists.
+    async fn session_claude_verified_conversation(&self, session_id: &str) -> Option<String> {
+        let provider = self.claude_activity.as_ref()?;
+        let name = extract_session_name(session_id);
+        if name.is_empty() {
+            return None;
+        }
+        let instance = self.tmux.session_instance_id(&name).await.ok()?;
+        provider.verified_conversation(&name, &instance)
     }
 
     /// One variable from the Session's own tmux environment (#3600).
@@ -569,6 +653,88 @@ mod tests {
             .await
             .expect("a Session created before the fence keeps its valid binding");
         assert_eq!(bound.claude_session_id, "conversation-legacy");
+
+        // SC-06: a pre-log Session was never handed a history path; the
+        // history answer is "cannot say", not an empty log it never had.
+        assert_eq!(
+            fixture.context.session_claude_history(&name).await,
+            None,
+            "a pre-log session has no history file to read"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_recreated_session_does_not_inherit_the_deleted_sessions_history() {
+        // SC-05: the lifecycle log is fenced by the same instance as the
+        // current binding (#4664 D5) — a recreated same-name Session reads
+        // neither the deleted instance's reports nor its late appends.
+        if !tmux_available() {
+            eprintln!("tmux not available, skipping");
+            return;
+        }
+        let fixture = binding_fixture("claude-history-recreate").await;
+        let name = fixture.session.name().to_string();
+
+        let old_instance = delivered_instance(&fixture.tmux, &name).await;
+        let old_history =
+            crate::claude_binding::history_file_for_in(fixture.root.path(), &name, &old_instance);
+        std::fs::write(
+            &old_history,
+            format!(
+                "{}\n{}\n",
+                hook_payload("conversation-a"),
+                hook_payload("conversation-a")
+            ),
+        )
+        .expect("the fixture writes A's history");
+        let history = fixture
+            .context
+            .session_claude_history(&name)
+            .await
+            .expect("A's own history resolves");
+        assert_eq!(history.len(), 2);
+
+        fixture.tmux.kill_session(&name).await.expect("kill A");
+        fixture
+            .tmux
+            .create_session(&name, 80, 24, "/tmp", &[])
+            .await
+            .expect("recreate B");
+        let new_instance = delivered_instance(&fixture.tmux, &name).await;
+        assert_ne!(new_instance, old_instance);
+
+        assert_eq!(
+            fixture.context.session_claude_history(&name).await,
+            Some(Vec::new()),
+            "B must not inherit A's reports before B's own hook runs"
+        );
+
+        // A late append from the deleted instance's hook stays in A's file.
+        std::fs::write(
+            &old_history,
+            format!("{}\n", hook_payload("conversation-a-late")),
+        )
+        .expect("the fixture simulates A's delayed hook append");
+        assert_eq!(
+            fixture.context.session_claude_history(&name).await,
+            Some(Vec::new()),
+            "a late append from the deleted instance must not reach B"
+        );
+
+        let new_history =
+            crate::claude_binding::history_file_for_in(fixture.root.path(), &name, &new_instance);
+        std::fs::write(
+            &new_history,
+            format!("{}\n", hook_payload("conversation-b")),
+        )
+        .expect("the fixture writes B's history");
+        let history = fixture
+            .context
+            .session_claude_history(&name)
+            .await
+            .expect("B's own history resolves");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].claude_session_id, "conversation-b");
     }
 
     #[tokio::test]

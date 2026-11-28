@@ -16,12 +16,16 @@
 //!
 //! ## The hook does not parse anything
 //!
-//! The agent injects two variables into every session it creates:
-//! `NESSION_RUNTIME_SESSION_ID` and the path of the file that session's binding belongs
-//! in. The hook's whole body is:
+//! The agent injects into every session it creates `NESSION_RUNTIME_SESSION_ID`,
+//! the path of the file that session's current binding belongs in, and — for
+//! sessions created since #4664 — the path of its append-only lifecycle log.
+//! The hook's whole body is:
 //!
 //! ```sh
 //! [ -n "$NESSION_RUNTIME_SESSION_ID" ] || exit 0
+//! # with a log: tee truncates the current file and appends to the log
+//! { tee "$NESSION_RUNTIME_BINDING_FILE"; printf '\n'; } >> "$NESSION_RUNTIME_BINDING_HISTORY"
+//! # without one (older sessions): exactly the original behavior
 //! cat > "$NESSION_RUNTIME_BINDING_FILE"
 //! ```
 //!
@@ -29,7 +33,9 @@
 //! guaranteed present) or a hand-rolled extractor (guaranteed wrong eventually);
 //! and the hook knows nothing about which Nession session it is in — but the
 //! *agent* does, because it injected the variable. So the hook copies bytes and
-//! this module does the reading, with one parser instead of two.
+//! this module does the reading, with one parser instead of two. The log keeps
+//! every report the current file truncates away, so a conversation the session
+//! ran earlier stays discoverable after its cwd drifted (#4664 D5).
 //!
 //! The first line is `#1005` decision 6: the plugin is installed at user scope
 //! so it is available everywhere, and it must be a **no-op outside a Nession
@@ -52,6 +58,16 @@ pub const SESSION_ID_ENV: &str = "NESSION_RUNTIME_SESSION_ID";
 /// agent's state directory and how session ids are made safe for a filename,
 /// and a second implementation of either is a second thing to get wrong.
 pub const BINDING_FILE_ENV: &str = "NESSION_RUNTIME_BINDING_FILE";
+
+/// The environment variable naming this session's append-only lifecycle log
+/// (#4664 D5).
+///
+/// The current-binding file keeps only the latest report; the log keeps every
+/// report this session instance's hook wrote, so a conversation the session
+/// ran earlier stays discoverable after its cwd drifted or Claude exited.
+/// Sessions created before the log existed are not handed this variable, and
+/// their hook keeps the truncate-only behavior byte-for-byte.
+pub const HISTORY_FILE_ENV: &str = "NESSION_RUNTIME_BINDING_HISTORY";
 
 /// The old names remain read-only hook inputs for Sessions already running
 /// when the runtime namespace changed. New Sessions never inject these keys.
@@ -195,6 +211,41 @@ pub fn binding_filename(session_id: &str) -> String {
     safe
 }
 
+/// The filename a Session's lifecycle history lives in, fenced by the same
+/// tmux Session instance as its current binding (#2974, #4664 D5).
+///
+/// A distinct file from the current binding rather than a second format in the
+/// same one: the hook truncates the current file with `cat >` exactly as it
+/// always has, and appends to this one, so a legacy session's file is never
+/// touched by the new behavior.
+pub fn history_filename_for_instance(session_id: &str, instance_id: &str) -> String {
+    let session = safe_stem(session_id).unwrap_or_else(|| "session".to_string());
+    let instance = safe_stem(instance_id).unwrap_or_else(|| "instance".to_string());
+    format!("{session}.{instance}.history.jsonl")
+}
+
+/// Parse an append-only lifecycle log: one hook payload per line, in append
+/// (chronological) order.
+///
+/// A line that does not parse is skipped, not fatal: the log is appended while
+/// it may be read, so a partial trailing write is an ordinary state, and the
+/// hook's newline separator leaves blank lines between records. Every record
+/// that *is* complete is kept — losing a parseable report over its neighbor's
+/// partial write would discard evidence the session actually produced.
+pub fn parse_history(raw: &str) -> Vec<Binding> {
+    raw.lines().filter_map(parse).collect()
+}
+
+/// Read a Session's lifecycle history. Empty for an absent file — the ordinary
+/// state for a session whose Claude has not started, or one created before the
+/// log existed.
+pub fn read_history(path: &Path) -> Vec<Binding> {
+    match std::fs::read_to_string(path) {
+        Ok(raw) => parse_history(&raw),
+        Err(_) => Vec::new(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +380,77 @@ mod tests {
         std::fs::write(&path, payload("abc", "/t.jsonl", "/w", "SessionStart")).unwrap();
         let binding = read(&path).expect("the hook wrote it, so it is readable");
         assert_eq!(binding.claude_session_id, "abc");
+    }
+
+    // ---- the lifecycle history (#4664 D5) ----------------------------------
+
+    #[test]
+    fn a_history_filename_is_fenced_by_the_instance_like_the_binding() {
+        assert_eq!(
+            history_filename_for_instance("s", "instance-a"),
+            "s.instance-a.history.jsonl"
+        );
+        assert_ne!(
+            history_filename_for_instance("s", "instance-a"),
+            history_filename_for_instance("s", "instance-b"),
+            "two instances of one name must not share a history"
+        );
+        assert_ne!(
+            history_filename_for_instance("s", "instance-a"),
+            binding_filename_for_instance("s", "instance-a"),
+            "the log is a distinct file from the current binding"
+        );
+    }
+
+    #[test]
+    fn the_history_keeps_every_complete_report_in_append_order() {
+        let raw = format!(
+            "{}\n{}\n{}\n",
+            payload("first", "/a.jsonl", "/w", "SessionStart"),
+            payload("first", "/a.jsonl", "/w", "SessionEnd"),
+            payload("second", "/b.jsonl", "/elsewhere", "SessionStart"),
+        );
+        let history = parse_history(&raw);
+        let ids: Vec<&str> = history
+            .iter()
+            .map(|b| b.claude_session_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["first", "first", "second"]);
+        assert_eq!(history[1].event, HookEvent::SessionEnd);
+        assert_eq!(history[2].cwd, "/elsewhere");
+    }
+
+    #[test]
+    fn a_partial_trailing_write_and_blank_separators_do_not_lose_reports() {
+        // The log is appended while it may be read, and the hook's newline
+        // separator leaves blank lines. Both are ordinary, not corruption.
+        let raw = format!(
+            "{}\n\n{}\n{{\"session_id\":\"partial\",\"transcript_pa",
+            payload("first", "/a.jsonl", "/w", "SessionStart"),
+            payload("second", "/b.jsonl", "/w", "SessionEnd"),
+        );
+        let history = parse_history(&raw);
+        let ids: Vec<&str> = history
+            .iter()
+            .map(|b| b.claude_session_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["first", "second"]);
+    }
+
+    #[test]
+    fn a_legacy_single_json_file_reads_as_one_report() {
+        // A pre-log binding file is one JSON object, possibly without a
+        // trailing newline. Read as a log it is exactly one record — the
+        // formats compose rather than compete.
+        let raw = payload("abc", "/t.jsonl", "/w", "SessionStart");
+        let history = parse_history(&raw);
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].claude_session_id, "abc");
+    }
+
+    #[test]
+    fn an_absent_history_file_is_empty_not_an_error() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(read_history(&dir.path().join("absent.history.jsonl")).is_empty());
     }
 }
