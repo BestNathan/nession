@@ -8,6 +8,7 @@ import { routeIntentEpochAtom } from '@/platform/attach/state';
 import { sessionsApi } from '@/product/session';
 import { inputDropAtomFamily } from '@/product/terminal/state/ui';
 import { useAddressPlan } from '@/shared/hooks/useAddressPlan';
+import { useAttachedAgentProbe } from '@/product/terminal/hooks/useAttachedAgentProbe';
 import { sessionRuntimeRegistry } from '@/platform/session-runtime/SessionRuntimeRegistry';
 import { createFilesApi, type FileOps } from '@/capabilities/files';
 import { createTerminalAgentApi, type TerminalAgentApi } from '@/product/terminal';
@@ -253,7 +254,7 @@ function useRuntimeConnectionSync(opts: {
 export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSessionRuntimeResult {
   const [sessionId] = useAtom(sessionIdAtom);
   const [sessionName] = useAtom(sessionNameAtom);
-  const [attachInfo] = useAtom(attachInfoAtom);
+  const [attachInfo, setAttachInfo] = useAtom(attachInfoAtom);
   const [orderedUrls] = useAtom(orderedUrlsAtom);
   const [manualOverride] = useAtom(manualOverrideAtom);
   const routeIntentEpoch = useAtomValue(routeIntentEpochAtom);
@@ -327,6 +328,25 @@ export function useSessionRuntime(options: UseSessionRuntimeOptions): UseSession
 
   const runtime = useRuntimeOwnership(sessionId, attachInfo?.session_id, runtimeConfig);
   const snapshot = useSessionRuntimeSnapshot(runtime);
+
+  // Mirror a runtime-adopted fresh attach inventory into the Session atom so the
+  // address plan reconciles to the new membership (#4618 SC-06). The runtime is
+  // the authority; this is the composition owner publishing its fact to React,
+  // not a second attach path. A stale React sync cannot revert it (runtime fence).
+  useEffect(() => {
+    if (!runtime || runtime.sessionId !== sessionId) {
+      return;
+    }
+    return runtime.subscribeRuntimeEvents((event) => {
+      if (event.type === 'attach-inventory-adopted' && event.attachInfo.session_id === sessionId) {
+        setAttachInfo(event.attachInfo);
+      }
+    });
+  }, [runtime, sessionId, setAttachInfo]);
+
+  // Maintain the attached Agent's reachability and wake existing recovery when a
+  // candidate becomes reachable while the route is unhealthy (#4618 SC-02/04).
+  useAttachedAgentProbe({ runtime, snapshot, attachInfo, sessionId });
 
   // The effective transport: P2P only when the intent is P2P AND the runtime
   // has not fallen back to relay. Before the runtime exists (no snapshot)

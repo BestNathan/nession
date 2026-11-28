@@ -51,6 +51,7 @@ fn test_agent_address_update_payload_serde() {
             label: Some("LAN (eth0)".to_string()),
             network_type: NetworkType::Lan,
             priority: 10,
+            probe_url: None,
         }],
     };
     let json = serde_json::to_string(&payload).unwrap();
@@ -318,12 +319,14 @@ fn test_agent_register_payload_with_addresses_roundtrip() {
                 label: Some("LAN".to_string()),
                 network_type: NetworkType::Lan,
                 priority: 10,
+                probe_url: None,
             },
             AgentAddress {
                 url: "wss://agent.example.com/ws".to_string(),
                 label: Some("Tunnel".to_string()),
                 network_type: NetworkType::Tunnel,
                 priority: 30,
+                probe_url: None,
             },
         ],
         protocol_manifest: None,
@@ -492,4 +495,47 @@ fn a_registration_from_before_manifests_existed_still_decodes() {
     // advertise the addresses the old agent really sent.
     assert_eq!(payload.addresses.len(), 1);
     assert_eq!(payload.metadata.nession_version, "0.34.1");
+}
+
+/// `#4618` SC-01/SC-06: `probe_url` is an additive optional field. A peer that
+/// predates it omits the key entirely and decodes as `None`; a peer that sends
+/// it round-trips. Absence preserves the old meaning, so mixed-version
+/// clients/servers/agents stay compatible without a contract version bump.
+#[test]
+fn agent_address_probe_url_is_additive_and_optional() {
+    let legacy_json = r#"{"url":"ws://192.168.1.5:8080/ws","network_type":"lan","priority":10}"#;
+    let decoded: AgentAddress = serde_json::from_str(legacy_json).unwrap();
+    assert!(
+        decoded.probe_url.is_none(),
+        "an absent probe_url decodes as None"
+    );
+
+    // None is skipped on the wire, so an old peer sees exactly the old bytes.
+    let encoded = serde_json::to_string(&decoded).unwrap();
+    assert!(
+        !encoded.contains("probe_url"),
+        "None must not emit the key: {encoded}"
+    );
+
+    let with_probe = AgentAddress {
+        probe_url: Some("http://192.168.1.5:8080/probe".to_string()),
+        ..decoded
+    };
+    let encoded = serde_json::to_string(&with_probe).unwrap();
+    assert!(encoded.contains("\"probe_url\":\"http://192.168.1.5:8080/probe\""));
+    let round_trip: AgentAddress = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(round_trip, with_probe);
+
+    // The flattened ProbedAddress carries the same additive field at top level.
+    let probed = ProbedAddress {
+        address: with_probe,
+        status: AddressStatus::Unknown,
+        rtt_ms: None,
+    };
+    let encoded = serde_json::to_string(&probed).unwrap();
+    assert!(encoded.contains("\"probe_url\":\"http://192.168.1.5:8080/probe\""));
+    let legacy_probed_json =
+        r#"{"url":"ws://h/ws","network_type":"lan","priority":10,"status":"unknown"}"#;
+    let legacy_probed: ProbedAddress = serde_json::from_str(legacy_probed_json).unwrap();
+    assert!(legacy_probed.address.probe_url.is_none());
 }

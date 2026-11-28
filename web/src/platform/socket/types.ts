@@ -104,6 +104,7 @@ export interface TransportDiagnostic {
     | 'socket-open'
     | 'socket-error'
     | 'socket-close'
+    | 'dial-timeout'
     | 'handshake-failure'
     | 'reconnect-scheduled'
     | 'invalid-envelope';
@@ -126,6 +127,17 @@ export interface WebSocketServiceOptions {
   handshake?: (surface: HandshakeSurface) => Promise<void>;
   maxReconnectAttempts?: number; // default 10
   reconnectBaseDelay?: number;   // default 1_000, exp backoff, cap 30_000
+  /**
+   * Independent deadline for the physical dial (default 5_000ms, #4618 SC-05).
+   *
+   * A browser socket can sit in CONNECTING with no `open`/`error`/`close`
+   * callback ever firing (a black-holed route). Without this deadline the
+   * connect promise and its waiters dangle forever. The deadline settles the
+   * attempt once — teardown fences any late callback — and routes through the
+   * ordinary loss/retry path so candidate rotation and recovery apply unchanged.
+   * It covers only the dial; the post-open handshake keeps its own timeout.
+   */
+  dialTimeoutMs?: number;
   /**
    * Past `maxReconnectAttempts`, keep probing at a slow flat cadence instead of
    * settling on `disconnected`.

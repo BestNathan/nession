@@ -737,6 +737,7 @@ mod tests {
                 network_type,
                 label: None,
                 priority: 0,
+                probe_url: None,
             },
             status,
             rtt_ms: None,

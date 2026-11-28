@@ -293,10 +293,15 @@ src/
 │   ├── session-runtime/     # SessionRuntime (the terminal lifecycle's single
 │   │                        #   writable authority, #1309) + its registry
 │   │                        #   (acquire/release leases, StrictMode-deferred dispose)
-│   └── attach/              # attach state machine, controller, address policy,
-│                            #   relay connection, attach prefs/profile, state/
-│                            #   (state/ = the route-intent epoch only; runtime
-│                            #   facts live in the SessionRuntime, not in atoms)
+│   ├── attach/              # attach state machine, controller, address policy,
+│   │                        #   relay connection, attach prefs/profile, state/
+│   │                        #   (state/ = the route-intent epoch only; runtime
+│   │                        #   facts live in the SessionRuntime, not in atoms)
+│   └── probe/               # React-free reachability probe scheduler (#4618):
+│                            #   per-address HTTP/legacy-WS measurement, incremental
+│                            #   publication, generation fences, configurable periodic
+│                            #   + event triggers, probe prefs. Observes reachability;
+│                            #   never decides routes or attaches a Session.
 ├── shared/hooks/            # generic hooks importable by every layer (useWebSocket,
 │                            #   useMediaQuery, useAddressPlan, useDialogReset)
 ├── shared/lib/              # generic pure helpers (cn, format, encoding, languageId,
@@ -535,6 +540,26 @@ filter/sort/refresh disclosure.
 The per-surface policy inventory — owner, context, triggers, cadence, exceptions,
 manual entry and test — is maintained in
 [web-refresh-inventory.md](web-refresh-inventory.md).
+
+## Reachability probing (#4618)
+
+`platform/probe/` owns browser reachability observation, distinct from the
+pull/refresh controller (which owns mutable-list reads) and from transport
+authority. The React-free `ProbeScheduler` measures each advertised candidate
+with a credential-free HTTP `GET /probe` (or the bounded legacy WS-upgrade path
+for a peer that advertises no `probe_url`), publishes per-address results
+incrementally, and fences obsolete results by inventory/probe/network generation.
+`useAgentProbe` is a thin bridge projecting settled results into
+`probeResultsAtom`; `useAddressPlan` reconciles a measured order against the
+current advertisement membership so a stale order cannot resurrect a removed
+address. `useAttachedAgentProbe` maintains the attached Agent and wakes the
+runtime's existing recovery when a candidate becomes reachable while the route is
+unhealthy — never preempting a healthy socket.
+
+The probe contract, policy separation (a probe success never clears a WS failure
+budget; latency jitter never migrates a healthy route), fresh-inventory adoption
+and the physical dial deadline are canonical in
+[websocket-runtime.md](websocket-runtime.md) §7–8.
 
 ## Quality gates
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMatch, useNavigate } from 'react-router-dom';
 import { useAtomValue, useSetAtom } from 'jotai';
 import type { AttachChoice } from '@/product/session/components/AttachDialog';
@@ -14,6 +14,10 @@ import {
 import { probeResultsAtom } from '@/product/agent/state';
 import { useDeepLinkRestore } from '@/app/useDeepLinkRestore';
 import type { Session } from '@/types';
+
+/** Finite foreground restore budget before the spinner yields to the work
+ *  surface (#4618 SC-07). Background recovery is unaffected. */
+const RESTORE_FOREGROUND_BUDGET_MS = 30_000;
 
 /** Deep-link restore for shell: `#/terminal/:sessionId` auto-attaches and syncs selection. */
 export function useDeepLink(opts: {
@@ -138,9 +142,25 @@ export function useDeepLink(opts: {
 
   // While the config dialog is open (stale profile), do not sit on the
   // restore spinner behind it — the user must resolve the dialog first.
-  const isRestoringDeepLink = Boolean(
+  const restoring = Boolean(
     terminalMatch && !hasActiveSession && attachDialogSession === null,
   );
+
+  // #4618 SC-07: a finite foreground budget ends the indefinite restore spinner
+  // when the network is down, while background recovery keeps running. The work
+  // surface mounts (with the connection notice / manual Retry) instead of a
+  // spinner that never resolves; a successful restore or Retry resets the budget.
+  const [restoreBudgetExhausted, setRestoreBudgetExhausted] = useState(false);
+  useEffect(() => {
+    if (!restoring) {
+      setRestoreBudgetExhausted(false);
+      return;
+    }
+    const timer = setTimeout(() => setRestoreBudgetExhausted(true), RESTORE_FOREGROUND_BUDGET_MS);
+    return () => clearTimeout(timer);
+  }, [restoring]);
+
+  const isRestoringDeepLink = restoring && !restoreBudgetExhausted;
 
   return { isRestoringDeepLink, sessionIdFromUrl };
 }

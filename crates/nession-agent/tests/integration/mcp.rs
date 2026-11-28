@@ -1342,3 +1342,98 @@ async fn agent_http_surface_is_explicit() {
 
     let _ = handle.shutdown().await;
 }
+
+/// Raw probe request with arbitrary extra headers; header keys are normalised
+/// to lowercase so assertions do not depend on the wire casing.
+async fn send_probe(
+    addr: SocketAddr,
+    method: &str,
+    extra: &[(&str, &str)],
+) -> Option<HttpResponse> {
+    let mut stream = TcpStream::connect(addr).await.ok()?;
+    let mut head = format!(
+        "{method} /probe HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Length: 0\r\nConnection: close\r\n"
+    );
+    for (name, value) in extra {
+        head.push_str(&format!("{name}: {value}\r\n"));
+    }
+    head.push_str("\r\n");
+    stream.write_all(head.as_bytes()).await.ok()?;
+    let mut raw = Vec::new();
+    stream.read_to_end(&mut raw).await.ok()?;
+    let text = String::from_utf8_lossy(&raw);
+    let (head, body) = text.split_once("\r\n\r\n")?;
+    let mut lines = head.split("\r\n");
+    let status = lines
+        .next()?
+        .split_whitespace()
+        .nth(1)?
+        .parse::<u16>()
+        .ok()?;
+    let headers = lines
+        .filter_map(|line| {
+            line.split_once(':')
+                .map(|(key, value)| (key.trim().to_ascii_lowercase(), value.trim().to_string()))
+        })
+        .collect();
+    Some(HttpResponse {
+        status,
+        headers,
+        body: body.to_string(),
+    })
+}
+
+/// `#4618` SC-01: the Agent's reserved `/probe` route is a credential-free
+/// reachability endpoint on the same P2P listener — `204` + `Nession-Probe: v1`
+/// + `no-store` + CORS exposure, no body, no auth, and no pending-auth upgrade
+/// even for an upgrade-shaped GET. The P2P listener has no Origin allowlist, so
+/// a browser Origin receives a credential-free wildcard.
+#[tokio::test]
+async fn agent_probe_route_is_credential_free() {
+    let (addr, handle) = start_agent_with_mcp().await;
+
+    let plain = send_probe(addr, "GET", &[]).await.expect("HTTP answer");
+    assert_eq!(plain.status, 204);
+    assert!(plain.body.is_empty(), "the probe carries no body");
+    assert_eq!(plain.header("cache-control"), Some("no-store"));
+    assert_eq!(plain.header("nession-probe"), Some("v1"));
+    assert_eq!(
+        plain.header("access-control-expose-headers"),
+        Some("Nession-Probe")
+    );
+    assert!(plain.header("access-control-allow-credentials").is_none());
+    // A bogus credential is ignored: the probe has no auth slot.
+    let bogus = send_probe(addr, "GET", &[("Authorization", "Bearer nonsense")])
+        .await
+        .expect("HTTP answer");
+    assert_eq!(bogus.status, 204);
+
+    let cors = send_probe(addr, "GET", &[("Origin", "https://app.example.com")])
+        .await
+        .expect("HTTP answer");
+    assert_eq!(cors.status, 204);
+    assert_eq!(cors.header("access-control-allow-origin"), Some("*"));
+    assert!(cors.header("access-control-allow-credentials").is_none());
+
+    let post = send_probe(addr, "POST", &[]).await.expect("HTTP answer");
+    assert_eq!(post.status, 405, "the probe is GET-only");
+
+    // An upgrade-shaped GET to the reserved path stays a probe, never a WS:
+    // the explicit route wins over the any-path upgrade fallback.
+    let upgrade = send_probe(
+        addr,
+        "GET",
+        &[
+            ("Upgrade", "websocket"),
+            ("Connection", "Upgrade"),
+            ("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ=="),
+            ("Sec-WebSocket-Version", "13"),
+        ],
+    )
+    .await
+    .expect("HTTP answer");
+    assert_eq!(upgrade.status, 204);
+    assert_eq!(upgrade.header("nession-probe"), Some("v1"));
+
+    let _ = handle.shutdown().await;
+}

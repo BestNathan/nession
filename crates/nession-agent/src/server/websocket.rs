@@ -53,9 +53,9 @@ use crate::tmux::manager::{InitialSessionMetadata, SessionBindingInput, SessionM
 use crate::tmux::session::TmuxSession;
 use anyhow::{Context, Result};
 use axum::extract::{FromRequestParts, State, WebSocketUpgrade};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
-use axum::routing::any;
+use axum::routing::{any, get};
 use axum::Router;
 use futures_util::StreamExt;
 use nession_mcp::McpService;
@@ -1406,6 +1406,20 @@ fn p2p_router(state: P2pHttpState) -> Router {
     let registry_router = state.registry.as_ref().map(|registry| registry.router());
     let slot = state.slot.clone();
     let mut router = Router::new();
+    // The credential-free reachability probe (#4618), reserved ahead of the
+    // any-path upgrade fallback. The P2P listener has no Origin allowlist (its
+    // WS upgrade admits any Origin), so the probe uses a credential-free
+    // wildcard. Config validation refuses an MCP path that claims `/probe`; the
+    // guard avoids a duplicate-route panic if that is ever bypassed.
+    if !mcp_path
+        .as_deref()
+        .is_some_and(nession_runtime::probe::is_reserved_probe_path)
+    {
+        router = router.route(
+            nession_runtime::probe::PROBE_PATH,
+            get(p2p_probe).options(p2p_probe_preflight),
+        );
+    }
     if let Some(path) = mcp_path.as_deref() {
         router = router.route(path, any(mcp_http));
     }
@@ -1486,6 +1500,26 @@ async fn p2p_upgrade_or_not_found(
                 })
                 .await;
         })
+}
+
+/// The reserved reachability probe on the P2P listener (#4618).
+///
+/// Credential-free, body-free, no pending-auth slot and no business work: a
+/// `204` + `Nession-Probe: v1` states only that this HTTP path responded. The
+/// P2P upgrade has no Origin allowlist, so the probe answers any Origin with a
+/// credential-free wildcard and exposes the marker for cross-origin reads.
+async fn p2p_probe(State(state): State<P2pHttpState>, headers: HeaderMap) -> Response {
+    state.slot.release();
+    nession_runtime::probe::probe_success(&headers, nession_runtime::probe::ProbeOriginPolicy::Any)
+}
+
+/// OPTIONS preflight for the P2P probe route (Private Network Access included).
+async fn p2p_probe_preflight(State(state): State<P2pHttpState>, headers: HeaderMap) -> Response {
+    state.slot.release();
+    nession_runtime::probe::probe_preflight(
+        &headers,
+        nession_runtime::probe::ProbeOriginPolicy::Any,
+    )
 }
 
 /// The optional MCP endpoint on the P2P listener.

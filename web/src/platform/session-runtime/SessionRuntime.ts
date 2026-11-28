@@ -196,6 +196,10 @@ export type SessionRuntimeEvent =
   | { type: 'route-intent-changed'; phase: AttachPhase }
   /** The Agent stated the live Session's authoritative fixed columns (#2487). */
   | { type: 'session-terminal-cols'; cols: number }
+  /** A fresh authenticated attach adopted new candidate membership for the same
+   *  Session (#4618 SC-06). The composition owner mirrors it to `attachInfoAtom`
+   *  so the plan reconciles; the runtime keeps it authoritative over stale syncs. */
+  | { type: 'attach-inventory-adopted'; attachInfo: AttachInfo }
 
 /**
  * Value equality for the published snapshot.
@@ -331,6 +335,16 @@ export class SessionRuntime {
    * refresh's single-flight pointer. Mirrors the `reconcileEpoch` fence idiom.
    */
   private agentTokenEpoch = 0;
+  /**
+   * Runtime-owned fresh attach inventory adopted by a credential refresh
+   * (#4618 SC-06). Authoritative over a steady-state React sync carrying the
+   * same credential, so stale addresses/orderedUrls cannot resurrect a candidate
+   * the fresh advertisement removed. Cleared by a genuinely new attach.
+   */
+  private freshAttach: AttachInfo | null = null;
+  /** The credential superseded by the last fresh adoption; a React sync still
+   *  carrying it is a backwards stale sync and must not revert membership. */
+  private supersededAttachToken: string | null = null;
   private routeIntentEpoch: number;
   private transportGeneration = 0;
   private lastResize: { cols: number; rows: number } | null = null;
@@ -1140,6 +1154,28 @@ export class SessionRuntime {
     this.emitSnapshot();
   }
 
+  /**
+   * #4618 SC-06: a runtime-adopted fresh inventory is authoritative over a
+   * steady-state or backwards React sync for the same Session. A genuinely new
+   * attach (different Session or a new credential) supersedes it.
+   */
+  private fenceStaleAttachSync(next: Partial<SessionRuntimeConfig>): Partial<SessionRuntimeConfig> {
+    if (!next.attachInfo || !this.freshAttach) {
+      return next;
+    }
+    const incoming = next.attachInfo;
+    const sameSession = incoming.session_id === this.freshAttach.session_id;
+    const sameCredential = incoming.agent_token === this.freshAttach.agent_token;
+    const backwards = incoming.agent_token !== undefined
+      && incoming.agent_token === this.supersededAttachToken;
+    if (sameSession && (sameCredential || backwards)) {
+      return { ...next, attachInfo: this.freshAttach };
+    }
+    this.freshAttach = null;
+    this.supersededAttachToken = null;
+    return next;
+  }
+
   updateContext(next: Partial<SessionRuntimeConfig>): RuntimeMirrorSnapshot {
     const previousServerConnection = this.config.serverConnection;
     const previousAttachInfo = this.config.attachInfo;
@@ -1150,6 +1186,7 @@ export class SessionRuntime {
     const planUrlsChanged =
       next.addressUrls !== undefined
       && next.addressUrls.join('|') !== this.config.addressUrls.join('|');
+    next = this.fenceStaleAttachSync(next);
     this.config = { ...this.config, ...next };
     // A fresh attach (a new token, or a different Session) is the new
     // authority; a steady-state sync carries the older attach and must leave a
@@ -1984,6 +2021,14 @@ export class SessionRuntime {
         this.agentToken = fresh.agent_token;
         this.agentTokenSessionId = fresh.session_id;
         this.agentTokenRejected = false;
+        // Adopt the fresh candidate membership atomically with the credential
+        // (#4618 SC-06): same Session, changed addresses replace stale ones.
+        // The runtime owns this inventory until a genuinely new attach arrives;
+        // the composition owner mirrors the event so the React plan reconciles.
+        this.supersededAttachToken = this.config.attachInfo?.agent_token ?? null;
+        this.freshAttach = fresh;
+        this.config = { ...this.config, attachInfo: fresh };
+        this.emitRuntimeEvent({ type: 'attach-inventory-adopted', attachInfo: fresh });
         return true;
       } catch {
         return false;

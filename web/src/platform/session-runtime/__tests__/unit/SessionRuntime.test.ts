@@ -958,6 +958,52 @@ describe('SessionRuntime', () => {
     rt.dispose();
   });
 
+  it('adopts fresh candidate membership for the same Session and fences a backwards stale sync (#4618 SC-06)', async () => {
+    vi.useFakeTimers();
+    try {
+      const base = makeAttachInfo();
+      const fresh: AttachInfo = {
+        ...base,
+        agent_token: 'fresh-token',
+        agent_address: 'ws://c/ws',
+        addresses: [
+          { url: 'ws://c/ws', label: 'C', network_type: 'lan', priority: 10, status: 'reachable' },
+        ],
+      };
+      const requestFreshAttach = vi.fn().mockResolvedValue(fresh);
+      const rt = new SessionRuntime(makeConfig({ requestFreshAttach }));
+      const events: { type: string; attachInfo?: AttachInfo }[] = [];
+      rt.subscribeRuntimeEvents((event) => events.push(event as { type: string; attachInfo?: AttachInfo }));
+      rt.setTransportReady(true);
+      rt.attachController.dispatch({ type: 'SESSION_SELECTED' });
+
+      lastWs().readyState = 1;
+      lastWs().onopen?.(new Event('open'));
+      answerPending('client.auth', 'ok', { status: 'failed', message: 'bad token' });
+      await drainHandshake();
+      await vi.advanceTimersByTimeAsync(2_000);
+      await drainHandshake();
+
+      // The fresh reply adopted new membership for the SAME Session, atomically
+      // with the credential, and announced it for the composition owner.
+      expect(requestFreshAttach).toHaveBeenCalledWith('agent:s1');
+      expect(events.some((e) => e.type === 'attach-inventory-adopted'
+        && e.attachInfo?.agent_token === 'fresh-token')).toBe(true);
+
+      // A backwards React sync still carrying the superseded credential and the
+      // old addresses must not revert the adopted inventory/credential.
+      rt.updateContext({ attachInfo: base, addressUrls: ['ws://a/ws', 'ws://b/ws'] });
+      rt.updateContext({ routeIntentEpoch: 1 });
+      await drainHandshake();
+      await openWs();
+      const auth = sentFrames().filter((frame) => frame.msg_type === 'client.auth');
+      expect(auth[auth.length - 1].payload).toMatchObject({ auth_token: 'fresh-token' });
+      rt.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('fences a superseded token refresh: a stale response never replaces the newer attach token (#4290 SC-01)', async () => {
     vi.useFakeTimers();
     try {
@@ -2534,8 +2580,11 @@ describe('SessionRuntime', () => {
       expect(clientAttachBootstrapFlags()).toEqual([false]);
 
       // The peer goes silent and the probe declares the transport lost — the
-      // only thing that tells this client its buffer is suspect.
-      await vi.advanceTimersByTimeAsync(60_000);
+      // only thing that tells this client its buffer is suspect. The liveness
+      // probe fires at 15s and times out at 20s; the first reconnect dials at
+      // ~21s. Open that socket within the physical dial deadline (#4618 SC-05)
+      // rather than letting a CONNECTING socket sit indefinitely.
+      await vi.advanceTimersByTimeAsync(21_000);
       await flushMicrotasks();
 
       // The shared Session-scoped Agent stream (#1619) can keep recording

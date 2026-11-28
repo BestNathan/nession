@@ -50,6 +50,7 @@ fn agent_with_urls(agent_id: &str, urls: Vec<String>) -> AgentInfo {
                     label: None,
                     network_type: NetworkType::Lan,
                     priority: 0,
+                    probe_url: None,
                 },
                 status: AddressStatus::Unknown,
                 rtt_ms: None,

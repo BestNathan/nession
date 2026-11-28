@@ -308,6 +308,48 @@ physical attachment; it does not kill the tmux Session the Agent owns. A
 reconnect presents the cached token and keeps its stream cursor, controller
 lease and connection generation.
 
+### Reachability probe and physical dial deadline (#4618)
+
+Reachability observation is separate from transport authority:
+
+- **Probe endpoint.** Both runtimes serve a reserved `GET /probe` on their
+  existing HTTP listener — `204 No Content`, `Cache-Control: no-store`, the
+  fixed `Nession-Probe: v1` marker, and CORS exposure of that marker. The
+  canonical owner is [`nession_runtime::probe`](../../crates/nession-runtime/src/probe.rs);
+  the Server echoes an Origin its allowlist already approved, the Agent P2P
+  listener (no Origin allowlist) uses a credential-free wildcard. The probe is
+  credential-free, body-free, allocates **no** pending-auth slot, and touches no
+  database/tmux/business protocol. `/probe` is reserved against configured MCP
+  paths. A probe success means "this HTTP path responded", never peer identity,
+  WS upgrade/auth readiness or Session authority.
+- **Advertisement.** `AgentAddress.probe_url` is an optional additive field
+  (absence preserves the old meaning). The Agent advertises a derived
+  same-authority probe URL, or an explicit owner-approved config value for a
+  reverse-proxy ingress. A peer that omits it is probed through the bounded
+  legacy WS-upgrade compatibility path; an unsupported/CORS failure never
+  removes a potentially working WS candidate.
+- **Browser scheduler.** `web/src/platform/probe` owns a React-free per-address
+  scheduler: single-flight per target/address, bounded global/per-target
+  concurrency, 500 ms signal coalescing, a configurable 5-minute periodic
+  maintenance interval (disable-able without disabling event-driven recovery),
+  hidden/offline suspend, and foreground/online/network-change/inventory/
+  transport-loss/manual triggers. Each address publishes incrementally — never
+  behind a `Promise.all` barrier. Inventory/probe/network generations fence
+  obsolete results. The scheduler observes; it never decides routes, clears a
+  WS failure budget, or attaches a Session.
+- **Policy separation.** A successful HTTP probe never clears a WS failure
+  budget. `AddressAttachPolicy` preserves the current selection across
+  latency-only reorders and membership changes while it remains a member, so
+  jitter never migrates a healthy Relay/P2P route; only a real transport failure
+  (or an explicit user switch) retires it. `SessionRuntime` adopts a fresh
+  attach's candidate membership atomically with the credential for the same
+  Session and fences backwards/stale React syncs.
+- **Physical dial deadline.** `WebSocketService` arms an independent dial
+  deadline (default 5 s): a CONNECTING socket whose browser callbacks never fire
+  settles once through the ordinary loss/retry path, waiters reject exactly
+  once, and teardown fences any late callback. The post-open handshake keeps its
+  own timeout.
+
 ## 8. Observability
 
 #4437 owns the metric contract. The runtime guarantees the **hooks** exist at
@@ -328,6 +370,11 @@ path.
   histograms are not interchanged.
 - A missing collector cannot delay message handling. The exporter queue is
   bounded and drops are counted.
+- Web reachability diagnostics (#4618) follow the same redaction rule:
+  `ProbeDiagnostic` (`web/src/platform/probe`) carries bounded enums (trigger,
+  method, result, failure reason) and generation/epoch counters only — never a
+  URL, IP, token or raw Session/Agent ID. `TransportDiagnostic` gains a
+  `dial-timeout` event for the physical dial deadline.
 
 The executable owners are:
 

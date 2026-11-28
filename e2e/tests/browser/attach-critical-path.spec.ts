@@ -8,16 +8,18 @@ const FAST_AGENT_URL = E2E_AGENT_URL;
 const STALLED_AGENT_URL = E2E_STALLED_AGENT_URL;
 
 /**
- * Browser-side evidence for #1430.
+ * Browser-side evidence for #1430, updated for the HTTP probe (#4618).
  *
- * The dialog starts one real background latency probe per advertised address.
- * The second candidate below is replaced with a CONNECTING-only WebSocket so
- * its probe cannot finish before addressSelection.ts's 3s deadline.
+ * The dialog subscribes to the shared probe scheduler, which starts one
+ * credential-free HTTP GET per advertised address. The second candidate's probe
+ * URL is intercepted with a fetch that never resolves, so its measurement cannot
+ * finish before the scheduler's 3s deadline.
  *
- * A latency probe never calls WebSocket.send(). The real P2P transport does:
- * its first frame is the client.auth handshake. Recording the first send on the
- * FAST candidate therefore distinguishes "a probe dial happened" from "the
- * actual attach transport started".
+ * A reachability probe never calls WebSocket.send(). The real P2P transport
+ * does: its first frame is the client.auth handshake. Recording the first send
+ * on the FAST candidate therefore distinguishes "a probe happened" from "the
+ * actual attach transport started" — the decision path still never waits for the
+ * slow sibling probe.
  */
 interface CriticalPathEvidence {
   slowProbeStartedAt: number | null;
@@ -33,8 +35,9 @@ declare global {
 
 async function installCriticalPathInstrumentation(page: Page): Promise<void> {
   await page.addInitScript(
-    ({ fastUrl, stalledUrl }) => {
+    ({ fastUrl, stalledProbeUrl }) => {
       const NativeWebSocket = window.WebSocket;
+      const nativeFetch = window.fetch.bind(window);
       const evidence: CriticalPathEvidence = {
         slowProbeStartedAt: null,
         markAt: null,
@@ -42,26 +45,21 @@ async function installCriticalPathInstrumentation(page: Page): Promise<void> {
       };
       window.__nession1430 = evidence;
 
+      // The slow candidate's HTTP probe never resolves, so it cannot settle
+      // before the scheduler's deadline. The fast candidate's probe and the
+      // real attach transport are untouched.
+      window.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+        if (url.startsWith(stalledProbeUrl)) {
+          evidence.slowProbeStartedAt ??= performance.now();
+          return new Promise<Response>(() => {});
+        }
+        return nativeFetch(input, init);
+      }) as typeof window.fetch;
+
       const WrappedWebSocket = new Proxy(NativeWebSocket, {
         construct(Target, args) {
           const url = String(args[0]);
-
-          if (url.startsWith(stalledUrl)) {
-            evidence.slowProbeStartedAt ??= performance.now();
-
-            // measureLatency() only assigns onopen/onerror/onclose, reads
-            // readyState, and calls close(). Keeping this object CONNECTING makes
-            // the browser-side probe resolve only through its own 3s timeout.
-            return {
-              url,
-              readyState: Target.CONNECTING,
-              onopen: null,
-              onerror: null,
-              onclose: null,
-              close() {},
-            } as unknown as WebSocket;
-          }
-
           const socket = Reflect.construct(Target, args) as WebSocket;
           if (url.startsWith(fastUrl)) {
             const send = socket.send.bind(socket);
@@ -85,7 +83,10 @@ async function installCriticalPathInstrumentation(page: Page): Promise<void> {
         value: WrappedWebSocket,
       });
     },
-    { fastUrl: FAST_AGENT_URL, stalledUrl: STALLED_AGENT_URL },
+    {
+      fastUrl: FAST_AGENT_URL,
+      stalledProbeUrl: STALLED_AGENT_URL.replace(/^ws/, 'http').replace(/\/ws$/, '/probe'),
+    },
   );
 }
 

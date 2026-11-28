@@ -21,11 +21,8 @@ export interface AddressAttachPolicyConfig {
  */
 export class AddressAttachPolicy {
   private addressIndex = 0;
-  private planUrlsKey = '';
 
-  constructor(private config: AddressAttachPolicyConfig) {
-    this.planUrlsKey = config.addressUrls.join(',');
-  }
+  constructor(private config: AddressAttachPolicyConfig) {}
 
   get activeUrl(): string | null {
     const { attachInfo, forcedRelay, manualOverride, addressUrls } = this.config;
@@ -60,13 +57,20 @@ export class AddressAttachPolicy {
   }
 
   update(config: Partial<AddressAttachPolicyConfig>): AddressPolicyAction {
-    const prevKey = this.planUrlsKey;
+    const previousUrls = this.config.addressUrls;
+    const currentUrl = previousUrls[this.addressIndex] ?? null;
     this.config = { ...this.config, ...config };
-    const nextKey = this.config.addressUrls.join(',');
-    if (nextKey !== prevKey) {
-      this.planUrlsKey = nextKey;
+    const nextUrls = this.config.addressUrls;
+    // #4618 SC-04: a latency-only reorder or a membership change recomputes the
+    // STANDBY plan, but never migrates the current selection while it is still a
+    // member. The healthy/progressing socket keeps its candidate; only a removed
+    // current address (or an explicit route intent, which calls resetIndex)
+    // restarts from the best candidate. This is what stops latency jitter — and
+    // a newly reachable sibling — from tearing down a healthy Relay or P2P route.
+    if (currentUrl && nextUrls.includes(currentUrl)) {
+      this.addressIndex = nextUrls.indexOf(currentUrl);
+    } else {
       this.addressIndex = 0;
-      return { type: 'none' };
     }
     return { type: 'none' };
   }

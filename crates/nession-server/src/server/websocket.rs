@@ -705,6 +705,19 @@ fn http_router(
         pending_auth,
     };
     let mut router = Router::new().route("/ws", get(ws_upgrade));
+    // The credential-free reachability probe (#4618), reserved ahead of the
+    // upgrade fallback. Config validation refuses an MCP path that claims it;
+    // this guard keeps a misconfigured listener starting (probe omitted) rather
+    // than panicking on a duplicate route.
+    if !mcp_path
+        .as_deref()
+        .is_some_and(nession_runtime::probe::is_reserved_probe_path)
+    {
+        router = router.route(
+            nession_runtime::probe::PROBE_PATH,
+            get(http_probe).options(http_probe_preflight),
+        );
+    }
     if legacy_blob_route {
         router = router.route(&crate::image::http::blob_route(), get(image_blob));
     }
@@ -776,6 +789,37 @@ fn origin_policy_allows(allowed_origins: &[String], headers: &HeaderMap) -> bool
     origin
         .to_str()
         .is_ok_and(|origin| allowed_origins.iter().any(|allowed| allowed == origin))
+}
+
+/// The reserved reachability probe (#4618).
+///
+/// Credential-free, body-free, and allocated no pending-auth slot: a `204`
+/// states only that this HTTP path responded, never peer identity or WS/Session
+/// readiness. The browser Origin policy is the same gate the WS upgrade applies
+/// (#4066), so an unapproved browser is refused exactly as it would be there;
+/// an approved Origin is echoed (never a credentialed wildcard).
+async fn http_probe(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+    if !origin_policy_allows(&state.ctx.allowed_origins, &headers) {
+        debug!("refusing a reachability probe: its browser Origin is not allowed");
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    state.slot.release();
+    nession_runtime::probe::probe_success(
+        &headers,
+        nession_runtime::probe::ProbeOriginPolicy::EchoApproved,
+    )
+}
+
+/// OPTIONS preflight for the probe route, under the same Origin policy.
+async fn http_probe_preflight(State(state): State<HttpState>, headers: HeaderMap) -> Response {
+    if !origin_policy_allows(&state.ctx.allowed_origins, &headers) {
+        return StatusCode::FORBIDDEN.into_response();
+    }
+    state.slot.release();
+    nession_runtime::probe::probe_preflight(
+        &headers,
+        nession_runtime::probe::ProbeOriginPolicy::EchoApproved,
+    )
 }
 
 fn finish_ws_upgrade(state: HttpState, ws: WebSocketUpgrade) -> Response {
@@ -4783,6 +4827,149 @@ mod tests {
             axum::serve(listener, router).await.unwrap();
         });
         (format!("http://{addr}"), handle)
+    }
+
+    // ── Reachability probe route (#4618 SC-01) ──────────────────────────────
+
+    async fn probe_send(
+        router: &Router,
+        method: Method,
+        uri: &str,
+        extra: &[(&str, &str)],
+    ) -> (StatusCode, HeaderMap, Vec<u8>) {
+        use http_body_util::BodyExt;
+        use tower::ServiceExt;
+        let mut builder = axum::http::Request::builder().method(method).uri(uri);
+        for (name, value) in extra {
+            builder = builder.header(*name, *value);
+        }
+        let request = builder.body(axum::body::Body::empty()).unwrap();
+        let response = router.clone().oneshot(request).await.unwrap();
+        let status = response.status();
+        let headers = response.headers().clone();
+        let bytes = response.into_body().collect().await.unwrap().to_bytes();
+        (status, headers, bytes.to_vec())
+    }
+
+    /// A probe-only context. The returned `TempDir` must outlive the router so
+    /// the image store paths stay valid; the probe itself touches no image.
+    async fn probe_context(allowed_origins: Vec<String>) -> (ServerContext, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let (manager, _blobs, _conn) = sc03_manager(dir.path()).await;
+        let auth = nession_protocol::TokenVerifier::new(SC03_TOKEN);
+        let mut ctx = sc03_context(manager, auth, false).await;
+        ctx.allowed_origins = Arc::new(allowed_origins);
+        (ctx, dir)
+    }
+
+    #[tokio::test]
+    async fn probe_returns_204_no_store_marker_and_exposure() {
+        let (ctx, _dir) = probe_context(Vec::new()).await;
+        let router = http_router(ctx, sc03_slot(), Arc::new(tokio::sync::Semaphore::new(8)));
+        let (status, headers, body) = probe_send(&router, Method::GET, "/probe", &[]).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(body.is_empty(), "the probe carries no body");
+        assert_eq!(headers.get("cache-control").unwrap(), "no-store");
+        assert_eq!(headers.get("nession-probe").unwrap(), "v1");
+        assert_eq!(
+            headers.get("access-control-expose-headers").unwrap(),
+            "Nession-Probe"
+        );
+        // No Origin request → no ACAO, and never a credentialed wildcard.
+        assert!(headers.get("access-control-allow-origin").is_none());
+        assert!(headers.get("access-control-allow-credentials").is_none());
+        // A bogus credential is ignored: the probe has no auth slot.
+        let (status, _, _) = probe_send(
+            &router,
+            Method::GET,
+            "/probe",
+            &[("authorization", "Bearer nonsense")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn probe_refuses_unapproved_browser_origin_and_echoes_approved() {
+        let (ctx, _dir) = probe_context(vec!["https://ok.example".to_string()]).await;
+        let router = http_router(ctx, sc03_slot(), Arc::new(tokio::sync::Semaphore::new(8)));
+        let (status, _, _) = probe_send(
+            &router,
+            Method::GET,
+            "/probe",
+            &[("origin", "https://evil.example")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
+
+        let (status, headers, _) = probe_send(
+            &router,
+            Method::GET,
+            "/probe",
+            &[("origin", "https://ok.example")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            headers.get("access-control-allow-origin").unwrap(),
+            "https://ok.example"
+        );
+        assert_eq!(headers.get("vary").unwrap(), "Origin");
+        assert!(headers.get("access-control-allow-credentials").is_none());
+    }
+
+    #[tokio::test]
+    async fn probe_allocates_no_pending_auth_slot() {
+        let (ctx, _dir) = probe_context(Vec::new()).await;
+        // Zero pending-auth permits: a WS upgrade would be refused (503), but
+        // the probe must answer without ever touching that budget.
+        let router = http_router(ctx, sc03_slot(), Arc::new(tokio::sync::Semaphore::new(0)));
+        let (status, _, _) = probe_send(&router, Method::GET, "/probe", &[]).await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+    }
+
+    #[tokio::test]
+    async fn probe_rejects_non_get_method() {
+        let (ctx, _dir) = probe_context(Vec::new()).await;
+        let router = http_router(ctx, sc03_slot(), Arc::new(tokio::sync::Semaphore::new(8)));
+        let (status, _, _) = probe_send(&router, Method::POST, "/probe", &[]).await;
+        assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[tokio::test]
+    async fn probe_preflight_answers_options_and_private_network() {
+        let (ctx, _dir) = probe_context(vec!["https://ok.example".to_string()]).await;
+        let router = http_router(ctx, sc03_slot(), Arc::new(tokio::sync::Semaphore::new(8)));
+        let (status, headers, _) = probe_send(
+            &router,
+            Method::OPTIONS,
+            "/probe",
+            &[
+                ("origin", "https://ok.example"),
+                ("access-control-request-method", "GET"),
+                ("access-control-request-private-network", "true"),
+            ],
+        )
+        .await;
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(headers.get("access-control-allow-methods").unwrap(), "GET");
+        assert_eq!(
+            headers.get("access-control-allow-private-network").unwrap(),
+            "true"
+        );
+        assert_eq!(
+            headers.get("access-control-allow-origin").unwrap(),
+            "https://ok.example"
+        );
+        // An unapproved Origin is refused on preflight too.
+        let (status, _, _) = probe_send(
+            &router,
+            Method::OPTIONS,
+            "/probe",
+            &[("origin", "https://evil.example")],
+        )
+        .await;
+        assert_eq!(status, StatusCode::FORBIDDEN);
     }
 
     #[tokio::test]

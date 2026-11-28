@@ -560,6 +560,7 @@ fn agent_address(url: &str, priority: i32) -> AgentAddress {
         label: None,
         network_type: NetworkType::Lan,
         priority,
+        probe_url: None,
     }
 }
 

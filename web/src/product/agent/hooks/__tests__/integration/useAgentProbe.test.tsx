@@ -1,39 +1,39 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { renderHook } from '@testing-library/react';
 import { createStore, Provider } from 'jotai';
 import type { ReactNode } from 'react';
-import { probeResultsAtom, type AgentProbe } from '@/product/agent/state/probe';
+import { probeResultsAtom } from '@/product/agent/state/probe';
 import { useAgentProbe } from '@/product/agent/hooks/useAgentProbe';
-import type { AddressLatency, ProbedAddress } from '@/types';
+import { probeScheduler } from '@/platform/probe';
+import type { ProbedAddress } from '@/types';
 
 /**
- * `testAddresses` is the only thing mocked; `orderByLatency` is the real one.
- * The ordering a caller reads out of the atom is therefore the shipped rule,
- * not a stub that could agree with a wrong implementation.
+ * The bridge delegates measurement to the shared React-free scheduler; these
+ * tests drive the real scheduler with a controlled `fetch` double and a fake
+ * clock, and assert what the bridge publishes into the compatibility read model.
+ * Per-address scheduling/fences are proven in ProbeScheduler.test.ts.
  */
-const { testAddressesMock } = vi.hoisted(() => ({ testAddressesMock: vi.fn() }));
 
-vi.mock('@/shared/lib/addressSelection', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/shared/lib/addressSelection')>();
-  return { ...actual, testAddresses: testAddressesMock };
-});
-
-function probed(url: string): ProbedAddress {
-  return { url, network_type: 'lan', priority: 10, status: 'reachable' };
+interface FetchCall {
+  url: string;
+  resolve: (response: Response) => void;
+  reject: (error: Error) => void;
 }
 
-/** A promise whose settlement this test decides. */
-function deferred<T>() {
-  let resolve!: (value: T) => void;
-  const promise = new Promise<T>((r) => {
-    resolve = r;
-  });
-  return { promise, resolve };
+const control = vi.hoisted(() => ({ calls: [] as FetchCall[] }));
+
+function probeResponse(): Response {
+  return {
+    status: 204,
+    ok: true,
+    type: 'cors',
+    headers: new Headers({ 'Nession-Probe': 'v1' }),
+  } as unknown as Response;
 }
 
-function latency(url: string, latencyMs: number | null): AddressLatency {
-  return { url, latencyMs };
+function probed(url: string, probeUrl: string): ProbedAddress {
+  return { url, network_type: 'lan', priority: 10, status: 'unknown', probe_url: probeUrl };
 }
 
 function wrapper(store: ReturnType<typeof createStore>) {
@@ -42,180 +42,149 @@ function wrapper(store: ReturnType<typeof createStore>) {
   };
 }
 
-const CANDIDATES = [probed('ws://a/ws'), probed('ws://b/ws')];
+const CANDIDATES = [probed('ws://a/ws', 'http://a/probe'), probed('ws://b/ws', 'http://b/probe')];
+
+async function fireDebounce(): Promise<void> {
+  await vi.advanceTimersByTimeAsync(500);
+}
+
+function settle(url: string, ok: boolean): void {
+  const call = control.calls.find((c) => c.url === url);
+  if (!call) {
+    throw new Error(`no fetch for ${url}`);
+  }
+  if (ok) {
+    call.resolve(probeResponse());
+  } else {
+    call.reject(new TypeError('Failed to fetch'));
+  }
+}
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  control.calls.length = 0;
+  vi.stubGlobal('fetch', vi.fn((url: string) => new Promise<Response>((resolve, reject) => {
+    control.calls.push({ url, resolve, reject });
+  })));
+});
+
+afterEach(() => {
+  probeScheduler.unregisterTarget('agent-1');
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
 
-describe('useAgentProbe', () => {
-  it('measures the candidates with the credential and caches the result', async () => {
-    testAddressesMock.mockResolvedValue([latency('ws://a/ws', 20), latency('ws://b/ws', 5)]);
+describe('useAgentProbe bridge (#4618)', () => {
+  it('registers the target and projects settled results into the atom', async () => {
     const store = createStore();
-
-    const { result } = renderHook(
+    const { result, unmount } = renderHook(
       () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
-
-    await waitFor(() => expect(result.current.probing).toBe(false));
-
-    expect(testAddressesMock).toHaveBeenCalledWith(CANDIDATES);
-    expect(store.get(probeResultsAtom).get('agent-1')).toMatchObject({
-      orderedUrls: ['ws://b/ws', 'ws://a/ws'],
-    });
-  });
-
-  /**
-   * The inversion of the old poll's `if (!reachable) return`.
-   *
-   * `orderByLatency` never drops a failed address, so "all failed" is a
-   * measurement a reader must be able to tell from "never measured". Refusing to
-   * cache it makes an absence do a result's work, and every reader then renders
-   * an untested address as unreachable — which is #1091's visible half.
-   */
-  it('caches a total failure rather than leaving the entry absent', async () => {
-    testAddressesMock.mockResolvedValue([latency('ws://a/ws', null), latency('ws://b/ws', null)]);
-    const store = createStore();
-
-    const { result } = renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
-      { wrapper: wrapper(store) },
-    );
-
-    await waitFor(() => expect(result.current.probe).not.toBeNull());
+    await fireDebounce();
+    expect(control.calls.map((c) => c.url).sort()).toEqual(['http://a/probe', 'http://b/probe']);
+    settle('http://a/probe', true);
+    settle('http://b/probe', true);
+    await vi.advanceTimersByTimeAsync(0);
 
     const cached = store.get(probeResultsAtom).get('agent-1');
-    expect(cached?.latencies.every((l) => l.latencyMs === null)).toBe(true);
-    expect(cached?.orderedUrls).toEqual(['ws://a/ws', 'ws://b/ws']);
+    expect(cached?.latencies.map((l) => l.url).sort()).toEqual(['ws://a/ws', 'ws://b/ws']);
+    expect(cached?.orderedUrls).toHaveLength(2);
+    expect(result.current.probing).toBe(false);
+    unmount();
   });
 
-  it('probes nothing with no candidates, and nothing with no agent', async () => {
+  it('caches a total failure rather than leaving the entry absent', async () => {
     const store = createStore();
-
-    renderHook(
-      () => useAgentProbe({ agentId: 'agent-1', addresses: [] }),
-      { wrapper: wrapper(store) },
-    );
-    renderHook(
-      () => useAgentProbe({ agentId: null, addresses: CANDIDATES }),
-      { wrapper: wrapper(store) },
-    );
-
-    await Promise.resolve();
-    expect(testAddressesMock).not.toHaveBeenCalled();
-  });
-
-  /**
-   * "Re-test" bumps a counter rather than relying on a reply carrying a new
-   * credential: the bump is what makes a repeated measurement explicit.
-   */
-  it('re-measures when the caller bumps reprobeKey', async () => {
-    testAddressesMock.mockResolvedValue([latency('ws://a/ws', 20), latency('ws://b/ws', 5)]);
-    const store = createStore();
-
-    const { rerender } = renderHook(
-      ({ reprobeKey }: { reprobeKey: number }) =>
-        useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, reprobeKey }),
-      { wrapper: wrapper(store), initialProps: { reprobeKey: 0 } },
-    );
-    await waitFor(() => expect(testAddressesMock).toHaveBeenCalledTimes(1));
-
-    testAddressesMock.mockResolvedValue([latency('ws://a/ws', 3), latency('ws://b/ws', 40)]);
-    rerender({ reprobeKey: 1 });
-
-    await waitFor(() => expect(testAddressesMock).toHaveBeenCalledTimes(2));
-    await waitFor(() =>
-      expect(store.get(probeResultsAtom).get('agent-1')?.orderedUrls).toEqual([
-        'ws://a/ws',
-        'ws://b/ws',
-      ]),
-    );
-    expect(testAddressesMock).toHaveBeenLastCalledWith(CANDIDATES);
-  });
-
-  it('does not re-probe when only the array identity changes', async () => {
-    testAddressesMock.mockResolvedValue([latency('ws://a/ws', 20), latency('ws://b/ws', 5)]);
-    const store = createStore();
-
-    const { rerender } = renderHook(
-      ({ addresses }: { addresses: ProbedAddress[] }) =>
-        useAgentProbe({ agentId: 'agent-1', addresses }),
-      { wrapper: wrapper(store), initialProps: { addresses: CANDIDATES } },
-    );
-    await waitFor(() => expect(testAddressesMock).toHaveBeenCalledTimes(1));
-
-    // Same content, new array — a caller re-rendering must not re-measure.
-    rerender({ addresses: [probed('ws://a/ws'), probed('ws://b/ws')] });
-
-    await Promise.resolve();
-    expect(testAddressesMock).toHaveBeenCalledTimes(1);
-  });
-
-  /**
-   * StrictMode mounts, cleans up and mounts again, so two measurements overlap
-   * from the first render. The newest must win — the older one resolving last is
-   * exactly the case a `cancelled` boolean gets wrong.
-   */
-  it('lets a newer measurement win even when an older one resolves later', async () => {
-    const first = deferred<AddressLatency[]>();
-    const second = deferred<AddressLatency[]>();
-    testAddressesMock.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
-    const store = createStore();
-
-    const { rerender } = renderHook(
-      ({ reprobeKey }: { reprobeKey: number }) =>
-        useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, reprobeKey }),
-      { wrapper: wrapper(store), initialProps: { reprobeKey: 0 } },
-    );
-    rerender({ reprobeKey: 1 });
-
-    // The newer measurement resolves first, the older one second.
-    second.resolve([latency('ws://a/ws', 1), latency('ws://b/ws', 99)]);
-    await waitFor(() =>
-      expect(store.get(probeResultsAtom).get('agent-1')?.latencies[0].latencyMs).toBe(1),
-    );
-
-    first.resolve([latency('ws://a/ws', 500), latency('ws://b/ws', 600)]);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(store.get(probeResultsAtom).get('agent-1')?.latencies[0].latencyMs).toBe(1);
-  });
-
-  it('does not write a result that arrives after unmount', async () => {
-    const pending = deferred<AddressLatency[]>();
-    testAddressesMock.mockReturnValue(pending.promise);
-    const store = createStore();
-
     const { unmount } = renderHook(
       () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
+    await fireDebounce();
+    settle('http://a/probe', false);
+    settle('http://b/probe', false);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const cached = store.get(probeResultsAtom).get('agent-1');
+    expect(cached?.latencies.every((l) => l.latencyMs === null)).toBe(true);
+    expect(cached?.orderedUrls).toEqual(['ws://a/ws', 'ws://b/ws']);
     unmount();
-
-    pending.resolve([latency('ws://a/ws', 5)]);
-    await Promise.resolve();
-    await Promise.resolve();
-
-    expect(store.get(probeResultsAtom).size).toBe(0);
   });
 
-  it('surfaces an entry already in the atom before measuring', async () => {
-    const seeded: AgentProbe = {
-      latencies: [latency('ws://a/ws', 7)],
-      orderedUrls: ['ws://a/ws'],
-      probedAt: 1,
-    };
+  it('probes nothing with no candidates, and nothing with no agent', async () => {
     const store = createStore();
-    store.set(probeResultsAtom, new Map([['agent-1', seeded]]));
-    testAddressesMock.mockReturnValue(new Promise(() => {}));
+    const h1 = renderHook(() => useAgentProbe({ agentId: 'agent-1', addresses: [] }), { wrapper: wrapper(store) });
+    const h2 = renderHook(() => useAgentProbe({ agentId: null, addresses: CANDIDATES }), { wrapper: wrapper(store) });
+    await fireDebounce();
+    expect(control.calls).toHaveLength(0);
+    h1.unmount();
+    h2.unmount();
+  });
 
-    const { result } = renderHook(
+  it('refreshes unchanged addresses when the caller bumps reprobeKey', async () => {
+    const store = createStore();
+    const { rerender, unmount } = renderHook(
+      ({ reprobeKey }: { reprobeKey: number }) => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES, reprobeKey }),
+      { wrapper: wrapper(store), initialProps: { reprobeKey: 0 } },
+    );
+    await fireDebounce();
+    settle('http://a/probe', true);
+    settle('http://b/probe', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(control.calls).toHaveLength(2);
+
+    rerender({ reprobeKey: 1 });
+    await fireDebounce();
+    expect(control.calls).toHaveLength(4); // a fresh round for the same addresses
+    unmount();
+  });
+
+  it('does not re-probe when only the array identity changes', async () => {
+    const store = createStore();
+    const { rerender, unmount } = renderHook(
+      ({ addresses }: { addresses: ProbedAddress[] }) => useAgentProbe({ agentId: 'agent-1', addresses }),
+      { wrapper: wrapper(store), initialProps: { addresses: CANDIDATES } },
+    );
+    await fireDebounce();
+    settle('http://a/probe', true);
+    settle('http://b/probe', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(control.calls).toHaveLength(2);
+
+    rerender({ addresses: [probed('ws://a/ws', 'http://a/probe'), probed('ws://b/ws', 'http://b/probe')] });
+    await fireDebounce();
+    expect(control.calls).toHaveLength(2);
+    unmount();
+  });
+
+  it('publishes incrementally: a fast address lands before the slow one settles', async () => {
+    const store = createStore();
+    const { unmount } = renderHook(
       () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
       { wrapper: wrapper(store) },
     );
+    await fireDebounce();
+    settle('http://a/probe', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get(probeResultsAtom).get('agent-1')?.latencies.map((l) => l.url)).toEqual(['ws://a/ws']);
 
-    expect(result.current.probe).toEqual(seeded);
+    settle('http://b/probe', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get(probeResultsAtom).get('agent-1')?.latencies).toHaveLength(2);
+    unmount();
+  });
+
+  it('does not write a result that arrives after unmount', async () => {
+    const store = createStore();
+    const { unmount } = renderHook(
+      () => useAgentProbe({ agentId: 'agent-1', addresses: CANDIDATES }),
+      { wrapper: wrapper(store) },
+    );
+    await fireDebounce();
+    unmount(); // releases the target before any probe settles
+    settle('http://a/probe', true);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.get(probeResultsAtom).size).toBe(0);
   });
 });

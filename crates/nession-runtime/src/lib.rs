@@ -86,3 +86,4 @@ pub mod lane;
 pub mod lifecycle;
 pub mod metrics;
 pub mod outbound;
+pub mod probe;

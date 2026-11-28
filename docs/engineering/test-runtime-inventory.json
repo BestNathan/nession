@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1910,
-    "references": 1020,
+    "entries": 1915,
+    "references": 1022,
     "unresolved": 0
   },
   "crates": [
@@ -49,7 +49,7 @@
       "file": "crates/nession-agent/src/config.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 588
+      "line": 597
     },
     {
       "file": "crates/nession-agent/src/connection/execution.rs",
@@ -139,7 +139,7 @@
       "file": "crates/nession-agent/src/netdetect.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 175
+      "line": 187
     },
     {
       "file": "crates/nession-agent/src/p2p_auth.rs",
@@ -223,7 +223,7 @@
       "file": "crates/nession-agent/src/server/websocket.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 4551
+      "line": 4585
     },
     {
       "file": "crates/nession-agent/src/session_env.rs",
@@ -1039,13 +1039,13 @@
       "file": "crates/nession-common/src/address.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 120
+      "line": 122
     },
     {
       "file": "crates/nession-common/src/config.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 639
+      "line": 650
     },
     {
       "file": "crates/nession-common/src/display_name.rs",
@@ -1984,6 +1984,12 @@
       "line": 1603
     },
     {
+      "file": "crates/nession-runtime/src/probe.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 163
+    },
+    {
       "file": "crates/nession-runtime/tests/gauge_aggregation.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
@@ -2509,7 +2515,7 @@
       "file": "crates/nession-server/src/server/websocket.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 3261
+      "line": 3305
     },
     {
       "file": "crates/nession-server/tests/integration/agent_address_update_race.rs",
@@ -6873,6 +6879,16 @@
       "disposition": "e2e-runtime"
     },
     {
+      "file": "e2e/acceptance/cases/4618/SC-07/verify.spec.js",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4618/SC-09/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
       "file": "e2e/acceptance/cases/4620/SC-01/verify.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
@@ -9098,6 +9114,16 @@
       "disposition": "web-unit"
     },
     {
+      "file": "web/src/platform/probe/__tests__/unit/httpProbe.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
+      "file": "web/src/platform/probe/__tests__/unit/ProbeScheduler.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
       "file": "web/src/platform/protocol/__tests__/unit/directory.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
@@ -10021,7 +10047,7 @@
   "references": [
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 655,
+      "line": 664,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10030,7 +10056,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 817,
+      "line": 833,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10039,7 +10065,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 822,
+      "line": 838,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10048,7 +10074,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 835,
+      "line": 851,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10057,7 +10083,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 853,
+      "line": 869,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10066,7 +10092,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 863,
+      "line": 879,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10075,7 +10101,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 877,
+      "line": 893,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10084,7 +10110,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 891,
+      "line": 907,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10093,7 +10119,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 905,
+      "line": 921,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10102,7 +10128,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 920,
+      "line": 936,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10111,7 +10137,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 933,
+      "line": 949,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10120,7 +10146,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 935,
+      "line": 951,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10129,7 +10155,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 941,
+      "line": 957,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10138,7 +10164,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 950,
+      "line": 966,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10147,7 +10173,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 957,
+      "line": 973,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10156,7 +10182,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 967,
+      "line": 983,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10165,7 +10191,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 1034,
+      "line": 1050,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10174,7 +10200,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 1049,
+      "line": 1065,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10183,7 +10209,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 1063,
+      "line": 1079,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10435,7 +10461,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 5684,
+      "line": 5718,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10444,7 +10470,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 5815,
+      "line": 5849,
       "kind": "session-metadata",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10453,7 +10479,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 6147,
+      "line": 6181,
       "kind": "session-metadata",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10462,7 +10488,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 6384,
+      "line": 6418,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10471,7 +10497,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 7919,
+      "line": 7953,
       "kind": "session-metadata",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -10480,7 +10506,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 7937,
+      "line": 7971,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -10489,7 +10515,7 @@
     },
     {
       "file": "crates/nession-agent/src/server/websocket.rs",
-      "line": 8655,
+      "line": 8689,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12298,7 +12324,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 693,
+      "line": 704,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12307,7 +12333,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 696,
+      "line": 707,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12316,7 +12342,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 728,
+      "line": 739,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12325,7 +12351,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 730,
+      "line": 741,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12334,7 +12360,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 737,
+      "line": 748,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12343,7 +12369,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 739,
+      "line": 750,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12352,7 +12378,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 766,
+      "line": 777,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12361,7 +12387,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 779,
+      "line": 790,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12370,7 +12396,25 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 825,
+      "line": 814,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"listen_address = \\\"127.0.0.1:19090\\\"\\n\\",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-common/src/config.rs",
+      "line": 827,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"listen_address = \\\"127.0.0.1:19090\\\"\\n\\",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-common/src/config.rs",
+      "line": 868,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12379,7 +12423,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 834,
+      "line": 877,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12388,7 +12432,7 @@
     },
     {
       "file": "crates/nession-common/src/config.rs",
-      "line": 953,
+      "line": 996,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -13963,7 +14007,7 @@
     },
     {
       "file": "crates/nession-server/src/server/websocket.rs",
-      "line": 4782,
+      "line": 4826,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",

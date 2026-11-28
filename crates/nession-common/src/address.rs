@@ -103,6 +103,7 @@ pub fn legacy_to_addresses(
                 label: Some("Tunnel".to_string()),
                 network_type: NetworkType::Tunnel,
                 priority: NetworkType::Tunnel.default_priority(),
+                probe_url: None,
             });
         }
     }
@@ -112,6 +113,7 @@ pub fn legacy_to_addresses(
             label: Some("Direct".to_string()),
             network_type: NetworkType::Lan,
             priority: NetworkType::Lan.default_priority(),
+            probe_url: None,
         });
     }
     out
@@ -127,6 +129,7 @@ mod tests {
             label: None,
             network_type: nt,
             priority,
+            probe_url: None,
         }
     }
 

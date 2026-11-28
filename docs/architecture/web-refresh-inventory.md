@@ -50,9 +50,15 @@ Status is measured against this branch, not against intent.
 Immutable history and diffs (`git.log`, `git.commit`, `git.diff`), transcript
 record rows and raw record text, conversation message pages (append-only
 live-tail), editor drafts, streaming terminal/AI output, MCP call history,
-local command history, single-document reads, and the browser-side Agent address
+local command history, single-document reads, and the browser-side reachability
 probe. These are not periodic mutable lists; their existing owners keep their
-semantics.
+semantics. The reachability probe (#4618) is owned by `platform/probe`
+(`ProbeScheduler`): a configurable 5-minute maintenance interval plus
+event-driven triggers, per-address incremental publication, and generation
+fences. It observes reachability for the active Server and active/attached Agent
+targets (plus explicit visible detail/Re-test); it is not a list read and never
+decides routes. See [web.md](web.md) "Reachability probing" and
+[websocket-runtime.md](websocket-runtime.md) §7.
 
 ## Known limits
 
