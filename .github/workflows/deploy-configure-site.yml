@@ -102,11 +102,14 @@ jobs:
             scripts/ci/configure-cloudflare-site.test.mjs \
             scripts/ci/configure-adguard-dns.test.mjs \
             scripts/ci/site-registry/edge-policy.test.mjs \
+            scripts/ci/site-registry/gateway-policy.test.mjs \
+            scripts/ci/site-registry/gateway-rollout.test.mjs \
             scripts/ci/site-registry/retire-origin-ca.test.mjs \
             scripts/ci/issue-cloudflare-origin-ca.test.mjs \
             scripts/ci/site-workflow-contract.test.mjs
           node scripts/ci/site-registry/site-registry.mjs validate
           node scripts/ci/site-registry/edge-policy.mjs check-fixture
+          node scripts/ci/site-registry/gateway-policy.mjs check-fixture
           node scripts/ci/site-registry/retire-origin-ca.mjs check-source
           bash scripts/ci/site-dns-tunnel.sh self-test
 

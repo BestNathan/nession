@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-// Legacy Cloudflare Origin CA retirement gate (#4589 SC-04). Removal of the
-// issue-tls workflow action and Origin CA implementation is permitted only
-// after a recorded #4588 cutover/readback AND zero remaining consumers in
-// source and GitOps. This issue owns workflow/script removal and docs; #4588
-// owns the legacy GitOps TLS objects. Public DNS and the generic SealedSecret
-// mechanism are preserved, and retirement never republishes private DNS.
+// Legacy Cloudflare Origin CA retirement gate (#4589 SC-04, extended by
+// #4719 SC-02). Removal of the issue-tls workflow action and Origin CA
+// implementation is permitted only after (1) a recorded #4588 cutover/readback,
+// (2) zero remaining consumers in source and GitOps, and (3) an independently
+// attested cross-repository parallel-gateway receipt pinned to the exact
+// reviewed Nession/nsible/nitops/GitOps revisions. This issue owns
+// workflow/script removal and docs; #4588 owns the legacy GitOps TLS objects.
+// Public DNS and the generic SealedSecret mechanism are preserved, and
+// retirement never republishes private DNS.
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import {
+  RECEIPT_RELATIVE_PATH, validateCrossRepoReceipt, verifyCrossRepoReceipt
+} from './gateway-rollout.mjs';
 
 const DIR = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(DIR, '../../..');
@@ -60,20 +66,33 @@ export function validateReadiness(record) {
   return true;
 }
 
-export function evaluateRetirement({ readiness, consumers }) {
+// #4719 SC-02: retirement additionally requires an independently attested
+// cross-repository cutover receipt pinned to the exact reviewed revisions. The
+// receipt binds the actual path/TLS/protocol evidence and no-remaining-consumer
+// claim; a missing, stale or mismatched receipt blocks retirement.
+export function evaluateRetirement({ readiness, consumers, crossRepoReceipt, expectedRevisions }) {
   if (Array.isArray(consumers) && consumers.length > 0) {
     return { allowed: false, reason: 'consumers-remain', consumers };
   }
   if (!validateReadiness(readiness)) {
     return { allowed: false, reason: 'cutover-readiness-not-recorded' };
   }
-  return { allowed: true, reason: 'readiness-recorded-and-no-consumers' };
+  const receiptErrors = validateCrossRepoReceipt(crossRepoReceipt);
+  if (receiptErrors.length > 0) {
+    return { allowed: false, reason: 'cross-repo-receipt-invalid', errors: receiptErrors };
+  }
+  try {
+    verifyCrossRepoReceipt(crossRepoReceipt, { expectedRevisions, readiness });
+  } catch (error) {
+    return { allowed: false, reason: 'cross-repo-receipt-stale', detail: error.message };
+  }
+  return { allowed: true, reason: 'readiness-recorded-cross-repo-receipt-and-no-consumers' };
 }
 
 // Enforceable source invariant: if the Origin CA mechanism has been removed
 // from the workflow/source, the recorded cutover readiness must exist. While
 // the mechanism is still present, retirement simply has not happened yet.
-export function checkSourceInvariant({ workflowText, originCaScriptPresent, readiness }) {
+export function checkSourceInvariant({ workflowText, originCaScriptPresent, readiness, crossRepoReceipt }) {
   const mechanismPresent = originCaScriptPresent ||
     (typeof workflowText === 'string' && workflowText.includes('issue-tls'));
   if (mechanismPresent) {
@@ -81,6 +100,17 @@ export function checkSourceInvariant({ workflowText, originCaScriptPresent, read
   }
   if (!validateReadiness(readiness)) {
     return { ok: false, state: 'retirement-without-recorded-readiness' };
+  }
+  const receiptErrors = validateCrossRepoReceipt(crossRepoReceipt);
+  if (receiptErrors.length > 0) {
+    return {
+      ok: false, state: 'retirement-without-cross-repo-receipt', errors: receiptErrors
+    };
+  }
+  try {
+    verifyCrossRepoReceipt(crossRepoReceipt, { readiness });
+  } catch (error) {
+    return { ok: false, state: 'retirement-cross-repo-receipt-stale', detail: error.message };
   }
   return { ok: true, state: 'retirement-readiness-recorded' };
 }
@@ -111,15 +141,27 @@ function readOptional(file) {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
 }
 
+function readJsonOptional(file) {
+  const text = readOptional(file);
+  if (text === null) return null;
+  try {
+    return JSON.parse(text);
+  } catch (error) {
+    throw new Error(path.basename(file) + ' is not valid JSON: ' + error.message);
+  }
+}
+
 function cli() {
   const command = process.argv[2];
-  const readiness = JSON.parse(readOptional(path.join(DIR, 'origin-ca-cutover-readiness.json')) ?? 'null');
+  const readiness = readJsonOptional(path.join(DIR, 'origin-ca-cutover-readiness.json'));
+  const crossRepoReceipt = readJsonOptional(path.join(ROOT, RECEIPT_RELATIVE_PATH));
   if (command === 'check-source') {
     const workflowText = readOptional(path.join(ROOT, '.github/workflows/deploy-configure-site.yml')) ?? '';
     const result = checkSourceInvariant({
       workflowText,
       originCaScriptPresent: fs.existsSync(path.join(ROOT, 'scripts/ci/issue-cloudflare-origin-ca.mjs')),
-      readiness
+      readiness,
+      crossRepoReceipt
     });
     console.log('ORIGIN_CA_RETIREMENT_SOURCE_V1 ' + JSON.stringify(result));
     if (!result.ok) process.exitCode = 1;
@@ -148,8 +190,11 @@ function cli() {
       }
     }
     const consumers = scanConsumers(files);
-    const verdict = evaluateRetirement({ readiness, consumers });
-    console.log('ORIGIN_CA_RETIREMENT_V1 ' + JSON.stringify({ verdict, plan: retirementPlan(verdict) }));
+    const verdict = evaluateRetirement({ readiness, consumers, crossRepoReceipt });
+    console.log('ORIGIN_CA_RETIREMENT_V1 ' + JSON.stringify({
+      verdict, plan: retirementPlan(verdict),
+      crossRepoReceipt: crossRepoReceipt === null ? 'absent' : 'present'
+    }));
     return;
   }
   throw new Error('usage: retire-origin-ca.mjs <check-source|evaluate>');

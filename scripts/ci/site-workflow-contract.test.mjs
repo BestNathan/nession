@@ -142,6 +142,8 @@ test('verify job executes the full deterministic site contract suite', () => {
     'scripts/ci/configure-cloudflare-site.test.mjs',
     'scripts/ci/configure-adguard-dns.test.mjs',
     'scripts/ci/site-registry/edge-policy.test.mjs',
+    'scripts/ci/site-registry/gateway-policy.test.mjs',
+    'scripts/ci/site-registry/gateway-rollout.test.mjs',
     'scripts/ci/site-registry/retire-origin-ca.test.mjs',
     'scripts/ci/issue-cloudflare-origin-ca.test.mjs',
     'scripts/ci/site-workflow-contract.test.mjs'
@@ -150,6 +152,7 @@ test('verify job executes the full deterministic site contract suite', () => {
   }
   assert.ok(section.includes('site-registry.mjs validate'));
   assert.ok(section.includes('edge-policy.mjs check-fixture'));
+  assert.ok(section.includes('gateway-policy.mjs check-fixture'));
   assert.ok(section.includes('retire-origin-ca.mjs check-source'));
   assert.ok(section.includes('bash scripts/ci/site-dns-tunnel.sh self-test'));
 });
