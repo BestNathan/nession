@@ -198,7 +198,7 @@
       },
       {
         "title": "Nession site registry and split-DNS exposure contract",
-        "description": "Private-by-default reviewed site registry, exact LAN AdGuard split-horizon DNS and MCP-only Cloudflare public exposure, with receipt-bound reconciliation and gated Origin CA retirement",
+        "description": "Private-by-default reviewed site registry, exact LAN AdGuard split-horizon DNS and MCP-only Cloudflare public exposure, parallel HK public/SLB private entrypoints with a pinned cross-repo policy and receipt-gated Origin CA retirement",
         "path": "topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md",
         "status": "verified",
         "categories": [
@@ -208,7 +208,7 @@
           "registry",
           "workflows"
         ],
-        "updated_at": "2026-11-27T09:36:15Z"
+        "updated_at": "2026-11-28T11:02:45Z"
       },
       {
         "title": "Nession WebSocket runtime architecture and message dispatch",

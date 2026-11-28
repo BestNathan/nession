@@ -1094,3 +1094,10 @@
 - Categories: architecture, security, delivery, identity
 - Reason: Correct the readiness record after the staging retirement was attempted and reverted (gitops 274f8f03f → 9ae33efc9, nitops 2a6fe785d → b3cb4d22b, premature receipt withdrawn in 55b915867): measured live, the Cloudflare origin for the MCP host reaches Higress TLS without SNI so the chain needs both tls and ssl-redirect, and the SLB-to-443 hop breaks LAN WebSocket for hosts without a tls block; publish the corrected four-step prerequisite order (Higress forwarded-hop trust, repoint the Cloudflare record to the router, plaintext SLB hop, then retire) and note that only post-change live probes prove a cutover
 - Source: https://github.com/BestNathan/nession/issues/4588
+
+## 2026-11-28T11:02:45Z | update | Nession site registry and split-DNS exposure contract
+- Path: topics/engineering/nession-site-registry-and-split-dns-exposure-contract.md
+- Topic: engineering
+- Categories: architecture, security, delivery, registry, workflows
+- Reason: Record the #4719 owner decision for parallel HK public/SLB private entrypoints, the pinned cross-repo gateway policy and route-fixture negatives, and the independently attested cross-repo receipt now required before Origin CA retirement; live rollout evidence remains Pending
+- Source: https://github.com/BestNathan/nession/issues/4719
