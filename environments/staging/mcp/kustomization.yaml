@@ -31,4 +31,4 @@ configMapGenerator:
 images:
 - name: ghcr.io/bestnathan/nession-mcp
   newName: ghcr.io/bestnathan/nession
-  newTag: mcp-98416f3
+  newTag: mcp-05eab8e
