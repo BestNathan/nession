@@ -126,6 +126,33 @@ pub trait SessionContext: Send + Sync {
     /// must not read `None` as "nothing here".
     async fn session_claude_binding(&self, session_id: &str) -> Option<Binding>;
 
+    /// Every lifecycle report this Session instance's hook appended, in append
+    /// order (#4664 D5).
+    ///
+    /// The current binding is the latest report; the history is what keeps a
+    /// conversation the session ran earlier discoverable after its cwd drifted
+    /// or Claude exited. `None` means the host cannot answer (no such session,
+    /// or one created before the log existed); an empty vector is an observed
+    /// "no reports yet". The default answers `None` so a host that predates the
+    /// log keeps the current-binding behavior unchanged.
+    async fn session_claude_history(&self, _session_id: &str) -> Option<Vec<Binding>> {
+        None
+    }
+
+    /// The conversation the host's verified Claude observation names for this
+    /// Session right now (#4664 D6/SC-10).
+    ///
+    /// This is the control path's live self-report (agent-view identity proved
+    /// against the Session's process membership), surfaced from the Activity
+    /// adapter's existing observation cache — not a new CLI probe in the read
+    /// path. `None` when no fresh verified observation exists. It is the
+    /// strongest current-conversation evidence: when it names a conversation,
+    /// the conversation list must include it and report it as the binding, so
+    /// the two surfaces cannot diverge.
+    async fn session_claude_verified_conversation(&self, _session_id: &str) -> Option<String> {
+        None
+    }
+
     /// One environment variable as the Session's own shell sees it (#3600).
     ///
     /// `None` is "the host could not ask"; `Some(None)` is an observation that

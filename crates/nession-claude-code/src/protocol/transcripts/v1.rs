@@ -1,9 +1,10 @@
 //! `claude-code.transcripts` / v1 — the **transcript** collection of one Nession
 //! Session (`#1234`).
 //!
-//! This unit answers one question: which transcripts are visible at the
-//! Session's current strict cwd, and which one — if any — the Session is exactly
-//! bound to. It is the transcript projection's sibling to
+//! This unit answers one question: which transcripts the Session sees — the
+//! strict-cwd candidates plus the transcripts of its own reported conversations
+//! and their subagents (#4664) — and which one, if any, is current. It is the
+//! transcript projection's sibling to
 //! [`crate::protocol::conversations`], not a replacement for it: the same
 //! upstream session is *one* conversation and *one* transcript, and the two
 //! resource families stay semantically distinct even where they name the same
@@ -179,8 +180,9 @@ pub struct TranscriptsResponseV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
 
-    /// The transcripts visible at `cwd`, newest first — a listing order, not a
-    /// selection.
+    /// The Session's transcripts, newest first — a listing order, not a
+    /// selection. Includes the subagents of reported conversations whose cwd
+    /// drifted, reached through their primary's report (#4664 D7).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<TranscriptItemV1>,
 

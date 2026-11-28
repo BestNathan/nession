@@ -406,13 +406,26 @@ fn every_leaf_command_help_succeeds() {
         &["config", "server", "init"],
         &["config", "server", "show"],
         &["config", "server", "set"],
+        &["profile", "list"],
+        &["profile", "current"],
+        &["profile", "add"],
+        &["profile", "use"],
+        &["profile", "show"],
+        &["profile", "set"],
+        &["profile", "remove"],
+        &["profile", "import-agent"],
+        &["profile", "test"],
+        &["profile", "credential", "set"],
+        &["profile", "credential", "clear"],
         &["update"],
     ];
 
     let root = nession(&dir).arg("--help").output().expect("root help");
     assert!(root.status.success());
     let help = stdout(&root);
-    for family in ["agent", "server", "agents", "sessions", "config", "update"] {
+    for family in [
+        "agent", "server", "agents", "sessions", "config", "profile", "update",
+    ] {
         assert!(help.contains(family), "missing {family}: {help}");
     }
 
@@ -1068,6 +1081,124 @@ fn global_target_flags_are_rejected_where_they_have_no_effect() {
         stderr(&output).contains("does not consume"),
         "{}",
         stderr(&output)
+    );
+}
+
+/// #4682 SC-06: `--profile` is rejected everywhere it has no effect — daemon
+/// lifecycle (profile resolution never runs there), local-only commands, and
+/// the profile management leaves themselves (which name profiles positionally).
+#[test]
+fn the_profile_flag_is_rejected_where_it_has_no_effect() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let leaves: &[&[&str]] = &[
+        &["agent", "start"],
+        &["agent", "restart"],
+        &["agent", "stop"],
+        &["agent", "status"],
+        &["agent", "logs"],
+        &["agent", "install-service"],
+        &["agent", "uninstall-service"],
+        &["server", "start"],
+        &["server", "stop"],
+        &["server", "restart"],
+        &["server", "status"],
+        &["server", "logs"],
+        &["config", "agent", "show"],
+        &["config", "server", "show"],
+        &["install", "0.35.0"],
+        &["version", "list"],
+        &["update", "--check"],
+        &["profile", "list"],
+        &["profile", "current"],
+        &["profile", "add", "home"],
+        &["profile", "use", "home"],
+        &["profile", "show", "home"],
+        &["profile", "set", "home"],
+        &["profile", "remove", "home"],
+        &["profile", "import-agent"],
+        &["profile", "test"],
+        &["profile", "credential", "set", "home"],
+        &["profile", "credential", "clear", "home"],
+    ];
+    for leaf in leaves {
+        let output = nession(&dir)
+            .args(*leaf)
+            .arg("--profile")
+            .arg("do-not-echo-profile")
+            .output()
+            .expect("run nession");
+        assert!(!output.status.success(), "{leaf:?} must reject --profile");
+        let error = stderr(&output);
+        assert!(error.contains("does not consume"), "{leaf:?}: {error}");
+        assert!(error.contains("--profile"), "{leaf:?}: {error}");
+    }
+
+    // No profile leaf accepts --auth-token (secret-free argv, #4682).
+    for leaf in [
+        &["profile", "add", "home"][..],
+        &["profile", "set", "home"][..],
+        &["profile", "credential", "set", "home"][..],
+    ] {
+        let output = nession(&dir)
+            .args(leaf)
+            .arg("--auth-token")
+            .arg("must-not-echo-this-credential")
+            .output()
+            .expect("run nession");
+        assert!(
+            !output.status.success(),
+            "{leaf:?} must reject --auth-token"
+        );
+        let error = stderr(&output);
+        assert!(error.contains("does not consume"), "{leaf:?}: {error}");
+        assert!(!error.contains("must-not-echo-this-credential"), "{error}");
+    }
+
+    // The profile leaves that do not store an endpoint reject --server-url.
+    for leaf in [
+        &["profile", "list"][..],
+        &["profile", "use", "home"][..],
+        &["profile", "test"][..],
+        &["profile", "credential", "set", "home"][..],
+    ] {
+        let output = nession(&dir)
+            .args(leaf)
+            .arg("--server-url")
+            .arg("ws://127.0.0.1:1")
+            .output()
+            .expect("run nession");
+        assert!(
+            !output.status.success(),
+            "{leaf:?} must reject --server-url"
+        );
+        assert!(stderr(&output).contains("does not consume"), "{leaf:?}");
+    }
+}
+
+/// #4682 SC-06: unrelated local/daemon commands neither access nor mutate the
+/// client store — a corrupt store cannot break them, and they leave it alone.
+#[test]
+fn local_commands_do_not_access_or_mutate_the_client_store() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let store = dir.path().join("client-config.toml");
+    std::fs::write(&store, "corrupt client store {{{").expect("seed corrupt store");
+
+    for leaf in [
+        &["agent", "status"][..],
+        &["config", "agent", "show"][..],
+        &["config", "server", "show"][..],
+    ] {
+        let output = nession(&dir).args(leaf).output().expect("run nession");
+        let text = format!("{}{}", stdout(&output), stderr(&output));
+        assert!(
+            !text.contains("client connection store"),
+            "{leaf:?} must not consult the client store: {text}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(&store).unwrap(),
+        "corrupt client store {{{",
+        "local commands must not mutate the client store"
     );
 }
 

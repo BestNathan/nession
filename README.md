@@ -247,7 +247,10 @@ loaded as written — the CLI does not rewrite it during startup.
 
 ### 3. Use it
 
-**CLI** (targets the central Server; override with `--server-url` / `--auth-token`, or set `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`). For the `19090` example above, set the target and use the same auth token configured for the Server:
+**CLI** (targets the central Server through a persistent connection profile,
+`--server-url` / `--auth-token`, or `NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`).
+For the `19090` example above, set the target and use the same auth token
+configured for the Server:
 
 ```bash
 export NESSION_SERVER_URL=ws://127.0.0.1:19090
@@ -259,33 +262,83 @@ nession sessions attach --session-id <agent_id>:<session_name> [--mode p2p|relay
 nession sessions kill   --session-id <agent_id>:<session_name> [--force]
 ```
 
+#### Connection profiles
+
+For repeatable operation, store a named **client connection profile** instead
+of re-entering infrastructure configuration (#4682). A profile is an
+installation-owned endpoint plus its credential policy — not an Agent,
+Project, Session or release, and it needs no running local daemon:
+
+```bash
+nession profile add home --server-url ws://127.0.0.1:19090
+nession profile credential set home --stdin   # pipe the Server token; never argv
+nession profile list
+nession profile current
+nession profile use home
+nession profile test home
+nession --profile home sessions list
+nession profile import-agent                  # endpoint-only Agent import
+nession profile set home --server-url ws://192.0.2.10:19090
+nession profile remove home --force
+```
+
+The first profile added (or imported) becomes current; later adds never change
+the selection. `profile credential set` reads a masked prompt or one line of
+stdin (`--stdin`), stores the secret in the OS credential store when available
+or a private 0600 file fallback otherwise, and binds it to the profile's
+endpoint. Re-running it rotates; `profile credential clear` deletes it;
+`profile set home --no-auth` marks an explicit no-auth Server. Secrets never
+appear in the profile TOML, argv for credential commands, output, logs or
+errors. `list`/`current`/`show` are offline and masked; `test` makes a bounded
+real connection and reports sanitized success/denial/refusal.
+
+With no profile, no explicit flag and no environment target, the first remote
+command imports the endpoint from a valid, explicitly configured Agent
+`server_url` (endpoint only — daemon credentials are never copied) and asks you
+to set a client credential. An absent Agent config keeps the legacy loopback
+with a setup hint; an invalid one is an actionable error. The full grammar,
+resolution matrix and credential boundary live in
+[docs/architecture/cli-connection-profiles.md](docs/architecture/cli-connection-profiles.md).
+
 `--auth-token` is convenient for a one-off command, but a value passed as a
 flag is visible in shell history and in process listings while the command
-runs. For repeatable operation, set `NESSION_AUTH_TOKEN` in the environment for
-the remote CLI. The daemon config's `auth_token` is a **different credential
-direction**: it is the Agent → Server credential (and the Server's inbound
-auth), written by `nession config agent set auth_token <token>`. Remote
-commands never read a daemon config (#2267) — a config file cannot redefine
-where `agents`/`sessions` connect.
+runs. For repeatable operation, use a profile credential or set
+`NESSION_AUTH_TOKEN` in the environment. The daemon config's `auth_token` is a
+**different credential direction**: it is the Agent → Server credential (and
+the Server's inbound auth), written by
+`nession config agent set auth_token <token>`. Remote commands never borrow a
+daemon config or credential (#2267, evolved by #4682): the independent client
+store may supply an endpoint and a client credential of its own, but an Agent's
+configured secrets are never copied, derived or sent.
 
-Remote commands resolve one target, in this order: the explicit global flag,
-`NESSION_SERVER_URL` / `NESSION_AUTH_TOKEN`, the legacy `NENSION_SERVER_URL` /
-`NENSION_AUTH_TOKEN` aliases (kept so an existing environment keeps working;
-the canonical name wins if both are set), then `ws://127.0.0.1:8080` with an
-empty token. Agent and Server daemon configs do not override this CLI target.
-A background `nession agent start` never passes its resolved token to the
-child process as an argument; the credential goes over a private pipe
-instead.
+Remote commands resolve one target/credential pair, in this order:
+`--server-url`, `--profile`, `NESSION_SERVER_URL`, the legacy
+`NENSION_SERVER_URL` alias, `NESSION_PROFILE`, the persisted current profile,
+the one-time Agent endpoint bootstrap, then `ws://127.0.0.1:8080` with an empty
+token. `--server-url` and `--profile` together are rejected as ambiguous; a
+named profile overrides ambient URL variables. An ambient token applies to the
+legacy flag/env/default flows, or when its accompanying ambient URL is the same
+canonical endpoint — never silently to a selected profile. The canonical
+`NESSION_*` names win over the legacy `NENSION_*` aliases (kept so an existing
+environment keeps working). Agent and Server daemon configs do not override
+this CLI target. A background `nession agent start` never passes its resolved
+token to the child process as an argument; the credential goes over a private
+pipe instead.
 
-The two global flags apply only where they have an effect. `agents` and
-`sessions` read them as the remote target/credential; `agent start` and
-`agent restart` read them as overrides for the Agent daemon's outbound target.
-`server`, `config`, `update`, and agent stop/status/service commands have no
-use for them and **reject** them rather than silently ignoring them:
+The global flags apply only where they have an effect. `agents` and `sessions`
+read `--server-url`/`--auth-token`/`--profile` as the remote context;
+`profile add`/`set` read `--server-url` as the endpoint to store; `agent start`
+and `agent restart` read `--server-url`/`--auth-token` as overrides for the
+Agent daemon's outbound target (never `--profile`). `server`, `config`,
+`update`, `version`, agent stop/status/service commands and the profile
+management leaves have no use for the irrelevant flags and **reject** them
+rather than silently ignoring them:
 
 ```bash
 # Rejected: --server-url does not configure the Server's listener
 nession server start --server-url ws://127.0.0.1:19090
+# Rejected: daemon lifecycle never runs profile resolution
+nession agent start --profile home
 ```
 
 **Web UI** — see [Web dashboard](#web-dashboard) below.

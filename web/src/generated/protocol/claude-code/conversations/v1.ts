@@ -24,8 +24,8 @@ export const VERSION = 1;
 export type ConversationsRequestV1 = { 
 /**
  * The Nession session whose conversations are wanted. Required, because
- * conversation visibility is scoped to a Session's cwd — there is no
- * machine-wide listing.
+ * conversation visibility is scoped to a Session — its cwd candidates and
+ * its own reports — and there is no machine-wide listing.
  */
 session_id: string, 
 /**
@@ -42,8 +42,10 @@ export type ConversationsResponseV1 = { state: ConversationsStateV1,
  */
 cwd?: string | null, 
 /**
- * The conversations visible at `cwd`, newest first — a listing order, not
- * a selection.
+ * The Session's conversations, newest first — a listing order, not a
+ * selection. An item's own `cwd` may differ from the response `cwd`: a
+ * reported conversation whose recorded cwd drifted is listed with the cwd
+ * its transcript recorded (#4664 D4).
  */
 items?: Array<ConversationItemV1>, 
 /**
@@ -109,8 +111,8 @@ export type ConversationActivityV1 = "active" | "inactive" | "unknown";
 export type ConversationsRequest = { 
 /**
  * The Nession session whose conversations are wanted. Required, because
- * conversation visibility is scoped to a Session's cwd — there is no
- * machine-wide listing.
+ * conversation visibility is scoped to a Session — its cwd candidates and
+ * its own reports — and there is no machine-wide listing.
  */
 session_id: string, 
 /**
@@ -129,8 +131,10 @@ export type ConversationsResponse = { state: ConversationsStateV1,
  */
 cwd?: string | null, 
 /**
- * The conversations visible at `cwd`, newest first — a listing order, not
- * a selection.
+ * The Session's conversations, newest first — a listing order, not a
+ * selection. An item's own `cwd` may differ from the response `cwd`: a
+ * reported conversation whose recorded cwd drifted is listed with the cwd
+ * its transcript recorded (#4664 D4).
  */
 items?: Array<ConversationItemV1>, 
 /**

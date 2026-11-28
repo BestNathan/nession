@@ -47,6 +47,9 @@ rand.workspace = true
 # API accounts for WAL; a plain file copy of a live-or-unclean DB is not a
 # verifiable snapshot. libsqlite3-sys is already in the graph via sqlx-sqlite.
 rusqlite = { version = "0.37", default-features = false, features = ["backup"] }
+keyring = { version = "3", default-features = false, features = ["apple-native", "windows-native", "async-secret-service", "tokio", "crypto-rust"] }
+rpassword = "7"
+url.workspace = true
 
 [dev-dependencies]
 tempfile = "3.10"

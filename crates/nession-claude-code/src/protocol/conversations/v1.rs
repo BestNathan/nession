@@ -1,9 +1,10 @@
 //! `claude-code.conversations` / v1 — the conversation **collection** of one
 //! Nession Session (`#1222`).
 //!
-//! This unit answers one question: which conversations are visible at the
-//! Session's current strict cwd, and which one — if any — the Session is
-//! exactly bound to. Reading one conversation's timeline is
+//! This unit answers one question: which conversations the Session sees —
+//! the transcripts at its current strict cwd plus the conversations its own
+//! reports name (#4664) — and which one, if any, is current. Reading one
+//! conversation's timeline is
 //! [`crate::protocol::messages`]' job; the two used to be a single
 //! `claude-code.conversation` unit whose `claude_session_id?` field switched
 //! between the two operations, and whose `ambiguous` state existed only because
@@ -101,9 +102,14 @@ pub struct ConversationItemV1 {
 ///
 /// Carried **beside** the items rather than on one of them: a binding is a fact
 /// about the Session, not a property of the conversation — the same
-/// conversation is another Session's unbound list row. Absent when the host
-/// reported no binding, and absent when the binding's transcript is not among
-/// this Session's current cwd (a stale binding is not the current one).
+/// conversation is another Session's unbound list row. Absent when the Session
+/// has no reported conversation, or when its report resolves to no readable
+/// transcript. **Not** gated on cwd membership (#4664 D2): a resumed
+/// conversation's recorded cwd can drift from the pane's while the report
+/// still names exactly the transcript the Session's Claude is writing, and
+/// that reported identity — not directory coincidence — is what makes the
+/// binding current. The id is always one of `items[]`'s ids: the list includes
+/// every reported conversation.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "codegen", derive(ts_rs::TS))]
 #[derive(schemars::JsonSchema)]
@@ -139,8 +145,8 @@ pub enum ConversationsStateV1 {
 #[derive(schemars::JsonSchema)]
 pub struct ConversationsRequestV1 {
     /// The Nession session whose conversations are wanted. Required, because
-    /// conversation visibility is scoped to a Session's cwd — there is no
-    /// machine-wide listing.
+    /// conversation visibility is scoped to a Session — its cwd candidates and
+    /// its own reports — and there is no machine-wide listing.
     pub session_id: String,
 
     /// Where to continue from, from a previous response's `next_cursor`.
@@ -165,8 +171,10 @@ pub struct ConversationsResponseV1 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
 
-    /// The conversations visible at `cwd`, newest first — a listing order, not
-    /// a selection.
+    /// The Session's conversations, newest first — a listing order, not a
+    /// selection. An item's own `cwd` may differ from the response `cwd`: a
+    /// reported conversation whose recorded cwd drifted is listed with the cwd
+    /// its transcript recorded (#4664 D4).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub items: Vec<ConversationItemV1>,
 
