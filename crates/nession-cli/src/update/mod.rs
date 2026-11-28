@@ -44,6 +44,12 @@ pub fn capability_probe_line(args: &[std::ffi::OsString]) -> Option<String> {
     if args.iter().any(|argument| argument == "--upgrade-contract") {
         return Some(upgrade_contract_line());
     }
+    if args
+        .iter()
+        .any(|argument| argument == "--client-profile-contract")
+    {
+        return Some(crate::profile::contract_line());
+    }
     None
 }
 

@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1912,
-    "references": 1026,
+    "entries": 1922,
+    "references": 1043,
     "unresolved": 0
   },
   "crates": [
@@ -733,7 +733,7 @@
       "file": "crates/nession-cli/src/args.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 499
+      "line": 639
     },
     {
       "file": "crates/nession-cli/src/commands/agent/start.rs",
@@ -745,7 +745,7 @@
       "file": "crates/nession-cli/src/commands/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 304
+      "line": 418
     },
     {
       "file": "crates/nession-cli/src/commands/server/start.rs",
@@ -775,7 +775,13 @@
       "file": "crates/nession-cli/src/connection/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 83
+      "line": 485
+    },
+    {
+      "file": "crates/nession-cli/src/lib.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 10
     },
     {
       "file": "crates/nession-cli/src/lifecycle/lock.rs",
@@ -856,6 +862,24 @@
       "line": 290
     },
     {
+      "file": "crates/nession-cli/src/profile/credential.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 425
+    },
+    {
+      "file": "crates/nession-cli/src/profile/mod.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 326
+    },
+    {
+      "file": "crates/nession-cli/src/profile/store.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 231
+    },
+    {
       "file": "crates/nession-cli/src/service/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
@@ -901,7 +925,7 @@
       "file": "crates/nession-cli/src/update/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 185
+      "line": 191
     },
     {
       "file": "crates/nession-cli/src/update/policy.rs",
@@ -931,7 +955,7 @@
       "file": "crates/nession-cli/src/update/snapshot.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 854
+      "line": 881
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
@@ -949,7 +973,7 @@
       "file": "crates/nession-cli/src/versions/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 757
+      "line": 890
     },
     {
       "file": "crates/nession-cli/tests/integration/attach_route.rs",
@@ -989,6 +1013,42 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/main.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_bootstrap.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_credential.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_release.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_resolution.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_support.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 1
@@ -1075,7 +1135,7 @@
       "file": "crates/nession-common/src/paths.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 588
+      "line": 625
     },
     {
       "file": "crates/nession-common/src/readiness.rs",
@@ -11579,42 +11639,6 @@
       "replacement": "serialized path string, not a resolved host resource"
     },
     {
-      "file": "crates/nession-cli/src/connection/mod.rs",
-      "line": 100,
-      "kind": "env-mutation",
-      "effect": "resolve/read",
-      "disposition": "serialized-unit-env-probe",
-      "reference": "std::env::set_var(key, value);",
-      "replacement": "focused unit test with a serialized env guard"
-    },
-    {
-      "file": "crates/nession-cli/src/connection/mod.rs",
-      "line": 106,
-      "kind": "env-mutation",
-      "effect": "resolve/read",
-      "disposition": "serialized-unit-env-probe",
-      "reference": "std::env::remove_var(key);",
-      "replacement": "focused unit test with a serialized env guard"
-    },
-    {
-      "file": "crates/nession-cli/src/connection/mod.rs",
-      "line": 114,
-      "kind": "env-mutation",
-      "effect": "resolve/read",
-      "disposition": "serialized-unit-env-probe",
-      "reference": "Some(previous) => std::env::set_var(self.key, previous),",
-      "replacement": "focused unit test with a serialized env guard"
-    },
-    {
-      "file": "crates/nession-cli/src/connection/mod.rs",
-      "line": 115,
-      "kind": "env-mutation",
-      "effect": "resolve/read",
-      "disposition": "serialized-unit-env-probe",
-      "reference": "None => std::env::remove_var(self.key),",
-      "replacement": "focused unit test with a serialized env guard"
-    },
-    {
       "file": "crates/nession-cli/src/lifecycle/lock.rs",
       "line": 202,
       "kind": "env-mutation",
@@ -11831,6 +11855,69 @@
       "replacement": "serialized path string, not a resolved host resource"
     },
     {
+      "file": "crates/nession-cli/src/profile/mod.rs",
+      "line": 369,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"ws://127.0.0.1:8080\",",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/src/profile/mod.rs",
+      "line": 370,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"ws://127.0.0.1:8080/ws\",",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/src/profile/mod.rs",
+      "line": 425,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": ".insert(\"local\".to_string(), entry(\"ws://127.0.0.1:8080\"));",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/src/profile/store.rs",
+      "line": 308,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "add_profile(&loc, \"local\", \"ws://127.0.0.1:8080\").unwrap();",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/src/profile/store.rs",
+      "line": 316,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert_eq!(file.profiles[\"local\"].server_url, \"ws://127.0.0.1:8080\");",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/src/profile/store.rs",
+      "line": 342,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "std::thread::spawn(move || {",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/src/profile/store.rs",
+      "line": 377,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "std::thread::spawn(move || bootstrap_import(&loc, \"ws://agent-endpoint/ws\"))",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
       "file": "crates/nession-cli/src/service/mod.rs",
       "line": 1666,
       "kind": "process-spawn",
@@ -11985,7 +12072,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/snapshot.rs",
-      "line": 1102,
+      "line": 1184,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -12003,7 +12090,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 1856,
+      "line": 1977,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -12012,7 +12099,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 2081,
+      "line": 2202,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -12021,7 +12108,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 2122,
+      "line": 2243,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12030,7 +12117,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 826,
+      "line": 959,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12039,7 +12126,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 836,
+      "line": 969,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -12183,7 +12270,7 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/cli_contract.rs",
-      "line": 762,
+      "line": 775,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12192,7 +12279,7 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/cli_contract.rs",
-      "line": 763,
+      "line": 776,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12201,7 +12288,7 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/cli_contract.rs",
-      "line": 765,
+      "line": 778,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12210,7 +12297,7 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/cli_contract.rs",
-      "line": 819,
+      "line": 832,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12219,7 +12306,7 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/cli_contract.rs",
-      "line": 873,
+      "line": 886,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12269,6 +12356,132 @@
       "effect": "execute",
       "disposition": "test-runtime-root",
       "reference": "let mut command = Command::new(env!(\"CARGO_BIN_EXE_nession\"));",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_bootstrap.rs",
+      "line": 30,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "!text.contains(\"127.0.0.1:8080\"),",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_bootstrap.rs",
+      "line": 93,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_bootstrap.rs",
+      "line": 117,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert!(text.contains(\"ws://127.0.0.1:8080\"), \"{text}\");",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_bootstrap.rs",
+      "line": 157,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert!(combined(&output).contains(\"ws://127.0.0.1:8080\"));",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "line": 24,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "add_profile(&home, \"local\", \"ws://127.0.0.1:8080\");",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "line": 43,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert!(text.contains(\"ws://127.0.0.1:8080\"), \"{text}\");",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "line": 60,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"ws://127.0.0.1:9090\",",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "line": 63,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert!(home.store_text().unwrap().contains(\"ws://127.0.0.1:9090\"));",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "line": 193,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_commands.rs",
+      "line": 222,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_release.rs",
+      "line": 212,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert!(combined(&output).contains(\"127.0.0.1:8080\"));",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_support.rs",
+      "line": 52,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = Command::new(env!(\"CARGO_BIN_EXE_nession\"));",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_support.rs",
+      "line": 94,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": ".spawn()",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/profile_support.rs",
+      "line": 139,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "std::thread::spawn(move || {",
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
@@ -12435,7 +12648,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 614,
+      "line": 651,
       "kind": "env-mutation",
       "effect": "resolve/read",
       "disposition": "serialized-unit-env-probe",
@@ -12444,7 +12657,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 622,
+      "line": 659,
       "kind": "env-mutation",
       "effect": "resolve/read",
       "disposition": "serialized-unit-env-probe",
@@ -12453,7 +12666,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 623,
+      "line": 660,
       "kind": "env-mutation",
       "effect": "resolve/read",
       "disposition": "serialized-unit-env-probe",
@@ -12462,7 +12675,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 644,
+      "line": 681,
       "kind": "durable-home",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12471,7 +12684,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 654,
+      "line": 691,
       "kind": "durable-home",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12480,7 +12693,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 665,
+      "line": 702,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12489,7 +12702,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 695,
+      "line": 732,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12498,7 +12711,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 738,
+      "line": 775,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12507,7 +12720,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 742,
+      "line": 779,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12516,7 +12729,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 846,
+      "line": 883,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12525,7 +12738,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 967,
+      "line": 1004,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12534,7 +12747,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 993,
+      "line": 1030,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12543,7 +12756,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 1015,
+      "line": 1052,
       "kind": "runtime-dir",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
@@ -12552,7 +12765,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 1054,
+      "line": 1091,
       "kind": "durable-home",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -12561,7 +12774,7 @@
     },
     {
       "file": "crates/nession-common/src/paths.rs",
-      "line": 1073,
+      "line": 1110,
       "kind": "server-db",
       "effect": "resolve/read",
       "disposition": "test-runtime-root",
