@@ -282,6 +282,43 @@ pub fn server_config_path() -> io::Result<PathBuf> {
     nession_home().map(|h| h.join("server-config.toml"))
 }
 
+/// Installation-owned client connection store file name (#4682).
+///
+/// The client Profile store belongs to the *installation*, not to one release:
+/// upgrades retain it in place and release archives never receive a copy.
+pub const CLIENT_CONFIG_FILE: &str = "client-config.toml";
+
+/// Advisory lock serialising client-store mutations (installation-owned).
+pub const CLIENT_CONFIG_LOCK_FILE: &str = "client-config.lock";
+
+/// Installation-owned private credential directory name (file fallback).
+pub const CLIENT_CREDENTIALS_DIR: &str = "client-credentials";
+
+/// Client connection store path: ~/.nession/client-config.toml
+pub fn client_config_path() -> io::Result<PathBuf> {
+    nession_home().map(|home| client_config_path_under(&home))
+}
+
+/// Client connection store path under an explicit Nession home.
+pub fn client_config_path_under(home: &Path) -> PathBuf {
+    home.join(CLIENT_CONFIG_FILE)
+}
+
+/// Client-store mutation lock path under an explicit Nession home.
+pub fn client_config_lock_path_under(home: &Path) -> PathBuf {
+    home.join(CLIENT_CONFIG_LOCK_FILE)
+}
+
+/// Private credential directory: ~/.nession/client-credentials
+pub fn client_credentials_dir() -> io::Result<PathBuf> {
+    nession_home().map(|home| client_credentials_dir_under(&home))
+}
+
+/// Private credential directory under an explicit Nession home.
+pub fn client_credentials_dir_under(home: &Path) -> PathBuf {
+    home.join(CLIENT_CREDENTIALS_DIR)
+}
+
 /// Create server and agent component directories (including logs) if they
 /// don't exist.
 pub fn ensure_component_dirs() -> io::Result<()> {

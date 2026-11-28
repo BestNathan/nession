@@ -44,6 +44,15 @@ const EXCLUDED_ROOTS: [&str; 6] = [
     "erofs",
 ];
 
+/// Installation-owned client connection context (#4682): retained in place
+/// across upgrades, never copied into a release archive. Recognized so the
+/// coverage record names them deliberately instead of as unknown entries.
+const INSTALLATION_CLIENT_ENTRIES: [&str; 3] = [
+    nession_common::paths::CLIENT_CONFIG_FILE,
+    nession_common::paths::CLIENT_CONFIG_LOCK_FILE,
+    nession_common::paths::CLIENT_CREDENTIALS_DIR,
+];
+
 /// The Agent's durable inbound credential file beside `agent-config.toml`
 /// (owned by `nession-agent/src/token.rs`, #3440). It is a non-regenerable
 /// secret bound to the Agent identity, so it is captured privately — never
@@ -284,6 +293,23 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
         ));
     }
 
+    // The installation-owned client connection context (#4682): profile
+    // metadata, its mutation lock and the private credential fallback are
+    // live installation state, deliberately retained in place and NEVER
+    // copied into a release archive (no secret duplication, no reset of the
+    // current selection on upgrade). An intentional policy exclusion, so it
+    // never blocks historical execution and is never an unknown root.
+    for name in INSTALLATION_CLIENT_ENTRIES {
+        if home.join(name).exists() {
+            plan.coverage.push(CoverageEntry::new(
+                name,
+                CoverageClass::Excluded,
+                CoverageComponent::Shared,
+                "installation-owned client context retained in place, never archived (#4682)",
+            ));
+        }
+    }
+
     // Agent identity + owned metadata subsets.
     let agent = home.join("agent");
     if agent.is_dir() {
@@ -430,6 +456,7 @@ pub fn plan(home: &Path) -> Result<SnapshotPlan> {
                 || name == AGENT_TOKEN_FILE
                 || name == "agent"
                 || name == "server"
+                || INSTALLATION_CLIENT_ENTRIES.contains(&name.as_str())
             {
                 continue;
             }
@@ -915,6 +942,61 @@ mod tests {
             .coverage
             .iter()
             .any(|e| matches!(e.class, CoverageClass::Missing | CoverageClass::Unknown)));
+    }
+
+    /// #4682: the installation-owned client context is retained in place and
+    /// never copied into an archive — and recognizing it must not mark the
+    /// snapshot state-incomplete (it is not an "unknown durable entry").
+    #[test]
+    fn the_installation_client_context_is_retained_not_archived() {
+        let root = home_fixture();
+        let home = root.path();
+        fs::write(
+            home.join(nession_common::paths::CLIENT_CONFIG_FILE),
+            "schema_version = 1\ncurrent_profile = \"home\"\n",
+        )
+        .unwrap();
+        fs::write(
+            home.join(nession_common::paths::CLIENT_CONFIG_LOCK_FILE),
+            "",
+        )
+        .unwrap();
+        fs::create_dir_all(home.join(nession_common::paths::CLIENT_CREDENTIALS_DIR)).unwrap();
+        fs::write(
+            home.join(nession_common::paths::CLIENT_CREDENTIALS_DIR)
+                .join("home.toml"),
+            "endpoint = \"ws://host/ws\"\ntoken = \"canary\"\n",
+        )
+        .unwrap();
+
+        let plan = plan(home).unwrap();
+        let relatives: Vec<String> = plan
+            .copies
+            .iter()
+            .map(|c| c.relative.display().to_string())
+            .collect();
+        assert!(
+            !relatives.iter().any(|r| r.contains("client-")),
+            "client context must never be copied into an archive: {relatives:?}"
+        );
+        // Schema 2: each client entry is a deliberate policy exclusion, never
+        // an unknown/missing root, and never blocks historical execution.
+        for name in INSTALLATION_CLIENT_ENTRIES {
+            let entry = plan
+                .coverage
+                .iter()
+                .find(|e| e.path == name)
+                .unwrap_or_else(|| panic!("{name} must be recognized in coverage"));
+            assert_eq!(entry.class, CoverageClass::Excluded, "{name}");
+            assert!(!entry.blocks(CoverageComponent::Agent, false));
+            assert!(!entry.blocks(CoverageComponent::Server, false));
+        }
+        assert!(
+            !plan.coverage.iter().any(|e| e.path.contains("client-")
+                && matches!(e.class, CoverageClass::Unknown | CoverageClass::Missing)),
+            "recognized client entries are not unknown/missing: {:?}",
+            plan.coverage
+        );
     }
 
     #[test]

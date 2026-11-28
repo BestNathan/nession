@@ -22,7 +22,11 @@ from different releases.
 `NESSION_HOME`, both TOML configs, the Agent identity/credentials and the
 compatible durable state belong to the *installation*, not to one release.
 Upgrading Current retains them in place; an archive receives independent
-copies. The superseded rule "the new Current starts with built-in defaults"
+copies. The installation's **client connection context** (#4682) —
+`client-config.toml`, its mutation lock and the private credential fallback —
+is likewise installation-owned: it is retained in place and **never** copied
+into an archive (see [Installation client context](#installation-client-context)).
+The superseded rule "the new Current starts with built-in defaults"
 (#3173/#3232) no longer holds — single-active, archive isolation and
 transaction recovery do.
 
@@ -33,6 +37,9 @@ transaction recovery do.
   (managed install dir, e.g. ~/.local/bin)   # Current binaries
   agent-config.toml                           # installation configuration (retained)
   server-config.toml
+  client-config.toml                          # installation client context (#4682,
+  client-config.lock                          #  retained, never archived)
+  client-credentials/                         # private credential fallback (0700)
   agent/                                      # installation durable state (retained)
   server/
   versions/
@@ -99,10 +106,11 @@ records are copied; the Agent's durable inbound credential (`agent-config.token`
 owned by `nession-agent/src/token.rs`, #3440) is captured privately; the Server
 DB is captured through the SQLite backup API (WAL accounted for);
 content-addressed stores (image blobs, EROFS) are **referenced, not copied**;
-caches, logs and runtime files are omitted; unknown top-level entries are
-preserved in place and recorded as unproven coverage. Every archive carries
-`manifest.json` recording binary digests, config coverage, per-entry state
-digests, references, typed coverage, external dependencies and whether the
+caches, logs and runtime files are omitted; the installation client context
+(#4682) is recognized, retained in place and never archived; unknown top-level
+entries are preserved in place and recorded as unproven coverage. Every archive
+carries `manifest.json` recording binary digests, config coverage, per-entry
+state digests, references, typed coverage, external dependencies and whether the
 snapshot is state-complete. A failed DB backup is a recorded `missing` gap,
 never a fake complete snapshot.
 
@@ -117,7 +125,7 @@ one class:
 | --- | --- | --- |
 | `captured` | independent copy captured and digest-verified | no |
 | `not_applicable` | component/data absent by design (e.g. no Server DB on an Agent-only install) | no |
-| `excluded` | policy exclusion: logs/runtime, reproducible build workspace, regenerable zsh caches (`.zcompdump*`, `*.zwc`), redundant config backups (`<config>.bak*`) — retained in place | no |
+| `excluded` | policy exclusion: logs/runtime, reproducible build workspace, regenerable zsh caches (`.zcompdump*`, `*.zwc`), redundant config backups (`<config>.bak*`), installation-owned client context (`client-config.toml`/`.lock`, `client-credentials/`, #4682) — retained in place | no |
 | `referenced` | content-addressed store referenced in place | only when **nonempty** (needs pin/retention or verified independent ownership; never assumed safe). An empty store is safe. |
 | `missing` | a required capture failed (e.g. the SQLite backup) | yes, for its component |
 | `unknown` | unknown durable root / unproven ownership (incl. user history/config) | yes |
@@ -356,6 +364,36 @@ skip install-transaction recovery and the background update check, and report
 a pending recovery journal instead of mutating anything. See
 [cli-logs.md](cli-logs.md).
 
+### Installation client context
+
+The client connection store (#4682) is installation-owned live state, distinct
+from both the daemon configs and the archive's snapshotted state. Upgrade,
+failed/interrupt-recovered upgrade and archive-only install preserve the
+selection, metadata bytes and credential references; the transaction never
+moves or copies them, and `version recover` never restores them (they are not
+archive entries). The full profile contract lives in
+[cli-connection-profiles.md](cli-connection-profiles.md).
+
+Archived dispatch rebinds `NESSION_HOME` to the version home, so an archive
+does not see the installation's client store by default. The dispatcher
+bridges that gap without mixing the two ownerships:
+
+- It probes `<archive>/bin/nession --client-profile-contract`. A profile-aware
+  release prints `nession-client-profile-v1 <release>` and receives
+  `NESSION_CLIENT_HOME=<installation home>` (captured before the rebind). The
+  archive consumes the client context **read-only** after schema validation:
+  remote commands resolve the live selection/credential, while every client
+  mutation and the first-use bootstrap are refused on the dispatched archive.
+- A release without the contract keeps legacy explicit URL/env behavior. The
+  dispatcher refuses — with actionable version/explicit-target guidance — any
+  `profile` command, a `--profile` flag, `NESSION_PROFILE`, or an implicit
+  remote invocation while a live client store exists, so a selected profile is
+  never silently reinterpreted as localhost. An explicit `--server-url`
+  flag/env invocation still dispatches normally.
+- An unknown client-store schema is refused read-only; credentials are never
+  duplicated into archives, and the lifecycle/state-coverage gates above are
+  unchanged.
+
 ## Lifecycle: start is idempotent, restart replaces
 
 - `start` on an already-running component reports the live PID and release and
@@ -458,4 +496,8 @@ Implementation owners: `crates/nession-cli/src/versions/mod.rs`,
 `crates/nession-cli/src/commands/install.rs`,
 `crates/nession-cli/src/commands/version/`,
 `crates/nession-cli/src/commands/{agent,server}/`,
-`crates/nession-cli/src/service/mod.rs`, and `scripts/install.sh`.
+`crates/nession-cli/src/service/mod.rs`, and `scripts/install.sh`. The
+installation client context (#4682) is owned by
+`crates/nession-cli/src/profile/`, `crates/nession-cli/src/connection/mod.rs`
+and `crates/nession-common/src/paths.rs`; see
+[cli-connection-profiles.md](cli-connection-profiles.md).
