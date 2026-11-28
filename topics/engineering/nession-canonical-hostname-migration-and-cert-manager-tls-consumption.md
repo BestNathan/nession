@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "security", "delivery", "identity"]
 status: verified
 created_at: 2026-11-27T09:36:15Z
-updated_at: 2026-11-28T02:36:51Z
-sources: ["https://github.com/BestNathan/nession/issues/4588", "https://github.com/BestNathan/nession/pull/4677", "https://github.com/BestNathan/nession/pull/4679", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-host-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-tls-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/adbf6b66260673bb4b80cd415039d651a2d08573/docs/engineering/cloudflare-site-provisioning.md", "https://github.com/BestNathan/nession/issues/4678"]
+updated_at: 2026-11-28T09:24:45Z
+sources: ["https://github.com/BestNathan/nession/issues/4588", "https://github.com/BestNathan/nession/pull/4677", "https://github.com/BestNathan/nession/pull/4679", "https://github.com/BestNathan/nession/pull/4716", "https://github.com/BestNathan/nession/pull/4717", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-host-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-tls-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/adbf6b66260673bb4b80cd415039d651a2d08573/docs/engineering/cloudflare-site-provisioning.md", "https://github.com/BestNathan/nession/issues/4678"]
 ---
 
 # Nession canonical hostname migration and cert-manager TLS consumption
@@ -104,27 +104,40 @@ client TLS at the edge.
 
 ## Limits / when to revisit
 
-- **nitops#2 is implemented and live-verified (2026-11-28 cluster readback recorded on
-  BestNathan/nitops#2):** cert-manager/issuers/wildcard Certificate merged (nitops
-  PRs #3–#12); Certificate Ready with Let's Encrypt YR2 `*.bestnathan.top` (serial
-  `05D4C56EA07B0FF07B02E73CF1C7FB5E3D4D`, notAfter 2027-02-25); all four SLB nodes
-  serve that serial under ordinary public trust (`Verify return code: 0`); the
-  cert-reloader log shows a validated generation transition (`0502CB22…` →
-  `05D4C56E…`) with reload and served-serial readback; `nhome.local` still serves
-  its own cert. **One open defect blocks the staging retirement:** LAN-direct HTTPS
-  to the MCP host through the SLB loops **308** — the ingress `higress.io/ssl-redirect`
-  is evaluated by Higress, which does not trust the SLB's `X-Forwarded-Proto https` —
-  while the public Cloudflare→router→SLB path answers correctly (401/404/308-to-https).
-  Dropping `ssl-redirect` on the Nession side alone is not a fix: the SLB
-  `:80 default_server` catch-all would then proxy cleartext bearer MCP. Retirement
-  waits for a nitops forwarded-proto trust fix (or an SLB-side redirect), then the
-  coordinated gitops change + cutover receipt unlock the SC-03 Gate.
-- Formal deployed acceptance (LAN/public probes as an authorized gate, renewal proof,
-  production MCP activation) remains Pending: production deployed Cases require the
-  #1616 identity lane. A green PR is not a rollout.
-- Legacy nested names and the legacy staging MCP Origin CA TLS are intentionally
-  retained during migration; prune them only in a reviewed change after the
-  cutover receipt is recorded and no consumer remains.
+- **nitops#2 infrastructure is implemented and live-verified.** cert-manager +
+  DNS-01 ClusterIssuers + the wildcard Certificate are merged (nitops PRs #3–#14);
+  Certificate Ready with Let's Encrypt YR2 `*.bestnathan.top`; all four SLB nodes
+  serve it under ordinary public trust (`Verify return code: 0`), and the
+  cert-reloader log shows a validated rotation (`05D4C56E…` → `069F7B1E…`) with
+  `nginx -t`, graceful reload and served-serial readback. `nhome.local` still serves
+  its own cert. GitHub checkboxes lagged this state; the cluster was the source of
+  truth.
+- **The staging retirement was attempted and reverted on 2026-11-28** (gitops
+  `274f8f03f` → restored by `efa0f1580`/`9ae33efc9`; nitops `2a6fe785d` → reverted by
+  `b3cb4d22b`). Two measurements, both contradicting the documented assumption that
+  the SLB is the only client-facing terminator, drove the rollback:
+  1. The **Cloudflare origin for the staging MCP record is port-forwarded straight to
+     the Higress TLS listener and arrives without SNI** (gateway access log
+     `requested_server_name "-"`, `response_flags NR`, `route_not_found`). The chain
+     answering that hop exists only while the Ingress keeps **both** `tls:` and
+     `higress.io/ssl-redirect`, so removing the Origin CA material 404s the public
+     endpoint (observed outage ~25–30 min, staging MCP only).
+  2. With the SLB→Higress `:443` hop introduced to stop the LAN 308 loop, **LAN
+     WebSocket upgrades to canonical hosts that have no `tls` block return 404**
+     while the same upgrade over the plaintext `:80` hop returns 101.
+- **Corrected prerequisite order before `sealed-tls.json` can be retired** (recorded in
+  the `gitops` manifest header and `docs/engineering/cloudflare-site-provisioning.md`):
+  (1) Higress trusts exactly one forwarded hop; (2) the Cloudflare record for this
+  host is repointed to the nitops router, which terminates TLS with the cert-manager
+  wildcard, sends SNI and verifies the SLB; (3) the SLB bestnathan hop returns to
+  plaintext `:80` with `X-Forwarded-Proto https`; (4) only then remove
+  `tls:`/`ssl-redirect`, retire the SealedSecret, and record the
+  `tls-cutover-readback` receipt. A receipt whose `noRemainingConsumer` is not yet
+  true must not be recorded — the first one was withdrawn (main `55b915867`).
+- Formal deployed acceptance (authorized LAN/public probe lanes, production MCP
+  activation) remains Pending and requires the #1616 identity lane. A green PR is not
+  a rollout, and a merged PR is not a verified cutover: only live probes after each
+  hop change are.
 - The hostname checker encodes the canonical contract directly; the reviewed site
   registry (#4678) has since landed on main. A future refinement can consume
   `scripts/ci/site-registry/registry.json` for site identity, keeping one source

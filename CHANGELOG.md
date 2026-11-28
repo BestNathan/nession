@@ -1087,3 +1087,10 @@
 - Categories: architecture, security, delivery, identity
 - Reason: Record the 2026-11-28 authenticated cluster readback superseding "readiness unverified": cert-manager/issuers/wildcard Certificate Ready (nitops PRs #3-#12 merged), all four SLB nodes serve the Let's Encrypt serial under ordinary trust with a validated rotation in the reloader log, canonical hosts live and nhome.local preserved; one open defect gates the staging retirement — LAN-direct SLB MCP HTTPS loops 308 because Higress does not trust the SLB X-Forwarded-Proto (public router path correct), and dropping ingress ssl-redirect alone would expose cleartext bearer MCP via the SLB catch-all
 - Source: https://github.com/BestNathan/nession/issues/4588
+
+## 2026-11-28T09:24:45Z | update | Nession canonical hostname migration and cert-manager TLS consumption
+- Path: topics/engineering/nession-canonical-hostname-migration-and-cert-manager-tls-consumption.md
+- Topic: engineering
+- Categories: architecture, security, delivery, identity
+- Reason: Correct the readiness record after the staging retirement was attempted and reverted (gitops 274f8f03f → 9ae33efc9, nitops 2a6fe785d → b3cb4d22b, premature receipt withdrawn in 55b915867): measured live, the Cloudflare origin for the MCP host reaches Higress TLS without SNI so the chain needs both tls and ssl-redirect, and the SLB-to-443 hop breaks LAN WebSocket for hosts without a tls block; publish the corrected four-step prerequisite order (Higress forwarded-hop trust, repoint the Cloudflare record to the router, plaintext SLB hop, then retire) and note that only post-change live probes prove a cutover
+- Source: https://github.com/BestNathan/nession/issues/4588
