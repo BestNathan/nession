@@ -104,7 +104,7 @@ test('policy validator rejects topology, ownership and exposure mutations', () =
       policy.entrypoints.private.hops.splice(2, 0, { id: 'cloudflare', owner: 'operator' });
     }],
     ['private-tls-owner', policy => {
-      policy.entrypoints.private.hops.find(hop => hop.id === 'slb').owner = 'nession';
+      policy.entrypoints.private.hops.find(hop => hop.id === 'slb').tls = 'origin-ca';
     }],
     ['protected-origin-ref', policy => {
       policy.entrypoints.public.configRefs.origin = '198.51.100.7';

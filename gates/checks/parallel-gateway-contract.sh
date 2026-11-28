@@ -16,8 +16,8 @@ gate_check() {
   gate_run_invariant node --test \
     scripts/ci/site-registry/gateway-policy.test.mjs \
     scripts/ci/site-registry/gateway-rollout.test.mjs \
-    scripts/ci/site-registry/retire-origin-ca.test.mjs
-  gate_run_invariant node scripts/ci/site-registry/gateway-policy.mjs check-fixture
+    scripts/ci/site-registry/retire-origin-ca.test.mjs || return $?
+  gate_run_invariant node scripts/ci/site-registry/gateway-policy.mjs check-fixture || return $?
   gate_run_invariant node scripts/ci/site-registry/retire-origin-ca.mjs check-source
 }
 
