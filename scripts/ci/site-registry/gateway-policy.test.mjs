@@ -96,6 +96,10 @@ test('policy validator rejects topology, ownership and exposure mutations', () =
     }],
     ['public-gateway-owner', policy => { policy.entrypoints.public.gatewayOwner = 'nitops'; }],
     ['private-gateway-owner', policy => { policy.entrypoints.private.gatewayOwner = 'nsible'; }],
+    ['hop-owner', policy => {
+      policy.entrypoints.public.hops.find(hop => hop.id === 'hk').owner = 'nitops';
+    }],
+    ['private-hosts-denied', policy => { policy.entrypoints.public.privateHostsDenied = []; }],
     ['entrypoint-hops', policy => {
       policy.entrypoints.private.hops.splice(2, 0, { id: 'cloudflare', owner: 'operator' });
     }],
@@ -131,6 +135,7 @@ test('policy validator rejects topology, ownership and exposure mutations', () =
       policy.tls.certificateOwner = 'nession';
       policy.tls.nessionOwnsCertificate = true;
     }],
+    ['tls-topology', policy => { policy.tls.clientFacingTerminators = ['hk']; }],
     ['prohibited-missing', policy => { policy.prohibited = []; }]
   ];
   for (const [invariant, mutate] of mutations) {

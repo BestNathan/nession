@@ -62,6 +62,17 @@ export const PROHIBITED = Object.freeze([
   'competing-certificate-owner'
 ]);
 
+const PUBLIC_HOP_OWNERS = Object.freeze({
+  client: 'client', cloudflare: 'operator-protected-config', hk: 'nsible',
+  'wireguard-gost': 'nsible', higress: 'nession-gitops', service: 'nession-gitops'
+});
+const PRIVATE_HOP_OWNERS = Object.freeze({
+  client: 'client', adguard: 'nession', slb: 'nitops',
+  higress: 'nession-gitops', service: 'nession-gitops'
+});
+const CLUSTER_HOP_OWNERS = Object.freeze({
+  'source-service': 'nession', 'destination-service': 'nession'
+});
 const PROTECTED_REF = /^(?:CLOUDFLARE_ORIGIN_IPV4|LAN_GATEWAY_IP|ADGUARD_API_URL|ADGUARD_USERNAME|ADGUARD_PASSWORD)$/;
 const IPV4 = /\b(?:\d{1,3}\.){3}\d{1,3}\b/;
 const URL_VALUE = /[a-z][a-z0-9+.-]*:\/\//i;
@@ -187,6 +198,14 @@ function assertHopIds(hops, expected, entrypoint) {
   }
 }
 
+function assertHopOwners(hops, expected, entrypoint) {
+  for (const hop of hops) {
+    if (hop.owner !== expected[hop.id]) {
+      fail('hop-owner', entrypoint + '.' + hop.id + ' must be owned by ' + expected[hop.id]);
+    }
+  }
+}
+
 function assertNoLiteralInfrastructure(policy) {
   const serialized = JSON.stringify(policy);
   if (IPV4.test(serialized)) fail('literal-address', 'policy must use protected references only');
@@ -224,6 +243,7 @@ export function validateGatewayPolicy(policy, registry, { requireRevision = fals
 
   const publicEntry = entrypoints.public;
   assertHopIds(publicEntry.hops, PUBLIC_HOP_IDS, 'public');
+  assertHopOwners(publicEntry.hops, PUBLIC_HOP_OWNERS, 'public');
   if (publicEntry.gatewayOwner !== OWNERSHIP.publicGateway) fail('public-gateway-owner');
   if (publicEntry.hops.some(hop => hop.id === 'slb')) fail('hk-slb-chaining');
   if (publicEntry.hops.some(hop => hop.id === 'higress' &&
@@ -236,9 +256,13 @@ export function validateGatewayPolicy(policy, registry, { requireRevision = fals
   }
   if (publicEntry.configRefs?.origin !== PUBLIC_ORIGIN_REF) fail('protected-origin-ref');
   if (publicEntry.pathPolicy !== 'exact-registry-route') fail('public-path-policy');
+  if (JSON.stringify(publicEntry.privateHostsDenied) !== JSON.stringify(privateHosts(registry))) {
+    fail('private-hosts-denied', 'private hosts must come from the registry');
+  }
 
   const privateEntry = entrypoints.private;
   assertHopIds(privateEntry.hops, PRIVATE_HOP_IDS, 'private');
+  assertHopOwners(privateEntry.hops, PRIVATE_HOP_OWNERS, 'private');
   if (privateEntry.gatewayOwner !== OWNERSHIP.privateGateway) fail('private-gateway-owner');
   if (privateEntry.hops.some(hop => ['cloudflare', 'hk'].includes(hop.id))) {
     fail('private-route-uses-public-provider');
@@ -269,6 +293,7 @@ export function validateGatewayPolicy(policy, registry, { requireRevision = fals
 
   const clusterEntry = entrypoints.cluster;
   assertHopIds(clusterEntry.hops, CLUSTER_HOP_IDS, 'cluster');
+  assertHopOwners(clusterEntry.hops, CLUSTER_HOP_OWNERS, 'cluster');
   if (clusterEntry.hops.some(hop => hop.tls === true || hop.tls === 'public-san')) {
     fail('cluster-external-tls');
   }
@@ -327,6 +352,11 @@ export function validateGatewayPolicy(policy, registry, { requireRevision = fals
       policy.tls?.nessionOwnsCertificate !== false ||
       policy.tls?.higressBusinessTls !== false) {
     fail('competing-certificate-owner');
+  }
+  if (JSON.stringify(policy.tls?.clientFacingTerminators) !== JSON.stringify(['hk', 'slb']) ||
+      policy.tls?.hkCertificate !== 'public-san-distinct-key' ||
+      policy.tls?.slbCertificate !== 'wildcard-cert-manager') {
+    fail('tls-topology');
   }
 
   for (const prohibition of PROHIBITED) {
