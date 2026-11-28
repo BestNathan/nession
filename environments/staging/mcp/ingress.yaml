@@ -1,7 +1,12 @@
-# Staging-only MCP endpoint (#3902, #3945). Manifest is deliberately
-# excluded from Kustomization until new DNS, SAN, Host allowlist, TLS trust
-# and Cloudflare Edge/Origin TLS have been verified after credential rotation.
-# The backend accepts only authenticated /mcp requests; do not expose root.
+# Staging-only MCP endpoint (#3902, #3945, #4588). This overlay is enrolled in
+# the Kustomization and active. TLS terminates at the nitops-owned SLB (the one
+# cert-manager wildcard `*.bestnathan.top`, served from slb/bestnathan-top-tls);
+# Higress does not terminate this host anymore — the legacy Cloudflare Origin CA
+# TLS (`sealed-tls.json` -> `nession-mcp-staging-tls`) and the ingress-level
+# ssl-redirect are retired with #4588 once nitops enables forwarded-proto trust
+# (BestNathan/nitops#2, Option A). Cleartext client access stays blocked upstream:
+# the SLB/router edges answer bestnathan.top on :80 only by redirecting to HTTPS,
+# and the backend accepts only authenticated exact /mcp requests; root is 404.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -12,18 +17,11 @@ metadata:
     env: staging
   annotations:
     higress.io/domain: "staging-mcp-nession.bestnathan.top"
-    # Higress supports SSL redirects; public bearer tokens must never flow
-    # over cleartext HTTP, including requests for MCP initialize/tools.
-    higress.io/ssl-redirect: "true"
     # Long-running MCP HTTP streaming may otherwise be cut by a short proxy
     # timeout. Keep the established Nession Higress timeout convention.
     higress.io/upstream-read-timeout: "86400"
 spec:
   ingressClassName: higress
-  tls:
-    - hosts:
-        - staging-mcp-nession.bestnathan.top
-      secretName: nession-mcp-staging-tls
   rules:
     - host: staging-mcp-nession.bestnathan.top
       http:
