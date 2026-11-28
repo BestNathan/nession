@@ -16,8 +16,9 @@
 //!   coincidence, because the request shape makes omission a malformed request
 //!   rather than a selectable default.
 //! - **Never guesses across Sessions.** `session_id` is required alongside
-//!   `conversation_id`: transcript visibility is scoped to a Session's cwd, and
-//!   a machine-wide transcript lookup is a path around that.
+//!   `conversation_id`: transcript visibility is scoped to a Session — its cwd
+//!   candidates and its own reported conversations (#4664) — and a
+//!   machine-wide transcript lookup is a path around that.
 //! - **Never carries a transcript path** — same structural rule as the sibling
 //!   unit.
 //!
@@ -251,7 +252,8 @@ impl MessageItemV1 {
 pub enum MessagesStateV1 {
     /// The requested conversation was found and the page is the answer.
     Ready,
-    /// No conversation with the requested id is visible at the Session's cwd.
+    /// No conversation with the requested id is visible to the Session — not
+    /// among its cwd candidates, and not named by any of its own reports.
     ///
     /// Final — the response names no other conversation, because substituting
     /// the binding or the newest for a request that named one would be a guess
@@ -271,7 +273,7 @@ pub enum MessagesStateV1 {
 #[derive(schemars::JsonSchema)]
 pub struct MessagesRequestV1 {
     /// The Nession session the read is scoped to. Required: visibility is
-    /// per-Session-cwd, so a request without one would be a machine-wide
+    /// per-Session, so a request without one would be a machine-wide
     /// transcript lookup.
     pub session_id: String,
 

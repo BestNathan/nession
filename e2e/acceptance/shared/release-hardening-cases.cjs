@@ -148,6 +148,10 @@ async function startInstallerFixture(release) {
   const { version, assetName, tarball, checksum } = release;
   const tag = 'v' + version;
   let base = '';
+  // Count full asset GETs so a Case can prove the first-hop handoff transfers
+  // the archive exactly once (#4660 SC-06/SC-07). Metadata/checksum GETs are
+  // small and not counted as asset transfers.
+  const counts = { asset: 0, checksums: 0, metadata: 0 };
   const server = http.createServer((request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     const send = (status, body, type = 'application/json') => {
@@ -155,6 +159,7 @@ async function startInstallerFixture(release) {
       response.end(body);
     };
     if (url.pathname.endsWith('/releases/tags/' + tag)) {
+      counts.metadata++;
       return send(200, JSON.stringify({
         tag_name: tag,
         prerelease: false,
@@ -166,10 +171,12 @@ async function startInstallerFixture(release) {
     }
     if (url.pathname === '/download/' + assetName ||
         url.pathname === '/releases/download/' + tag + '/' + assetName) {
+      counts.asset++;
       return send(200, fs.readFileSync(tarball), 'application/gzip');
     }
     if (url.pathname === '/download/checksums.txt' ||
         url.pathname === '/releases/download/' + tag + '/checksums.txt') {
+      counts.checksums++;
       return send(200, checksum + '  ' + assetName + '\n', 'text/plain');
     }
     return send(404, '{}');
@@ -182,6 +189,7 @@ async function startInstallerFixture(release) {
   return {
     base,
     releaseBase: base + '/releases/download',
+    counts,
     close: () => new Promise((resolve) => server.close(resolve)),
   };
 }

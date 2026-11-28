@@ -24,7 +24,7 @@ export const VERSION = 1;
 export type MessagesRequestV1 = { 
 /**
  * The Nession session the read is scoped to. Required: visibility is
- * per-Session-cwd, so a request without one would be a machine-wide
+ * per-Session, so a request without one would be a machine-wide
  * transcript lookup.
  */
 session_id: string, 
@@ -170,7 +170,7 @@ export type ConversationActivityV1 = "active" | "inactive" | "unknown";
 export type MessagesRequest = { 
 /**
  * The Nession session the read is scoped to. Required: visibility is
- * per-Session-cwd, so a request without one would be a machine-wide
+ * per-Session, so a request without one would be a machine-wide
  * transcript lookup.
  */
 session_id: string, 
