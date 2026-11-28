@@ -13,9 +13,14 @@ commonLabels:
 resources:
 - sealed-backend-server.json
 - sealed-inbound.json
-# sealed-tls.json retired by #4588: TLS is consumed at the nitops-owned SLB
-# cert-manager wildcard; the Higress Origin CA secret has no remaining consumer
-# after the cutover receipt (docs/engineering/receipts/4588-tls-cutover-readback.json).
+# NOTE #4588: the Cloudflare origin for the public MCP record is port-forwarded
+# straight to the Higress gateway TLS listener (nodePort 32077), which binds this
+# host only while an Ingress `tls` block exists. Retirement of sealed-tls.json is
+# deferred until that record points at the nitops router (which terminates TLS
+# with the cert-manager wildcard and proxies to the SLB). Verified live
+# 2026-11-28: dropping this broke the public path (404) while the LAN path through
+# the SLB stayed healthy (401).
+- sealed-tls.json
 - sealed-secret.json
 - deployment.yaml
 - service.yaml
