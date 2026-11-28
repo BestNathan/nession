@@ -1,21 +1,21 @@
-# Staging-only MCP endpoint (#3902, #3945, #4588). This overlay is enrolled in the
-# Kustomization and active.
+# Staging-only MCP endpoint (#3902, #3945, #4588). Enrolled and active.
 #
-# Live topology (measured 2026-11-28, BestNathan/nitops#2 / nession#4588):
-#  - LAN clients terminate TLS at the nitops SLB (cert-manager wildcard
-#    slb/bestnathan-top-tls), which proxies to Higress over the trusted plaintext
-#    hop. The ingress-level ssl-redirect is therefore NOT used: Higress ignores
-#    X-Forwarded-Proto (use_remote_address, zero trusted hops), so keeping the
-#    annotation made one-hop LAN requests loop 308.
-#  - Public clients terminate TLS at Cloudflare, whose origin for this record is
-#    port-forwarded directly to the Higress gateway TLS listener (nodePort 32077).
-#    That listener binds this host only while this `tls` block exists, so the
-#    legacy Cloudflare Origin CA material below is still required for the public
-#    path and its retirement is deferred until the record points at the nitops
-#    router (192.168.2.106), which already serves the cert-manager wildcard and
-#    proxies to the SLB with verification.
+# Measured 2026-11-28 (#4588 cutover attempt, reverted by this file): the Cloudflare
+# origin for this host reaches the Higress gateway TLS listener WITHOUT SNI
+# (gateway access log: requested_server_name "-", response_flags NR,
+# route_not_found). The no-SNI filter chain that used to answer it is only created
+# while BOTH this `tls` block and `higress.io/ssl-redirect` are present, so removing
+# either broke the public path with 404. The ingress-level redirect also cannot be
+# dropped while the nitops SLB proxies a plaintext hop, because Higress runs
+# `use_remote_address` with zero trusted hops and ignores `X-Forwarded-Proto`.
 #
-# The backend accepts only authenticated exact /mcp requests; root is 404.
+# Retirement of the Cloudflare Origin CA material therefore requires, in order:
+# (1) Higress trusts exactly one forwarded hop; (2) the SLB bestnathan hop is
+# plaintext with `X-Forwarded-Proto https`; (3) the Cloudflare record is repointed
+# to the nitops router (192.168.2.106) which already serves the cert-manager
+# wildcard and proxies to the SLB with verification; (4) only then remove the
+# `tls` block + `ssl-redirect` and retire sealed-tls.json.
+# The backend accepts only authenticated /mcp requests; do not expose root.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -26,6 +26,9 @@ metadata:
     env: staging
   annotations:
     higress.io/domain: "staging-mcp-nession.bestnathan.top"
+    # Higress supports SSL redirects; public bearer tokens must never flow
+    # over cleartext HTTP, including requests for MCP initialize/tools.
+    higress.io/ssl-redirect: "true"
     # Long-running MCP HTTP streaming may otherwise be cut by a short proxy
     # timeout. Keep the established Nession Higress timeout convention.
     higress.io/upstream-read-timeout: "86400"
