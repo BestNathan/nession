@@ -399,23 +399,27 @@ export function evaluateRouteFixture(fixture, { registry, policy = null } = {}) 
   }
 
   const hops = Array.isArray(fixture.hops) ? fixture.hops : [];
-  if (fixture.entrypoint === 'public') {
-    for (const required of ['cloudflare', 'hk', 'higress', 'service']) {
-      if (!hops.includes(required)) fail('public-route-chain', 'missing ' + required);
+  const exactHops = (expected, label) => {
+    if (hops.length !== expected.length ||
+        hops.some((hop, index) => hop !== expected[index])) {
+      fail(label, 'must be exactly ' + expected.join('->'));
     }
+  };
+  if (fixture.entrypoint === 'public') {
     if (hops.includes('slb') || fixture.hkToSlb === true) fail('hk-slb-chaining', site.id);
+    exactHops(['cloudflare', 'hk', 'higress', 'service'], 'public-route-chain');
   }
   if (fixture.entrypoint === 'private') {
-    for (const required of ['adguard', 'slb', 'higress', 'service']) {
-      if (!hops.includes(required)) fail('private-route-chain', 'missing ' + required);
-    }
     if (hops.includes('cloudflare') || hops.includes('hk')) {
       fail('private-route-uses-public-provider', site.id);
     }
+    exactHops(['adguard', 'slb', 'higress', 'service'], 'private-route-chain');
   }
-  if (fixture.entrypoint === 'cluster' &&
-      hops.some(hop => ['cloudflare', 'hk', 'slb', 'adguard'].includes(hop))) {
-    fail('cluster-route-external-hop', site.id);
+  if (fixture.entrypoint === 'cluster') {
+    if (hops.some(hop => ['cloudflare', 'hk', 'slb', 'adguard'].includes(hop))) {
+      fail('cluster-route-external-hop', site.id);
+    }
+    exactHops(['source-service', 'destination-service'], 'cluster-route-chain');
   }
   if (fixture.publicNodePort === true || fixture.exposure === 'public-nodeport') {
     fail('public-nodeport-exposure', site.id);
