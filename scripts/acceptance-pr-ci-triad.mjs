@@ -35,7 +35,9 @@ const checksFor = visual => visual ? [...CHECKS, ...VISUAL_CHECKS] : CHECKS;
 const positive = value => Number.isSafeInteger(value) && value > 0;
 
 export function requiresPrVisualEvidenceCriterion(criterion) {
-  const text = String(criterion?.text ?? '');
+  // A deterministic report-tooling Gate ID is not a product visual assertion.
+  // Keep the rest of the criterion intact: an explicit visual obligation still applies.
+  const text = String(criterion?.text ?? '').replace(/\be2e-browser-report-selftest\b/gi, ' ');
   return /\b(?:browser|viewport)\b/i.test(text) &&
     /\b(?:Quality|CI|Gate)\b/i.test(text) &&
     /\b(?:exact|source-aligned)\b/i.test(text) &&
@@ -238,6 +240,18 @@ export function selfTestPrCiTriad() {
   assert.equal(requiresPrVisualEvidenceCriterion({text:web4050}),true);
   assert.equal(requiresPrVisualEvidenceCriterion({text:web4061}),true);
   assert.equal(requiresPrVisualEvidenceCriterion({text:'normal prose without CI proof'}),false);
+  // #4700: the original release-gate criterion is tooling-only, despite the Gate ID.
+  const release4576 = "`main-full-release-gate.mjs` accepts exact-Main-SHA Full runs with `push` or `workflow_dispatch` events as release receipts, and still rejects `schedule` runs, wrong SHA/branch/repo, and non-successful or attestation-incomplete runs — proven by the script self-test (including the new dispatch positive and negative fixtures) and the owning `e2e-browser-report-selftest` Gate at the exact PR head.";
+  for (const text of [release4576, release4576.replaceAll('\x60', ''),
+    'Run E2E-BROWSER-REPORT-SELFTEST Gate at the exact PR head']) {
+    assert.equal(requiresPrVisualEvidenceCriterion({text}),false);
+    assert.equal(requiresPrCiTriad({stage:'pr',criteria:[{text}]}),false);
+    assert.equal(requiresPrVisualEvidenceCriterion({text:text+'; browser design checks remain green'}),true);
+  }
+  assert.equal(requiresPrCiTriad({stage:'pr',criteria:[{
+    text:release4576+'; Quality / E2E / Case Smoke tests pass',
+  }]}),true);
+
   assert.equal(requiresPrCiTriad({stage:'pr',criteria:[{criterion:'SC-03',text:web4050}]}),true);
   assert.equal(requiresPrCiTriad({stage:'pr',criteria:[{criterion:'SC-04',text:web4061}]}),true);
   const visualObservations=structuredClone(observations);
