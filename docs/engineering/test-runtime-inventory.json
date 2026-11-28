@@ -4,8 +4,8 @@
   "issue": 4597,
   "summary": {
     "crates": 16,
-    "entries": 1904,
-    "references": 1018,
+    "entries": 1913,
+    "references": 1028,
     "unresolved": 0
   },
   "crates": [
@@ -49,7 +49,7 @@
       "file": "crates/nession-agent/src/config.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 535
+      "line": 588
     },
     {
       "file": "crates/nession-agent/src/connection/execution.rs",
@@ -169,7 +169,7 @@
       "file": "crates/nession-agent/src/runtime.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 959
+      "line": 963
     },
     {
       "file": "crates/nession-agent/src/sandbox_images.rs",
@@ -235,7 +235,7 @@
       "file": "crates/nession-agent/src/session/activity/claude.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 318
+      "line": 331
     },
     {
       "file": "crates/nession-agent/src/session/activity/coordinator.rs",
@@ -382,6 +382,12 @@
       "line": 938
     },
     {
+      "file": "crates/nession-agent/tests/entrypoint_advertise.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
       "file": "crates/nession-agent/tests/integration/connection.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
@@ -470,6 +476,12 @@
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 362
+    },
+    {
+      "file": "crates/nession-claude-code/src/composer.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 414
     },
     {
       "file": "crates/nession-claude-code/src/conversation_reader.rs",
@@ -709,7 +721,7 @@
       "file": "crates/nession-claude-code/src/tools/nession_claude_submit.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 141
+      "line": 147
     },
     {
       "file": "crates/nession-claude-code/src/transcript.rs",
@@ -727,7 +739,7 @@
       "file": "crates/nession-cli/src/args.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 489
+      "line": 499
     },
     {
       "file": "crates/nession-cli/src/commands/agent/start.rs",
@@ -739,7 +751,7 @@
       "file": "crates/nession-cli/src/commands/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 292
+      "line": 304
     },
     {
       "file": "crates/nession-cli/src/commands/server/start.rs",
@@ -889,7 +901,7 @@
       "file": "crates/nession-cli/src/update/install.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 535
+      "line": 783
     },
     {
       "file": "crates/nession-cli/src/update/mod.rs",
@@ -925,13 +937,13 @@
       "file": "crates/nession-cli/src/update/snapshot.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 532
+      "line": 854
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1377
+      "line": 1376
     },
     {
       "file": "crates/nession-cli/src/update/version.rs",
@@ -943,7 +955,7 @@
       "file": "crates/nession-cli/src/versions/mod.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 648
+      "line": 757
     },
     {
       "file": "crates/nession-cli/tests/integration/attach_route.rs",
@@ -965,6 +977,12 @@
     },
     {
       "file": "crates/nession-cli/tests/integration/client_commands.rs",
+      "owner": "scripts/test-runtime.sh",
+      "disposition": "harness-owned-context",
+      "line": 1
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
       "line": 1
@@ -2635,7 +2653,7 @@
       "file": "crates/nession-tmux/src/ops.rs",
       "owner": "scripts/test-runtime.sh",
       "disposition": "harness-owned-context",
-      "line": 1696
+      "line": 1719
     },
     {
       "file": "crates/nession-tmux/src/parser.rs",
@@ -6872,6 +6890,31 @@
       "disposition": "e2e-runtime"
     },
     {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-01/verify-live.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-01/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-02/verify-live.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
+      "file": "e2e/acceptance/cases/4665/SC-02/verify.cjs",
+      "owner": "e2e/runner/runtime/full-stack.js",
+      "disposition": "e2e-runtime"
+    },
+    {
       "file": "e2e/acceptance/cases/565/SC-02/verify.cjs",
       "owner": "e2e/runner/runtime/full-stack.js",
       "disposition": "e2e-runtime"
@@ -9932,6 +9975,11 @@
       "disposition": "web-unit"
     },
     {
+      "file": "web/src/shared/lib/__tests__/unit/serverSocketUrl.test.ts",
+      "owner": "web vitest",
+      "disposition": "web-unit"
+    },
+    {
       "file": "web/src/shared/lib/__tests__/unit/touchOwnership.test.ts",
       "owner": "web vitest",
       "disposition": "web-unit"
@@ -9990,7 +10038,7 @@
   "references": [
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 602,
+      "line": 655,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -9999,7 +10047,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 645,
+      "line": 817,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10008,7 +10056,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 650,
+      "line": 822,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10017,7 +10065,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 663,
+      "line": 835,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10026,7 +10074,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 681,
+      "line": 853,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10035,106 +10083,7 @@
     },
     {
       "file": "crates/nession-agent/src/config.rs",
-      "line": 691,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "server_url = \"ws://localhost:8443\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 705,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "server_url = \"ws://localhost:8443\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 719,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "server_url = \"ws://localhost:8443\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 733,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "server_url = \"ws://localhost:8443\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 748,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "server_url = \"ws://localhost:8443\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 761,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "server_url = \"ws://localhost:8443\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 763,
-      "kind": "fixed-tmp-path",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "tmux_socket_path = \"/tmp/nession-agent-b/tmux.sock\"",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 769,
-      "kind": "fixed-tmp-path",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "Some(\"/tmp/nession-agent-b/tmux.sock\")",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 778,
-      "kind": "fixed-tmp-path",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "tmux_socket_path: Some(\"/tmp/nession-rt/tmux.sock\".to_string()),",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 785,
-      "kind": "fixed-tmp-path",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "Some(\"/tmp/nession-rt/tmux.sock\")",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 795,
-      "kind": "fixed-port",
-      "effect": "resolve/read",
-      "disposition": "path-string-fixture",
-      "reference": "assert_eq!(config.server_url, \"ws://localhost:8443\");",
-      "replacement": "serialized path string, not a resolved host resource"
-    },
-    {
-      "file": "crates/nession-agent/src/config.rs",
-      "line": 862,
+      "line": 863,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -10153,6 +10102,105 @@
     {
       "file": "crates/nession-agent/src/config.rs",
       "line": 891,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "server_url = \"ws://localhost:8443\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 905,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "server_url = \"ws://localhost:8443\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 920,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "server_url = \"ws://localhost:8443\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 933,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "server_url = \"ws://localhost:8443\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 935,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "tmux_socket_path = \"/tmp/nession-agent-b/tmux.sock\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 941,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "Some(\"/tmp/nession-agent-b/tmux.sock\")",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 950,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "tmux_socket_path: Some(\"/tmp/nession-rt/tmux.sock\".to_string()),",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 957,
+      "kind": "fixed-tmp-path",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "Some(\"/tmp/nession-rt/tmux.sock\")",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 967,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "assert_eq!(config.server_url, \"ws://localhost:8443\");",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 1034,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "server_url = \"ws://localhost:8443\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 1049,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "server_url = \"ws://localhost:8443\"",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-agent/src/config.rs",
+      "line": 1063,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11069,6 +11117,15 @@
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
+      "file": "crates/nession-agent/tests/entrypoint_advertise.rs",
+      "line": 30,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut cmd = Command::new(\"sh\");",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
       "file": "crates/nession-agent/tests/integration/connection.rs",
       "line": 68,
       "kind": "process-spawn",
@@ -11853,7 +11910,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/install.rs",
-      "line": 627,
+      "line": 875,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11862,7 +11919,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/install.rs",
-      "line": 670,
+      "line": 918,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11871,7 +11928,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/install.rs",
-      "line": 722,
+      "line": 970,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11952,7 +12009,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/snapshot.rs",
-      "line": 658,
+      "line": 1102,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -11961,7 +12018,7 @@
     },
     {
       "file": "crates/nession-cli/src/update/transaction.rs",
-      "line": 1454,
+      "line": 1453,
       "kind": "fixed-port",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -11997,7 +12054,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 717,
+      "line": 826,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -12006,7 +12063,7 @@
     },
     {
       "file": "crates/nession-cli/src/versions/mod.rs",
-      "line": 727,
+      "line": 836,
       "kind": "delete",
       "effect": "delete",
       "disposition": "test-runtime-root",
@@ -12200,6 +12257,33 @@
       "effect": "execute",
       "disposition": "test-runtime-root",
       "reference": "let mut command = Command::new(BIN);",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 103,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let status = Command::new(\"tar\")",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 121,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "path-string-fixture",
+      "reference": "\"server_url = \\\"ws://127.0.0.1:19099/ws\\\"\\nauth_token = \\\"\\\"\\n\",",
+      "replacement": "serialized path string, not a resolved host resource"
+    },
+    {
+      "file": "crates/nession-cli/tests/integration/install_bridge.rs",
+      "line": 169,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let mut command = Command::new(\"sh\");",
       "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
     },
     {
@@ -13230,7 +13314,7 @@
     },
     {
       "file": "crates/nession-mcp/tests/integration/protocol.rs",
-      "line": 429,
+      "line": 432,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -13239,7 +13323,7 @@
     },
     {
       "file": "crates/nession-mcp/tests/integration/protocol.rs",
-      "line": 435,
+      "line": 438,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -13248,7 +13332,7 @@
     },
     {
       "file": "crates/nession-mcp/tests/integration/protocol.rs",
-      "line": 1270,
+      "line": 1402,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -13257,7 +13341,7 @@
     },
     {
       "file": "crates/nession-mcp/tests/integration/protocol.rs",
-      "line": 1276,
+      "line": 1408,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -13266,7 +13350,7 @@
     },
     {
       "file": "crates/nession-mcp/tests/integration/protocol.rs",
-      "line": 1456,
+      "line": 1588,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -13275,7 +13359,7 @@
     },
     {
       "file": "crates/nession-mcp/tests/integration/protocol.rs",
-      "line": 1502,
+      "line": 1634,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14346,7 +14430,7 @@
     },
     {
       "file": "crates/nession-server/tests/integration/websocket.rs",
-      "line": 4204,
+      "line": 4311,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14355,7 +14439,7 @@
     },
     {
       "file": "crates/nession-server/tests/integration/websocket.rs",
-      "line": 4253,
+      "line": 4360,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14364,7 +14448,7 @@
     },
     {
       "file": "crates/nession-server/tests/integration/websocket.rs",
-      "line": 4259,
+      "line": 4366,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14409,7 +14493,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 1895,
+      "line": 1918,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14418,7 +14502,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 1914,
+      "line": 1937,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14427,7 +14511,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2288,
+      "line": 2311,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -14436,7 +14520,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2472,
+      "line": 2495,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -14445,7 +14529,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2479,
+      "line": 2502,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -14454,7 +14538,7 @@
     },
     {
       "file": "crates/nession-tmux/src/ops.rs",
-      "line": 2488,
+      "line": 2511,
       "kind": "fixed-tmp-path",
       "effect": "resolve/read",
       "disposition": "path-string-fixture",
@@ -14527,6 +14611,15 @@
     {
       "file": "crates/nession-tmux/tests/real_tmux.rs",
       "line": 191,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "test-runtime-root",
+      "reference": "let command = TmuxCommand::new(\"tmux\", dir.path().join(\"tmux.sock\"));",
+      "replacement": "run root from scripts/test-runtime.sh (HOME/NESION_HOME/NESION_RUNTIME_DIR/TMPDIR)"
+    },
+    {
+      "file": "crates/nession-tmux/tests/real_tmux.rs",
+      "line": 234,
       "kind": "process-spawn",
       "effect": "execute",
       "disposition": "test-runtime-root",
@@ -16026,6 +16119,33 @@
       "disposition": "read-only-tooling",
       "reference": "const child = spawn(process.execPath, ['-e', [",
       "replacement": "read-only repository/tooling command"
+    },
+    {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "line": 25,
+      "kind": "process-spawn",
+      "effect": "execute",
+      "disposition": "case-owned-root",
+      "reference": "const child = spawn('sh', [script, ...args], {",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
+    },
+    {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "line": 93,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "case-owned-root",
+      "reference": "'server_url = \"ws://127.0.0.1:19098/ws\"\\nauth_token = \"\"\\n');",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
+    },
+    {
+      "file": "e2e/acceptance/cases/4660/SC-07/verify.cjs",
+      "line": 186,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "case-owned-root",
+      "reference": "fs.writeFileSync(path.join(homeL, 'agent-config.toml'), 'server_url = \"ws://127.0.0.1:19097/ws\"\\nauth_token = \"\"\\n');",
+      "replacement": "Case-owned root from makeRoot/createRunRoot"
     },
     {
       "file": "e2e/acceptance/cases/565/SC-12/verify.cjs",
@@ -19148,6 +19268,24 @@
       "effect": "resolve/read",
       "disposition": "pure-unit",
       "reference": "endpoint_url: 'http://127.0.0.1:19091/mcp',",
+      "replacement": "Vitest unit environment (no host resource)"
+    },
+    {
+      "file": "web/src/shared/lib/__tests__/unit/serverSocketUrl.test.ts",
+      "line": 41,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "pure-unit",
+      "reference": "expect(deriveServerSocketUrl('http:', 'localhost:13000')).toBe(",
+      "replacement": "Vitest unit environment (no host resource)"
+    },
+    {
+      "file": "web/src/shared/lib/__tests__/unit/serverSocketUrl.test.ts",
+      "line": 42,
+      "kind": "fixed-port",
+      "effect": "resolve/read",
+      "disposition": "pure-unit",
+      "reference": "'ws://localhost:13000/ws',",
       "replacement": "Vitest unit environment (no host resource)"
     }
   ]

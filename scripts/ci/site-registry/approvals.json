@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "issue": 4589,
+  "approvals": [
+    {
+      "id": "lineage-staging-mcp-public-3963",
+      "site": "staging-mcp",
+      "operation": "public-activate",
+      "scope": {
+        "fqdn": "staging-mcp-nession.bestnathan.top",
+        "visibility": "public",
+        "originRef": "CLOUDFLARE_ORIGIN_IPV4"
+      },
+      "issue": 3963,
+      "lineage": true,
+      "note": "Recorded lineage of the existing reviewed public staging MCP activation (#3963/#3992). The Cloudflare A record is already Nession-owned; this entry authorizes continued maintenance of exactly that reviewed desired state, not a new exposure."
+    }
+  ]
+}

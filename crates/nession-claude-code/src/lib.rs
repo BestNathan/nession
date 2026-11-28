@@ -2,6 +2,7 @@ pub mod agent;
 pub mod agent_view;
 pub mod binding;
 pub mod canonical;
+pub mod composer;
 pub mod control;
 pub mod conversation;
 pub mod conversation_reader;

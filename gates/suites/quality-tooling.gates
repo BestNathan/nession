@@ -32,6 +32,8 @@ mcp-image-default
 mcp-standalone-image
 compose-storage-contract
 gitops-storage-contract
+gitops-host-contract
+gitops-tls-contract
 cloudflare-site-dns-selftest
 gitops-seal-required-selftest
 mcp-secret-preflight-readback-selftest
@@ -60,8 +62,10 @@ issue-audit-agent-selftest
 issue-audit-cursor-selftest
 gate-router-contract
 # Deterministic known-violation fixtures for the custom blocking detectors.
+protocol-integrity
 protocol-integrity-selftest
 test-isolation-selftest
+tmux-socket-isolation
 tmux-socket-isolation-selftest
 server-handler-locality-selftest
 server-handler-concurrency-selftest
@@ -71,6 +75,8 @@ acr-mirror-deadline-selftest
 ghcr-gitops-separation
 compose-storage-contract-selftest
 gitops-storage-contract-selftest
+gitops-host-contract-selftest
+gitops-tls-contract-selftest
 agent-provider-contract
 e2e-failure-analysis-selftest
 agent-checkpoint-store
