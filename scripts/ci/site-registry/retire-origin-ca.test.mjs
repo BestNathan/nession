@@ -25,6 +25,55 @@ const recorded = {
 const pending = JSON.parse(fs.readFileSync(
   path.join(ROOT, 'scripts/ci/site-registry/origin-ca-cutover-readiness.json'), 'utf8'));
 
+// Minimal independently attested cross-repository receipt (#4719 SC-02).
+function validReceipt() {
+  return {
+    version: 1,
+    kind: 'parallel-gateway-cutover-receipt',
+    issue: 4719,
+    status: 'attested',
+    revisions: {
+      nession: 'a'.repeat(40), nsible: 'b'.repeat(40),
+      nitops: 'c'.repeat(40), gitops: recorded.gitopsRevision
+    },
+    path: {
+      public: {
+        verified: true, hops: ['cloudflare', 'hk', 'wireguard-gost', 'higress', 'service'],
+        higressProtocol: 'http', higressTls: false, hkToSlb: false,
+        sourceEnforced: 'cloudflare-ipv4-cidrs'
+      },
+      private: {
+        verified: true, hops: ['adguard', 'slb', 'higress', 'service'],
+        higressProtocol: 'http', higressTls: false, slbTls: true
+      }
+    },
+    tls: {
+      hk: {
+        owner: 'nitops', san: ['staging-mcp-nession.bestnathan.top'],
+        serial: '01AB', notAfter: '2027-02-26T00:00:00Z', chainVerified: true,
+        publiclyTrusted: true, keyDistinctFromSlb: true,
+        readback: { workflow: 'Deploy / Staging Rollout Readback', runId: '123456789' }
+      },
+      slb: {
+        owner: 'nitops', san: ['*.bestnathan.top'],
+        serial: '02CD', notAfter: '2027-02-26T00:00:00Z', chainVerified: true,
+        publiclyTrusted: true,
+        readback: { workflow: 'Deploy / Staging Rollout Readback', runId: '123456790' }
+      }
+    },
+    protocol: {
+      positive: ['mcp-initialize', 'mcp-tools-list', 'wss-101-frames', 'sse-beyond-60s'],
+      negative: ['unauthorized-source', 'forged-forwarding', 'unknown-host',
+        'private-host', 'sni-mismatch', 'alternate-path'],
+      evidence: { independent: true, workflow: 'Acceptance / Cases', runId: '987654321' }
+    },
+    noRemainingConsumer: true,
+    noQueryCredentialsInLogs: true,
+    approvedBy: 'operator',
+    verifiedAt: '2026-11-28'
+  };
+}
+
 test('current source keeps the mechanism and blocks retirement until readiness', () => {
   const workflowText = fs.readFileSync(
     path.join(ROOT, '.github/workflows/deploy-configure-site.yml'), 'utf8');
@@ -62,15 +111,17 @@ test('removal without recorded cutover readiness fails the source invariant', ()
   }).ok, false);
 });
 
-test('recorded readiness plus zero consumers permits a DNS-free retirement', () => {
+test('recorded readiness plus an attested receipt and zero consumers permits a DNS-free retirement', () => {
+  const receipt = validReceipt();
   const invariant = checkSourceInvariant({
     workflowText: 'name: Deploy / Configure Site\n',
     originCaScriptPresent: false,
-    readiness: recorded
+    readiness: recorded,
+    crossRepoReceipt: receipt
   });
   assert.equal(invariant.ok, true);
   assert.equal(invariant.state, 'retirement-readiness-recorded');
-  const verdict = evaluateRetirement({ readiness: recorded, consumers: [] });
+  const verdict = evaluateRetirement({ readiness: recorded, consumers: [], crossRepoReceipt: receipt });
   assert.equal(verdict.allowed, true);
   const plan = retirementPlan(verdict);
   assert.equal(plan.permitted, true);
@@ -80,6 +131,54 @@ test('recorded readiness plus zero consumers permits a DNS-free retirement', () 
   assert.equal(plan.genericSealedSecretPreserved, true);
   assert.ok(plan.removals.some(entry => entry.includes('issue-tls')));
   assert.ok(plan.gitopsOwnedBy4588.includes('environments/staging/mcp/sealed-tls.json'));
+});
+
+test('premature retirement is blocked without a valid cross-repo receipt', () => {
+  const removed = {
+    workflowText: 'name: Deploy / Configure Site\n',
+    originCaScriptPresent: false,
+    readiness: recorded,
+    crossRepoReceipt: null
+  };
+  const missingSource = checkSourceInvariant(removed);
+  assert.equal(missingSource.ok, false);
+  assert.equal(missingSource.state, 'retirement-without-cross-repo-receipt');
+
+  const missing = evaluateRetirement({
+    readiness: recorded, consumers: [], crossRepoReceipt: null
+  });
+  assert.equal(missing.allowed, false);
+  assert.equal(missing.reason, 'cross-repo-receipt-invalid');
+
+  const stale = evaluateRetirement({
+    readiness: recorded, consumers: [], crossRepoReceipt: validReceipt(),
+    expectedRevisions: { nsible: 'd'.repeat(40) }
+  });
+  assert.equal(stale.allowed, false);
+  assert.equal(stale.reason, 'cross-repo-receipt-stale');
+
+  const readinessMismatch = evaluateRetirement({
+    readiness: { ...recorded, gitopsRevision: 'e'.repeat(40) },
+    consumers: [], crossRepoReceipt: validReceipt()
+  });
+  assert.equal(readinessMismatch.allowed, false);
+  assert.equal(readinessMismatch.reason, 'cross-repo-receipt-stale');
+
+  const stillConsumed = validReceipt();
+  stillConsumed.noRemainingConsumer = false;
+  const consumed = evaluateRetirement({
+    readiness: recorded, consumers: [], crossRepoReceipt: stillConsumed
+  });
+  assert.equal(consumed.allowed, false);
+  assert.equal(consumed.reason, 'cross-repo-receipt-invalid');
+
+  const staleSource = checkSourceInvariant({
+    ...removed,
+    crossRepoReceipt: validReceipt(),
+    readiness: { ...recorded, gitopsRevision: 'f'.repeat(40) }
+  });
+  assert.equal(staleSource.ok, false);
+  assert.equal(staleSource.state, 'retirement-cross-repo-receipt-stale');
 });
 
 test('remaining GitOps TLS consumers block retirement even with readiness', () => {

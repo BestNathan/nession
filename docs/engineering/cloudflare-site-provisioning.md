@@ -13,6 +13,11 @@ Ownership boundaries:
   workflow/script removal plus this documentation.
 - **#4588** owns the GitOps ingress host migration to the canonical names and
   cert-manager TLS consumption, including legacy GitOps TLS object retirement.
+- **#4719** coordinates the parallel public/private gateway topology, the
+  cross-repository policy artifact and the rollout/retirement evidence
+  contract. Its canonical engineering owner is
+  [parallel-gateway-contract.md](parallel-gateway-contract.md); it does not own
+  hosts, the cluster, DNS providers or certificates.
 - **nitops#2** owns cert-manager, the DNS-01 issuer and actual edge/router
   enforcement. The edge-policy fixture here is a reviewed contract artifact,
   not a live router configuration.
@@ -52,6 +57,37 @@ registration requires the canonical host** (`lan-readiness`), so a rewrite is
 never created for a name the gateway cannot yet route. Editable desired hosts
 live only on the gitops branch; the registry never writes a second desired
 state.
+
+## Parallel public/private gateways (#4719)
+
+Owner-approved 2026-11-28: HK is the unified public entrance and the SLB is the
+unified LAN/VPN entrance. They are **parallel**, never chained:
+
+```text
+Public:  Client -> Cloudflare -> HK (TLS + public ACL) -> WireGuard/gost
+         -> Higress HTTP -> Service
+Private: LAN/VPN Client -> AdGuard DNS -> SLB (TLS) -> Higress HTTP -> Service
+Cluster: Service -> Service
+```
+
+The registry remains the single hostname/visibility/enabled/path authority.
+[gateway-policy.mjs](../../scripts/ci/site-registry/gateway-policy.mjs) renders
+and validates the cross-repository policy artifact: explicit ownership per hop,
+the public eligible/active split (`production-mcp` eligible but disabled),
+exact `/mcp` public paths, private-host and wildcard denial, no HK→SLB chain,
+no Higress business TLS and no public NodePort. Consumers pin the exact reviewed
+Nession SHA; the checked-in fixture is a contract template, not a pinned
+artifact. Route fixtures for private/disabled exposure, wildcard authorization,
+HK→SLB chaining or Higress TLS dependency fail deterministically.
+
+Rollout/retirement evidence is owned by
+[gateway-rollout.mjs](../../scripts/ci/site-registry/gateway-rollout.mjs) and
+the canonical
+[parallel gateway contract](parallel-gateway-contract.md): an independently
+attested receipt must pin the exact Nession/nsible/nitops/GitOps revisions and
+record the actual path, both certificate lifecycles and positive/negative
+protocol evidence before any legacy direct-TLS or Origin CA retirement. All live
+items remain Pending under authorized operator execution.
 
 ## cert-manager TLS consumption (#4588)
 
@@ -235,14 +271,19 @@ Full (strict) effective, never a blind zone-wide change.
 ## Legacy Origin CA retirement
 
 [retire-origin-ca.mjs](../../scripts/ci/site-registry/retire-origin-ca.mjs) gates
-removal of the `issue-tls` action and Origin CA implementation on **both**:
+removal of the `issue-tls` action and Origin CA implementation on **all** of:
 
 1. a recorded #4588 cutover readiness
    ([origin-ca-cutover-readiness.json](../../scripts/ci/site-registry/origin-ca-cutover-readiness.json):
    `status=recorded`, `cutoverVerified=true`, exact GitOps revision,
-   authenticated edge TLS readback Run identity, approver and date), and
+   authenticated edge TLS readback Run identity, approver and date),
 2. zero remaining consumers in source and GitOps (deterministic identifier
-   scan; the gate itself and docs are allowlisted).
+   scan; the gate itself and docs are allowlisted), and
+3. an independently attested cross-repository receipt
+   ([gateway-rollout.mjs](../../scripts/ci/site-registry/gateway-rollout.mjs);
+   exact Nession/nsible/nitops/GitOps revisions, actual path/TLS and
+   positive/negative protocol evidence, no remaining consumer). Missing, stale
+   or mismatched receipts block retirement; #4588 remains the retirement owner.
 
 Until then the mechanism remains available and the source invariant passes as
 `mechanism-present`. Retirement removes only TLS issuance: public DNS and the
