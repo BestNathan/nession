@@ -5,8 +5,8 @@ topic: engineering
 categories: ["architecture", "security", "delivery", "identity"]
 status: verified
 created_at: 2026-11-27T09:36:15Z
-updated_at: 2026-11-27T12:25:04Z
-sources: ["https://github.com/BestNathan/nession/issues/4588", "https://github.com/BestNathan/nession/pull/4677", "https://github.com/BestNathan/nession/pull/4679", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-host-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-tls-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/adbf6b66260673bb4b80cd415039d651a2d08573/docs/engineering/cloudflare-site-provisioning.md"]
+updated_at: 2026-11-28T02:36:51Z
+sources: ["https://github.com/BestNathan/nession/issues/4588", "https://github.com/BestNathan/nession/pull/4677", "https://github.com/BestNathan/nession/pull/4679", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-host-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/scripts/gitops-tls-contract.mjs", "https://github.com/BestNathan/nession/blob/ab01fa680a2ce65167d65a811f1665bec36b7e78/deploy/entrypoint-agent.sh", "https://github.com/BestNathan/nession/blob/adbf6b66260673bb4b80cd415039d651a2d08573/docs/engineering/cloudflare-site-provisioning.md", "https://github.com/BestNathan/nession/issues/4678"]
 ---
 
 # Nession canonical hostname migration and cert-manager TLS consumption
@@ -104,12 +104,24 @@ client TLS at the edge.
 
 ## Limits / when to revisit
 
-- **nitops#2 readiness is unverified**: no certificate Ready / trust-chain readback
-  was recorded at implementation time, so TLS consumption switch and legacy
-  retirement stay blocked by the SC-03 Gate. A green PR is not a rollout.
-- Live LAN/public probes, certificate chain/expiry/renewal readback and formal
-  deployed acceptance are the separate SCN-07 operational gate; production
-  deployed Cases require the #1616 identity lane. These remain Pending.
+- **nitops#2 is implemented and live-verified (2026-11-28 cluster readback recorded on
+  BestNathan/nitops#2):** cert-manager/issuers/wildcard Certificate merged (nitops
+  PRs #3–#12); Certificate Ready with Let's Encrypt YR2 `*.bestnathan.top` (serial
+  `05D4C56EA07B0FF07B02E73CF1C7FB5E3D4D`, notAfter 2027-02-25); all four SLB nodes
+  serve that serial under ordinary public trust (`Verify return code: 0`); the
+  cert-reloader log shows a validated generation transition (`0502CB22…` →
+  `05D4C56E…`) with reload and served-serial readback; `nhome.local` still serves
+  its own cert. **One open defect blocks the staging retirement:** LAN-direct HTTPS
+  to the MCP host through the SLB loops **308** — the ingress `higress.io/ssl-redirect`
+  is evaluated by Higress, which does not trust the SLB's `X-Forwarded-Proto https` —
+  while the public Cloudflare→router→SLB path answers correctly (401/404/308-to-https).
+  Dropping `ssl-redirect` on the Nession side alone is not a fix: the SLB
+  `:80 default_server` catch-all would then proxy cleartext bearer MCP. Retirement
+  waits for a nitops forwarded-proto trust fix (or an SLB-side redirect), then the
+  coordinated gitops change + cutover receipt unlock the SC-03 Gate.
+- Formal deployed acceptance (LAN/public probes as an authorized gate, renewal proof,
+  production MCP activation) remains Pending: production deployed Cases require the
+  #1616 identity lane. A green PR is not a rollout.
 - Legacy nested names and the legacy staging MCP Origin CA TLS are intentionally
   retained during migration; prune them only in a reviewed change after the
   cutover receipt is recorded and no consumer remains.
