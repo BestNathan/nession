@@ -81,6 +81,33 @@ and TLS contract are also in the `gitops` branch README. Live LAN/public probes
 and certificate readback are the separate SCN-07 operational gate (#1616 identity
 lane); a green PR is not a rollout.
 
+### Measured origin topology (2026-11-28)
+
+A cutover attempt was executed and reverted the same day; the measurements are the
+reason, and they contradict two earlier assumptions:
+
+- The Cloudflare origin for `staging-mcp-nession.bestnathan.top` is **not** the
+  nitops router. The router (`192.168.2.106`) logged no requests for that host, and
+  the Higress gateway access log shows the public hop arriving on its `:443`
+  listener with **no SNI** (`requested_server_name "-"`, `response_flags NR`,
+  `route_not_found` once the Ingress `tls` block is gone). The no-SNI chain exists
+  only while the Ingress carries **both** `tls:` and `higress.io/ssl-redirect`, so
+  the Origin CA material is still a live consumer and cannot be retired yet.
+- While the SLB forwards the bestnathan vhost to Higress `:443` (the
+  BestNathan/nitops#2 #13 workaround for the redirect loop), LAN WebSocket upgrades
+  to hosts that have no `tls` block return 404 (plain HTTP requests still succeed;
+  the same upgrade through the `:80` hop returns 101). So the #13 topology is not a
+  valid end state either.
+
+The retirement therefore requires, in order: (1) Higress trusts exactly one
+forwarded hop, (2) the Cloudflare record for this host is repointed to the nitops
+router, which already terminates TLS with the cert-manager wildcard and proxies to
+the SLB with `proxy_ssl_verify on`, (3) the SLB bestnathan hop becomes plaintext
+`:80` with `X-Forwarded-Proto https`, and only then (4) the Ingress `tls:` +
+`ssl-redirect` are removed and `sealed-tls.json` retired. Steps 1–3 are nitops and
+#4589 owner actions; the cutover readback receipt must not be recorded before step
+4 is actually verified.
+
 ## GitHub Environment configuration
 
 All deployment-specific settings and provider credentials are GitHub
