@@ -13,7 +13,9 @@ commonLabels:
 resources:
 - sealed-backend-server.json
 - sealed-inbound.json
-- sealed-tls.json
+# sealed-tls.json retired by #4588: TLS is consumed at the nitops-owned SLB
+# cert-manager wildcard; the Higress Origin CA secret has no remaining consumer
+# after the cutover receipt (docs/engineering/receipts/4588-tls-cutover-readback.json).
 - sealed-secret.json
 - deployment.yaml
 - service.yaml
