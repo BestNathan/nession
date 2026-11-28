@@ -134,6 +134,10 @@ async function selfTest(){
   assert.equal(v({runs:[{...run,event:'workflow_dispatch'}]}).decision,'PASS');
   assert.equal(v({runs:[{...run,event:'workflow_dispatch',head_sha:old}]}).decision,'PENDING');
   assert.equal(v({runs:[{...run,event:'workflow_dispatch',head_branch:'staging'}]}).decision,'PENDING');
+  for (const event of ['push', 'workflow_dispatch']) {
+    assert.equal(v({runs:[{...run,event,repository:{full_name:'Other/nession'}}]}).decision,'PENDING');
+    assert.equal(v({runs:[{...run,event,head_repository:{full_name:'Other/nession'}}]}).decision,'PENDING');
+  }
   assert.equal(v({runs:[{...run,status:'in_progress'}]}).decision,'PENDING');
   assert.equal(v({runs:[{...run,conclusion:'failure'}]}).decision,'FAIL');
   assert.equal(v({jobs:[{...job,run_attempt:1}]}).decision,'ERROR');
@@ -148,7 +152,10 @@ async function selfTest(){
   const reads=[];
   const inspected=await evaluateReleaseFull({sha,get:async path=>{
     reads.push(path);
-    if(path.includes('/workflows/'))return {workflow_runs:[run]};
+    if(path.includes('/workflows/')){
+      assert.equal(new URLSearchParams(path.split('?')[1]).get('event'),null);
+      return {workflow_runs:[{...run,event:'workflow_dispatch'}]};
+    }
     if(path.includes('/jobs?'))return {jobs:[job]};
     return {artifacts:[artifact]};
   }});
