@@ -1,0 +1,247 @@
+{
+  "kind": "nession-parallel-gateway-policy",
+  "version": 1,
+  "issue": 4719,
+  "zone": "bestnathan.top",
+  "source": {
+    "repository": "BestNathan/nession",
+    "registryPath": "scripts/ci/site-registry/registry.json",
+    "registryHash": "254a632f49048cc580235bc7448e29a7f57de4332d6157d39fc57339aa5911ec",
+    "revision": null,
+    "revisionRequirement": "exact-40-hex-at-consumption"
+  },
+  "ownership": {
+    "siteIdentity": "nession",
+    "publicGateway": "nsible",
+    "privateGateway": "nitops",
+    "certificateLifecycle": "nitops",
+    "adguardRecords": "nession",
+    "cloudflareRecords": "operator-protected-config",
+    "gitopsRender": "nession-gitops"
+  },
+  "entrypoints": {
+    "public": {
+      "id": "public-hk",
+      "trustBoundary": "hk-public",
+      "gatewayOwner": "nsible",
+      "hops": [
+        {
+          "id": "client",
+          "owner": "client",
+          "protocol": "https"
+        },
+        {
+          "id": "cloudflare",
+          "owner": "operator-protected-config",
+          "tls": "universal-ssl"
+        },
+        {
+          "id": "hk",
+          "owner": "nsible",
+          "tls": "public-san",
+          "terminatesTls": true
+        },
+        {
+          "id": "wireguard-gost",
+          "owner": "nsible",
+          "transport": "wireguard",
+          "protocol": "http"
+        },
+        {
+          "id": "higress",
+          "owner": "nession-gitops",
+          "protocol": "http",
+          "tls": false
+        },
+        {
+          "id": "service",
+          "owner": "nession-gitops",
+          "protocol": "http"
+        }
+      ],
+      "eligibleSites": [
+        "production-mcp",
+        "staging-mcp"
+      ],
+      "activeSites": [
+        "staging-mcp"
+      ],
+      "routes": [
+        {
+          "host": "staging-mcp-nession.bestnathan.top",
+          "path": "/mcp",
+          "pathType": "Exact",
+          "backend": {
+            "service": "nession-mcp-staging",
+            "port": 9090
+          },
+          "originTls": "full-strict",
+          "authentication": "required"
+        }
+      ],
+      "privateHostsDenied": [
+        "agent-nession.bestnathan.top",
+        "agent.nession.bestnathan.top",
+        "nession.bestnathan.top",
+        "preprod-agent-nession.bestnathan.top",
+        "preprod-nession.bestnathan.top",
+        "preprod-ui-nession.bestnathan.top",
+        "preprod.agent.nession.bestnathan.top",
+        "preprod.nession.bestnathan.top",
+        "preprod.ui.nession.bestnathan.top",
+        "staging-01-agent-nession.bestnathan.top",
+        "staging-01-nession.bestnathan.top",
+        "staging-01-ui-nession.bestnathan.top",
+        "staging-01.agent.nession.bestnathan.top",
+        "staging-01.nession.bestnathan.top",
+        "staging-01.ui.nession.bestnathan.top",
+        "staging-agent-nession.bestnathan.top",
+        "staging-nession.bestnathan.top",
+        "staging-ui-nession.bestnathan.top",
+        "staging.agent.nession.bestnathan.top",
+        "staging.nession.bestnathan.top",
+        "staging.ui.nession.bestnathan.top",
+        "ui-nession.bestnathan.top",
+        "ui.nession.bestnathan.top"
+      ],
+      "deny": {
+        "unknownHost": "reject",
+        "privateHost": "reject",
+        "sniMismatch": "reject",
+        "nonExactPath": "reject",
+        "spoofedForwarding": "reject",
+        "untrustedForwardingSource": "reject",
+        "nonCloudflareOriginSource": "reject",
+        "wildcardFallback": "reject"
+      },
+      "upstream": {
+        "protocol": "http",
+        "tls": false,
+        "exposure": "private-upstream"
+      },
+      "pathPolicy": "exact-registry-route",
+      "configRefs": {
+        "origin": "CLOUDFLARE_ORIGIN_IPV4"
+      }
+    },
+    "private": {
+      "id": "private-slb",
+      "trustBoundary": "lan-vpn",
+      "gatewayOwner": "nitops",
+      "hops": [
+        {
+          "id": "client",
+          "owner": "client",
+          "network": "lan-vpn"
+        },
+        {
+          "id": "adguard",
+          "owner": "nession",
+          "answerRef": "LAN_GATEWAY_IP"
+        },
+        {
+          "id": "slb",
+          "owner": "nitops",
+          "tls": "wildcard-cert-manager",
+          "terminatesTls": true
+        },
+        {
+          "id": "higress",
+          "owner": "nession-gitops",
+          "protocol": "http",
+          "tls": false
+        },
+        {
+          "id": "service",
+          "owner": "nession-gitops",
+          "protocol": "http"
+        }
+      ],
+      "enabledHosts": [
+        "agent-nession.bestnathan.top",
+        "agent.nession.bestnathan.top",
+        "nession.bestnathan.top",
+        "preprod-agent-nession.bestnathan.top",
+        "preprod-nession.bestnathan.top",
+        "preprod-ui-nession.bestnathan.top",
+        "preprod.agent.nession.bestnathan.top",
+        "preprod.nession.bestnathan.top",
+        "preprod.ui.nession.bestnathan.top",
+        "staging-01-agent-nession.bestnathan.top",
+        "staging-01-nession.bestnathan.top",
+        "staging-01-ui-nession.bestnathan.top",
+        "staging-01.agent.nession.bestnathan.top",
+        "staging-01.nession.bestnathan.top",
+        "staging-01.ui.nession.bestnathan.top",
+        "staging-agent-nession.bestnathan.top",
+        "staging-nession.bestnathan.top",
+        "staging-ui-nession.bestnathan.top",
+        "staging.agent.nession.bestnathan.top",
+        "staging.nession.bestnathan.top",
+        "staging.ui.nession.bestnathan.top",
+        "ui-nession.bestnathan.top",
+        "ui.nession.bestnathan.top"
+      ],
+      "deny": {
+        "publicHost": "reject",
+        "unknownHost": "reject",
+        "nonLanSource": "reject",
+        "wildcardFallback": "reject"
+      },
+      "upstream": {
+        "protocol": "http",
+        "tls": false,
+        "exposure": "private-upstream"
+      },
+      "pathPolicy": "registry-route",
+      "configRefs": {
+        "answer": "LAN_GATEWAY_IP",
+        "adguardUrl": "ADGUARD_API_URL",
+        "adguardUsername": "ADGUARD_USERNAME",
+        "adguardPassword": "ADGUARD_PASSWORD"
+      }
+    },
+    "cluster": {
+      "id": "cluster-service-to-service",
+      "trustBoundary": "cluster",
+      "gatewayOwner": "nession",
+      "hops": [
+        {
+          "id": "source-service",
+          "owner": "nession",
+          "protocol": "http"
+        },
+        {
+          "id": "destination-service",
+          "owner": "nession",
+          "protocol": "http"
+        }
+      ],
+      "upstream": {
+        "protocol": "http",
+        "tls": false,
+        "exposure": "cluster"
+      }
+    }
+  },
+  "tls": {
+    "clientFacingTerminators": [
+      "hk",
+      "slb"
+    ],
+    "certificateOwner": "nitops",
+    "nessionOwnsCertificate": false,
+    "higressBusinessTls": false,
+    "hkCertificate": "public-san-distinct-key",
+    "slbCertificate": "wildcard-cert-manager"
+  },
+  "prohibited": [
+    "private-host-public-exposure",
+    "disabled-host-public-exposure",
+    "wildcard-authorization",
+    "hk-slb-chaining",
+    "higress-tls-dependency",
+    "public-nodeport-exposure",
+    "competing-certificate-owner"
+  ]
+}

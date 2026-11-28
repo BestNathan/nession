@@ -35,6 +35,7 @@ gitops-storage-contract
 gitops-host-contract
 gitops-tls-contract
 cloudflare-site-dns-selftest
+parallel-gateway-contract
 gitops-seal-required-selftest
 mcp-secret-preflight-readback-selftest
 protocol-json-contract
