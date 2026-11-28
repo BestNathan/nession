@@ -4,6 +4,7 @@ mod attach_route;
 mod attach_session;
 mod cli_contract;
 mod client_commands;
+mod install_bridge;
 mod logs;
 mod profile_bootstrap;
 mod profile_commands;

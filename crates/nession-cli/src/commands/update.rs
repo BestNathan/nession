@@ -26,6 +26,7 @@ pub async fn run(
         prompt: !skip_prompt,
         include_installer,
         policy_overrides,
+        local_artifact: None,
     })
     .await
 }

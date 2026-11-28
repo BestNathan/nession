@@ -198,6 +198,16 @@ pub enum Commands {
         #[arg(long)]
         yes: bool,
 
+        /// Internal: install a bootstrap-verified local tarball without
+        /// re-downloading it (#4660). Requires --artifact-sha256; the CLI
+        /// independently re-verifies the digest and the release identity.
+        #[arg(long, hide = true, value_name = "PATH", requires = "artifact_sha256")]
+        local_artifact: Option<String>,
+
+        /// Internal: expected SHA256 of --local-artifact (hex).
+        #[arg(long, hide = true, value_name = "HEX", requires = "local_artifact")]
+        artifact_sha256: Option<String>,
+
         #[command(flatten)]
         policy: TransferPolicyArgs,
     },
@@ -769,9 +779,11 @@ mod tests {
             (
                 "install".to_string(),
                 strings(&[
+                    "--artifact-sha256",
                     "--connect-timeout-secs",
                     "--dry-run",
                     "--idle-timeout-secs",
+                    "--local-artifact",
                     "--lock-wait-secs",
                     "--metadata-timeout-secs",
                     "--retries",

@@ -373,8 +373,20 @@ pub async fn dispatch(cli: Cli) -> Result<()> {
             version,
             dry_run,
             yes,
+            local_artifact,
+            artifact_sha256,
             policy,
-        } => install::run(version, dry_run, yes, policy.to_overrides()).await?,
+        } => {
+            install::run(
+                version,
+                dry_run,
+                yes,
+                local_artifact,
+                artifact_sha256,
+                policy.to_overrides(),
+            )
+            .await?
+        }
         Commands::Version { action } => match action {
             VersionAction::List => version::list::run().await?,
             VersionAction::Inspect { version } => version::inspect::run(version)?,
