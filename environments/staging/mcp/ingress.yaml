@@ -1,12 +1,21 @@
-# Staging-only MCP endpoint (#3902, #3945, #4588). This overlay is enrolled in
-# the Kustomization and active. TLS terminates at the nitops-owned SLB (the one
-# cert-manager wildcard `*.bestnathan.top`, served from slb/bestnathan-top-tls);
-# Higress does not terminate this host anymore — the legacy Cloudflare Origin CA
-# TLS (`sealed-tls.json` -> `nession-mcp-staging-tls`) and the ingress-level
-# ssl-redirect are retired with #4588 once nitops enables forwarded-proto trust
-# (BestNathan/nitops#2, Option A). Cleartext client access stays blocked upstream:
-# the SLB/router edges answer bestnathan.top on :80 only by redirecting to HTTPS,
-# and the backend accepts only authenticated exact /mcp requests; root is 404.
+# Staging-only MCP endpoint (#3902, #3945, #4588). This overlay is enrolled in the
+# Kustomization and active.
+#
+# Live topology (measured 2026-11-28, BestNathan/nitops#2 / nession#4588):
+#  - LAN clients terminate TLS at the nitops SLB (cert-manager wildcard
+#    slb/bestnathan-top-tls), which proxies to Higress over the trusted plaintext
+#    hop. The ingress-level ssl-redirect is therefore NOT used: Higress ignores
+#    X-Forwarded-Proto (use_remote_address, zero trusted hops), so keeping the
+#    annotation made one-hop LAN requests loop 308.
+#  - Public clients terminate TLS at Cloudflare, whose origin for this record is
+#    port-forwarded directly to the Higress gateway TLS listener (nodePort 32077).
+#    That listener binds this host only while this `tls` block exists, so the
+#    legacy Cloudflare Origin CA material below is still required for the public
+#    path and its retirement is deferred until the record points at the nitops
+#    router (192.168.2.106), which already serves the cert-manager wildcard and
+#    proxies to the SLB with verification.
+#
+# The backend accepts only authenticated exact /mcp requests; root is 404.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -22,6 +31,10 @@ metadata:
     higress.io/upstream-read-timeout: "86400"
 spec:
   ingressClassName: higress
+  tls:
+    - hosts:
+        - staging-mcp-nession.bestnathan.top
+      secretName: nession-mcp-staging-tls
   rules:
     - host: staging-mcp-nession.bestnathan.top
       http:
