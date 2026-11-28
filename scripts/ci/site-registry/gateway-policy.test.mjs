@@ -116,6 +116,7 @@ test('policy validator rejects topology, ownership and exposure mutations', () =
       policy.entrypoints.private.configRefs.adguardUrl = 'http://192.168.2.10';
     }],
     ['literal-address', policy => { policy.note = '192.168.2.10'; }],
+    ['public-shape', policy => { policy.entrypoints.public.activeSites = 'staging-mcp'; }],
     ['public-eligibility', policy => { policy.entrypoints.public.eligibleSites = ['staging-mcp']; }],
     ['public-activation', policy => {
       policy.entrypoints.public.activeSites = ['production-mcp', 'staging-mcp'];

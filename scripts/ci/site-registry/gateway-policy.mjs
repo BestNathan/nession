@@ -304,6 +304,11 @@ export function validateGatewayPolicy(policy, registry, { requireRevision = fals
 
   // Public exposure is derived from the reviewed registry: eligibility is the
   // allowlist, activation additionally requires enabled=true.
+  if (!Array.isArray(publicEntry.eligibleSites) ||
+      !Array.isArray(publicEntry.activeSites) ||
+      !Array.isArray(publicEntry.routes)) {
+    fail('public-shape');
+  }
   const expectedEligible = [...registry.publicAllowlist].sort();
   if (JSON.stringify(publicEntry.eligibleSites) !== JSON.stringify(expectedEligible)) {
     fail('public-eligibility');
@@ -324,7 +329,6 @@ export function validateGatewayPolicy(policy, registry, { requireRevision = fals
       fail('private-host-public-exposure', site.id);
     }
   }
-  if (!Array.isArray(publicEntry.routes)) fail('public-routes');
   for (const route of publicEntry.routes) {
     if (typeof route.host !== 'string' || route.host.includes('*')) {
       fail('wildcard-authorization', String(route.host));
